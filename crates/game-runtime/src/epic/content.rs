@@ -378,13 +378,6 @@ impl<N: Network> sessions::Handover<Epic> for Handover<N> {
             .is_some()
             .then(|| self.locations.voile.clone())
     }
-    fn linux_engine(&self) -> bool {
-        self.configuration.prefix.is_some()
-            && crate::linux_engine::runs_epic(
-                &self.configuration.namespace,
-                &self.configuration.app_name,
-            )
-    }
     fn prepare(&self) -> BoxFuture<'_, Result<Self::Prepared, Failure>> {
         Box::pin(async move {
             // A Windows build runs in Wine, readied before any exchange code

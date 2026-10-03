@@ -2,8 +2,7 @@
 //! it pins on the first Windows launch; a development runtime that voile's
 //! install-dev.sh put in `current` takes precedence.
 //!
-//! The release also carries the Linux engine's runtime, a second archive that
-//! goes into the release's `linux` folder on the first launch that needs it.
+//! The release also carries the Linux engine's runtime, in its `linux` folder.
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use std::{
@@ -30,25 +29,13 @@ const UNFINISHED: &str = ".";
 /// The Linux engine's runtime, inside a release (or the development runtime).
 const LINUX: &str = "linux";
 
-/// Two installs never extract into the same folder, and a release never goes
-/// while its Linux runtime moves into it.
+/// Two installs never extract into the same folder.
 static INSTALLING: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 /// The Voile release SailOver runs Windows games with.
 #[derive(Debug, Deserialize)]
 pub struct Release {
     pub version: String,
-    pub url: String,
-    pub size: u64,
-    pub sha256: String,
-    /// The Linux engine's archive of the same release, when it has one.
-    #[serde(default)]
-    pub linux: Option<Asset>,
-}
-
-/// One more archive of a release.
-#[derive(Debug, Deserialize)]
-pub struct Asset {
     pub url: String,
     pub size: u64,
     pub sha256: String,
@@ -62,16 +49,6 @@ struct Archive<'a> {
 }
 
 impl Release {
-    fn archive(&self) -> Archive<'_> {
-        Archive {
-            url: &self.url,
-            size: self.size,
-            sha256: &self.sha256,
-        }
-    }
-}
-
-impl Asset {
     fn archive(&self) -> Archive<'_> {
         Archive {
             url: &self.url,
@@ -134,9 +111,12 @@ fn located_linux(root: &Path, release: &Release) -> Option<PathBuf> {
     if has_engine(&development) {
         return Some(development);
     }
-    let pinned = root.join(&release.version).join(LINUX);
-    (has_engine(&pinned) && version(&pinned).as_deref() == Some(release.version.as_str()))
-        .then_some(pinned)
+    let pinned = root.join(&release.version);
+    let linux = pinned.join(LINUX);
+    (has_wine(&pinned)
+        && version(&pinned).as_deref() == Some(release.version.as_str())
+        && has_engine(&linux))
+    .then_some(linux)
 }
 
 /// The engine and the Wine it runs.
@@ -206,59 +186,12 @@ impl Install {
         }
         let destination = root.join(&release.version);
         if destination.exists() {
-            // A Linux runtime installed first stays with its release.
-            let linux = destination.join(LINUX);
-            if linux.exists() {
-                fs::rename(&linux, runtime.join(LINUX))?;
-            }
             fs::remove_dir_all(&destination)?;
         }
         fs::rename(&runtime, &destination)?;
         // No game runs from the releases removed here: only Steam launches
         // Windows games, and this install runs inside the one Game session
         // its Reservation gate admits.
-        remove_entries(root, |name| {
-            name != DEVELOPMENT && name != release.version && !name.starts_with(UNFINISHED)
-        });
-        Ok(destination)
-    }
-
-    /// Installs the pinned release's Linux engine runtime in its `linux` folder
-    /// unless one is already there, then removes the releases it replaces.
-    /// `archive` stands in for the download while the release is private.
-    pub async fn run_linux(&self, root: &Path, archive: Option<&Path>) -> Result<PathBuf, Failure> {
-        let release = release();
-        let linux = release.linux.as_ref().ok_or(Failure::Download)?;
-        self.install_linux(root, release, linux, archive).await
-    }
-
-    async fn install_linux(
-        &self,
-        root: &Path,
-        release: &Release,
-        linux: &Asset,
-        archive: Option<&Path>,
-    ) -> Result<PathBuf, Failure> {
-        let _installing = self.cancellable(INSTALLING.lock()).await?;
-        if let Some(runtime) = located_linux(root, release) {
-            return Ok(runtime);
-        }
-        let extracted = self.extract(root, linux.archive(), archive).await?;
-        let runtime = extracted
-            .path()
-            .join(format!("voile-linux-{}", release.version));
-        if !has_engine(&runtime) || version(&runtime).as_deref() != Some(release.version.as_str()) {
-            return Err(Failure::Damaged);
-        }
-        let folder = root.join(&release.version);
-        fs::create_dir_all(&folder)?;
-        let destination = folder.join(LINUX);
-        if destination.exists() {
-            fs::remove_dir_all(&destination)?;
-        }
-        fs::rename(&runtime, &destination)?;
-        // Same reasoning as the Windows runtime's install: no game runs from
-        // the releases removed here.
         remove_entries(root, |name| {
             name != DEVELOPMENT && name != release.version && !name.starts_with(UNFINISHED)
         });

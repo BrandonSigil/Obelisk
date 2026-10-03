@@ -132,11 +132,6 @@ pub trait Handover<P: Storefront>: Send + Sync + 'static {
     type Prepared: Send + 'static;
     /// Voile, which a Windows game needs in place before it is prepared.
     fn voile(&self) -> Option<std::path::PathBuf>;
-    /// Whether the game runs through Voile's Linux engine, whose runtime then
-    /// goes in place too.
-    fn linux_engine(&self) -> bool {
-        false
-    }
     /// Readies the game, such as its Wine prefix, which may take minutes, and
     /// then the short-lived credentials it starts with. A failure is definite.
     fn prepare(&self) -> BoxFuture<'_, Result<Self::Prepared, Failure>>;
@@ -813,49 +808,12 @@ impl<P: Storefront> Canceller<P> {
             Err(failure) => Err(Failure::Failed(failure.to_string())),
         }
     }
-
-    /// Installs the Linux engine's runtime of the pinned Voile release unless
-    /// it is in place, as `install_runtime` does for Voile itself.
-    pub async fn install_linux_runtime(&self, voile: &std::path::Path) -> Result<(), Failure> {
-        if crate::voile::linux_runtime(voile).is_some() {
-            return Ok(());
-        }
-        let install = Arc::new(crate::voile::Install::new());
-        let cancel = install.clone();
-        self.on_cancel(move || cancel.cancel());
-        self.runtime_install(Some(0.0));
-        let (watched, admitted) = (install.clone(), self.clone());
-        let progress = tokio::spawn(async move {
-            loop {
-                let (received, total) = watched.progress();
-                if total > 0 {
-                    admitted.runtime_install(Some((received as f64 / total as f64).min(1.0)));
-                }
-                tokio::time::sleep(PACE).await;
-            }
-        });
-        let installed = install
-            .run_linux(voile, development_linux_archive().as_deref())
-            .await;
-        progress.abort();
-        self.runtime_install(None);
-        match installed {
-            Ok(_) => Ok(()),
-            Err(crate::voile::Failure::Cancelled) => Err(Failure::Cancelled),
-            Err(failure) => Err(Failure::Failed(failure.to_string())),
-        }
-    }
 }
 
 /// A local copy of the pinned Voile release, which replaces its download in
 /// development builds while the release is private.
 fn development_archive() -> Option<std::path::PathBuf> {
     development_copy("SAILOVER_VOILE_ARCHIVE")
-}
-
-/// The same for the release's Linux engine archive.
-fn development_linux_archive() -> Option<std::path::PathBuf> {
-    development_copy("SAILOVER_VOILE_LINUX_ARCHIVE")
 }
 
 fn development_copy(variable: &str) -> Option<std::path::PathBuf> {
@@ -893,12 +851,6 @@ impl<P: Storefront> Admission<P> {
                     .install_runtime(&voile)
                     .await
                     .map_err(Handoff::Refused)?;
-                if handover.linux_engine() {
-                    admission
-                        .install_linux_runtime(&voile)
-                        .await
-                        .map_err(Handoff::Refused)?;
-                }
             }
             let prepared = handover.prepare().await.map_err(Handoff::Refused)?;
             if admission.cancelled() {
