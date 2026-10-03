@@ -32,7 +32,13 @@ game=
 finish() {
     [ -n "$game" ] && kill -TERM "$game" 2>/dev/null
     for helper in ${helpers[@]+"${helpers[@]}"}; do kill -TERM "$helper" 2>/dev/null; done
-    sleep 1
+    # They end within a few milliseconds of SIGTERM; a helper still there after a second is killed.
+    for _ in $(seq 1 20); do
+        alive=
+        for helper in ${helpers[@]+"${helpers[@]}"}; do kill -0 "$helper" 2>/dev/null && alive=1; done
+        [ -z "$alive" ] && break
+        sleep 0.05
+    done
     for helper in ${helpers[@]+"${helpers[@]}"}; do kill -KILL "$helper" 2>/dev/null; done
     rm -rf "${sockets_root:?}/$sockets"
 }
@@ -79,9 +85,10 @@ done
 
 export FEXDARWIN_LKD=1 FEXDARWIN_ROOT="$runtime/root" FEXDARWIN_ROOT_RO=1 FEXDARWIN_SUPERVISOR_PID=$$
 export FEXDARWIN_BIND="/opt/wine=$runtime/wine:ro;/home/user=$home;/games/game=$install;/run/sailover=$sockets_root/$sockets"
-# wineserver writes the registry only when it exits: wait for it inside the guest before the game ends.
+# wineserver writes the registry only when it exits: wait for it inside the guest before the game ends. Started
+# with -p0, it stops Wine's own processes as soon as the game's last process ends, instead of 3 seconds later.
 "$runtime/engine/fexdarwin-run" --cwd "$cwd" ${guest_env[@]+"${guest_env[@]}"} \
-    /bin/sh -c '/opt/wine/bin/wine "$@"; status=$?; /opt/wine/bin/wineserver -w; exit $status' sh "$@" &
+    /bin/sh -c '/opt/wine/bin/wineserver -p0; /opt/wine/bin/wine "$@"; status=$?; /opt/wine/bin/wineserver -w; exit $status' sh "$@" &
 game=$!
 wait "$game"
 status=$?
