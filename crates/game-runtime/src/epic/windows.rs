@@ -57,13 +57,18 @@ pub fn prepare_windows(
         install: &config.install,
         prerequisite: installed.prerequisite.as_ref(),
     };
-    wine::prepare(
-        &wine,
-        &config.home,
-        &config.install,
-        &installed.target,
-        &prefix,
-    )?;
+    // The engine may start another program than the publisher's (see
+    // linux_engine): that program must be the one readied.
+    let target = match wine.engine {
+        wine::Engine::Linux => crate::linux_engine::epic_target(
+            &config.namespace,
+            &config.app_name,
+            &config.install,
+            &installed.target,
+        ),
+        wine::Engine::Rosetta => installed.target.clone(),
+    };
+    wine::prepare(&wine, &config.home, &config.install, &target, &prefix)?;
     Ok(wine)
 }
 

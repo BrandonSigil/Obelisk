@@ -262,7 +262,16 @@ pub(super) fn windows_target(
     wine: &crate::wine::Config,
     environment: &std::collections::HashMap<String, String>,
 ) -> Result<(Target, Architecture, Option<tempfile::TempDir>)> {
-    let mut target = crate::wine::target(&config.install, &plan.target, environment.clone(), wine)?;
+    let launched = match wine.engine {
+        crate::wine::Engine::Linux => crate::linux_engine::epic_target(
+            &config.namespace,
+            &config.app_name,
+            &config.install,
+            &plan.target,
+        ),
+        crate::wine::Engine::Rosetta => plan.target.clone(),
+    };
+    let mut target = crate::wine::target(&config.install, &launched, environment.clone(), wine)?;
     let ownership = match (&plan.ownership_token, wine.engine) {
         // The engine's guest cannot see the Mac's disk: the token goes into the
         // prefix's C: drive.

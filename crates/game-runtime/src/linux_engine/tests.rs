@@ -18,6 +18,34 @@ fn only_rocket_league_runs_through_the_engine() {
 }
 
 #[test]
+fn rocket_league_starts_its_anti_cheat_bootstrapper_instead_of_its_dotnet_launcher() {
+    let install = Path::new("/games/rl");
+    let publisher = LaunchTarget {
+        executable: "/games/rl/Binaries/Win64/Launcher.exe".into(),
+        arguments: vec!["-AUTH_TYPE=exchangecode".into()],
+        working_directory: "/games/rl/Binaries/Win64".into(),
+        is_application_bundle: false,
+    };
+    let started = epic_target(
+        "9773aa1aa54f4f7b80e44bef04986cea",
+        "Sugar",
+        install,
+        &publisher,
+    );
+    assert_eq!(
+        started.executable,
+        "/games/rl/Binaries/Win64/RocketLeague_EAC.exe"
+    );
+    assert_eq!(started.working_directory, "/games/rl/Binaries/Win64");
+    assert_eq!(started.arguments, publisher.arguments);
+    // A game the list does not redirect starts its publisher's program.
+    assert_eq!(
+        epic_target("other", "Other", install, &publisher),
+        publisher
+    );
+}
+
+#[test]
 fn the_engine_keeps_its_prefix_in_its_own_folder_beside_rosetta_s() {
     let rosetta = Path::new("/library/Prefixes/epic-game-Windows");
     let prefix = prefix(rosetta).unwrap();

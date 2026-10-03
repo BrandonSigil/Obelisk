@@ -13,16 +13,60 @@ use std::{
     time::Duration,
 };
 
-/// The Epic builds that run through the engine, by namespace and app name.
-const EPIC: &[(&str, &str)] = &[
+/// An Epic build that runs through the engine.
+struct EpicGame {
+    namespace: &'static str,
+    app_name: &'static str,
+    /// The program the engine starts instead of the publisher's executable,
+    /// relative to the installation, when that executable cannot run there.
+    executable: Option<&'static str>,
+}
+
+const EPIC: &[EpicGame] = &[
     // Rocket League: its Easy Anti-Cheat refuses Rosetta's Wine (code 206).
-    ("9773aa1aa54f4f7b80e44bef04986cea", "Sugar"),
+    // Its publisher executable, Launcher.exe, is a .NET program and the
+    // engine's Wine has no Mono: the engine starts the Easy Anti-Cheat
+    // bootstrapper Launcher.exe would start, with the same arguments.
+    EpicGame {
+        namespace: "9773aa1aa54f4f7b80e44bef04986cea",
+        app_name: "Sugar",
+        executable: Some("Binaries/Win64/RocketLeague_EAC.exe"),
+    },
 ];
+
+fn epic_game(namespace: &str, app_name: &str) -> Option<&'static EpicGame> {
+    EPIC.iter()
+        .find(|game| game.namespace == namespace && game.app_name == app_name)
+}
 
 /// Whether the Epic build `app_name` of `namespace` runs through the engine.
 pub fn runs_epic(namespace: &str, app_name: &str) -> bool {
-    EPIC.iter()
-        .any(|(listed, app)| *listed == namespace && *app == app_name)
+    epic_game(namespace, app_name).is_some()
+}
+
+/// What the engine starts for the Epic build `app_name` of `namespace`
+/// installed in `install`: `target`, or the program the list names instead,
+/// with the same arguments, in that program's folder.
+pub(crate) fn epic_target(
+    namespace: &str,
+    app_name: &str,
+    install: &Path,
+    target: &LaunchTarget,
+) -> LaunchTarget {
+    let Some(executable) = epic_game(namespace, app_name).and_then(|game| game.executable) else {
+        return target.clone();
+    };
+    let executable = install.join(executable);
+    LaunchTarget {
+        working_directory: executable
+            .parent()
+            .unwrap_or(install)
+            .to_string_lossy()
+            .into_owned(),
+        executable: executable.to_string_lossy().into_owned(),
+        arguments: target.arguments.clone(),
+        is_application_bundle: false,
+    }
 }
 
 /// Starts the window server and Neptune's render server, then the game, and
