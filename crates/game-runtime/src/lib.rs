@@ -4,6 +4,7 @@ pub mod cloud_status;
 pub mod epic;
 mod files;
 pub mod installations;
+pub mod linux_engine;
 mod locations;
 mod native;
 pub mod package;

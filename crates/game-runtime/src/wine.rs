@@ -39,12 +39,26 @@ pub fn profile(prefix: &Path) -> PathBuf {
 }
 
 /// How one Windows installation runs: the Wine runtime, the installation's
-/// prefix, and the log Wine writes while its game runs.
+/// prefix, the log Wine writes while its game runs, and the engine that runs
+/// that Wine.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Config {
     pub runtime: PathBuf,
     pub prefix: PathBuf,
     pub log: PathBuf,
+    #[serde(default)]
+    pub engine: Engine,
+}
+
+/// What runs a Windows game's Wine.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Engine {
+    /// Voile's Wine for macOS, under Rosetta.
+    #[default]
+    Rosetta,
+    /// Voile's Wine for Linux, which voile-lkd's engine runs natively; for the
+    /// games `linux_engine` names.
+    Linux,
 }
 
 /// The Wine prefix of the Windows installation in `install`, named after the
@@ -63,6 +77,19 @@ impl Config {
             runtime,
             prefix,
             log,
+            engine: Engine::Rosetta,
+        })
+    }
+
+    /// The Linux engine's runtime installed in `voile` running `prefix`, or
+    /// `WineUnavailable` while it is not installed.
+    pub fn locate_linux(voile: &Path, prefix: PathBuf, log: PathBuf) -> Result<Self, Error> {
+        let runtime = crate::voile::linux_runtime(voile).ok_or(Error::WineUnavailable)?;
+        Ok(Self {
+            runtime,
+            prefix,
+            log,
+            engine: Engine::Linux,
         })
     }
 
@@ -72,7 +99,19 @@ impl Config {
 
     /// Whether the runtime is in place.
     pub fn installed(&self) -> bool {
-        self.wine().is_file()
+        match self.engine {
+            Engine::Rosetta => self.wine().is_file(),
+            Engine::Linux => self.runtime.join("engine/fexdarwin-run").is_file(),
+        }
+    }
+
+    /// How the game starts: Wine for macOS is an Intel program, the Linux
+    /// engine's launcher a native one.
+    pub(crate) fn architecture(&self) -> Architecture {
+        match self.engine {
+            Engine::Rosetta => ARCHITECTURE,
+            Engine::Linux => Architecture::Arm64,
+        }
     }
 
     /// Released runtimes carry D3DMetal. When one does, CrossOver's Wine
@@ -104,7 +143,7 @@ impl Config {
 
     /// Wine's errors, unless a development runtime's `winedebug` file names
     /// other channels, such as `+steamclient`.
-    fn debug_channels(&self) -> String {
+    pub(crate) fn debug_channels(&self) -> String {
         fs::read_to_string(self.runtime.join("winedebug"))
             .ok()
             .and_then(|channels| channels.lines().next().map(str::to_owned))
@@ -165,6 +204,9 @@ pub fn prepare(
     target: &LaunchTarget,
     storefront: &impl Storefront,
 ) -> Result<(), Error> {
+    if config.engine == Engine::Linux {
+        return crate::linux_engine::prepare(config, install, target);
+    }
     program(install, target)?;
     boot(config, home)?;
     storefront.furnish(config)?;
@@ -184,6 +226,9 @@ pub(crate) fn target(
     environment: HashMap<String, String>,
     config: &Config,
 ) -> Result<Target, Error> {
+    if config.engine == Engine::Linux {
+        return crate::linux_engine::target(install, target, environment, config);
+    }
     let executable = program(install, target)?;
     let mut arguments = vec![executable.to_string_lossy().into_owned()];
     arguments.extend(target.arguments.iter().cloned());
@@ -199,7 +244,7 @@ pub(crate) fn target(
 }
 
 /// The Windows program `target` names, when it is one inside `install`.
-fn program(install: &Path, target: &LaunchTarget) -> Result<PathBuf, Error> {
+pub(crate) fn program(install: &Path, target: &LaunchTarget) -> Result<PathBuf, Error> {
     let root = install.canonicalize()?;
     let executable = Path::new(&target.executable)
         .canonicalize()
@@ -303,6 +348,7 @@ pub(crate) fn windows_path(path: &Path) -> String {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Installation {
     prefix: PathBuf,
+    engine: Engine,
 }
 
 impl Installation {
@@ -318,7 +364,16 @@ impl Installation {
         }
         Ok(Some(Self {
             prefix: prefix(&locations.wine_prefixes, install)?,
+            engine: Engine::Rosetta,
         }))
+    }
+
+    /// The same installation run by the Linux engine, in its own prefix.
+    pub fn on_linux_engine(self) -> Result<Self, Error> {
+        Ok(Self {
+            prefix: crate::linux_engine::prefix(&self.prefix)?,
+            engine: Engine::Linux,
+        })
     }
 
     /// The Windows machine the installation runs in.
@@ -328,7 +383,10 @@ impl Installation {
 
     /// How its game runs, once Voile is installed. Wine logs into `log`.
     pub fn runtime(&self, locations: &crate::Locations, log: PathBuf) -> Result<Config, Error> {
-        Config::locate(&locations.voile, self.prefix.clone(), log)
+        match self.engine {
+            Engine::Rosetta => Config::locate(&locations.voile, self.prefix.clone(), log),
+            Engine::Linux => Config::locate_linux(&locations.voile, self.prefix.clone(), log),
+        }
     }
 
     /// Deletes the prefix of the uninstalled installation, as Steam deletes a
@@ -338,22 +396,55 @@ impl Installation {
         &self,
         locations: &crate::Locations,
     ) -> Result<(), sailover_core::installation::RemovalFailure> {
-        use sailover_core::installation::RemovalFailure;
-        match fs::symlink_metadata(&self.prefix) {
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-            Err(error) => return Err(error.into()),
-            Ok(metadata) if !metadata.is_dir() => {
-                return Err(RemovalFailure::Unsafe(self.prefix.clone()));
+        match self.engine {
+            Engine::Rosetta => remove_prefix(locations, &self.prefix),
+            // The engine's folder, and the Rosetta prefix an earlier launch
+            // may have made before the game moved to the engine.
+            Engine::Linux => {
+                let home = crate::linux_engine::home(&self.prefix).map_err(|_| {
+                    sailover_core::installation::RemovalFailure::Unsafe(self.prefix.clone())
+                })?;
+                remove_folder(home)?;
+                let name = home
+                    .file_name()
+                    .map(|name| name.to_string_lossy().into_owned());
+                match name.as_deref().and_then(|name| name.strip_suffix("-linux")) {
+                    Some(rosetta) => remove_prefix(locations, &home.with_file_name(rosetta)),
+                    None => Ok(()),
+                }
             }
-            Ok(_) => {}
         }
-        // A Wine server lingers a few seconds after its game and would write
-        // the registry back into the prefix.
-        if let Some(runtime) = crate::voile::runtime(&locations.voile) {
-            let _ = wineserver(&runtime, &self.prefix, "-k");
-        }
-        Ok(fs::remove_dir_all(&self.prefix)?)
     }
+}
+
+/// Deletes a Rosetta prefix, after its Wine server.
+fn remove_prefix(
+    locations: &crate::Locations,
+    prefix: &Path,
+) -> Result<(), sailover_core::installation::RemovalFailure> {
+    // A Wine server lingers a few seconds after its game and would write the
+    // registry back into the prefix.
+    if prefix.is_dir()
+        && let Some(runtime) = crate::voile::runtime(&locations.voile)
+    {
+        let _ = wineserver(&runtime, prefix, "-k");
+    }
+    remove_folder(prefix)
+}
+
+/// Deletes `folder`. A missing one is already gone; a link in its place is
+/// never followed.
+fn remove_folder(folder: &Path) -> Result<(), sailover_core::installation::RemovalFailure> {
+    use sailover_core::installation::RemovalFailure;
+    match fs::symlink_metadata(folder) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error.into()),
+        Ok(metadata) if !metadata.is_dir() => {
+            return Err(RemovalFailure::Unsafe(folder.to_owned()));
+        }
+        Ok(_) => {}
+    }
+    Ok(fs::remove_dir_all(folder)?)
 }
 
 /// Runs, in order, the prerequisites this prefix has not run yet. One that
@@ -455,7 +546,10 @@ fn wait(mut child: Child, timeout: Duration) -> Result<Option<i32>, Error> {
 /// Ends every process of the prefix: Wine asks them to quit, then kills
 /// those that remain, including the ones it started apart from the game.
 pub(crate) fn stop(config: &Config) {
-    let _ = wineserver(&config.runtime, &config.prefix, "-k");
+    // The engine's processes follow its launcher, which the session stops.
+    if config.engine == Engine::Rosetta {
+        let _ = wineserver(&config.runtime, &config.prefix, "-k");
+    }
 }
 
 /// Ends the Wine processes a SailOver that died left behind, and returns how

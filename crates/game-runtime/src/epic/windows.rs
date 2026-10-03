@@ -4,6 +4,24 @@ use super::{Configuration, Error, Result};
 use crate::wine;
 use std::path::Path;
 
+/// The Wine installation of an Epic build: a Windows one, run by the Linux
+/// engine when `linux_engine` names the game, else by Rosetta's Wine.
+pub(crate) fn installation(
+    locations: &crate::Locations,
+    namespace: &str,
+    app_name: &str,
+    platform: &str,
+    install: &Path,
+) -> std::result::Result<Option<wine::Installation>, crate::Error> {
+    let Some(windows) = wine::Installation::of(locations, platform, install)? else {
+        return Ok(None);
+    };
+    if crate::linux_engine::runs_epic(namespace, app_name) {
+        return windows.on_linux_engine().map(Some);
+    }
+    Ok(Some(windows))
+}
+
 /// Readies a Windows build for its Game session: its prefix, the prerequisite
 /// its installation names, and the folder of Wine's log. This runs before any
 /// short-lived game credential exists, since a prerequisite may take minutes.
@@ -13,9 +31,15 @@ pub fn prepare_windows(
 ) -> Result<wine::Config> {
     // The configuration may come from a saved journal: its prefix must be the
     // one of the installation it names.
-    let windows = wine::Installation::of(locations, &config.platform, &config.install)?
-        .filter(|windows| config.prefix.as_deref() == Some(windows.prefix()))
-        .ok_or(Error::Unsupported)?;
+    let windows = installation(
+        locations,
+        &config.namespace,
+        &config.app_name,
+        &config.platform,
+        &config.install,
+    )?
+    .filter(|windows| config.prefix.as_deref() == Some(windows.prefix()))
+    .ok_or(Error::Unsupported)?;
     let wine = windows.runtime(
         locations,
         locations

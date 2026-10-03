@@ -33,6 +33,7 @@ pub(crate) fn config(root: &Path) -> Config {
         runtime: root.join("runtime"),
         prefix: root.join("prefix"),
         log: root.join("logs/wine-game.log"),
+        engine: Engine::Rosetta,
     }
 }
 

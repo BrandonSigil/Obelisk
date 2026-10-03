@@ -370,3 +370,40 @@ fn a_windows_build_runs_only_in_its_prefix_and_a_mac_build_never_does() {
     config.prefix = None;
     assert!(config.runs_in(None));
 }
+
+#[test]
+fn a_build_on_the_linux_engine_starts_natively_with_its_token_in_the_prefix() {
+    let root = tempfile::tempdir().unwrap();
+    let directory = root.path().canonicalize().unwrap();
+    let mut config = config(&directory, &directory.join("sessions"));
+    config.platform = "Windows".into();
+    config.prefix = Some(directory.join("game-linux/prefix"));
+    fs::create_dir_all(&config.install).unwrap();
+    fs::write(config.install.join("game"), crate::wine::tests::pe()).unwrap();
+    let mut plan = launch_plan(&config.install, &config.install);
+    plan.platform = "Windows".into();
+    plan.ownership_token = Some(b"ownership".to_vec());
+    let wine = crate::wine::Config {
+        runtime: directory.join("runtime"),
+        prefix: directory.join("game-linux/prefix"),
+        log: directory.join("logs/wine-game.log"),
+        engine: crate::wine::Engine::Linux,
+    };
+    fs::create_dir_all(wine.prefix.join("drive_c")).unwrap();
+
+    let (target, architecture, ownership) =
+        windows_target(&plan, &config, &wine, &HashMap::new()).unwrap();
+
+    assert_eq!(architecture, Architecture::Arm64);
+    assert_eq!(target.executable, Path::new("/bin/bash"));
+    let token = target
+        .arguments
+        .last()
+        .unwrap()
+        .strip_prefix("-epicovt=C:\\")
+        .unwrap();
+    let file = wine.prefix.join("drive_c").join(token.replace('\\', "/"));
+    assert_eq!(fs::read(&file).unwrap(), b"ownership");
+    drop(ownership);
+    assert!(!file.exists());
+}

@@ -183,9 +183,15 @@ impl<N: Network> Content<N> {
     /// The build's Wine prefix, when it is a Windows one.
     fn windows(&self, receipt: &Receipt) -> Option<crate::wine::Installation> {
         let install = Path::new(&receipt.directory);
-        crate::wine::Installation::of(&self.locations, &receipt.platform, install)
-            .ok()
-            .flatten()
+        super::windows::installation(
+            &self.locations,
+            &receipt.namespace,
+            &receipt.app_name,
+            &receipt.platform,
+            install,
+        )
+        .ok()
+        .flatten()
     }
 
     /// What maintenance of `game` syncs: its installation, or, uninstalled,
@@ -371,6 +377,13 @@ impl<N: Network> sessions::Handover<Epic> for Handover<N> {
             .prefix
             .is_some()
             .then(|| self.locations.voile.clone())
+    }
+    fn linux_engine(&self) -> bool {
+        self.configuration.prefix.is_some()
+            && crate::linux_engine::runs_epic(
+                &self.configuration.namespace,
+                &self.configuration.app_name,
+            )
     }
     fn prepare(&self) -> BoxFuture<'_, Result<Self::Prepared, Failure>> {
         Box::pin(async move {

@@ -263,14 +263,24 @@ pub(super) fn windows_target(
     environment: &std::collections::HashMap<String, String>,
 ) -> Result<(Target, Architecture, Option<tempfile::TempDir>)> {
     let mut target = crate::wine::target(&config.install, &plan.target, environment.clone(), wine)?;
-    let ownership = ownership_token(plan)?.map(|(directory, path)| {
+    let ownership = match (&plan.ownership_token, wine.engine) {
+        // The engine's guest cannot see the Mac's disk: the token goes into the
+        // prefix's C: drive.
+        (Some(bytes), crate::wine::Engine::Linux) => {
+            let (directory, path) =
+                crate::linux_engine::private_file(wine, "ownership.bin", bytes)?;
+            target.arguments.push(format!("-epicovt={path}"));
+            Some(directory)
+        }
         // The game reads the token through Wine's view of the Mac's disk.
-        target
-            .arguments
-            .push(format!("-epicovt={}", crate::wine::windows_path(&path)));
-        directory
-    });
-    Ok((target, crate::wine::ARCHITECTURE, ownership))
+        _ => ownership_token(plan)?.map(|(directory, path)| {
+            target
+                .arguments
+                .push(format!("-epicovt={}", crate::wine::windows_path(&path)));
+            directory
+        }),
+    };
+    Ok((target, wine.architecture(), ownership))
 }
 
 pub(super) fn native_target(
