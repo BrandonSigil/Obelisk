@@ -15,6 +15,7 @@ fn configuration(root: &Path) -> Configuration {
         app_name: "game".into(),
         platform: "Windows".into(),
         language: "en".into(),
+        title: String::new(),
         prefix: Some(root.join("library/Prefixes/epic-hash-Windows")),
     }
 }

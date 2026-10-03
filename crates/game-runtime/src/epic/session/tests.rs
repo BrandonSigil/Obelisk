@@ -47,6 +47,7 @@ impl Harness for EpicGame {
             app_name: "game".into(),
             platform: "Mac".into(),
             language: "en".into(),
+            title: String::new(),
             prefix: None,
         };
         for directory in [
@@ -179,6 +180,7 @@ fn fixture() -> (tempfile::TempDir, Vault, Context) {
         app_name: "game".into(),
         platform: "Mac".into(),
         language: "en".into(),
+        title: String::new(),
         prefix: None,
     };
     let mut vault = Vault::open(&config.root, config.scope(ACCOUNT)).unwrap();

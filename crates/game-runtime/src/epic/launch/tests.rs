@@ -27,6 +27,7 @@ fn config(directory: &Path, sessions: &Path) -> Configuration {
         app_name: "game".into(),
         platform: "Mac".into(),
         language: "en".into(),
+        title: String::new(),
         prefix: None,
     }
 }
@@ -378,6 +379,7 @@ fn a_build_on_the_linux_engine_starts_natively_with_its_token_in_the_prefix() {
     let mut config = config(&directory, &directory.join("sessions"));
     config.platform = "Windows".into();
     config.prefix = Some(directory.join("game-linux/prefix"));
+    config.title = "Rocket League".into();
     fs::create_dir_all(&config.install).unwrap();
     fs::write(config.install.join("game"), crate::wine::tests::pe()).unwrap();
     let mut plan = launch_plan(&config.install, &config.install);
@@ -396,6 +398,11 @@ fn a_build_on_the_linux_engine_starts_natively_with_its_token_in_the_prefix() {
 
     assert_eq!(architecture, Architecture::Arm64);
     assert_eq!(target.executable, Path::new("/bin/bash"));
+    // The Dock names the game as the store does.
+    assert_eq!(
+        target.environment[crate::linux_engine::APP_NAME],
+        "Rocket League"
+    );
     let token = target
         .arguments
         .last()

@@ -272,10 +272,11 @@ pub(super) fn windows_target(
         crate::wine::Engine::Rosetta => plan.target.clone(),
     };
     let mut environment = environment.clone();
-    if wine.engine == crate::wine::Engine::Linux
-        && let Some(title) = crate::linux_engine::epic_title(&config.namespace, &config.app_name)
-    {
-        environment.insert(crate::linux_engine::APP_NAME.to_owned(), title.to_owned());
+    if wine.engine == crate::wine::Engine::Linux && !config.title.is_empty() {
+        environment.insert(
+            crate::linux_engine::APP_NAME.to_owned(),
+            config.title.clone(),
+        );
     }
     let mut target = crate::wine::target(&config.install, &launched, environment, wine)?;
     let ownership = match (&plan.ownership_token, wine.engine) {

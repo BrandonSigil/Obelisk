@@ -174,6 +174,7 @@ impl<N: Network> Content<N> {
             app_name: receipt.app_name.clone(),
             platform: receipt.platform.clone(),
             language: self.language.clone(),
+            title: receipt.name.clone(),
             prefix: self
                 .windows(receipt)
                 .map(|windows| windows.prefix().to_owned()),

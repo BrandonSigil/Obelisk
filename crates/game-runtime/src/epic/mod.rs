@@ -103,6 +103,10 @@ pub struct Configuration {
     pub app_name: String,
     pub platform: String,
     pub language: String,
+    /// The game's name in the store, which the Linux engine shows in the
+    /// menu bar, the Dock and Cmd-Tab.
+    #[serde(default)]
+    pub title: String,
     /// Set for a Windows build, which runs in Wine: its saves live in this
     /// prefix.
     #[serde(default)]

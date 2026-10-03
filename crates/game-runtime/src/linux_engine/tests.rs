@@ -18,15 +18,6 @@ fn only_rocket_league_runs_through_the_engine() {
 }
 
 #[test]
-fn rocket_league_is_named_after_itself_in_the_dock() {
-    assert_eq!(
-        epic_title("9773aa1aa54f4f7b80e44bef04986cea", "Sugar"),
-        Some("Rocket League")
-    );
-    assert_eq!(epic_title("9773aa1aa54f4f7b80e44bef04986cea", "Other"), None);
-}
-
-#[test]
 fn rocket_league_starts_its_anti_cheat_bootstrapper_instead_of_its_dotnet_launcher() {
     let install = Path::new("/games/rl");
     let publisher = LaunchTarget {
@@ -125,13 +116,13 @@ fn a_game_starts_through_the_native_launcher_with_guest_paths() {
 }
 
 #[test]
-fn a_game_keeps_the_dock_name_its_storefront_gives() {
+fn a_game_takes_its_store_name_in_the_dock_without_trademark_signs() {
     let (_directory, root) = installation();
     let install = root.join("install");
     fs::create_dir_all(&install).unwrap();
     let executable = install.join("RocketLeague_EAC.exe");
     fs::write(&executable, pe()).unwrap();
-    let environment = HashMap::from([(APP_NAME.to_owned(), "Rocket League".to_owned())]);
+    let environment = HashMap::from([(APP_NAME.to_owned(), "Rocket League® ".to_owned())]);
 
     let target = target(
         &install,
