@@ -10,6 +10,7 @@
 #   INSTALL     the game's installation, seen as /games/game
 #   CWD         the guest working directory
 #   EXECUTABLE  the guest path of the Windows program
+# SAILOVER_APP_NAME names the game in the menu bar, the Dock and Cmd-Tab.
 set -u
 runtime=$1 home=$2 install=$3 cwd=$4
 shift 4
@@ -38,7 +39,33 @@ finish() {
 trap 'finish; trap - EXIT; exit 143' TERM INT HUP
 trap finish EXIT
 
-"$runtime/engine/wsd" --dir "$sockets" &
+# wsd runs from an application bundle named after the game: macOS takes the name in the menu bar, the Dock and
+# Cmd-Tab from it (the game gives the icon). The bundle keeps one place per game, so Launch Services sees one app.
+app_name=${SAILOVER_APP_NAME:-Game}
+app_name=${app_name//\//-}
+app_id=$(printf '%s' "$app_name" | LC_ALL=C tr -c 'A-Za-z0-9' '-')
+app="$sockets_root/sailover-apps/$app_id/$app_name.app"
+mkdir -p "$app/Contents/MacOS" || exit 1
+rm -f "$app/Contents/MacOS/wsd"
+cp -c "$runtime/engine/wsd" "$app/Contents/MacOS/wsd" 2>/dev/null || cp "$runtime/engine/wsd" "$app/Contents/MacOS/wsd" || exit 1
+xml_name=$(printf '%s' "$app_name" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g')
+cat > "$app/Contents/Info.plist" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleExecutable</key><string>wsd</string>
+  <key>CFBundleIdentifier</key><string>com.zagrios.sailover.game.$app_id</string>
+  <key>CFBundleName</key><string>$xml_name</string>
+  <key>CFBundleDisplayName</key><string>$xml_name</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>LSApplicationCategoryType</key><string>public.app-category.games</string>
+  <key>NSHighResolutionCapable</key><true/>
+</dict>
+</plist>
+PLIST
+
+"$app/Contents/MacOS/wsd" --dir "$sockets" &
 helpers+=($!)
 dxmt="$runtime/graphics/dxmt-native.framework/Versions/A/dxmt-native"
 RENDER_SERVER_EXEC_PATH="$runtime/graphics/libexec/virgl_render_server" NPT_BACKEND=dxmt \

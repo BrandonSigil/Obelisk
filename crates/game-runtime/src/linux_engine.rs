@@ -17,6 +17,8 @@ use std::{
 struct EpicGame {
     namespace: &'static str,
     app_name: &'static str,
+    /// Its name in the menu bar, the Dock and Cmd-Tab.
+    title: &'static str,
     /// The program the engine starts instead of the publisher's executable,
     /// relative to the installation, when that executable cannot run there.
     executable: Option<&'static str>,
@@ -30,6 +32,7 @@ const EPIC: &[EpicGame] = &[
     EpicGame {
         namespace: "9773aa1aa54f4f7b80e44bef04986cea",
         app_name: "Sugar",
+        title: "Rocket League",
         executable: Some("Binaries/Win64/RocketLeague_EAC.exe"),
     },
 ];
@@ -42,6 +45,12 @@ fn epic_game(namespace: &str, app_name: &str) -> Option<&'static EpicGame> {
 /// Whether the Epic build `app_name` of `namespace` runs through the engine.
 pub fn runs_epic(namespace: &str, app_name: &str) -> bool {
     epic_game(namespace, app_name).is_some()
+}
+
+/// The name of the Epic build `app_name` of `namespace` in the menu bar, the
+/// Dock and Cmd-Tab while it runs through the engine.
+pub(crate) fn epic_title(namespace: &str, app_name: &str) -> Option<&'static str> {
+    epic_game(namespace, app_name).map(|game| game.title)
 }
 
 /// What the engine starts for the Epic build `app_name` of `namespace`
@@ -72,6 +81,9 @@ pub(crate) fn epic_target(
 /// Starts the window server and Neptune's render server, then the game, and
 /// ends them with it (see the script).
 const LAUNCHER: &str = include_str!("linux_engine/launch.sh");
+/// The launcher's variable that names the game in the menu bar, the Dock and
+/// Cmd-Tab; the program's file name otherwise.
+pub(crate) const APP_NAME: &str = "SAILOVER_APP_NAME";
 /// The guest sees the installation here, and the prefix in its home.
 const GAME: &str = "/games/game";
 const HOME: &str = "/home/user";
@@ -219,6 +231,12 @@ pub(crate) fn target(
     config: &wine::Config,
 ) -> Result<Target, Error> {
     let executable = guest_program(install, target)?;
+    let mut environment = environment;
+    if !environment.contains_key(APP_NAME)
+        && let Some(stem) = Path::new(&target.executable).file_stem()
+    {
+        environment.insert(APP_NAME.to_owned(), stem.to_string_lossy().into_owned());
+    }
     let install = install.canonicalize()?;
     let working_directory = guest_path(&install, Path::new(&target.working_directory))
         .unwrap_or_else(|| GAME.to_owned());

@@ -271,7 +271,13 @@ pub(super) fn windows_target(
         ),
         crate::wine::Engine::Rosetta => plan.target.clone(),
     };
-    let mut target = crate::wine::target(&config.install, &launched, environment.clone(), wine)?;
+    let mut environment = environment.clone();
+    if wine.engine == crate::wine::Engine::Linux
+        && let Some(title) = crate::linux_engine::epic_title(&config.namespace, &config.app_name)
+    {
+        environment.insert(crate::linux_engine::APP_NAME.to_owned(), title.to_owned());
+    }
+    let mut target = crate::wine::target(&config.install, &launched, environment, wine)?;
     let ownership = match (&plan.ownership_token, wine.engine) {
         // The engine's guest cannot see the Mac's disk: the token goes into the
         // prefix's C: drive.
