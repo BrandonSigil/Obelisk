@@ -1,8 +1,8 @@
 #!/bin/bash
 # Runs a Windows game through Voile's Linux engine (voile-lkd): voile-wine built for x86-64 Linux, which
-# fexdarwin-run executes in native macOS processes. Starts the window server and Neptune's render server, then the
-# game, and ends both when the game ends or this script is stopped. Every guest process follows this script
-# (FEXDARWIN_SUPERVISOR_PID) and ends within half a second once it is gone.
+# fexdarwin-run executes in native macOS processes. Starts the window server, Neptune's render server and the input
+# service, then the game, and ends them when the game ends or this script is stopped. Every guest process follows
+# this script (FEXDARWIN_SUPERVISOR_PID) and ends within half a second once it is gone.
 #
 # Usage: launch.sh RUNTIME HOME INSTALL CWD [--env NAME=VALUE]... -- EXECUTABLE [ARGUMENT]...
 #   RUNTIME     the Linux engine runtime (engine/, graphics/, wine/, root/)
@@ -78,8 +78,17 @@ RENDER_SERVER_EXEC_PATH="$runtime/graphics/libexec/virgl_render_server" NPT_BACK
     NPT_D3D11_LIBRARY_PATH="$dxmt" NPT_DXGI_LIBRARY_PATH="$dxmt" NPT_D3D12_LIBRARY_PATH="$dxmt" \
     "$runtime/graphics/bin/virgl_test_server" --no-virgl --no-fork --socket-path "$sockets/vtest.sock" &
 helpers+=($!)
+# The input service gives the Mac's gamepads to Wine's SailOver bus. A runtime without it starts the game without
+# gamepads.
+input=
+if [ -x "$runtime/engine/sailover-input" ]; then
+    "$runtime/engine/sailover-input" --dir "$sockets" &
+    helpers+=($!)
+    input=1
+fi
 for _ in $(seq 1 100); do
-    [ -S "$sockets/wsd.sock" ] && [ -S "$sockets/vtest.sock" ] && break
+    [ -S "$sockets/wsd.sock" ] && [ -S "$sockets/vtest.sock" ] && { [ -z "$input" ] || [ -S "$sockets/input.sock" ]; } &&
+        break
     sleep 0.05
 done
 
