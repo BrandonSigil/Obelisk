@@ -3,6 +3,7 @@ pub mod cloud;
 pub mod cloud_status;
 pub mod epic;
 mod files;
+mod input;
 pub mod installations;
 pub mod linux_engine;
 mod locations;

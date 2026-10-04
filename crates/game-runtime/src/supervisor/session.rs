@@ -593,9 +593,21 @@ async fn run<L: Launch>(
         break (target, architecture);
     };
     session.check()?;
-    let prepared = launch
+    let mut prepared = launch
         .prepare_host(session, &target, architecture, cloud.as_ref())
         .await?;
+    // A game in Wine for macOS reads the Mac's gamepads through the input
+    // service while it runs.
+    let input = launch
+        .wine()
+        .and_then(|wine| crate::input::Service::start(&wine))
+        .map(|(service, socket)| {
+            prepared.environment.insert(
+                crate::input::SOCKET.to_owned(),
+                socket.to_string_lossy().into_owned(),
+            );
+            service
+        });
     let host = Arc::new(prepared.host);
     let mut command = Process::new(&prepared.helper);
     let (mut pipe, child_pipe) = UnixStream::pair().map_err(Error::from)?;
@@ -695,6 +707,7 @@ async fn run<L: Launch>(
     }
     let watching = launch.watch(&host, session);
     let exit = wait_for_exit(&mut game).await;
+    drop(input);
     session.state.lock().unwrap().game = None;
     session.presence.stop();
     launch.stopped(&host, Some(exit));
