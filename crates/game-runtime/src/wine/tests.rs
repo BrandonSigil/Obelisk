@@ -223,6 +223,13 @@ fn every_wine_command_syncs_through_mach_and_gives_32_bit_games_4_gb() {
 }
 
 #[test]
+fn every_wine_command_sees_the_avx_rosetta_translates() {
+    let (_directory, root) = installation();
+
+    assert_eq!(environment(&config(&root))["ROSETTA_ADVERTISE_AVX"], "1");
+}
+
+#[test]
 fn a_prefix_profile_stops_linking_into_the_mac_home() {
     let (_directory, root) = installation();
     let home = root.join("home");

@@ -169,6 +169,9 @@ impl Config {
             // 32-bit games get 4 GB of address space, as on 64-bit Windows,
             // even when their executable does not ask for it.
             ("WINE_LARGE_ADDRESS_AWARE".to_owned(), "1".to_owned()),
+            // Rosetta translates AVX and AVX2 but hides them from CPUID unless
+            // asked, and some games refuse to start without them.
+            ("ROSETTA_ADVERTISE_AVX".to_owned(), "1".to_owned()),
         ]);
         if let Some(library) = self.d3dmetal() {
             environment.insert(
