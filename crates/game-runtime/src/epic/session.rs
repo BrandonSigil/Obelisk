@@ -53,7 +53,7 @@ pub(crate) struct Adapter<R: CloudRemote> {
     api: Arc<R>,
     context: Option<Context>,
     /// The complete snapshot the last view verified. An upload republishes
-    /// its files that SailOver does not manage.
+    /// its files that Obelisk does not manage.
     snapshot: Option<CloudSnapshot>,
 }
 
@@ -213,7 +213,7 @@ impl<R: CloudRemote> Storefront for Adapter<R> {
         });
         context.config = self.config.clone();
         context.save()?;
-        // Supported publisher rules activate SailOver's Cloud policy. These are
+        // Supported publisher rules activate Obelisk's Cloud policy. These are
         // not preferences read from Epic's official launcher; no such account
         // preference endpoint has been established for this protocol.
         vault.set_preferences(Preferences {
@@ -452,7 +452,7 @@ fn indicator(
     ))
 }
 
-/// Cloud maintenance of one Epic game, run inside SailOver with the UI's
+/// Cloud maintenance of one Epic game, run inside Obelisk with the UI's
 /// authenticated client. `idle` proves no Epic launch or supervisor can
 /// start while it runs.
 pub async fn maintain(

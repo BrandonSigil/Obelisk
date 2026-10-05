@@ -277,7 +277,7 @@ impl Client {
     }
 
     pub async fn next_credentials_revision(&self, after_revision: u64) -> Option<u64> {
-        sailover_core::watch::next_matching(self.credential_events.subscribe(), |state| {
+        obelisk_core::watch::next_matching(self.credential_events.subscribe(), |state| {
             state.stopped || state.revision != after_revision
         })
         .await

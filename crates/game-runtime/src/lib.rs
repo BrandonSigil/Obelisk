@@ -140,7 +140,7 @@ pub struct Config {
     pub app_id: u32,
     #[serde(default)]
     pub cloud_save_roots: Vec<PathBuf>,
-    /// Set for a Windows game, which runs in SailOver's Wine runtime.
+    /// Set for a Windows game, which runs in Obelisk's Wine runtime.
     #[serde(default)]
     pub wine: Option<wine::Config>,
 }
@@ -238,7 +238,7 @@ impl Launch {
         }
         self.check_cancelled()?;
         let service = format!(
-            "com.zagrios.sailover.discovery.{}",
+            "com.zagrios.obelisk.discovery.{}",
             uuid::Uuid::new_v4().simple()
         );
         let mut host = start_host(&prepared, config, &service)?;

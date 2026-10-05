@@ -2,7 +2,7 @@
 //! credentials. Process execution remains in the native host.
 use std::{collections::BTreeMap, path::Path};
 
-use sailover_core::{
+use obelisk_core::{
     installation::{self, InstallFailure},
     launch::{self, LaunchTarget},
 };

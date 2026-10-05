@@ -18,11 +18,11 @@ pub(super) async fn connection(steam_id: u64, logged_on: bool) -> (SteamConnecti
 }
 
 impl TestServer {
-    /// The next message SailOver sent, which must be of `kind`.
+    /// The next message Obelisk sent, which must be of `kind`.
     pub(super) async fn request(&mut self, kind: u32) -> Packet {
         let packet = timeout(Duration::from_secs(1), self.next())
             .await
-            .expect("SailOver sent nothing");
+            .expect("Obelisk sent nothing");
         assert_eq!(packet.kind, kind);
         packet
     }
@@ -33,7 +33,7 @@ impl TestServer {
                 .0
                 .next()
                 .await
-                .expect("SailOver closed the connection")
+                .expect("Obelisk closed the connection")
                 .unwrap();
             let WsMessage::Binary(bytes) = frame else {
                 continue;
@@ -69,7 +69,7 @@ impl TestServer {
             .unwrap();
     }
 
-    /// SailOver sends nothing for a moment.
+    /// Obelisk sends nothing for a moment.
     pub(super) async fn quiet(&mut self) -> bool {
         timeout(Duration::from_millis(100), self.next())
             .await

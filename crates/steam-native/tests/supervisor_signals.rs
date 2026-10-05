@@ -1,11 +1,11 @@
-use sailover_steam_native::native;
+use obelisk_steam_native::native;
 use std::{
     os::unix::process::CommandExt,
     process::{Command, Stdio},
     time::{Duration, Instant},
 };
 
-const FIXTURE: &str = "SAILOVER_SUPERVISOR_SIGNAL_FIXTURE";
+const FIXTURE: &str = "OBELISK_SUPERVISOR_SIGNAL_FIXTURE";
 
 fn current_mask() -> libc::sigset_t {
     // SAFETY: a null input set only queries the calling thread's signal mask;

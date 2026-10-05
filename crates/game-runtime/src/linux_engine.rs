@@ -4,7 +4,7 @@
 //! anti-cheat then loads its Linux module. Only the games this list names run
 //! there; every other Windows game keeps Rosetta's Wine.
 use crate::{Error, supervisor::Target, wine};
-use sailover_core::launch::LaunchTarget;
+use obelisk_core::launch::LaunchTarget;
 use std::{
     collections::HashMap,
     fs,
@@ -74,7 +74,7 @@ pub(crate) fn epic_target(
 const LAUNCHER: &str = include_str!("linux_engine/launch.sh");
 /// The launcher's variable that names the game in the menu bar, the Dock and
 /// Cmd-Tab: its name in the store, or its program's file name without one.
-pub(crate) const APP_NAME: &str = "SAILOVER_APP_NAME";
+pub(crate) const APP_NAME: &str = "OBELISK_APP_NAME";
 /// A store title as an application name: without the trademark signs stores
 /// add ("Rocket League®"), which Mac apps leave out.
 fn app_name(title: &str) -> String {
@@ -126,7 +126,7 @@ fn guest_environment(config: &wine::Config) -> Vec<(&'static str, String)> {
             "WINEDLLOVERRIDES",
             "mscoree,mshtml=;winemenubuilder.exe=d;d3d11,dxgi,d3d12=n".into(),
         ),
-        ("VTEST_SOCKET_NAME", "/run/sailover/vtest.sock".into()),
+        ("VTEST_SOCKET_NAME", "/run/obelisk/vtest.sock".into()),
         ("NPT_DEBUG", "force_vtest".into()),
     ]
 }
@@ -249,7 +249,7 @@ pub(crate) fn target(
     let mut arguments = vec![
         "-c".to_owned(),
         LAUNCHER.to_owned(),
-        "sailover-linux-engine".to_owned(),
+        "obelisk-linux-engine".to_owned(),
         config.runtime.to_string_lossy().into_owned(),
         home(&config.prefix)?.to_string_lossy().into_owned(),
         install.to_string_lossy().into_owned(),
@@ -282,7 +282,7 @@ pub(crate) fn private_file(
     use std::{io::Write, os::unix::fs::PermissionsExt};
     let drive = config.prefix.join("drive_c");
     let directory = tempfile::Builder::new()
-        .prefix(".sailover-")
+        .prefix(".obelisk-")
         .permissions(fs::Permissions::from_mode(0o700))
         .tempdir_in(&drive)?;
     let path = directory.path().join(name);

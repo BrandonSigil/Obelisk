@@ -2,7 +2,7 @@
 //! which stands in for Steam, once its prefix ran the steps of the install
 //! scripts the installation lists.
 use crate::{Error, supervisor::Target, wine};
-use sailover_core::launch::LaunchTarget;
+use obelisk_core::launch::LaunchTarget;
 use std::{
     fs,
     path::{Path, PathBuf},
@@ -27,7 +27,7 @@ impl wine::Storefront for Prefix<'_> {
     /// out.
     fn prerequisites(&self) -> Result<Vec<wine::Prerequisite>, Error> {
         let read = |relative: &Path| {
-            sailover_core::install::read_cached_file(self.install, relative, MAX_SCRIPT_BYTES)
+            obelisk_core::install::read_cached_file(self.install, relative, MAX_SCRIPT_BYTES)
                 .map_err(|_| Error::Storage)
         };
         let Some(list) = read(Path::new(steam_kit::install_script::LIST))? else {

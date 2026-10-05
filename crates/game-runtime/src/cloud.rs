@@ -1,10 +1,10 @@
 //! What a Cloud sync publishes and asks, shared by every storefront. A Game
-//! session journals its status; Cloud maintenance keeps it in SailOver's memory.
+//! session journals its status; Cloud maintenance keeps it in Obelisk's memory.
 //! Only the publication differs.
 pub(crate) mod sync;
 
 use crate::supervisor::session::Questions;
-use sailover_core::transfer::CancelToken;
+use obelisk_core::transfer::CancelToken;
 use serde::{Deserialize, Serialize};
 use std::{
     sync::{
@@ -112,7 +112,7 @@ pub struct Control {
     publish: Box<dyn Fn(Status) + Send + Sync>,
 }
 impl Control {
-    /// Cloud maintenance in SailOver, where the UI waits for any answer.
+    /// Cloud maintenance in Obelisk, where the UI waits for any answer.
     pub fn new(publish: impl Fn(Status) + Send + Sync + 'static) -> Self {
         Self::with_questions(Arc::new(Questions::in_app()), publish)
     }

@@ -5,13 +5,13 @@
     <key>CFBundleDevelopmentRegion</key>
     <string>en</string>
     <key>CFBundleExecutable</key>
-    <string>SailOverRosetta</string>
+    <string>ObeliskRosetta</string>
     <key>CFBundleIdentifier</key>
-    <string>com.zagrios.sailover.rosetta</string>
+    <string>com.zagrios.obelisk.rosetta</string>
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundleName</key>
-    <string>SailOver Rosetta</string>
+    <string>Obelisk Rosetta</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>

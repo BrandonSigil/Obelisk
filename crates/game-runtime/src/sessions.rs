@@ -1,13 +1,13 @@
 //! One storefront's Game sessions: the Reservation a launch holds from its
 //! admission until its supervisor confirms the game is gone, the recovery of
-//! a session SailOver left running, Account revocation, and the answers to a
+//! a session Obelisk left running, Account revocation, and the answers to a
 //! session's Cloud question and Rosetta requirement. Only the supervisor owns
 //! the game and its processes; this module observes it and forwards answers.
 use crate::{
     cloud::{Choice, Phase as CloudPhase, Status as CloudStatus},
     supervisor::{self, FailureReason, Phase, Provider, Record},
 };
-use sailover_core::transfer::CancelToken;
+use obelisk_core::transfer::CancelToken;
 use std::{
     fmt,
     sync::{
@@ -79,7 +79,7 @@ pub trait Supervised<P: Provider>: Send + Sync {
     fn snapshot(&self, after: Option<u64>) -> Result<Observation<P>, String>;
     /// Cancels preparation. After spawn the game keeps running.
     fn cancel(&self);
-    /// Ends the game, as quitting SailOver does; its exit Cloud sync still
+    /// Ends the game, as quitting Obelisk does; its exit Cloud sync still
     /// runs. Before spawn it cancels preparation.
     fn stop(&self) -> Result<(), String>;
     /// Opens the start gate of a supervisor that waits for its UI.
@@ -149,7 +149,7 @@ pub trait Handover<P: Storefront>: Send + Sync + 'static {
     ) -> Result<Arc<dyn Supervised<P>>, String>;
 }
 
-/// Finds the session a previous SailOver left running. `None` confirms that
+/// Finds the session a previous Obelisk left running. `None` confirms that
 /// none remains.
 pub type Recovery<P> =
     Box<dyn Fn() -> Result<Option<Arc<dyn Supervised<P>>>, String> + Send + Sync>;
@@ -175,7 +175,7 @@ pub enum Handoff {
     Lost(String),
 }
 
-/// One Game session as SailOver presents it.
+/// One Game session as Obelisk presents it.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Session<P: Storefront> {
     pub id: String,
@@ -242,7 +242,7 @@ pub struct State<P: Storefront> {
     pub active: Option<Session<P>>,
     /// The last session observed, kept after it ends.
     pub last: Option<Session<P>>,
-    /// A session a previous SailOver left may still run: the storefront
+    /// A session a previous Obelisk left may still run: the storefront
     /// stays reserved until recovery settles.
     pub recovering: bool,
     /// The last recovery attempt failed; it is retried.
@@ -515,7 +515,7 @@ impl<P: Storefront> Shared<P> {
         }
     }
 
-    /// Recovers a session a previous SailOver left running and follows it.
+    /// Recovers a session a previous Obelisk left running and follows it.
     /// `Ok(false)` confirms that none remains.
     fn recover(&self, operation: &Arc<Operation>) -> Result<bool, Failure> {
         loop {
@@ -543,7 +543,7 @@ pub struct Sessions<P: Storefront> {
 }
 
 impl<P: Storefront> Sessions<P> {
-    /// Starts by recovering a session a previous SailOver left running: the
+    /// Starts by recovering a session a previous Obelisk left running: the
     /// storefront stays reserved until recovery settles.
     pub fn new(recover: Recovery<P>) -> Self {
         let operation = Operation::new();
@@ -632,7 +632,7 @@ impl<P: Storefront> Sessions<P> {
         }
     }
 
-    /// Ends the running game, as quitting SailOver does: it gets a few
+    /// Ends the running game, as quitting Obelisk does: it gets a few
     /// seconds to quit, and its session still settles its Cloud saves. A
     /// launch still preparing is cancelled.
     pub fn stop(&self) -> Result<(), Failure> {
@@ -813,7 +813,7 @@ impl<P: Storefront> Canceller<P> {
 /// A local copy of the pinned Voile release, which replaces its download in
 /// development builds while the release is private.
 fn development_archive() -> Option<std::path::PathBuf> {
-    development_copy("SAILOVER_VOILE_ARCHIVE")
+    development_copy("OBELISK_VOILE_ARCHIVE")
 }
 
 fn development_copy(variable: &str) -> Option<std::path::PathBuf> {

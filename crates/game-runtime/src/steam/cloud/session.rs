@@ -414,7 +414,7 @@ fn recovery_is_settled(
     }
 }
 
-/// Cloud maintenance of one Steam game, run inside SailOver. `idle` proves that
+/// Cloud maintenance of one Steam game, run inside Obelisk. `idle` proves that
 /// no Steam launch or supervisor can start while it runs.
 pub fn maintain(
     target: MaintenanceTarget,

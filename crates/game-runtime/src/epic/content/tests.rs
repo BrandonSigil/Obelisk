@@ -131,7 +131,7 @@ impl Fixture {
         let library = root.path().canonicalize().unwrap();
         let locations = Locations::new(
             &library,
-            Path::new("/Applications/SailOver.app"),
+            Path::new("/Applications/Obelisk.app"),
             &library.join("home"),
         );
         std::fs::create_dir_all(&locations.cloud_archive).unwrap();
@@ -360,7 +360,7 @@ async fn an_older_receipt_learns_its_catalog_item_from_the_installation_itself()
         prerequisite: None,
     };
     std::fs::write(
-        Path::new(&receipt.directory).join(".sailover-install.json"),
+        Path::new(&receipt.directory).join(".obelisk-install.json"),
         serde_json::to_vec(&installed).unwrap(),
     )
     .unwrap();

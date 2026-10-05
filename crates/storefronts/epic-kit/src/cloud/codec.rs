@@ -5,7 +5,7 @@ use std::{
     io::Write,
 };
 
-use sailover_core::transfer::CancelToken;
+use obelisk_core::transfer::CancelToken;
 use sha1::{Digest, Sha1};
 
 use super::{

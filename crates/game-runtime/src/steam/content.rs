@@ -10,7 +10,7 @@ use crate::{
     protocol::Credentials,
     sessions::{self, Admission, Failure, Storefront as _, Supervised},
 };
-use sailover_core::{installation::TransferProgress, launch::LaunchTarget, transfer::CancelToken};
+use obelisk_core::{installation::TransferProgress, launch::LaunchTarget, transfer::CancelToken};
 use std::{
     path::{Path, PathBuf},
     sync::Arc,

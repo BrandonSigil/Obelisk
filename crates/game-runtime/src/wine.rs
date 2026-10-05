@@ -1,11 +1,11 @@
-//! A Windows game runs in SailOver's Wine runtime, inside the prefix of its
+//! A Windows game runs in Obelisk's Wine runtime, inside the prefix of its
 //! installation. What a storefront adds, such as Steam's steam.exe helper or
 //! the prerequisites it names, comes from that storefront's side.
 use crate::{
     Error,
     supervisor::{Target, architecture::Architecture},
 };
-use sailover_core::launch::LaunchTarget;
+use obelisk_core::launch::LaunchTarget;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeSet, HashMap},
@@ -22,11 +22,11 @@ pub(crate) const ARCHITECTURE: Architecture = Architecture::Intel;
 /// The user every prefix of CrossOver's Wine names its profile after.
 const USER: &str = "crossover";
 /// The prerequisites a prefix ran, one id per line.
-const PREREQUISITES: &str = "sailover-prerequisites";
+const PREREQUISITES: &str = "obelisk-prerequisites";
 /// The Wine Mono whose .NET registration the prefix holds.
-const MONO: &str = "sailover-mono";
+const MONO: &str = "obelisk-mono";
 /// Their output, rewritten by each launch that runs one.
-const PREREQUISITES_LOG: &str = "sailover-prerequisites.log";
+const PREREQUISITES_LOG: &str = "obelisk-prerequisites.log";
 /// An installer still running after this long is stopped.
 const PREREQUISITE_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 /// Success, "a newer version is already installed" and "restart required".
@@ -398,14 +398,14 @@ impl Installation {
     pub fn remove(
         &self,
         locations: &crate::Locations,
-    ) -> Result<(), sailover_core::installation::RemovalFailure> {
+    ) -> Result<(), obelisk_core::installation::RemovalFailure> {
         match self.engine {
             Engine::Rosetta => remove_prefix(locations, &self.prefix),
             // The engine's folder, and the Rosetta prefix an earlier launch
             // may have made before the game moved to the engine.
             Engine::Linux => {
                 let home = crate::linux_engine::home(&self.prefix).map_err(|_| {
-                    sailover_core::installation::RemovalFailure::Unsafe(self.prefix.clone())
+                    obelisk_core::installation::RemovalFailure::Unsafe(self.prefix.clone())
                 })?;
                 remove_folder(home)?;
                 let name = home
@@ -424,7 +424,7 @@ impl Installation {
 fn remove_prefix(
     locations: &crate::Locations,
     prefix: &Path,
-) -> Result<(), sailover_core::installation::RemovalFailure> {
+) -> Result<(), obelisk_core::installation::RemovalFailure> {
     // A Wine server lingers a few seconds after its game and would write the
     // registry back into the prefix.
     if prefix.is_dir()
@@ -437,8 +437,8 @@ fn remove_prefix(
 
 /// Deletes `folder`. A missing one is already gone; a link in its place is
 /// never followed.
-fn remove_folder(folder: &Path) -> Result<(), sailover_core::installation::RemovalFailure> {
-    use sailover_core::installation::RemovalFailure;
+fn remove_folder(folder: &Path) -> Result<(), obelisk_core::installation::RemovalFailure> {
+    use obelisk_core::installation::RemovalFailure;
     match fs::symlink_metadata(folder) {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
         Err(error) => return Err(error.into()),
@@ -555,8 +555,8 @@ pub(crate) fn stop(config: &Config) {
     }
 }
 
-/// Ends the Wine processes a SailOver that died left behind, and returns how
-/// many. macOS ends every process of a SailOver that dies, its sessions'
+/// Ends the Wine processes an Obelisk that died left behind, and returns how
+/// many. macOS ends every process of an Obelisk that dies, its sessions'
 /// supervisors and Steam hosts included, but not the Windows processes Wine
 /// starts apart: those froze without their session, and nothing else runs
 /// from `voile`.

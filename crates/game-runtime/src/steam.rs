@@ -4,7 +4,7 @@ use crate::{
     protocol::Credentials,
     supervisor::{self, Record, Target},
 };
-use sailover_core::transfer::CancelToken;
+use obelisk_core::transfer::CancelToken;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
@@ -73,7 +73,7 @@ pub fn prepare(
     app_id: u32,
     platform: &str,
     install: &Path,
-    target: &sailover_core::launch::LaunchTarget,
+    target: &obelisk_core::launch::LaunchTarget,
 ) -> Result<Request, Error> {
     let home = &locations.home;
     let log = locations
@@ -119,7 +119,7 @@ pub fn prepare(
 /// The Mac game `target` names inside `install`, and its Steam API library.
 fn native_target(
     install: &Path,
-    target: &sailover_core::launch::LaunchTarget,
+    target: &obelisk_core::launch::LaunchTarget,
     home: &Path,
 ) -> Result<(Target, PathBuf), Error> {
     let steam_api = launch::steam_api(target)?;
@@ -210,7 +210,7 @@ pub struct Download {
     pub directory: PathBuf,
 }
 
-/// A Steam game SailOver can install: its build for `platform`, with the
+/// A Steam game Obelisk can install: its build for `platform`, with the
 /// depots of `language`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Offer {

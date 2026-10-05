@@ -1,8 +1,8 @@
 // Display identity can change without moving the user's library.
-PRODUCT_NAME = SailOver
-PRODUCT_BUNDLE_IDENTIFIER = com.zagrios.sailover
+PRODUCT_NAME = Obelisk
+PRODUCT_BUNDLE_IDENTIFIER = com.zagrios.obelisk
 MARKETING_VERSION = 0.1.0
 CURRENT_PROJECT_VERSION = 1
-INFOPLIST_KEY_CFBundleDisplayName = SailOver
+INFOPLIST_KEY_CFBundleDisplayName = Obelisk
 INFOPLIST_KEY_LSApplicationCategoryType = public.app-category.games
 

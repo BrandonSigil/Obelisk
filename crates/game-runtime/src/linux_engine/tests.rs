@@ -176,7 +176,7 @@ fn a_private_file_lives_in_the_prefix_s_c_drive_as_long_as_its_folder() {
 #[test]
 fn uninstalling_removes_the_engine_s_folder_and_any_rosetta_prefix() {
     let (_directory, root) = installation();
-    let locations = crate::Locations::new(&root.join("library"), Path::new("/SailOver.app"), &root);
+    let locations = crate::Locations::new(&root.join("library"), Path::new("/Obelisk.app"), &root);
     let install = root.join("library/Games/Epic/epic-game-Windows");
     let rosetta = crate::wine::Installation::of(&locations, "Windows", &install)
         .unwrap()
@@ -192,15 +192,15 @@ fn uninstalling_removes_the_engine_s_folder_and_any_rosetta_prefix() {
 }
 
 /// End to end on an installed engine runtime, through `prepare` and the
-/// launcher as a launch runs them: `SAILOVER_LINUX_ENGINE_RUNTIME` names the
-/// runtime, `SAILOVER_LINUX_ENGINE_PROGRAM` a Windows program that exits by
-/// itself, `SAILOVER_LINUX_ENGINE_ARGUMENTS` its arguments. It opens a window.
+/// launcher as a launch runs them: `OBELISK_LINUX_ENGINE_RUNTIME` names the
+/// runtime, `OBELISK_LINUX_ENGINE_PROGRAM` a Windows program that exits by
+/// itself, `OBELISK_LINUX_ENGINE_ARGUMENTS` its arguments. It opens a window.
 #[test]
 #[ignore]
 fn smoke() {
-    let runtime = PathBuf::from(std::env::var("SAILOVER_LINUX_ENGINE_RUNTIME").unwrap());
-    let program = PathBuf::from(std::env::var("SAILOVER_LINUX_ENGINE_PROGRAM").unwrap());
-    let arguments = std::env::var("SAILOVER_LINUX_ENGINE_ARGUMENTS").unwrap_or_default();
+    let runtime = PathBuf::from(std::env::var("OBELISK_LINUX_ENGINE_RUNTIME").unwrap());
+    let program = PathBuf::from(std::env::var("OBELISK_LINUX_ENGINE_PROGRAM").unwrap());
+    let arguments = std::env::var("OBELISK_LINUX_ENGINE_ARGUMENTS").unwrap_or_default();
     let (_directory, root) = installation();
     let install = root.join("install");
     fs::create_dir_all(&install).unwrap();

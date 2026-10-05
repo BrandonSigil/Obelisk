@@ -4,7 +4,7 @@ use crate::wine::tests::{calls, config, installation, pe, record_calls, target};
 fn locations(root: &Path) -> crate::Locations {
     crate::Locations::new(
         &root.join("library"),
-        &root.join("SailOver.app"),
+        &root.join("Obelisk.app"),
         &root.join("home"),
     )
 }
@@ -81,7 +81,7 @@ fn a_steam_installation_lists_the_steps_of_its_install_scripts() {
     let install = root.join("game");
     let redist = install.join("_CommonRedist/vcredist/2022");
     fs::create_dir_all(&redist).unwrap();
-    fs::create_dir_all(install.join(".sailover-content")).unwrap();
+    fs::create_dir_all(install.join(".obelisk-content")).unwrap();
     fs::write(
         install.join(steam_kit::install_script::LIST),
         "_CommonRedist/missing/installscript.vdf\n_CommonRedist/vcredist/2022/installscript.vdf",
@@ -144,7 +144,7 @@ fn a_windows_launch_readies_the_installation_prefix_and_names_it_once() {
     assert_eq!(request.target.arguments[0], HELPER);
     assert_eq!(
         request.target.log,
-        Some(root.join("home/Library/Logs/SailOver/Steam/wine-42.log"))
+        Some(root.join("home/Library/Logs/Obelisk/Steam/wine-42.log"))
     );
     assert_eq!(calls(&root.join("library/Prefixes")), ["wineboot --init"]);
     assert_eq!(

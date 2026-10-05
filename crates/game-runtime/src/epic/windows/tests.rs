@@ -9,7 +9,7 @@ fn configuration(root: &Path) -> Configuration {
         home: root.join("home"),
         install: install.clone(),
         session_directory: root.join("library/EpicSessions"),
-        helper: root.join("SailOver.app/Contents/Helpers/SteamNative/sailover-steam-host"),
+        helper: root.join("Obelisk.app/Contents/Helpers/SteamNative/obelisk-steam-host"),
         namespace: "space".into(),
         catalog_item_id: "base".into(),
         app_name: "game".into(),
@@ -44,7 +44,7 @@ fn install(
         prerequisite,
     };
     fs::write(
-        config.install.join(sailover_core::install::RECEIPT_FILE),
+        config.install.join(obelisk_core::install::RECEIPT_FILE),
         serde_json::to_vec(&receipt).unwrap(),
     )
     .unwrap();
@@ -115,7 +115,7 @@ fn a_windows_build_readies_its_prefix_with_its_prerequisite_before_any_credentia
     let (_directory, root) = installation();
     let locations = crate::Locations::new(
         &root.join("library"),
-        &root.join("SailOver.app"),
+        &root.join("Obelisk.app"),
         &root.join("home"),
     );
     record_calls(&locations.voile.join("current"));
@@ -133,7 +133,7 @@ fn a_windows_build_readies_its_prefix_with_its_prerequisite_before_any_credentia
     assert_eq!(wine.prefix, root.join("library/Prefixes/epic-hash-Windows"));
     assert_eq!(
         wine.log,
-        root.join("home/Library/Logs/SailOver/Epic/wine-game.log")
+        root.join("home/Library/Logs/Obelisk/Epic/wine-game.log")
     );
     assert!(config.runs_in(Some(&wine)));
     assert_eq!(
@@ -146,7 +146,7 @@ fn a_windows_build_readies_its_prefix_with_its_prerequisite_before_any_credentia
             ),
         ]
     );
-    assert!(root.join("home/Library/Logs/SailOver/Epic").is_dir());
+    assert!(root.join("home/Library/Logs/Obelisk/Epic").is_dir());
 }
 
 #[test]
@@ -154,7 +154,7 @@ fn a_build_that_is_no_windows_program_never_boots_a_prefix() {
     let (_directory, root) = installation();
     let locations = crate::Locations::new(
         &root.join("library"),
-        &root.join("SailOver.app"),
+        &root.join("Obelisk.app"),
         &root.join("home"),
     );
     record_calls(&locations.voile.join("current"));
@@ -174,7 +174,7 @@ fn a_mac_build_or_a_missing_runtime_is_no_windows_launch() {
     let (_directory, root) = installation();
     let locations = crate::Locations::new(
         &root.join("library"),
-        &root.join("SailOver.app"),
+        &root.join("Obelisk.app"),
         &root.join("home"),
     );
     let mut config = configuration(&root);

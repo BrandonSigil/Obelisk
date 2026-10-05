@@ -259,8 +259,8 @@ fn the_steam_journal_holds_no_credentials() {
     assert!(!record.contains("fixture-token") && !record.contains("refresh_token"));
 }
 
-fn launch_target(executable: &Path, bundle: bool) -> sailover_core::launch::LaunchTarget {
-    sailover_core::launch::LaunchTarget {
+fn launch_target(executable: &Path, bundle: bool) -> obelisk_core::launch::LaunchTarget {
+    obelisk_core::launch::LaunchTarget {
         executable: executable.to_string_lossy().into_owned(),
         arguments: vec![],
         working_directory: String::new(),

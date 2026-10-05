@@ -1,6 +1,6 @@
 use super::*;
 use crate::content;
-use sailover_core::transfer::CancelToken;
+use obelisk_core::transfer::CancelToken;
 
 fn rules(path: &str) -> CloudRules {
     CloudRules {

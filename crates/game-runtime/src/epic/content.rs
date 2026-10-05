@@ -11,7 +11,7 @@ use crate::{
     sessions::{self, Admission, BeforeBegin, Failure, Storefront as _, Supervised},
 };
 use epic_kit::client::Client as EpicClient;
-use sailover_core::{installation::TransferProgress, transfer::CancelToken};
+use obelisk_core::{installation::TransferProgress, transfer::CancelToken};
 use std::{
     path::{Path, PathBuf},
     sync::{
@@ -196,7 +196,7 @@ impl<N: Network> Content<N> {
     }
 
     /// What maintenance of `game` syncs: its installation, or, uninstalled,
-    /// the configuration its journal saved, with this SailOver's paths.
+    /// the configuration its journal saved, with this Obelisk's paths.
     async fn maintenance(
         &self,
         game: &Store,

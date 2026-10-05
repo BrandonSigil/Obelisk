@@ -18,7 +18,7 @@ RUNTIME_PACKAGE="$PROJECT_ROOT/build/steam-runtime/runtime.zip"
 # costs seconds per incremental build when this tool is built unoptimized.
 CARGO_TARGET_DIR="$PROJECT_ROOT/target" cargo run --locked --release \
     --manifest-path "$PROJECT_ROOT/Cargo.toml" -p game-runtime \
-    --features packaging --bin sailover-steam-runtime-package -- \
+    --features packaging --bin obelisk-steam-runtime-package -- \
     "$PROJECT_ROOT/build/steam-runtime/downloads" "$RUNTIME_PACKAGE"
 RUNTIME_DESTINATION="$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/SteamRuntime"
 mkdir -p "$RUNTIME_DESTINATION"
@@ -27,40 +27,40 @@ if ! cmp -s "$RUNTIME_PACKAGE" "$RUNTIME_DESTINATION/runtime.zip"; then
 fi
 export CARGO_TARGET_DIR="$PROJECT_ROOT/build/steam-native-target"
 cargo build --locked --manifest-path "$PROJECT_ROOT/crates/steam-native/Cargo.toml" \
-    --workspace --bin sailover-steam-host --lib --profile "$PROFILE_NAME" --target aarch64-apple-darwin
+    --workspace --bin obelisk-steam-host --lib --profile "$PROFILE_NAME" --target aarch64-apple-darwin
 cargo build --locked --manifest-path "$PROJECT_ROOT/crates/steam-native/Cargo.toml" \
-    -p sailover-steam-native --bin sailover-steam-sdk --profile "$PROFILE_NAME" --target x86_64-apple-darwin
+    -p obelisk-steam-native --bin obelisk-steam-sdk --profile "$PROFILE_NAME" --target x86_64-apple-darwin
 cargo build --locked --manifest-path "$PROJECT_ROOT/crates/steam-native/Cargo.toml" \
-    -p sailover-steam-discovery-adapter --lib --profile "$PROFILE_NAME" --target x86_64-apple-darwin
+    -p obelisk-steam-discovery-adapter --lib --profile "$PROFILE_NAME" --target x86_64-apple-darwin
 ARM_BUILD="$CARGO_TARGET_DIR/aarch64-apple-darwin/$PROFILE_DIRECTORY"
 INTEL_BUILD="$CARGO_TARGET_DIR/x86_64-apple-darwin/$PROFILE_DIRECTORY"
 DESTINATION="$TARGET_BUILD_DIR/$CONTENTS_FOLDER_PATH/Helpers/SteamNative"
 mkdir -p "$DESTINATION"
-cp "$ARM_BUILD/sailover-steam-host" "$DESTINATION/sailover-steam-host"
+cp "$ARM_BUILD/obelisk-steam-host" "$DESTINATION/obelisk-steam-host"
 # Remove the former diagnostic helper from incremental app builds.
-rm -f "$DESTINATION/sailover-steam-sdk-arm64"
-cp "$INTEL_BUILD/sailover-steam-sdk" "$DESTINATION/sailover-steam-sdk-x86_64"
-ADAPTER="$DESTINATION/libsailover_steam_discovery_adapter.dylib"
-/usr/bin/lipo -create "$ARM_BUILD/libsailover_steam_discovery_adapter.dylib" \
-    "$INTEL_BUILD/libsailover_steam_discovery_adapter.dylib" -output "$ADAPTER"
+rm -f "$DESTINATION/obelisk-steam-sdk-arm64"
+cp "$INTEL_BUILD/obelisk-steam-sdk" "$DESTINATION/obelisk-steam-sdk-x86_64"
+ADAPTER="$DESTINATION/libobelisk_steam_discovery_adapter.dylib"
+/usr/bin/lipo -create "$ARM_BUILD/libobelisk_steam_discovery_adapter.dylib" \
+    "$INTEL_BUILD/libobelisk_steam_discovery_adapter.dylib" -output "$ADAPTER"
 IDENTITY="${EXPANDED_CODE_SIGN_IDENTITY:?A stable Apple signing identity is required}"
 /usr/bin/codesign --force --sign "$IDENTITY" --options runtime \
-    --identifier com.zagrios.sailover.steam-host \
-    --entitlements "$PROJECT_ROOT/packaging/steam-host.entitlements" "$DESTINATION/sailover-steam-host"
+    --identifier com.zagrios.obelisk.steam-host \
+    --entitlements "$PROJECT_ROOT/packaging/steam-host.entitlements" "$DESTINATION/obelisk-steam-host"
 /usr/bin/codesign --force --sign "$IDENTITY" \
-    --identifier com.zagrios.sailover.steam-discovery "$ADAPTER"
+    --identifier com.zagrios.obelisk.steam-discovery "$ADAPTER"
 /usr/bin/codesign --force --sign "$IDENTITY" --options runtime \
-    --identifier com.zagrios.sailover.steam-sdk-x86_64 \
+    --identifier com.zagrios.obelisk.steam-sdk-x86_64 \
     --entitlements "$PROJECT_ROOT/packaging/steam-host.entitlements" \
-    "$DESTINATION/sailover-steam-sdk-x86_64"
+    "$DESTINATION/obelisk-steam-sdk-x86_64"
 
 # Opening this Intel-only app through LaunchServices lets macOS present its
 # Rosetta installer. A direct --probe invocation never starts the app run loop.
 ROSETTA_SOURCE="$PROJECT_ROOT/packaging/rosetta"
 ROSETTA_BUILD="$PROJECT_ROOT/build/rosetta"
-ROSETTA_APP="$TARGET_BUILD_DIR/$CONTENTS_FOLDER_PATH/Helpers/SailOver Rosetta.app"
+ROSETTA_APP="$TARGET_BUILD_DIR/$CONTENTS_FOLDER_PATH/Helpers/Obelisk Rosetta.app"
 mkdir -p "$ROSETTA_BUILD" "$ROSETTA_APP/Contents/MacOS"
-ROSETTA_EXECUTABLE="$ROSETTA_BUILD/SailOverRosetta"
+ROSETTA_EXECUTABLE="$ROSETTA_BUILD/ObeliskRosetta"
 SDK_PATH="$(xcrun --sdk macosx --show-sdk-path)"
 MINIMUM_MACOS="${MACOSX_DEPLOYMENT_TARGET:-26.0}"
 BUILD_SETTINGS="$SDK_PATH|$MINIMUM_MACOS"
@@ -74,7 +74,7 @@ if [[ ! -f "$ROSETTA_EXECUTABLE" \
         -framework AppKit "$ROSETTA_SOURCE/main.m" -o "$ROSETTA_EXECUTABLE"
     printf '%s\n' "$BUILD_SETTINGS" > "$ROSETTA_BUILD/settings"
 fi
-cp "$ROSETTA_EXECUTABLE" "$ROSETTA_APP/Contents/MacOS/SailOverRosetta"
+cp "$ROSETTA_EXECUTABLE" "$ROSETTA_APP/Contents/MacOS/ObeliskRosetta"
 if ! cmp -s "$ROSETTA_SOURCE/Info.plist" "$ROSETTA_APP/Contents/Info.plist"; then
     cp "$ROSETTA_SOURCE/Info.plist" "$ROSETTA_APP/Contents/Info.plist"
 fi

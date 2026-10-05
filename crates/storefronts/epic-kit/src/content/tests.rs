@@ -471,8 +471,8 @@ async fn rejects_unsafe_manifest_paths_before_writing() {
         "/absolute",
         "C:\\outside",
         "safe/../outside",
-        ".sailover-content/lock",
-        ".sailover-install.json",
+        ".obelisk-content/lock",
+        ".obelisk-install.json",
     ] {
         manifest.files[0].filename = name.into();
         let result = ContentClient::new(Client::new())
@@ -758,7 +758,7 @@ async fn repairs_corrupt_files_using_another_mirror_without_manifest_credentials
 #[tokio::test]
 async fn abandoned_account_transfer_keeps_disk_admission_until_worker_exits() {
     use crate::client::{TransferProgress, TransferState};
-    use sailover_core::transfer::Transfers;
+    use obelisk_core::transfer::Transfers;
     fn initial() -> TransferProgress {
         TransferProgress::new("test-game")
     }

@@ -34,7 +34,7 @@ if [[ "$BUILD_APPLICATION" == true ]]; then
     CONFIGURATION=Release "$PROJECT_ROOT/scripts/build.sh"
 fi
 
-APP="$PROJECT_ROOT/build/xcode/Build/Products/Release/SailOver.app"
+APP="$PROJECT_ROOT/build/xcode/Build/Products/Release/Obelisk.app"
 INFO="$APP/Contents/Info.plist"
 LAYOUT="$PROJECT_ROOT/packaging/macos/FinderLayout.dsstore"
 if [[ ! -f "$INFO" || ! -f "$LAYOUT" ]]; then
@@ -56,12 +56,12 @@ STAGING="$(mktemp -d "$PROJECT_ROOT/build/dmg/staging.XXXXXX")"
 # This directory is created by this invocation and contains only generated files.
 trap 'rm -rf "$STAGING"' EXIT
 mkdir "$STAGING/content"
-/usr/bin/ditto "$APP" "$STAGING/content/SailOver.app"
+/usr/bin/ditto "$APP" "$STAGING/content/Obelisk.app"
 ln -s /Applications "$STAGING/content/Applications"
 cp "$LAYOUT" "$STAGING/content/.DS_Store"
 
-NAME="SailOver-$VERSION-$ARCHITECTURES.dmg"
-/usr/bin/hdiutil create -volname "Installer SailOver" -fs HFS+ \
+NAME="Obelisk-$VERSION-$ARCHITECTURES.dmg"
+/usr/bin/hdiutil create -volname "Installer Obelisk" -fs HFS+ \
     -srcfolder "$STAGING/content" -format UDZO \
     -imagekey zlib-level=9 "$STAGING/$NAME"
 /usr/bin/hdiutil verify "$STAGING/$NAME"

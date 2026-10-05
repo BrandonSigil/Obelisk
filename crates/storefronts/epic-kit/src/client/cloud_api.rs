@@ -7,8 +7,8 @@ use std::{
 };
 
 use futures_util::{StreamExt, stream};
+use obelisk_core::{install::hex, transfer::CancelToken};
 use reqwest::Url;
-use sailover_core::{install::hex, transfer::CancelToken};
 use serde::Deserialize;
 use sha1::{Digest, Sha1};
 

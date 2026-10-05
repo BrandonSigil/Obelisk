@@ -54,8 +54,8 @@ pub(crate) trait Failure:
     fn conflict() -> Self;
     /// The installation or durable state a sync needs is missing.
     fn recovery() -> Self;
-    /// The storefront has no Cloud rules SailOver can follow for a game whose
-    /// saves SailOver already holds.
+    /// The storefront has no Cloud rules Obelisk can follow for a game whose
+    /// saves Obelisk already holds.
     fn unsupported() -> Self;
 }
 
@@ -358,7 +358,7 @@ impl<S: Storefront> CloudSync<S> {
             || self.vault.pending().is_some()
     }
 
-    /// SailOver holds this game's saves, so its Cloud cannot silently vanish.
+    /// Obelisk holds this game's saves, so its Cloud cannot silently vanish.
     fn saved_state(&self) -> bool {
         self.store.work().is_some()
             || self.vault.pending().is_some()

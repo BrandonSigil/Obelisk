@@ -1,7 +1,7 @@
-//! Every path SailOver uses, named once.
+//! Every path Obelisk uses, named once.
 use std::path::{Path, PathBuf};
 
-/// Where SailOver keeps everything, derived from its library directory, its
+/// Where Obelisk keeps everything, derived from its library directory, its
 /// application bundle and the user's home.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Locations {
@@ -37,9 +37,9 @@ impl Locations {
             helper: helpers.join(crate::package::HOST),
             helpers,
             steam_runtime_package: bundle.join("Contents/Resources/SteamRuntime/runtime.zip"),
-            steam_runtime_cache: home.join("Library/Caches/com.zagrios.sailover/SteamRuntime"),
-            steam_diagnostics: home.join("Library/Logs/SailOver/Steam"),
-            epic_diagnostics: home.join("Library/Logs/SailOver/Epic"),
+            steam_runtime_cache: home.join("Library/Caches/com.zagrios.obelisk/SteamRuntime"),
+            steam_diagnostics: home.join("Library/Logs/Obelisk/Steam"),
+            epic_diagnostics: home.join("Library/Logs/Obelisk/Epic"),
             voile: library.join("Voile"),
             wine_prefixes: library.join("Prefixes"),
             library: library.to_owned(),

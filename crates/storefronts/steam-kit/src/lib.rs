@@ -1,4 +1,4 @@
-//! SailOver's independent Steam protocol client: authentication, licenses and
+//! Obelisk's independent Steam protocol client: authentication, licenses and
 //! verified SteamPipe downloads. No .NET runtime or SteamCMD process is used.
 
 pub mod auth;
@@ -15,7 +15,7 @@ mod message;
 pub mod news;
 mod proto;
 
-use sailover_core::storefront::{StorefrontCapabilities, StorefrontDescriptor, StorefrontId};
+use obelisk_core::storefront::{StorefrontCapabilities, StorefrontDescriptor, StorefrontId};
 
 pub fn descriptor() -> StorefrontDescriptor {
     StorefrontDescriptor {

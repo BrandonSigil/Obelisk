@@ -2,11 +2,11 @@
 #include <string.h>
 
 // This app exists only to request macOS's normal Intel-app launch path. It
-// never starts a game, reads credentials, or changes SailOver's launch state.
-@interface SailOverRosettaDelegate : NSObject <NSApplicationDelegate>
+// never starts a game, reads credentials, or changes Obelisk's launch state.
+@interface ObeliskRosettaDelegate : NSObject <NSApplicationDelegate>
 @end
 
-@implementation SailOverRosettaDelegate
+@implementation ObeliskRosettaDelegate
 - (void)applicationDidFinishLaunching:(NSNotification *)notification {
     (void)notification;
     // Finish AppKit's launch handshake before exiting, so LaunchServices can
@@ -28,7 +28,7 @@ int main(int argc, const char *argv[]) {
         NSApplication *application = [NSApplication sharedApplication];
         [application setActivationPolicy:NSApplicationActivationPolicyProhibited];
         __attribute__((objc_precise_lifetime))
-        SailOverRosettaDelegate *delegate = [SailOverRosettaDelegate new];
+        ObeliskRosettaDelegate *delegate = [ObeliskRosettaDelegate new];
         application.delegate = delegate;
         [application run];
     }

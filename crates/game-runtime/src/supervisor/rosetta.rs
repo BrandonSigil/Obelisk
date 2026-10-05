@@ -5,7 +5,7 @@ use tokio::sync::Notify;
 
 /// The Rosetta helper app bundled beside the storefront helpers.
 pub(crate) fn helper(helpers: &Path) -> PathBuf {
-    helpers.join("SailOver Rosetta.app/Contents/MacOS/SailOverRosetta")
+    helpers.join("Obelisk Rosetta.app/Contents/MacOS/ObeliskRosetta")
 }
 
 pub(crate) struct Gate {

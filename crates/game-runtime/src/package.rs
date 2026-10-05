@@ -15,9 +15,9 @@ use std::{
 };
 
 const MANIFEST: &str = include_str!("../runtime-manifest.json");
-pub const HOST: &str = "sailover-steam-host";
-pub(crate) const ADAPTER: &str = "libsailover_steam_discovery_adapter.dylib";
-pub(crate) const SDK_INTEL: &str = "sailover-steam-sdk-x86_64";
+pub const HOST: &str = "obelisk-steam-host";
+pub(crate) const ADAPTER: &str = "libobelisk_steam_discovery_adapter.dylib";
+pub(crate) const SDK_INTEL: &str = "obelisk-steam-sdk-x86_64";
 pub(crate) const HELPERS: [&str; 3] = [HOST, ADAPTER, SDK_INTEL];
 
 fn executable_helper(name: &str) -> bool {

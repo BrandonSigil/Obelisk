@@ -426,7 +426,7 @@ async fn eventually(predicate: impl Fn() -> bool) {
 }
 
 #[tokio::test]
-async fn receipts_load_from_the_account_file_without_games_removed_outside_sailover() {
+async fn receipts_load_from_the_account_file_without_games_removed_outside_obelisk() {
     let fixture = Fixture::new(true).await;
     assert_eq!(fixture.installations.state().receipts.len(), 1);
 
@@ -936,7 +936,7 @@ async fn a_new_installation_goes_to_the_library_and_an_update_or_launch_stays_wh
     let requests = fixture.fake.with(|script| script.requests.clone());
     assert_eq!(requests, [fixture.request("windows")]);
 
-    // An installation SailOver made in another folder keeps it.
+    // An installation Obelisk made in another folder keeps it.
     let previous = fixture.root.join("Previous location");
     let installed = previous.join("steam-620-macos");
     std::fs::create_dir_all(&installed).unwrap();

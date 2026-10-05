@@ -1,5 +1,5 @@
-//! SailOver's input service, voile-lkd's sailover-input: it reads the Mac's
-//! gamepads with SDL3 and serves them to Wine's SailOver bus, which offers
+//! Obelisk's input service, voile-lkd's obelisk-input: it reads the Mac's
+//! gamepads with SDL3 and serves them to Wine's Obelisk bus, which offers
 //! them to Windows games through XInput. The Linux engine's launcher starts
 //! its own; a game in Wine for macOS gets one from its supervisor for as long
 //! as it runs.
@@ -12,8 +12,8 @@ use std::{
     time::{Duration, Instant},
 };
 
-/// Tells Wine's SailOver bus where the service listens.
-pub(crate) const SOCKET: &str = "WINE_SAILOVER_INPUT_SOCKET";
+/// Tells Wine's Obelisk bus where the service listens.
+pub(crate) const SOCKET: &str = "WINE_OBELISK_INPUT_SOCKET";
 /// The service starts in a few milliseconds; a game never waits longer.
 const START_LIMIT: Duration = Duration::from_secs(2);
 /// It ends within milliseconds of SIGTERM; after this it is killed.
@@ -33,7 +33,7 @@ impl Service {
             return None;
         }
         // It ships with the Linux engine's host programs, in every runtime.
-        let program = config.runtime.join("linux/engine/sailover-input");
+        let program = config.runtime.join("linux/engine/obelisk-input");
         if !program.is_file() {
             return None;
         }
@@ -85,7 +85,7 @@ impl Drop for Service {
 fn directory(prefix: &Path) -> PathBuf {
     let digest = Sha256::digest(prefix.as_os_str().as_encoded_bytes());
     let name: String = digest[..8].iter().map(|byte| format!("{byte:02x}")).collect();
-    std::env::temp_dir().join(format!("sailover-input-{name}"))
+    std::env::temp_dir().join(format!("obelisk-input-{name}"))
 }
 
 fn ready(socket: &Path) -> bool {

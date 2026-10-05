@@ -94,7 +94,7 @@ impl Fixture {
         let library = root.path().canonicalize().unwrap();
         let locations = Locations::new(
             &library,
-            Path::new("/Applications/SailOver.app"),
+            Path::new("/Applications/Obelisk.app"),
             &library.join("home"),
         );
         let fake = Arc::new(Fake::default());

@@ -465,7 +465,7 @@ pub(crate) async fn execute_verified(
                     "Cloud.BeginAppUploadBatch#1",
                     &wire::BeginBatchRequest {
                         app_id: app,
-                        machine_name: "SailOver".into(),
+                        machine_name: "Obelisk".into(),
                         uploads: job.state.uploads.iter().map(|f| f.name.clone()).collect(),
                         deletes: job.state.deletes.clone(),
                     },

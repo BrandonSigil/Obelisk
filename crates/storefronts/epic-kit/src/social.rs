@@ -48,7 +48,7 @@ impl SocialService {
         self.state.borrow().clone()
     }
     pub(crate) async fn next(&self, revision: u64) -> Snapshot {
-        sailover_core::watch::next_matching(self.state.subscribe(), |snapshot| {
+        obelisk_core::watch::next_matching(self.state.subscribe(), |snapshot| {
             snapshot.revision != revision || snapshot.connection == Connection::Stopped
         })
         .await

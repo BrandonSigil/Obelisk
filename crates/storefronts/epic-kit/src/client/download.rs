@@ -1,8 +1,8 @@
-//! Epic's side of an installation Transfer: sailover-core runs the order around
+//! Epic's side of an installation Transfer: obelisk-core runs the order around
 //! it, this module prepares Epic's manifest and runs its content engine.
 use std::{path::Path, sync::Arc};
 
-use sailover_core::{
+use obelisk_core::{
     install::hex,
     installation::{self, Destination, InstallFailure, InstalledFiles, TransferError},
     transfer::{TransferBusy, TransferContext, Transfers},
@@ -14,7 +14,7 @@ use super::{Client, validate_identity};
 pub use crate::content_manifest::Prerequisite;
 use crate::{EpicError, content::ContentClient, details};
 
-pub use sailover_core::{installation::TransferProgress, transfer::TransferState};
+pub use obelisk_core::{installation::TransferProgress, transfer::TransferState};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Installation {

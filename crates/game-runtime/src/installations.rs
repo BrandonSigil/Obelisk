@@ -2,14 +2,14 @@
 //! Transfers, verified launches, uninstalls and Cloud maintenance. Every
 //! action asks one Reservation gate, which the state publishes so the UI
 //! shows exactly what may start. The account's Installation receipts live
-//! here, in the file SailOver keeps per storefront and account, and each
+//! here, in the file Obelisk keeps per storefront and account, and each
 //! action names one of them: the Transfers it needs are built here. So is the
 //! account's one Cloud question, whichever sync asks it.
 use crate::{
     cloud, cloud_status,
     sessions::{self, Admission, Canceller, Failure, Sessions},
 };
-use sailover_core::{installation::TransferProgress, transfer::TransferState};
+use obelisk_core::{installation::TransferProgress, transfer::TransferState};
 use serde::{Serialize, de::DeserializeOwned};
 use std::{
     fmt,
@@ -36,7 +36,7 @@ pub trait Storefront: sessions::Storefront {
     /// Shown when the receipt file cannot be read, or saved.
     const RECEIPTS_UNAVAILABLE: &'static str;
     const RECEIPTS_NOT_SAVED: &'static str;
-    /// Where new installations go, inside SailOver's library directory.
+    /// Where new installations go, inside Obelisk's library directory.
     const GAMES_DIRECTORY: &'static str;
 
     fn receipt_game(receipt: &Self::Receipt) -> Self::Game;
@@ -269,9 +269,9 @@ struct Shared<S: Storefront> {
     sessions: Arc<Sessions<S>>,
     account: S::Account,
     receipts_file: PathBuf,
-    /// SailOver's library directory, where new installations go.
+    /// Obelisk's library directory, where new installations go.
     library: PathBuf,
-    /// SailOver's library directory and the user's home: never removed.
+    /// Obelisk's library directory and the user's home: never removed.
     protected: Vec<PathBuf>,
     /// Publishes the gate again whenever the Game sessions change.
     watcher: Mutex<Option<tokio::task::JoinHandle<()>>>,
@@ -291,7 +291,7 @@ fn runtime() -> &'static tokio::runtime::Runtime {
     RUNTIME.get_or_init(|| {
         tokio::runtime::Builder::new_multi_thread()
             .worker_threads(2)
-            .thread_name("sailover-installations")
+            .thread_name("obelisk-installations")
             .enable_all()
             .build()
             .expect("the installations runtime starts")
@@ -606,7 +606,7 @@ impl<S: Storefront> Inner<S> {
 }
 
 /// The receipts in `file`, without those whose folder has vanished: the game
-/// was removed outside SailOver.
+/// was removed outside Obelisk.
 fn load<R: DeserializeOwned>(
     file: &Path,
     directory: impl Fn(&R) -> &str,
@@ -648,7 +648,7 @@ impl<S: Storefront> Clone for Installations<S> {
 }
 
 impl<S: Storefront> Installations<S> {
-    /// Loads the account's receipts from `receipts_file`. `library`, SailOver's
+    /// Loads the account's receipts from `receipts_file`. `library`, Obelisk's
     /// library directory, and `home` are never removed.
     pub fn new(
         content: Arc<dyn Content<S>>,
@@ -751,7 +751,7 @@ impl<S: Storefront> Installations<S> {
         self.shared.update(|inner| inner.diagnostic = running);
     }
 
-    /// Installs what `offer` names under SailOver's library, or updates the
+    /// Installs what `offer` names under Obelisk's library, or updates the
     /// installation of its platform in place. A Transfer of the game that
     /// stopped before its receipt resumes instead.
     pub fn install(&self, offer: S::Offer) {
@@ -1174,7 +1174,7 @@ impl<S: Storefront> Shared<S> {
         let remaining = remaining.to_vec();
         let removal = tokio::task::spawn_blocking(move || {
             let protected: Vec<&Path> = protected.iter().map(PathBuf::as_path).collect();
-            sailover_core::installation::remove(&directory, &expected, &protected)
+            obelisk_core::installation::remove(&directory, &expected, &protected)
                 .map_err(removal_reason)?;
             // The captured account's receipts are updated even if it signs
             // out while the files go.
@@ -1201,8 +1201,8 @@ impl<S: Storefront> Shared<S> {
     }
 }
 
-fn removal_reason(failure: sailover_core::installation::RemovalFailure) -> Failure {
-    use sailover_core::installation::RemovalFailure;
+fn removal_reason(failure: obelisk_core::installation::RemovalFailure) -> Failure {
+    use obelisk_core::installation::RemovalFailure;
     Failure::Failed(match failure {
         RemovalFailure::Unsafe(_) => "model.game.unsafeInstallation".into(),
         RemovalFailure::Busy => "model.game.installationBusy".into(),

@@ -1,13 +1,13 @@
 //! Steam manifest entries described for the shared verification scheduler.
 //!
 //! Path confinement, the SHA-1 read, the reader bound and the join-before-repair
-//! guarantee all live in `sailover_core::verification`. Rust's orphan rule is why
+//! guarantee all live in `obelisk_core::verification`. Rust's orphan rule is why
 //! the trait implementation stays in this crate.
-use sailover_core::verification::{VerificationError, VerificationFile};
+use obelisk_core::verification::{VerificationError, VerificationFile};
 
 use super::{ContentError, format::ManifestFile, invalid};
 
-pub(super) use sailover_core::verification::verify_files;
+pub(super) use obelisk_core::verification::verify_files;
 
 impl VerificationFile for ManifestFile {
     fn name(&self) -> &str {
@@ -41,7 +41,7 @@ impl From<VerificationError> for ContentError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sailover_core::{
+    use obelisk_core::{
         install::{checked_file_path, safe_relative_path},
         transfer::{CancelToken, DownloadProgress, Reporter},
         verification::{verify_with_workers, worker_limit},
@@ -50,13 +50,13 @@ mod tests {
     use std::fs;
 
     #[test]
-    #[ignore = "Reads an existing installation selected by SAILOVER_VERIFY_BENCH_DIRECTORY; no writes or network"]
+    #[ignore = "Reads an existing installation selected by OBELISK_VERIFY_BENCH_DIRECTORY; no writes or network"]
     fn benchmark_installed_files() {
         use std::{fs::File, io::Read, time::Instant};
 
-        let root = std::env::var_os("SAILOVER_VERIFY_BENCH_DIRECTORY")
+        let root = std::env::var_os("OBELISK_VERIFY_BENCH_DIRECTORY")
             .map(std::path::PathBuf::from)
-            .expect("set SAILOVER_VERIFY_BENCH_DIRECTORY to an existing game installation")
+            .expect("set OBELISK_VERIFY_BENCH_DIRECTORY to an existing game installation")
             .canonicalize()
             .unwrap();
         assert!(root.is_dir());
@@ -65,7 +65,7 @@ mod tests {
         while let Some(directory) = directories.pop() {
             for entry in fs::read_dir(directory).unwrap() {
                 let entry = entry.unwrap();
-                if entry.file_name().to_string_lossy().starts_with(".sailover") {
+                if entry.file_name().to_string_lossy().starts_with(".obelisk") {
                     continue;
                 }
                 let kind = entry.file_type().unwrap();

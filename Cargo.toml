@@ -1,7 +1,7 @@
 [workspace]
 members = [
-    "crates/sailover-core",
-    "crates/sailover-bridge",
+    "crates/obelisk-core",
+    "crates/obelisk-bridge",
     "crates/game-runtime",
     "crates/cloud-vault",
     "crates/storefronts/steam-kit",
@@ -18,7 +18,7 @@ rust-version = "1.98"
 publish = false
 
 [workspace.dependencies]
-sailover-core = { path = "crates/sailover-core" }
+obelisk-core = { path = "crates/obelisk-core" }
 game-runtime = { path = "crates/game-runtime" }
 cloud-vault = { path = "crates/cloud-vault" }
 steam-kit = { path = "crates/storefronts/steam-kit" }

@@ -4,7 +4,7 @@
 //! A storefront supplies its `Launch`; the order of the steps is the core's.
 use super::*;
 use crate::supervisor::architecture::Architecture;
-use sailover_core::transfer::CancelToken;
+use obelisk_core::transfer::CancelToken;
 use std::{
     io::{Read, Write},
     os::fd::OwnedFd,
@@ -46,7 +46,7 @@ pub(crate) struct Opening<P: Provider> {
     pub id: String,
     pub account_id: P::Account,
     pub store: P::Store,
-    /// The directory that bundles the SailOver Rosetta helper app.
+    /// The directory that bundles the Obelisk Rosetta helper app.
     pub helpers: PathBuf,
 }
 
@@ -188,7 +188,7 @@ pub struct Questions {
     observed: Option<Mutex<Instant>>,
 }
 impl Questions {
-    /// Cloud maintenance in SailOver: the UI itself waits for the answer.
+    /// Cloud maintenance in Obelisk: the UI itself waits for the answer.
     pub fn in_app() -> Self {
         Self {
             next: AtomicU64::new(0),
@@ -272,7 +272,7 @@ pub(crate) struct Session<P: Provider> {
     wine: OnceLock<Option<crate::wine::Config>>,
 }
 impl<P: Provider> Session<P> {
-    /// SailOver is ending: macOS asks every process it started to quit, the
+    /// Obelisk is ending: macOS asks every process it started to quit, the
     /// Wine server of a Windows game included. The game stops as on a quit,
     /// and the Windows processes left frozen without their server go too; the
     /// session then settles its Cloud saves.
@@ -420,7 +420,7 @@ pub(crate) fn serve<L: Launch>(
     // A short socket path avoids macOS's 104-byte sockaddr_un limit, including
     // when the account home is long. tempfile creates an unpredictable 0700 dir.
     let socket_directory = tempfile::Builder::new()
-        .prefix("sailover-session-")
+        .prefix("obelisk-session-")
         .permissions(std::fs::Permissions::from_mode(0o700))
         .tempdir_in("/tmp")
         .map_err(Error::from)?;
@@ -492,7 +492,7 @@ pub(crate) fn serve<L: Launch>(
     drop(output);
     let alive = |id: &str| owner.session_alive(id, inspect);
     let outcome = executor.block_on(async {
-        // Catching SIGTERM keeps this supervisor alive when SailOver ends,
+        // Catching SIGTERM keeps this supervisor alive when Obelisk ends,
         // long enough to stop its game and settle its Cloud saves.
         let terminated = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
             .ok()

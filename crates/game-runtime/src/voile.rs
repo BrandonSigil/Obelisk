@@ -1,4 +1,4 @@
-//! Voile, the Wine runtime Windows games run in. SailOver downloads the release
+//! Voile, the Wine runtime Windows games run in. Obelisk downloads the release
 //! it pins on the first Windows launch; a development runtime that voile's
 //! install-dev.sh put in `current` takes precedence.
 //!
@@ -32,7 +32,7 @@ const LINUX: &str = "linux";
 /// Two installs never extract into the same folder.
 static INSTALLING: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
-/// The Voile release SailOver runs Windows games with.
+/// The Voile release Obelisk runs Windows games with.
 #[derive(Debug, Deserialize)]
 pub struct Release {
     pub version: String,

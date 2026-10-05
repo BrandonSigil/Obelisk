@@ -1,5 +1,5 @@
 //! What a failed manifest fetch received, written by debug builds only to
-//! `~/Library/Logs/SailOver/Epic` for diagnosis. It never holds an access
+//! `~/Library/Logs/Obelisk/Epic` for diagnosis. It never holds an access
 //! token or a signed URL: the asset response keeps its keys and value types,
 //! and manifest URLs keep their host.
 use serde::Serialize;
@@ -83,7 +83,7 @@ fn directory() -> Option<std::path::PathBuf> {
         return None;
     }
     let directory =
-        std::path::Path::new(&std::env::var_os("HOME")?).join("Library/Logs/SailOver/Epic");
+        std::path::Path::new(&std::env::var_os("HOME")?).join("Library/Logs/Obelisk/Epic");
     std::fs::create_dir_all(&directory).ok()?;
     Some(directory)
 }

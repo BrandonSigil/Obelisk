@@ -2,7 +2,7 @@
 //!
 //! The caller obtains entitlements, depot keys and request codes through Steam's CM.
 //! Protocol references and format limits are recorded in docs/steam-content-notes.md.
-//! Path confinement, locking, hashing and progress reporting come from `sailover_core`.
+//! Path confinement, locking, hashing and progress reporting come from `obelisk_core`.
 
 mod format;
 mod manifest_cache;
@@ -21,14 +21,14 @@ use std::{
 };
 
 use futures_util::future::BoxFuture;
-use reqwest::{Client, Url};
-use sailover_core::{
+use obelisk_core::{
     install::{
         self, InstallError, PARTIAL_DIRECTORY, apply_permissions, checked_file_path,
         ensure_directory, reject_link_or_special_file, safe_relative_path,
     },
     transfer::{self, Cancelled, DownloadPhase, DownloadProgress, DownloadSummary, Reporter},
 };
+use reqwest::{Client, Url};
 use sha1::{Digest, Sha1};
 #[cfg(test)]
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -40,8 +40,8 @@ use format::{Chunk, Manifest, ManifestFile, decode_chunk, parse_manifest, unpack
 use mirrors::{Mirrors, Ticket};
 
 /// Shared with CM avatar hashes.
-pub(crate) use sailover_core::install::hex;
-pub use sailover_core::transfer::CancelToken;
+pub(crate) use obelisk_core::install::hex;
+pub use obelisk_core::transfer::CancelToken;
 
 const MAX_MANIFEST_BYTES: usize = 128 * 1024 * 1024;
 const MAX_CHUNK_BYTES: usize = 64 * 1024 * 1024;

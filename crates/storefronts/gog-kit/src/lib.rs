@@ -1,6 +1,6 @@
-//! Reserved for SailOver's GOG integration. No authentication or downloads yet.
+//! Reserved for Obelisk's GOG integration. No authentication or downloads yet.
 
-use sailover_core::storefront::{StorefrontCapabilities, StorefrontDescriptor, StorefrontId};
+use obelisk_core::storefront::{StorefrontCapabilities, StorefrontDescriptor, StorefrontId};
 
 pub fn descriptor() -> StorefrontDescriptor {
     StorefrontDescriptor {

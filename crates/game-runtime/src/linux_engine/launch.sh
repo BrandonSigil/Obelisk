@@ -10,7 +10,7 @@
 #   INSTALL     the game's installation, seen as /games/game
 #   CWD         the guest working directory
 #   EXECUTABLE  the guest path of the Windows program
-# SAILOVER_APP_NAME names the game in the menu bar, the Dock and Cmd-Tab.
+# OBELISK_APP_NAME names the game in the menu bar, the Dock and Cmd-Tab.
 set -u
 runtime=$1 home=$2 install=$3 cwd=$4
 shift 4
@@ -23,7 +23,7 @@ shift
 
 # wsd and the render server bind UNIX sockets in a private folder; a relative path keeps them inside sun_path.
 sockets_root=${TMPDIR:-/tmp}
-sockets=sailover-engine-$$
+sockets=obelisk-engine-$$
 cd "$sockets_root" || exit 1
 mkdir -m 700 "$sockets" || exit 1
 
@@ -47,10 +47,10 @@ trap finish EXIT
 
 # wsd runs from an application bundle named after the game: macOS takes the name in the menu bar, the Dock and
 # Cmd-Tab from it (the game gives the icon). The bundle keeps one place per game, so Launch Services sees one app.
-app_name=${SAILOVER_APP_NAME:-Game}
+app_name=${OBELISK_APP_NAME:-Game}
 app_name=${app_name//\//-}
 app_id=$(printf '%s' "$app_name" | LC_ALL=C tr -c 'A-Za-z0-9' '-')
-app="$sockets_root/sailover-apps/$app_id/$app_name.app"
+app="$sockets_root/obelisk-apps/$app_id/$app_name.app"
 mkdir -p "$app/Contents/MacOS" || exit 1
 rm -f "$app/Contents/MacOS/wsd"
 cp -c "$runtime/engine/wsd" "$app/Contents/MacOS/wsd" 2>/dev/null || cp "$runtime/engine/wsd" "$app/Contents/MacOS/wsd" || exit 1
@@ -61,7 +61,7 @@ cat > "$app/Contents/Info.plist" <<PLIST
 <plist version="1.0">
 <dict>
   <key>CFBundleExecutable</key><string>wsd</string>
-  <key>CFBundleIdentifier</key><string>com.zagrios.sailover.game.$app_id</string>
+  <key>CFBundleIdentifier</key><string>com.zagrios.obelisk.game.$app_id</string>
   <key>CFBundleName</key><string>$xml_name</string>
   <key>CFBundleDisplayName</key><string>$xml_name</string>
   <key>CFBundlePackageType</key><string>APPL</string>
@@ -78,11 +78,11 @@ RENDER_SERVER_EXEC_PATH="$runtime/graphics/libexec/virgl_render_server" NPT_BACK
     NPT_D3D11_LIBRARY_PATH="$dxmt" NPT_DXGI_LIBRARY_PATH="$dxmt" NPT_D3D12_LIBRARY_PATH="$dxmt" \
     "$runtime/graphics/bin/virgl_test_server" --no-virgl --no-fork --socket-path "$sockets/vtest.sock" &
 helpers+=($!)
-# The input service gives the Mac's gamepads to Wine's SailOver bus. A runtime without it starts the game without
+# The input service gives the Mac's gamepads to Wine's Obelisk bus. A runtime without it starts the game without
 # gamepads.
 input=
-if [ -x "$runtime/engine/sailover-input" ]; then
-    "$runtime/engine/sailover-input" --dir "$sockets" &
+if [ -x "$runtime/engine/obelisk-input" ]; then
+    "$runtime/engine/obelisk-input" --dir "$sockets" &
     helpers+=($!)
     input=1
 fi
@@ -93,7 +93,7 @@ for _ in $(seq 1 100); do
 done
 
 export FEXDARWIN_LKD=1 FEXDARWIN_ROOT="$runtime/root" FEXDARWIN_ROOT_RO=1 FEXDARWIN_SUPERVISOR_PID=$$
-export FEXDARWIN_BIND="/opt/wine=$runtime/wine:ro;/home/user=$home;/games/game=$install;/run/sailover=$sockets_root/$sockets"
+export FEXDARWIN_BIND="/opt/wine=$runtime/wine:ro;/home/user=$home;/games/game=$install;/run/obelisk=$sockets_root/$sockets"
 # wineserver writes the registry only when it exits: wait for it inside the guest before the game ends. Started
 # with -p0, it stops Wine's own processes as soon as the game's last process ends, instead of 3 seconds later.
 "$runtime/engine/fexdarwin-run" --cwd "$cwd" ${guest_env[@]+"${guest_env[@]}"} \

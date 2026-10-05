@@ -302,10 +302,10 @@ fn archive_symlinks_are_rejected() {
 }
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 #[test]
-#[ignore = "Requires SAILOVER_STEAM_BUNDLE pointing at a built app; no account or game is used"]
+#[ignore = "Requires OBELISK_STEAM_BUNDLE pointing at a built app; no account or game is used"]
 fn bundled_runtime_loads_without_steam_installation_access() {
     let bundle =
-        PathBuf::from(std::env::var_os("SAILOVER_STEAM_BUNDLE").expect("SAILOVER_STEAM_BUNDLE"));
+        PathBuf::from(std::env::var_os("OBELISK_STEAM_BUNDLE").expect("OBELISK_STEAM_BUNDLE"));
     let root = tempfile::tempdir().unwrap();
     let config = Config {
         cloud_save_roots: vec![],

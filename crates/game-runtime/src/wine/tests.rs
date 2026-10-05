@@ -398,7 +398,7 @@ fn a_missing_program_leaves_its_prerequisite_pending() {
 fn a_windows_installation_runs_in_the_prefix_named_after_its_folder_whatever_the_storefront() {
     let locations = crate::Locations::new(
         Path::new("/library"),
-        Path::new("/SailOver.app"),
+        Path::new("/Obelisk.app"),
         Path::new("/home"),
     );
     for (platform, install) in [
@@ -426,10 +426,10 @@ fn a_windows_installation_runs_in_the_prefix_named_after_its_folder_whatever_the
 
 #[test]
 fn an_uninstalled_windows_game_loses_its_prefix_but_never_what_a_link_points_to() {
-    use sailover_core::installation::RemovalFailure;
+    use obelisk_core::installation::RemovalFailure;
     let (_directory, root) = installation();
     let library = root.join("library");
-    let locations = crate::Locations::new(&library, Path::new("/SailOver.app"), Path::new("/home"));
+    let locations = crate::Locations::new(&library, Path::new("/Obelisk.app"), Path::new("/home"));
     let windows = |name: &str| {
         Installation::of(
             &locations,
@@ -463,6 +463,6 @@ fn only_processes_running_the_runtime_are_left_behind_wine_processes() {
     assert_eq!(
         running_from(listing, Path::new("/lib/Voile"), 20),
         [40],
-        "never SailOver itself"
+        "never Obelisk itself"
     );
 }

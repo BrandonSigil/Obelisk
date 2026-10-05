@@ -6,7 +6,7 @@ rust-version.workspace = true
 publish.workspace = true
 
 [dependencies]
-sailover-core.workspace = true
+obelisk-core.workspace = true
 tokio.workspace = true
 reqwest = { workspace = true, features = ["stream"] }
 prost.workspace = true

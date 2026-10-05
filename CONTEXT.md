@@ -1,6 +1,6 @@
-# SailOver
+# Obelisk
 
-SailOver manages games owned through storefront accounts, including their installation and launch.
+Obelisk manages games owned through storefront accounts, including their installation and launch.
 
 ## Language
 
@@ -11,15 +11,15 @@ One account-scoped attempt to install, verify or repair a game's files. Its life
 A record identifying a game installation whose required files were successfully installed. Partial download data is not an installation receipt.
 
 **Offer**:
-What a storefront says SailOver can install of one game: its build for one platform, with Steam's language, before any folder is chosen. A new installation starts from an offer; an installed game launches, updates and uninstalls from its Installation receipt alone.
+What a storefront says Obelisk can install of one game: its build for one platform, with Steam's language, before any folder is chosen. A new installation starts from an offer; an installed game launches, updates and uninstalls from its Installation receipt alone.
 _Avoid_: download request, install target
 
 **Cloud archive**:
-SailOver's own local store of each account's save versions, together with the record of which account currently owns each physical save location. One archive serves every storefront, so two storefront copies of a game that share a save location cannot silently adopt each other's saves.
+Obelisk's own local store of each account's save versions, together with the record of which account currently owns each physical save location. One archive serves every storefront, so two storefront copies of a game that share a save location cannot silently adopt each other's saves.
 _Avoid_: vault root, SteamCloud folder
 
 **Last Cloud sync**:
-The last moment SailOver confirmed that an account's local saves for a game and its Cloud saves were identical, by uploading, downloading or finding them equal. Capturing or choosing a version without that confirmation does not count.
+The last moment Obelisk confirmed that an account's local saves for a game and its Cloud saves were identical, by uploading, downloading or finding them equal. Capturing or choosing a version without that confirmation does not count.
 _Avoid_: last upload, last played
 
 **Wine prefix**:
@@ -39,11 +39,11 @@ The moment a launch claims its game's Reservation, before any verification, Voil
 _Avoid_: launch start, pending launch
 
 **Game session**:
-One account-scoped launch of a game, holding a Reservation from admission until the game has really exited and its Cloud saves are settled. SailOver keeps running in the background while it lasts; really quitting SailOver stops its game first, and if SailOver dies, its game stops with it.
+One account-scoped launch of a game, holding a Reservation from admission until the game has really exited and its Cloud saves are settled. Obelisk keeps running in the background while it lasts; really quitting Obelisk stops its game first, and if Obelisk dies, its game stops with it.
 _Avoid_: launch, supervisor session
 
 **Cloud maintenance**:
-Synchronizing one game's Cloud saves without launching it, at the player's request. It runs inside SailOver, holds the Reservation of every game of its storefront while it runs, and stops if SailOver quits or the account signs out.
+Synchronizing one game's Cloud saves without launching it, at the player's request. It runs inside Obelisk, holds the Reservation of every game of its storefront while it runs, and stops if Obelisk quits or the account signs out.
 _Avoid_: Cloud resume, cloud-only session, background sync
 
 **Cloud sync**:
