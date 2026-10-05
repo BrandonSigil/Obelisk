@@ -84,7 +84,10 @@ impl Drop for Service {
 /// service, and short enough for a socket path.
 fn directory(prefix: &Path) -> PathBuf {
     let digest = Sha256::digest(prefix.as_os_str().as_encoded_bytes());
-    let name: String = digest[..8].iter().map(|byte| format!("{byte:02x}")).collect();
+    let name: String = digest[..8]
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
     std::env::temp_dir().join(format!("obelisk-input-{name}"))
 }
 
@@ -100,8 +103,14 @@ mod tests {
     #[test]
     fn a_prefix_keeps_its_folder_and_two_prefixes_do_not_share_one() {
         let first = directory(Path::new("/library/Prefixes/epic-game-Windows"));
-        assert_eq!(first, directory(Path::new("/library/Prefixes/epic-game-Windows")));
-        assert_ne!(first, directory(Path::new("/library/Prefixes/steam-1-windows")));
+        assert_eq!(
+            first,
+            directory(Path::new("/library/Prefixes/epic-game-Windows"))
+        );
+        assert_ne!(
+            first,
+            directory(Path::new("/library/Prefixes/steam-1-windows"))
+        );
         // A Mac's TMPDIR is about 50 bytes; a socket path takes at most 103.
         let name = first.file_name().unwrap().to_string_lossy().into_owned();
         assert!(name.len() + "/input.sock".len() <= 103 - 50, "{name}");
