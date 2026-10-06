@@ -2,9 +2,16 @@ import SwiftUI
 
 struct SteamView: View {
     @Bindable var model: SteamModel
+    @State private var libraryScroll = LibraryScrollMemory()
 
     var body: some View {
-        StorefrontPage { titleBar } content: { content }
+        Group {
+            if model.showsLibrary && model.selectedGame == nil {
+                library
+            } else {
+                StorefrontPage { titleBar } content: { content }
+            }
+        }
         .task { await model.start() }
         .onChange(of: model.gameSessions.isBusy) { _, isBusy in
             if !isBusy { model.refreshCloudIndicator() }
@@ -16,26 +23,55 @@ struct SteamView: View {
         .errorAlert(L10n.string("ui.store.steam"), message: $model.errorMessage)
     }
 
+    private var library: some View {
+        StorefrontLibraryPage(
+            model: model,
+            storeID: "steam",
+            storeTitle: L10n.string("ui.store.steam"),
+            libraryTitle: L10n.string("ui.steam.library"),
+            accountName: model.displayName,
+            avatarURL: model.avatarURL,
+            scrollMemory: libraryScroll,
+            hero: hero
+        ) { game in
+            LibraryCardContent(
+                title: game.name,
+                accessibilityLabel: L10n.string("ui.steam.game_accessibility", game.name, SteamFormatting.lastPlayed(game.lastPlayed)),
+                help: L10n.string("ui.steam.game_help", game.name, SteamFormatting.playtime(game.playtimeMinutes)),
+                platform: .preferred(platforms: model.libraryPlatforms.platforms[game.appId] ?? [])
+            )
+        } artwork: { game in
+            SteamArtwork(appId: game.appId, iconHash: game.iconHash)
+        } accountMenu: {
+            accountMenu
+        }
+    }
+
+    private func hero(_ game: SteamGame) -> some View {
+        LibraryHero(
+            details: [
+                model.lastPlayed(of: game).map { .init(symbol: "calendar", text: SteamFormatting.lastPlayed($0)) },
+                .init(symbol: "clock", text: SteamFormatting.playtime(game.playtimeMinutes)),
+            ].compactMap { $0 },
+            open: { model.open(game) }
+        ) {
+            SteamArtwork(appId: game.appId, portrait: false, iconHash: game.iconHash)
+        } logo: {
+            LibraryHeroLogo(url: SteamArtwork.logoURL(appId: game.appId), title: game.name)
+        }
+    }
+
+    /// A game's page, or the sign-in while no account is connected.
     private var content: some View {
         VStack(alignment: .leading, spacing: 25) {
             StorefrontWarningBanner(message: $model.storageWarning)
 
             if model.isConnected {
                 if model.cloud.failurePresented {
-                    SteamCloudFailureView(
-                        title: model.cloudTitle(for: model.cloud.promptGame),
-                        message: model.cloud.promptMessage,
-                        busy: model.cloud.promptWorking,
-                        canLaunchAnyway: model.cloud.canLaunchAnyway,
-                        onRetry: { model.cloud.respond(.retry) },
-                        onCancel: { model.cloud.respond(.cancel) },
-                        onLaunchAnyway: { model.cloud.respond(.launchAnyway) }
-                    )
+                    SteamCloudFailureView(model: model, storefront: "steam")
                 }
                 if let game = model.selectedGame {
                     SteamGameDetailView(model: model, game: game)
-                } else {
-                    library
                 }
             } else {
                 SteamLoginView(model: model)
@@ -52,129 +88,22 @@ struct SteamView: View {
             title: L10n.string("ui.store.steam"),
             accountName: model.displayName,
             avatarURL: model.avatarURL,
-            searchText: $model.searchText,
-            sortTitle: model.sort.title,
-            sortOptions: SteamLibrarySort.allCases.map { sort in
-                StorefrontSortOption(
-                    id: sort.id,
-                    title: sort.menuTitle,
-                    isSelected: model.sort == sort,
-                    action: { model.sort = sort }
-                )
-            },
-            filter: $model.filter,
-            availableFilters: model.availableFilters,
-            showsLibraryControls: model.isConnected && model.selectedGame == nil,
             isConnected: model.isConnected
         ) {
-            Text(model.displayName ?? L10n.string("ui.steam.account"))
-            Text(L10n.string("ui.library.account_game_count", Int64(model.games.count)))
-            Divider()
-            Button(model.friends?.menuTitle ?? L10n.string("ui.friends.menuLoading"), systemImage: "person.2", action: model.openFriends)
-                .accessibilityIdentifier("steam-friends-menu")
-            Divider()
-            Button(L10n.string("ui.library.refresh"), systemImage: "arrow.clockwise", action: model.refresh)
-            Divider()
-            Button(L10n.string("ui.account.sign_out"), systemImage: "rectangle.portrait.and.arrow.right", action: model.signOut)
+            accountMenu
         }
     }
 
-    private var library: some View {
-        VStack(alignment: .leading, spacing: 24) {
-            if let transfer = model.installations.transfer, model.installations.isDownloading {
-                SteamTransferView(transfer: transfer, isDownloading: true, cancel: model.installations.cancelDownload)
-            }
-
-            if model.filter == .macOS && model.libraryPlatforms.hasFailures {
-                HStack(spacing: 12) {
-                    Text(L10n.string("ui.filter.platforms_unavailable"))
-                        .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
-                    Spacer(minLength: 0)
-                    Button(L10n.string("ui.common.retry"), action: model.refresh)
-                        .obeliskButtonStyle(.bordered)
-                        .controlSize(.small)
-                        .disabled(model.isLoadingGames || model.libraryPlatforms.isLoading)
-                }
-            }
-
-            let filtered = model.filteredGames
-            if model.isLoadingGames && model.games.isEmpty {
-                ProgressView(L10n.string("ui.library.fetching")).frame(maxWidth: .infinity, minHeight: 260)
-            } else if filtered.isEmpty && model.filter == .macOS && model.libraryPlatforms.isLoading {
-                ProgressView(L10n.string("ui.filter.loading_platforms")).frame(maxWidth: .infinity, minHeight: 260)
-            } else if filtered.isEmpty {
-                StorefrontEmptyLibrary(searchText: $model.searchText, filter: $model.filter, refresh: model.refresh)
-            } else {
-                LazyVGrid(columns: StorefrontLibrary.gridColumns, alignment: .leading, spacing: 24) {
-                    ForEach(filtered, id: \.appId) { game in
-                        let lastPlayed = SteamFormatting.lastPlayed(game.lastPlayed)
-                        LibraryGridCard(
-                            title: game.name,
-                            subtitle: lastPlayed,
-                            platform: .preferred(platforms: model.libraryPlatforms.platforms[game.appId] ?? []),
-                            open: { model.open(game) }
-                        ) {
-                            SteamArtwork(appId: game.appId, iconHash: game.iconHash)
-                        }
-                        .help(L10n.string("ui.steam.game_help", game.name, SteamFormatting.playtime(game.playtimeMinutes)))
-                        .accessibilityLabel(L10n.string("ui.steam.game_accessibility", game.name, lastPlayed))
-                    }
-                }
-                if model.isLoadingGames || (model.filter == .macOS && model.libraryPlatforms.isLoading) {
-                    ProgressView().controlSize(.small)
-                }
-            }
-        }
-    }
-}
-
-struct SteamTransferView: View {
-    let transfer: GameTransfer
-    let isDownloading: Bool
-    let cancel: () -> Void
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Label(transfer.activityTitle, systemImage: systemImage)
-                    .font(.system(size: 13, weight: .semibold))
-                Spacer()
-                if isDownloading {
-                    Button(L10n.string("ui.common.cancel"), action: cancel)
-                        .controlSize(.small)
-                        .pointerCursor()
-                }
-            }
-            if transfer.totalBytes > 0 {
-                ProgressView(value: Double(min(transfer.completedBytes, transfer.totalBytes)), total: Double(transfer.totalBytes))
-                Text(transfer.verifiedProgressText)
-                    .font(.system(size: 11)).monospacedDigit().foregroundStyle(.secondary)
-            } else if isDownloading { ProgressView().progressViewStyle(.linear) }
-            if let downloadedGameDataText = transfer.downloadedGameDataText {
-                Text(downloadedGameDataText)
-                    .font(.system(size: 11)).monospacedDigit().foregroundStyle(.secondary)
-            }
-            if !transfer.currentFile.isEmpty {
-                Text(L10n.message(transfer.currentFile)).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
-            }
-            if !transfer.message.isEmpty {
-                Text(L10n.message(transfer.message)).font(.system(size: 12)).foregroundStyle(.secondary)
-            }
-        }
-        .padding(16)
-        .background(ObeliskStyle.accent.opacity(0.055), in: RoundedRectangle(cornerRadius: 10))
-    }
-
-    private var systemImage: String {
-        switch transfer.state {
-        case .preparing: "arrow.clockwise"
-        case .verifying: "checkmark.shield"
-        case .downloading: "arrow.down.circle"
-        case .complete: "checkmark.circle"
-        case .cancelled: "pause.circle"
-        case .failed: "exclamationmark.circle"
-        }
+    @ViewBuilder private var accountMenu: some View {
+        Text(model.displayName ?? L10n.string("ui.steam.account"))
+        Text(L10n.string("ui.library.account_game_count", Int64(model.games.count)))
+        Divider()
+        Button(model.friends?.menuTitle ?? L10n.string("ui.friends.menuLoading"), systemImage: "person.2", action: model.openFriends)
+            .accessibilityIdentifier("steam-friends-menu")
+        Divider()
+        Button(L10n.string("ui.library.refresh"), systemImage: "arrow.clockwise", action: model.refresh)
+        Divider()
+        Button(L10n.string("ui.account.sign_out"), systemImage: "rectangle.portrait.and.arrow.right", action: model.signOut)
     }
 }
 

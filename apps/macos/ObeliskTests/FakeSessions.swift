@@ -161,7 +161,7 @@ extension CloudStatus {
 extension GameSessions {
     /// Game sessions whose state the test publishes through `fake`.
     convenience init() {
-        self.init(FakeSessions())
+        self.init(FakeSessions(), history: .temporary())
     }
 
     var fake: FakeSessions { core as! FakeSessions }
@@ -199,5 +199,14 @@ func eventually(_ predicate: @MainActor () async -> Bool, file: StaticString = #
     if !satisfied {
         XCTFail("Fixture timed out", file: file, line: line)
         throw SteamError.Failure(reason: "Fixture timed out")
+    }
+}
+
+extension LaunchHistory {
+    /// A history no other test reads, never the live library's.
+    static func temporary() -> LaunchHistory {
+        LaunchHistory(cache: LibraryCache(
+            file: FileManager.default.temporaryDirectory.appending(path: "ObeliskLibraryCache-\(UUID().uuidString).json")
+        ))
     }
 }

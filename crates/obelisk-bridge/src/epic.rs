@@ -94,6 +94,10 @@ pub struct EpicGame {
     pub developer: String,
     pub windows: bool,
     pub macos: bool,
+    /// Everything Epic returned for the game, as JSON: `catalogItems`,
+    /// `libraryRecords` and `assets`.
+    #[uniffi(default = None)]
+    pub metadata: Option<String>,
 }
 
 impl From<client::Game> for EpicGame {
@@ -109,6 +113,7 @@ impl From<client::Game> for EpicGame {
             developer: game.developer,
             windows: game.windows,
             macos: game.macos,
+            metadata: Some(game.metadata.to_string()),
         }
     }
 }
@@ -150,6 +155,13 @@ impl From<client::GameDetails> for EpicGameDetails {
             installation_bytes: details.installation_bytes,
         }
     }
+}
+
+/// How long the account played one game, as Epic records it.
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct EpicPlaytime {
+    pub app_name: String,
+    pub seconds: u64,
 }
 
 #[derive(uniffi::Object)]
@@ -238,6 +250,17 @@ impl EpicSession {
             .await?
             .into_iter()
             .map(Into::into)
+            .collect())
+    }
+
+    /// Every game the account played, in one request.
+    pub async fn playtimes(&self) -> Result<Vec<EpicPlaytime>, EpicError> {
+        Ok(self
+            .client
+            .playtimes()
+            .await?
+            .into_iter()
+            .map(|(app_name, seconds)| EpicPlaytime { app_name, seconds })
             .collect())
     }
 

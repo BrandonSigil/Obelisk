@@ -225,7 +225,7 @@ final class EpicPresentationTests: XCTestCase {
     }
 
     @MainActor
-    func testScrollbarAndContentGutterSurviveLibraryDetailAndReturn() async throws {
+    func testScrollbarAndContentWidthSurviveLibraryDetailAndReturn() async throws {
         for size in [NSSize(width: 900, height: 700), NSSize(width: 903, height: 728)] {
             let session = EpicPresentationSession(games: epicPresentationLibrary)
             let model = EpicModel(keychain: EpicPresentationCredentials(), restore: { _ in session })
@@ -238,13 +238,15 @@ final class EpicPresentationTests: XCTestCase {
                 guard let scroll = self.firstScrollView(in: fixture.host), let document = scroll.documentView else { return false }
                 return document.frame.height > scroll.contentView.bounds.height
             }
-            let originalScroll = try XCTUnwrap(firstScrollView(in: fixture.host))
-            let originalScroller = try XCTUnwrap(originalScroll.verticalScroller)
-            let viewportWidth = originalScroll.contentView.bounds.width
+            // The library and a game's page each keep their own scroll view. The
+            // library's scrollbar floats over its covers; a game's page reserves
+            // the same persistent one as Steam's. Neither changes its width.
+            var scroll = try XCTUnwrap(firstScrollView(in: fixture.host))
+            var scroller = try XCTUnwrap(scroll.verticalScroller)
+            let libraryWidth = scroll.contentView.bounds.width
+            XCTAssertEqual(libraryWidth, size.width, accuracy: 0.5, "The library's covers reach under its scrollbar")
             let searchFrameBefore = try XCTUnwrap(searchFrame(in: fixture.host))
 
-            // Compare against the same native container used by Steam, including
-            // the custom thumb that remains visible when a document fits.
             let reference = EpicPresentationWindow(StorefrontScrollView { Color.clear.frame(height: 1) }, size: size)
             defer { reference.close() }
             try await eventually {
@@ -253,62 +255,63 @@ final class EpicPresentationTests: XCTestCase {
             }
             let referenceScroll = try XCTUnwrap(firstScrollView(in: reference.host))
             let referenceScroller = try XCTUnwrap(referenceScroll.verticalScroller)
-            XCTAssertEqual(ObjectIdentifier(type(of: originalScroller)), ObjectIdentifier(type(of: referenceScroller)))
-            XCTAssertEqual(viewportWidth, referenceScroll.contentView.bounds.width, accuracy: 0.5)
 
-            func assertStable(_ phase: String) throws {
-                let scroll = try XCTUnwrap(firstScrollView(in: fixture.host))
-                let scroller = try XCTUnwrap(scroll.verticalScroller)
-                XCTAssertTrue(scroll === originalScroll, "The native scroll view changed during \(phase)")
-                XCTAssertTrue(scroller === originalScroller, "The persistent scrollbar changed during \(phase)")
-                XCTAssertEqual(scroll.scrollerStyle, .legacy)
-                XCTAssertFalse(scroll.autohidesScrollers)
-                XCTAssertTrue(scroll.hasVerticalScroller)
-                XCTAssertFalse(scroller.isHidden, "The scrollbar disappeared during \(phase)")
-                XCTAssertGreaterThan(scroller.alphaValue, 0)
-                XCTAssertEqual(scroll.contentView.bounds.width, viewportWidth, accuracy: 0.5, "The content gutter changed during \(phase)")
+            func assertStable(_ phase: String, style: NSScroller.Style, width: CGFloat) throws {
+                let current = try XCTUnwrap(firstScrollView(in: fixture.host))
+                XCTAssertTrue(current === scroll, "The native scroll view changed during \(phase)")
+                XCTAssertTrue(current.verticalScroller === scroller, "The scrollbar changed during \(phase)")
+                XCTAssertEqual(current.scrollerStyle, style, "Unexpected scroller style during \(phase)")
+                XCTAssertTrue(current.hasVerticalScroller)
+                if style == .legacy {
+                    // Overlay scrollers fade out even with autohiding disabled.
+                    XCTAssertFalse(current.autohidesScrollers)
+                    XCTAssertFalse(scroller.isHidden, "The scrollbar disappeared during \(phase)")
+                    XCTAssertGreaterThan(scroller.alphaValue, 0)
+                }
+                XCTAssertEqual(current.contentView.bounds.width, width, accuracy: 0.5, "The content width changed during \(phase)")
             }
-            try assertStable("the full library")
+            try assertStable("the full library", style: .overlay, width: libraryWidth)
 
             model.searchText = epicPresentationLibrary[0].title
             try await eventually {
                 fixture.layout()
-                guard let document = originalScroll.documentView else { return false }
-                return document.frame.height <= originalScroll.contentView.bounds.height
+                guard let document = scroll.documentView else { return false }
+                return document.frame.height <= scroll.contentView.bounds.height
             }
-            try assertStable("the filtered library")
+            try assertStable("the filtered library", style: .overlay, width: libraryWidth)
             let filteredSearch = try XCTUnwrap(searchFrame(in: fixture.host))
             // The clear button takes space at the field's right edge once text exists.
             XCTAssertEqual(filteredSearch.minX, searchFrameBefore.minX, accuracy: 0.5, "Filtering must not move the search field horizontally")
-            let filteredHeight = try XCTUnwrap(originalScroll.documentView).frame.height
 
+            let libraryScroll = scroll
             model.open(epicPresentationLibrary[0])
             try await eventually {
                 fixture.layout()
-                guard let document = originalScroll.documentView else { return false }
-                return abs(document.frame.height - filteredHeight) > 1
-                    && document.frame.height <= originalScroll.contentView.bounds.height
+                guard let current = self.firstScrollView(in: fixture.host), let document = current.documentView else { return false }
+                return current !== libraryScroll && document.frame.height <= current.contentView.bounds.height
             }
-            try assertStable("the short game detail")
-            XCTAssertFalse(originalScroller.isEnabled, "A visible scrollbar must not make a short page scrollable")
+            scroll = try XCTUnwrap(firstScrollView(in: fixture.host))
+            scroller = try XCTUnwrap(scroll.verticalScroller)
+            XCTAssertEqual(ObjectIdentifier(type(of: scroller)), ObjectIdentifier(type(of: referenceScroller)))
+            try assertStable("the short game detail", style: .legacy, width: referenceScroll.contentView.bounds.width)
+            XCTAssertFalse(scroller.isEnabled, "A visible scrollbar must not make a short page scrollable")
 
+            let detailScroll = scroll
             model.closeGame()
             model.searchText = ""
             try await eventually {
                 fixture.layout()
-                guard let document = originalScroll.documentView else { return false }
-                return model.selectedGame == nil && document.frame.height > originalScroll.contentView.bounds.height
+                guard let current = self.firstScrollView(in: fixture.host), let document = current.documentView else { return false }
+                return model.selectedGame == nil && current !== detailScroll
+                    && document.frame.height > current.contentView.bounds.height
             }
-            try assertStable("returning to the full library")
+            scroll = try XCTUnwrap(firstScrollView(in: fixture.host))
+            scroller = try XCTUnwrap(scroll.verticalScroller)
+            try assertStable("returning to the full library", style: .overlay, width: libraryWidth)
             let returnedSearch = try XCTUnwrap(searchFrame(in: fixture.host))
             XCTAssertEqual(returnedSearch.maxX, searchFrameBefore.maxX, accuracy: 0.5)
-            XCTAssertTrue(originalScroller.isEnabled)
-            XCTAssertTrue(originalScroller.target === originalScroll)
-            XCTAssertNotNil(originalScroller.action)
-            let document = try XCTUnwrap(originalScroll.documentView)
-            originalScroll.contentView.scroll(to: NSPoint(x: 0, y: (document.frame.height - originalScroll.contentView.bounds.height) / 2))
-            originalScroll.reflectScrolledClipView(originalScroll.contentView)
-            XCTAssertEqual(originalScroller.doubleValue, 0.5, accuracy: 0.02)
+            XCTAssertTrue(scroller.target === scroll)
+            XCTAssertNotNil(scroller.action)
             let gameCalls = await session.gameCalls
             XCTAssertEqual(gameCalls, 1, "Opening a cached game and returning must not reload the library")
         }
@@ -356,10 +359,8 @@ final class EpicPresentationTests: XCTestCase {
         }
         XCTAssertEqual(abs(contentAfter.y - contentBefore.y), offset, accuracy: 0.5, "The game-card document must move underneath the fixed controls")
         XCTAssertTrue(firstScrollView(in: fixture.host) === scroll)
-        XCTAssertTrue(scroll.verticalScroller === scroller, "Scrolling must keep the same persistent scrollbar")
-        XCTAssertFalse(scroller.isHidden)
-        XCTAssertEqual(scroll.scrollerStyle, .legacy)
-        XCTAssertFalse(scroll.autohidesScrollers)
+        XCTAssertTrue(scroll.verticalScroller === scroller, "Scrolling must keep the same scrollbar")
+        XCTAssertEqual(scroll.scrollerStyle, .overlay, "The library's scrollbar floats over its covers")
         XCTAssertEqual(model.searchText, "")
         let gameCalls = await session.gameCalls
         XCTAssertEqual(gameCalls, 1)
@@ -641,6 +642,7 @@ private actor EpicPresentationSession: EpicSessionProtocol {
         detailsContinuation?.resume(returning: details)
         detailsContinuation = nil
     }
+    func playtimes() async throws -> [EpicPlaytime] { [] }
     func games() async -> [EpicGame] {
         gameCalls += 1
         if shouldHoldGames {

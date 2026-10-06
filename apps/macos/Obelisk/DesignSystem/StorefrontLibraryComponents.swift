@@ -16,11 +16,6 @@ enum ImageDecoding {
     }
 }
 
-/// Building blocks shared by every storefront library (Steam, Epic, later GOG).
-enum StorefrontLibrary {
-    static let gridColumns = [GridItem(.adaptive(minimum: 145, maximum: 210), spacing: 18, alignment: .top)]
-}
-
 enum StorefrontLibraryFilter: String, CaseIterable, Identifiable, Sendable {
     case all, installed, played, macOS
 
@@ -32,6 +27,30 @@ enum StorefrontLibraryFilter: String, CaseIterable, Identifiable, Sendable {
         case .installed: L10n.string("ui.filter.installed")
         case .played: L10n.string("ui.filter.played")
         case .macOS: L10n.string("ui.filter.macos")
+        }
+    }
+}
+
+/// The orders a storefront library offers, each where its store records what
+/// it needs.
+enum StorefrontLibrarySort: String, CaseIterable, Identifiable, Sendable {
+    case lastPlayed, name, playtime
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .lastPlayed: L10n.string("model.library.sort.lastPlayed")
+        case .name: L10n.string("model.library.sort.name")
+        case .playtime: L10n.string("model.library.sort.playtime")
+        }
+    }
+
+    var menuTitle: String {
+        switch self {
+        case .lastPlayed: L10n.string("model.library.sortMenu.lastPlayed")
+        case .name: L10n.string("model.library.sortMenu.name")
+        case .playtime: L10n.string("model.library.sortMenu.playtime")
         }
     }
 }
@@ -89,42 +108,6 @@ struct StorefrontEmptyLibrary: View {
             .obeliskButtonStyle(.bordered)
         }
         .frame(maxWidth: .infinity, minHeight: 260)
-    }
-}
-
-/// Portrait artwork with a hover border, a title and an optional second line.
-struct LibraryGridCard<Artwork: View>: View {
-    let title: String
-    var subtitle: String?
-    var platform: GamePlatform?
-    let open: () -> Void
-    @ViewBuilder let artwork: Artwork
-    @State private var hovered = false
-
-    var body: some View {
-        Button(action: open) {
-            VStack(alignment: .leading, spacing: 9) {
-                Color.clear
-                    .aspectRatio(2.0 / 3.0, contentMode: .fit)
-                    .overlay { artwork }
-                    .overlay(alignment: .bottomTrailing) {
-                        if hovered, let platform {
-                            GamePlatformBadge(platform: platform)
-                                .padding(10)
-                        }
-                    }
-                    .clipShape(RoundedRectangle(cornerRadius: 9))
-                    .overlay { RoundedRectangle(cornerRadius: 9).strokeBorder(hovered ? ObeliskStyle.accent.opacity(0.7) : .primary.opacity(0.08), lineWidth: 1) }
-                Text(title).font(.system(size: 13, weight: .semibold)).foregroundStyle(.primary).lineLimit(2)
-                if let subtitle {
-                    Text(subtitle).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1)
-                }
-            }
-            .contentShape(Rectangle())
-        }
-        .obeliskButtonStyle(.plain)
-        .accessibilityValue(platform?.title ?? "")
-        .onHover { hovered = $0 }
     }
 }
 

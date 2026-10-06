@@ -8,56 +8,31 @@ struct StorefrontSortOption: Identifiable {
     let action: @MainActor () -> Void
 }
 
+/// The title bar of a storefront's sign-in and game pages: the account and the
+/// storefront's name.
 struct StorefrontTitleBar<AccountMenu: View>: View {
     let title: String
 
     let accountName: String?
     let avatarURL: URL?
-    @Binding private var searchText: String
-    let sortTitle: String
-    let sortOptions: [StorefrontSortOption]
-    @Binding private var filter: StorefrontLibraryFilter
-    let availableFilters: [StorefrontLibraryFilter]
-    let showsLibraryControls: Bool
     let isConnected: Bool
     private let accountMenu: AccountMenu
-    private let sortButtonWidth: CGFloat
 
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @FocusState private var searchIsFocused: Bool
-    @State private var sortIsPresented = false
 
     init(
         title: String,
         accountName: String?,
         avatarURL: URL? = nil,
-        searchText: Binding<String>,
-        sortTitle: String = L10n.string("ui.sort.name"),
-        sortOptions: [StorefrontSortOption] = [],
-        filter: Binding<StorefrontLibraryFilter> = .constant(.all),
-        availableFilters: [StorefrontLibraryFilter] = [],
-        showsLibraryControls: Bool = true,
         isConnected: Bool,
         @ViewBuilder accountMenu: () -> AccountMenu
     ) {
         self.title = title
         self.accountName = accountName
         self.avatarURL = avatarURL
-        self._searchText = searchText
-        self.sortTitle = sortTitle
-        self.sortOptions = sortOptions
-        self._filter = filter
-        self.availableFilters = availableFilters
-        self.showsLibraryControls = showsLibraryControls
         self.isConnected = isConnected
         self.accountMenu = accountMenu()
-        // Measured once per title change rather than on every body evaluation.
-        let textWidth = (sortTitle as NSString).size(withAttributes: [
-            .font: NSFont.systemFont(ofSize: 13, weight: .medium),
-        ]).width
-        sortButtonWidth = ceil(textWidth) + 20 + 7 + 24
     }
 
     var body: some View {
@@ -81,42 +56,6 @@ struct StorefrontTitleBar<AccountMenu: View>: View {
 
             Spacer(minLength: 12)
                 .overlay { StorefrontWindowDragRegion() }
-
-            if showsLibraryControls {
-                Button { sortIsPresented.toggle() } label: {
-                    HStack(spacing: 7) {
-                        Image(systemName: "arrow.up.arrow.down")
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundStyle(.white)
-                            .frame(width: 20)
-                        Text(sortTitle)
-                            .font(.system(size: 13, weight: .medium))
-                            .lineLimit(1)
-                    }
-                    .foregroundStyle(.primary)
-                    .padding(.horizontal, 12)
-                    .frame(width: sortButtonWidth, height: 38)
-                    .modifier(StorefrontControlGlass())
-                    .contentShape(Capsule())
-                }
-                .obeliskButtonStyle(.plain)
-                .fixedSize()
-                .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: sortTitle)
-                .popover(isPresented: $sortIsPresented, arrowEdge: .bottom) {
-                    StorefrontSortPopover(options: sortOptions) { sortIsPresented = false }
-                }
-                .disabled(sortOptions.isEmpty)
-                .accessibilityLabel(L10n.string("ui.sort.library_named", title))
-                .accessibilityValue(sortTitle)
-                .accessibilityIdentifier("storefront-sort-menu")
-                .help(L10n.string("ui.sort.library"))
-
-                if !availableFilters.isEmpty {
-                    filterMenu
-                }
-
-                searchField
-            }
         }
         .padding(.horizontal, 20)
         .frame(height: ObeliskStyle.titleBarHeight)
@@ -140,105 +79,14 @@ struct StorefrontTitleBar<AccountMenu: View>: View {
         return name.isEmpty ? L10n.string("ui.account.store", title) : name
     }
 
-    private var initials: String { (accountName ?? "").initials }
-
+    /// The library's account picture, glass as the title bar's control.
     private var avatar: some View {
-        ZStack {
-            Circle().fill(.primary.opacity(0.09))
-            if let avatarURL {
-                AsyncImage(url: avatarURL) { phase in
-                    if let image = phase.image {
-                        image.resizable().scaledToFill()
-                    } else {
-                        avatarPlaceholder
-                    }
-                }
-            } else {
-                avatarPlaceholder
-            }
-        }
-        .frame(width: 38, height: 38)
-        .clipShape(Circle())
-        .modifier(StorefrontControlGlass())
-        .overlay {
-            if avatarURL != nil {
-                Circle().strokeBorder(.white.opacity(0.2), lineWidth: 0.75)
-                    .allowsHitTesting(false)
-            }
-        }
-        .contentShape(Circle())
-    }
-
-    @ViewBuilder
-    private var avatarPlaceholder: some View {
-        if initials.isEmpty {
-            Image(systemName: "person.fill")
-                .font(.system(size: 15, weight: .medium))
-                .foregroundStyle(.primary)
-        } else {
-            Text(initials)
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(.primary)
-        }
-    }
-
-    private var searchField: some View {
-        HStack(spacing: 7) {
-            Image(systemName: "magnifyingglass")
-                .foregroundStyle(.secondary)
-                .accessibilityHidden(true)
-            TextField(L10n.string("ui.search.placeholder"), text: $searchText)
-                .textFieldStyle(.plain)
-                .focused($searchIsFocused)
-                .accessibilityLabel(L10n.string("ui.search.store_library", title))
-                .accessibilityIdentifier("storefront-search")
-                .onExitCommand {
-                    if searchText.isEmpty { searchIsFocused = false }
-                    else { searchText = "" }
-                }
-            if !searchText.isEmpty {
-                Button { searchText = "" } label: {
-                    Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
-                }
-                .obeliskButtonStyle(.plain)
-                .accessibilityLabel(L10n.string("ui.search.clear"))
-            }
-        }
-        .font(.system(size: 13))
-        .foregroundStyle(.primary)
-        .padding(.horizontal, 13)
-        .frame(height: 38)
-        .modifier(StorefrontControlGlass())
-        .frame(minWidth: 160, idealWidth: 240, maxWidth: 300)
-    }
-
-    private var filterMenu: some View {
-        Menu {
-            Picker(L10n.string("ui.filter.library"), selection: $filter) {
-                ForEach(availableFilters) { option in
-                    Text(option.title)
-                        .tag(option)
-                        .accessibilityIdentifier("storefront-filter-option-\(option.id)")
-                }
-            }
-            .pickerStyle(.inline)
-            .labelsHidden()
-        } label: {
-            Image(systemName: filter == .all ? "line.3.horizontal.decrease" : "line.3.horizontal.decrease.circle.fill")
-                .font(.system(size: 18, weight: .medium))
-                .foregroundStyle(.primary)
-                .frame(width: 38, height: 38)
-                .modifier(StorefrontControlGlass())
-                .contentShape(Circle())
-        }
-        .menuStyle(.button)
-        .obeliskButtonStyle(.plain)
-        .menuIndicator(.hidden)
-        .fixedSize()
-        .accessibilityLabel(L10n.string("ui.filter.library_named", title))
-        .accessibilityValue(filter.title)
-        .accessibilityIdentifier("storefront-filter-menu")
-        .help(L10n.string("ui.filter.library"))
+        AccountAvatar(name: accountName, url: avatarURL)
+            .frame(width: 28, height: 28)
+            .modifier(StorefrontControlGlass())
+            .contentShape(Circle())
+            // The picture hides itself from accessibility; the bar names the account.
+            .accessibilityElement(children: .ignore)
     }
 }
 
@@ -306,7 +154,10 @@ struct StorefrontSortPopover: View {
     }
 }
 
-private struct StorefrontControlGlass: ViewModifier {
+/// A storefront control's glass capsule, solid while transparency is reduced.
+struct StorefrontControlGlass: ViewModifier {
+    /// Whether the glass reacts to the pointer, as a button's does.
+    var interactive = true
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
@@ -319,7 +170,7 @@ private struct StorefrontControlGlass: ViewModifier {
                     .overlay { outline }
             }
         } else {
-            content.glassEffect(.regular.interactive(), in: Capsule())
+            content.glassEffect(interactive ? .regular.interactive() : .regular, in: Capsule())
         }
     }
 
@@ -347,7 +198,7 @@ private struct StorefrontTitleBarMaterial: NSViewRepresentable {
     func updateNSView(_ nsView: NSVisualEffectView, context: Context) {}
 }
 
-private struct StorefrontWindowDragRegion: NSViewRepresentable {
+struct StorefrontWindowDragRegion: NSViewRepresentable {
     func makeNSView(context: Context) -> DragRegion {
         let view = DragRegion()
         view.identifier = NSUserInterfaceItemIdentifier("storefront-titlebar-drag-region")

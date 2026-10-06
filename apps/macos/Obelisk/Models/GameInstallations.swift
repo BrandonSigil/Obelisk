@@ -314,14 +314,17 @@ final class GameInstallations<Store: InstallationStorefront> {
         receipts.first { $0.gameID == game && $0.platform == platform }
     }
 
+    /// The game's installation for `platform`, else its other one.
+    func receipt(for game: Store.GameID, preferring platform: String) -> Receipt? {
+        receipt(for: game, platform: platform) ?? receipts.first { $0.gameID == game }
+    }
+
     // MARK: The game on screen
 
     /// The installation of the selected platform, else the game's other one: an
     /// installed build stays on screen whatever the storefront would install now.
     var selectedReceipt: Receipt? {
-        selection().flatMap { selection in
-            receipt(for: selection.game, platform: selection.platform) ?? receipts.first { $0.gameID == selection.game }
-        }
+        selection().flatMap { receipt(for: $0.game, preferring: $0.platform) }
     }
 
     /// The active Game session when it is this account's, for the game on screen.
@@ -399,12 +402,30 @@ final class GameInstallations<Store: InstallationStorefront> {
     func primaryAction() {
         guard primaryActionAvailable else { return }
         if let receipt = selectedReceipt {
-            guard let port else { return }
-            let verify = port.verifiesBeforeLaunch()
-            act { $0.launch(receipt, verify: verify) }
+            launch(receipt)
         } else {
             downloadSelected()
         }
+    }
+
+    /// Launches an installation, from its game's page or from the library.
+    func launch(_ receipt: Receipt) {
+        guard account != nil, canLaunch(receipt.gameID), receipts.contains(receipt), let port else { return }
+        let verify = port.verifiesBeforeLaunch()
+        act { $0.launch(receipt, verify: verify) }
+    }
+
+    /// Whether the library may install `game`: no build of it is installed
+    /// and no operation holds it.
+    func canInstall(_ game: Store.GameID) -> Bool {
+        account != nil && canModify(game) && !receipts.contains { $0.gameID == game }
+    }
+
+    /// Installs a game from the library, where no game is on screen. Rust
+    /// resumes the game's interrupted Transfer instead, and picks every folder.
+    func install(_ offer: GameOffer, of game: Store.GameID) {
+        guard canInstall(game) else { return }
+        act { $0.install(offer) }
     }
 
     /// Installs the game on screen, or updates its installation in place with

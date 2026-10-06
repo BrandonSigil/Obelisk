@@ -342,6 +342,30 @@ async fn game_details_preserve_epic_seconds_when_the_manifest_is_unavailable() {
 }
 
 #[tokio::test]
+async fn playtimes_read_every_game_of_the_account_in_one_request() {
+    let mock = Mock::new(vec![reply(
+        PLAYTIME_PATH,
+        200,
+        json!([
+            {"accountId":"account-b","artifactId":"game","totalTime":999},
+            {"accountId":"account-a","artifactId":"other","totalTime":123},
+            {"accountId":"account-a","artifactId":"game","totalTime":68363},
+            {"accountId":"account-a","artifactId":"idle","totalTime":0}
+        ]),
+    )]);
+    let playtimes = mock.client(false).playtimes().await.unwrap();
+    assert_eq!(
+        playtimes.into_iter().collect::<Vec<_>>(),
+        [
+            ("game".to_string(), 68363),
+            ("idle".to_string(), 0),
+            ("other".to_string(), 123)
+        ]
+    );
+    assert_eq!(mock.requests().len(), 1);
+}
+
+#[tokio::test]
 async fn missing_history_stays_unknown_but_explicit_zero_is_preserved() {
     for (body, expected) in [
         (json!([]), None),
@@ -547,7 +571,7 @@ async fn pages_merge_owned_assets_and_metadata_without_duplicate_games() {
             "/catalog/api/shared/namespace/space/bulk/items",
             200,
             json!({
-                "base":{"title":"A game","description":"Game description","developer":"Studio","keyImages":[{"type":"DieselGameBoxTall","url":"file:///bad"},{"type":"OfferImageTall","url":"https://cdn.epicgames.com/cover.jpg"},{"type":"DieselStoreFrontWide","url":"https://cdn.epicgames.com/header.jpg"}]},
+                "base":{"title":"A game","description":"Game description","developer":"Studio","keyImages":[{"type":"DieselGameBoxTall","url":"file:///bad"},{"type":"OfferImageTall","url":"https://cdn.epicgames.com/cover.jpg"},{"type":"DieselStoreFrontWide","url":"https://cdn.epicgames.com/header.jpg"}],"customAttributes":{"CanRunOffline":{"type":"STRING","value":"true"}}},
                 "alternate":{"title":"A game"},
                 "dlc":{"title":"DLC","mainGameItem":{"id":"base"}},
                 "asset":{"title":"Editor asset","categories":[{"path":"asset-format"}]},
@@ -567,9 +591,33 @@ async fn pages_merge_owned_assets_and_metadata_without_duplicate_games() {
         games[0].header_image_url.as_deref(),
         Some("https://cdn.epicgames.com/header.jpg")
     );
+    // Everything Epic returned for the game stays available, unknown fields too.
+    let metadata = &games[0].metadata;
+    assert_eq!(metadata["catalogItems"]["base"]["developer"], "Studio");
+    assert_eq!(
+        metadata["catalogItems"]["base"]["customAttributes"]["CanRunOffline"]["value"],
+        "true"
+    );
+    assert_eq!(metadata["catalogItems"]["alternate"]["title"], "A game");
+    assert_eq!(
+        metadata["libraryRecords"],
+        json!([item("game", "base"), item("game", "alternate")]),
+        "Each record once, though Epic listed one on both pages"
+    );
+    assert_eq!(metadata["assets"]["Windows"], json!([item("game", "base")]));
+    assert_eq!(
+        metadata["assets"]["Mac"],
+        json!([item("game", "alternate")])
+    );
     assert_eq!(games[1].app_name, "missing");
     assert!(games[1].image_url.is_none());
     assert!(games[1].header_image_url.is_none());
+    assert!(
+        games[1].metadata["catalogItems"]
+            .as_object()
+            .unwrap()
+            .is_empty()
+    );
     assert_eq!(mock.requests().len(), 5);
     assert!(
         mock.requests()

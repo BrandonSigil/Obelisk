@@ -205,6 +205,9 @@ pub struct SteamGame {
     pub icon_hash: String,
     pub last_played: u64,
     pub playtime_minutes: u32,
+    /// Every field Steam returned for the game, as JSON.
+    #[uniffi(default = None)]
+    pub record: Option<String>,
 }
 impl From<client::OwnedGame> for SteamGame {
     fn from(game: client::OwnedGame) -> Self {
@@ -214,6 +217,7 @@ impl From<client::OwnedGame> for SteamGame {
             icon_hash: game.icon_hash,
             last_played: game.last_played,
             playtime_minutes: game.playtime_minutes,
+            record: Some(game.record.to_string()),
         }
     }
 }
@@ -221,12 +225,16 @@ impl From<client::OwnedGame> for SteamGame {
 pub struct SteamGamePlatforms {
     pub app_id: u32,
     pub platforms: Vec<String>,
+    /// The game's whole PICS app info as JSON, when PICS returned the game.
+    #[uniffi(default = None)]
+    pub pics: Option<String>,
 }
 impl From<client::GamePlatforms> for SteamGamePlatforms {
     fn from(game: client::GamePlatforms) -> Self {
         Self {
             app_id: game.app_id,
             platforms: game.platforms,
+            pics: game.pics.map(|pics| pics.to_string()),
         }
     }
 }

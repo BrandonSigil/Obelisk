@@ -20,6 +20,24 @@ final class CoreIntegrationTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: file), original)
     }
 
+    @MainActor
+    func testTheStorefrontLibraryCacheLeavesTheCoreCatalogReadable() async throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let executable = root.appending(path: "A game.exe")
+        try Data([0x4d, 0x5a]).write(to: executable)
+        let added = try await CoreClient(storageDirectory: root.path).addLocalGame(path: executable.path)
+
+        LibraryCache(file: root.appending(path: LibraryCache.fileName)).save(
+            [SteamLibraryEntry(SteamGame(appId: 620, name: "Portal 2", iconHash: "", lastPlayed: 0, playtimeMinutes: 0), platforms: nil)],
+            in: .steam, account: "7"
+        )
+
+        let reloaded = try await CoreClient(storageDirectory: root.path).games()
+        XCTAssertEqual(reloaded.map(\.id), [added.id], "The cache must never replace the core's catalog")
+    }
+
     func testLibraryRoundTripAcrossRustBridge() async throws {
         let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)

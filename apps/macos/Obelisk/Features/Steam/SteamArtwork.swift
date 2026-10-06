@@ -5,49 +5,46 @@ struct SteamArtwork: View {
     var portrait = true
     var iconHash = ""
 
-    private var base: String { "https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/\(appId)" }
+    private static func assets(_ appId: UInt32) -> String {
+        "https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/\(appId)"
+    }
+
+    /// The game's library logo, which some games do not publish.
+    static func logoURL(appId: UInt32) -> URL? {
+        URL(string: "\(assets(appId))/logo.png")
+    }
+
+    /// Some games only publish the standard library hero or the store header.
+    private var urls: [URL] {
+        let names = portrait ? ["library_600x900.jpg", "header.jpg"]
+            : ["library_hero_2x.jpg", "library_hero.jpg", "header.jpg"]
+        return names.compactMap { URL(string: "\(Self.assets(appId))/\($0)") }
+    }
 
     var body: some View {
-        AsyncImage(url: URL(string: "\(base)/\(portrait ? "library_600x900.jpg" : "library_hero_2x.jpg")")) { phase in
-            if let image = phase.image {
-                image.resizable().scaledToFill()
-            } else if phase.error != nil {
-                if portrait { headerFallback }
-                else { heroFallback }
-            }
-            else { placeholder }
+        // A cover decodes at its published size, a hero at most 2048 pixels wide as Epic's.
+        CachedArtwork(urls: urls, maxPixelSize: portrait ? 900 : 2048) { image in
+            image.resizable().scaledToFill()
+        } placeholder: {
+            ArtworkPlaceholder()
+        } failure: {
+            icon
         }
         .accessibilityHidden(true)
     }
 
-    // Some games only publish the standard library hero or the store header.
-    private var heroFallback: some View {
-        AsyncImage(url: URL(string: "\(base)/library_hero.jpg")) { phase in
-            if let image = phase.image { image.resizable().scaledToFill() }
-            else if phase.error != nil { headerFallback }
-            else { placeholder }
-        }
-    }
-
-    private var headerFallback: some View {
-        AsyncImage(url: URL(string: "\(base)/header.jpg")) { phase in
-            if let image = phase.image { image.resizable().scaledToFill() }
-            else if phase.error != nil { iconFallback }
-            else { placeholder }
-        }
-    }
-
-    @ViewBuilder private var iconFallback: some View {
-        if iconHash.count == 40 && iconHash.allSatisfy(\.isHexDigit) {
-            AsyncImage(url: URL(string: "https://media.steampowered.com/steamcommunity/public/images/apps/\(appId)/\(iconHash).jpg")) { phase in
-                if let image = phase.image {
-                    placeholder.overlay { image.resizable().scaledToFit().padding(30) }
-                } else { placeholder }
+    @ViewBuilder private var icon: some View {
+        if iconHash.count == 40 && iconHash.allSatisfy(\.isHexDigit),
+           let url = URL(string: "https://media.steampowered.com/steamcommunity/public/images/apps/\(appId)/\(iconHash).jpg") {
+            CachedArtwork(url: url, maxPixelSize: 64) { image in
+                ArtworkPlaceholder().overlay { image.resizable().scaledToFit().padding(30) }
+            } placeholder: {
+                ArtworkPlaceholder()
             }
-        } else { placeholder }
+        } else {
+            ArtworkPlaceholder()
+        }
     }
-
-    private var placeholder: ArtworkPlaceholder { ArtworkPlaceholder() }
 }
 
 enum SteamFormatting {
@@ -60,7 +57,11 @@ enum SteamFormatting {
 
     static func lastPlayed(_ timestamp: UInt64) -> String {
         guard timestamp > 0 else { return L10n.string("ui.game.never_launched") }
-        return Date(timeIntervalSince1970: TimeInterval(timestamp)).formatted(.dateTime.day().month(.abbreviated).year().locale(L10n.locale))
+        return lastPlayed(Date(timeIntervalSince1970: TimeInterval(timestamp)))
+    }
+
+    static func lastPlayed(_ date: Date) -> String {
+        date.formatted(.dateTime.day().month(.abbreviated).year().locale(L10n.locale))
     }
 
     static func bytes(_ value: UInt64) -> String {

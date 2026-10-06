@@ -31,8 +31,11 @@ final class AppModel {
         self.defaults = defaults
         appearance = AppAppearance(rawValue: defaults.string(forKey: "appearance") ?? "system") ?? .system
         core = CoreClient(storageDirectory: directory.path)
-        self.steam = steam ?? SteamModel(directory: directory, preferences: defaults)
-        self.epic = epic ?? EpicModel(directory: directory)
+        // Every storefront's library shares one file. `LaunchHistory.live`
+        // records launches into the app library's copy of it.
+        let libraryCache = LibraryCache(file: directory.appending(path: LibraryCache.fileName))
+        self.steam = steam ?? SteamModel(directory: directory, preferences: defaults, libraryCache: libraryCache)
+        self.epic = epic ?? EpicModel(directory: directory, libraryCache: libraryCache)
     }
 
     /// The Cloud or Rosetta question shown over the whole app, whichever tab is

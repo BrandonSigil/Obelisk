@@ -17,10 +17,20 @@ final class EpicModel {
     private(set) var accountName: String?
     private(set) var games: [EpicGame] = [] {
         didSet {
-            libraryOrderCache = nil
+            libraryOrderCache.removeAll()
             filteredLibraryCache = nil
         }
     }
+    /// Each played game's playtime in seconds, by app name, once Epic answered.
+    private var playtimes: [String: UInt64] = [:] {
+        didSet {
+            // Only the playtime order reads them.
+            libraryOrderCache[.playtime] = nil
+            filteredLibraryCache = nil
+        }
+    }
+    private(set) var isLoadingPlaytimes = false
+    private var playtimesFailed = false
 
     let gameSessions: EpicGameSessions
     /// The Rust installations of an account a session signed in: its id, the
@@ -48,14 +58,20 @@ final class EpicModel {
     }
     var searchText = ""
     var filter: StorefrontLibraryFilter = .all
-    // Epic exposes playtime only in individual game details, not in its library.
-    var availableFilters: [StorefrontLibraryFilter] { [.all, .installed, .macOS] }
+    var availableFilters: [StorefrontLibraryFilter] { [.all, .installed, .played, .macOS] }
+    var sort: StorefrontLibrarySort = .name
+    // Epic records each game's playtime, but no last played date.
+    var availableSorts: [StorefrontLibrarySort] { [.name, .playtime] }
     var rememberSession: Bool {
         get { rememberedSession.rememberSession }
         set { rememberedSession.rememberSession = newValue }
     }
 
     @ObservationIgnored private let rememberedSession: EpicRememberedSession
+    /// Where the account's last library is kept between launches.
+    @ObservationIgnored private let libraryCache: LibraryCache?
+    /// The account whose cached library shows while its session restores.
+    private var cachedAccount: String?
     @ObservationIgnored private let directory: URL
     @ObservationIgnored private let launchLanguage: String
     @ObservationIgnored private let authorize: @MainActor () async throws -> String
@@ -73,9 +89,11 @@ final class EpicModel {
     @ObservationIgnored private var libraryTask: Task<Void, Never>?
     @ObservationIgnored private var detailsTask: Task<Void, Never>?
     @ObservationIgnored private var detailsGeneration = 0
-    @ObservationIgnored private var libraryOrderCache: [EpicGame]?
+    @ObservationIgnored private var playtimeTask: Task<Void, Never>?
+    @ObservationIgnored private var libraryOrderCache: [StorefrontLibrarySort: [EpicGame]] = [:]
     @ObservationIgnored private var filteredLibraryCache: (
-        query: String, filter: StorefrontLibraryFilter, installed: Set<String>, games: [EpicGame]
+        query: String, sort: StorefrontLibrarySort, filter: StorefrontLibraryFilter, installed: Set<String>,
+        games: [EpicGame]
     )?
 
     init(
@@ -86,9 +104,11 @@ final class EpicModel {
         restore: @escaping @Sendable (EpicCredentials) async throws -> any EpicSessionProtocol = { try await EpicSession.restore(credentials: $0) },
         language: String = Locale.preferredLanguages.first ?? "en",
         gameSessions: EpicGameSessions = .shared,
+        libraryCache: LibraryCache? = nil,
         installations makeInstallations: MakeInstallations? = nil
     ) {
         self.directory = directory
+        self.libraryCache = libraryCache
         self.rememberedSession = EpicRememberedSession(store: keychain)
         self.authorize = authorize
         self.createSession = signIn
@@ -121,14 +141,41 @@ final class EpicModel {
     // Always read the observable account, even before the unobserved session exists.
     var isConnected: Bool { accountName != nil && session != nil }
 
+    /// Whether the library shows: once connected, or from the cache while the
+    /// saved session restores.
+    var showsLibrary: Bool { isConnected || (cachedAccount != nil && isRestoring) }
+
+    /// Shows the account's last library at once, while its session restores.
+    private func showCachedLibrary(of account: String) {
+        guard games.isEmpty,
+              let cached = libraryCache?.games(EpicLibraryEntry.self, in: .epic, account: account),
+              !cached.isEmpty else { return }
+        cachedAccount = account
+        games = cached.map(\.game)
+        playtimes = Dictionary(cached.compactMap { entry in entry.playtimeSeconds.map { (entry.appName, $0) } },
+                               uniquingKeysWith: max)
+    }
+
+    /// Hides a cached library whose session did not restore: another account
+    /// may sign in next. The cache keeps it for a later restoration.
+    private func dropCachedLibrary() {
+        guard cachedAccount != nil else { return }
+        cachedAccount = nil
+        games = []
+        playtimes = [:]
+    }
+
+    /// Saves the library as it now shows, playtimes included.
+    private func saveLibrary() {
+        guard let libraryCache, let accountID else { return }
+        libraryCache.save(games.map { EpicLibraryEntry($0, playtimeSeconds: playtimes[$0.appName]) },
+                          in: .epic, account: accountID)
+    }
+
     /// The game on screen, for its installation actions.
     private var installationSelection: InstallationSelection<EpicGames>? {
         guard let game = selectedGame else { return nil }
-        let offer = game.macos || game.windows
-            ? GameOffer.epic(namespace: game.namespace, catalogItemId: game.catalogItemId, appName: game.appName,
-                             title: game.title, platform: game.preferredPlatform)
-            : nil
-        return InstallationSelection(game: game.libraryID, platform: game.preferredPlatform, offer: offer)
+        return InstallationSelection(game: game.libraryID, platform: game.preferredPlatform, offer: game.offer)
     }
 
     func syncCloud() { installations.syncCloud() }
@@ -169,34 +216,61 @@ final class EpicModel {
     var filteredGames: [EpicGame] {
         // Observe dependencies even when the cached result is reused.
         let source = games
+        let playtimes = playtimes
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let order = sort
         let selectedFilter = filter
         let installedLibraryIDs = selectedFilter == .installed ? Set(installations.receipts.map(\.gameID)) : []
-        if let cached = filteredLibraryCache, cached.query == query, cached.filter == selectedFilter,
-           cached.installed == installedLibraryIDs {
+        if let cached = filteredLibraryCache, cached.query == query, cached.sort == order,
+           cached.filter == selectedFilter, cached.installed == installedLibraryIDs {
             return cached.games
         }
         let ordered: [EpicGame]
-        if let cached = libraryOrderCache {
+        if let cached = libraryOrderCache[order] {
             ordered = cached
         } else {
-            ordered = source.sorted {
-                let comparison = $0.title.localizedStandardCompare($1.title)
-                return comparison == .orderedSame ? $0.libraryID < $1.libraryID : comparison == .orderedAscending
-            }
-            libraryOrderCache = ordered
+            ordered = Self.order(source, by: order, playtimes: playtimes)
+            libraryOrderCache[order] = ordered
         }
         let filtered = query.isEmpty && selectedFilter == .all ? ordered : ordered.filter { game in
             guard query.isEmpty || game.title.localizedStandardContains(query) else { return false }
             switch selectedFilter {
             case .all: return true
             case .installed: return installedLibraryIDs.contains(game.libraryID)
-            case .played: return false
+            case .played: return (playtimes[game.appName] ?? 0) > 0
             case .macOS: return game.macos
             }
         }
-        filteredLibraryCache = (query, selectedFilter, installedLibraryIDs, filtered)
+        filteredLibraryCache = (query, order, selectedFilter, installedLibraryIDs, filtered)
         return filtered
+    }
+
+    /// The most played games first for `.playtime`, then by name. Epic has no
+    /// last played date, so `.lastPlayed` orders by name.
+    static func order(_ games: [EpicGame], by sort: StorefrontLibrarySort, playtimes: [String: UInt64]) -> [EpicGame] {
+        games.sorted {
+            if sort == .playtime {
+                let first = playtimes[$0.appName] ?? 0, second = playtimes[$1.appName] ?? 0
+                if first != second { return first > second }
+            }
+            let comparison = $0.title.localizedStandardCompare($1.title)
+            return comparison == .orderedSame ? $0.libraryID < $1.libraryID : comparison == .orderedAscending
+        }
+    }
+
+    /// The game's playtime in seconds, once Epic answered; nil when it was
+    /// never played.
+    func playtime(of game: EpicGame) -> UInt64? { playtimes[game.appName] }
+
+    /// Whether the filter or the order reads the games' playtimes.
+    private var usesPlaytime: Bool { filter == .played || sort == .playtime }
+
+    var pendingMetadata: String? {
+        usesPlaytime && isLoadingPlaytimes ? L10n.string("ui.library.loading_playtime") : nil
+    }
+
+    var missingMetadata: String? {
+        usesPlaytime && playtimesFailed && !isLoadingPlaytimes ? L10n.string("ui.library.playtime_unavailable") : nil
     }
 
     func start() async {
@@ -231,11 +305,13 @@ final class EpicModel {
             return
         }
         guard current == generation && !Task.isCancelled, let credentials else { return }
+        showCachedLibrary(of: credentials.accountId)
         do {
             let connected = try await restoreSession(credentials)
             await accept(connected, generation: current)
         } catch {
             guard current == generation && !Task.isCancelled else { return }
+            dropCachedLibrary()
             errorMessage = Self.message(error)
             if case EpicError.Unauthorized = error {
                 await rememberedSession.forget().value
@@ -298,6 +374,11 @@ final class EpicModel {
                 await disconnectAbandonedSession(connected)
                 return
             }
+            if cachedAccount != credentials.accountId {
+                games = []
+                playtimes = [:]
+            }
+            cachedAccount = nil
             session = connected
             accountID = credentials.accountId
             accountName = credentials.displayName.isEmpty ? credentials.accountId : credentials.displayName
@@ -338,10 +419,12 @@ final class EpicModel {
 
     private func reloadGames(_ connected: any EpicSessionProtocol, generation current: Int) async {
         defer { if current == generation { isLoadingGames = false } }
+        reloadPlaytimes(connected, generation: current)
         do {
             let loaded = try await connected.games()
             guard current == generation && !Task.isCancelled else { return }
             games = loaded
+            saveLibrary()
             if let selectedGame {
                 if let updated = loaded.first(where: { $0.libraryID == selectedGame.libraryID }) { open(updated) }
                 else { closeGame() }
@@ -353,8 +436,33 @@ final class EpicModel {
         }
     }
 
+    /// Epic answers every game's playtime in one request. It only orders and
+    /// filters the library, so the library never waits for it.
+    private func reloadPlaytimes(_ connected: any EpicSessionProtocol, generation current: Int) {
+        playtimeTask?.cancel()
+        isLoadingPlaytimes = true
+        playtimesFailed = false
+        playtimeTask = Task {
+            do {
+                let loaded = try await connected.playtimes()
+                guard current == generation && !Task.isCancelled else { return }
+                playtimes = Dictionary(loaded.map { ($0.appName, $0.seconds) }, uniquingKeysWith: max)
+                saveLibrary()
+            } catch {
+                guard current == generation && !Task.isCancelled else { return }
+                playtimesFailed = true
+            }
+            isLoadingPlaytimes = false
+        }
+    }
+
     func signOut() {
         guard !isSigningOut else { return }
+        if let account = accountID ?? cachedAccount {
+            libraryCache?.forget(.epic, account: account)
+            gameSessions.history.forget(account: account, in: EpicGames.self)
+        }
+        cachedAccount = nil
         generation += 1
         let current = generation
         let disconnected = session
@@ -371,10 +479,15 @@ final class EpicModel {
         libraryTask?.cancel()
         authenticationTask = nil
         libraryTask = nil
+        playtimeTask?.cancel()
+        playtimeTask = nil
         session = nil
         accountID = nil
         accountName = nil
         games = []
+        playtimes = [:]
+        isLoadingPlaytimes = false
+        playtimesFailed = false
         closeGame()
         searchText = ""
         filter = .all
@@ -445,6 +558,37 @@ final class EpicModel {
         let selection = detailsGeneration
         detailsTask = Task { await loadDetails(game, session: session, generation: current, selection: selection) }
     }
+
+    /// When this account last launched the game from Obelisk: Epic records
+    /// no last played date of its own.
+    func lastLaunch(of game: EpicGame) -> Date? {
+        accountID.flatMap { gameSessions.history.lastLaunch(of: game.libraryID, account: $0, in: EpicGames.self) }
+    }
+
+    /// The game the library shows first: the last one launched from Obelisk,
+    /// else the most played.
+    var featuredGame: EpicGame? {
+        if let launched = games.compactMap({ game in lastLaunch(of: game).map { (game, $0) } }).max(by: { $0.1 < $1.1 }) {
+            return launched.0
+        }
+        return games.filter { (playtimes[$0.appName] ?? 0) > 0 }
+            .max { (playtimes[$0.appName] ?? 0) < (playtimes[$1.appName] ?? 0) }
+    }
+
+    /// Launches the game's native installation first.
+    func launchFromLibrary(_ game: EpicGame) {
+        guard let receipt = installations.receipt(for: game.libraryID, preferring: "Mac") else { return }
+        installations.launch(receipt)
+    }
+
+    /// Epic's library already tells which builds a game ships, so the library
+    /// downloads it without opening its page.
+    func downloadFromLibrary(_ game: EpicGame) {
+        guard let offer = game.offer else { return }
+        installations.install(offer, of: game.libraryID)
+    }
+
+    func canInstallFromLibrary(_ game: EpicGame) -> Bool { game.offer != nil }
 
     func reloadAchievements() {
         guard let game = selectedGame, let session else { return }
@@ -523,8 +667,58 @@ final class EpicModel {
     }
 }
 
-extension EpicGame {
+/// What the library cache keeps of an Epic game: everything Epic returned for
+/// it, beside the fields the library reads.
+struct EpicLibraryEntry: LibraryCacheEntry, Equatable {
+    var id: String
+    var appName: String
+    var namespace: String
+    var catalogItemId: String
+    var title: String
+    var description: String
+    var imageUrl: String?
+    var headerImageUrl: String?
+    var developer: String
+    var windows: Bool
+    var macos: Bool
+    /// Nil until Epic told the playtime, or when the game was never played.
+    var playtimeSeconds: UInt64?
+    /// Its catalog items, library records and assets, as Epic returned them.
+    var metadata: JSONValue?
+
+    init(_ game: EpicGame, playtimeSeconds: UInt64?) {
+        id = game.libraryID
+        appName = game.appName
+        namespace = game.namespace
+        catalogItemId = game.catalogItemId
+        title = game.title
+        description = game.description
+        imageUrl = game.imageUrl
+        headerImageUrl = game.headerImageUrl
+        developer = game.developer
+        windows = game.windows
+        macos = game.macos
+        self.playtimeSeconds = playtimeSeconds
+        metadata = JSONValue(json: game.metadata)
+    }
+
+    var game: EpicGame {
+        EpicGame(appName: appName, namespace: namespace, catalogItemId: catalogItemId, title: title,
+                 description: description, imageUrl: imageUrl, headerImageUrl: headerImageUrl, developer: developer,
+                 windows: windows, macos: macos, metadata: metadata?.json)
+    }
+}
+
+extension EpicGame: Identifiable {
     var preferredPlatform: String { macos ? "Mac" : "Windows" }
     var libraryID: String { epicLibraryID(namespace: namespace, appName: appName) }
+    public var id: String { libraryID }
+
+    /// What Epic can install of the game: its native build first.
+    var offer: GameOffer? {
+        guard macos || windows else { return nil }
+        return .epic(namespace: namespace, catalogItemId: catalogItemId, appName: appName, title: title,
+                     platform: preferredPlatform)
+    }
 }
 

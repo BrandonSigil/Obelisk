@@ -8,7 +8,7 @@ final class StorefrontSortPopoverTests: XCTestCase {
     func testClickAppliesSortBeforeDismissingInTheSameEvent() async throws {
         var selected = "recent"
         var events: [String] = []
-        let option = StorefrontSortOption(id: "name", title: SteamLibrarySort.name.title, isSelected: false) {
+        let option = StorefrontSortOption(id: "name", title: StorefrontLibrarySort.name.title, isSelected: false) {
             selected = "name"
             events.append("selected")
         }

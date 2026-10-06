@@ -79,7 +79,7 @@ final class EpicCloudTests: XCTestCase {
 
 
     func testRecoveryReservesEveryGameUntilItFindsTheSession() async throws {
-        let sessions = EpicGameSessions(FakeSessions(recovering: true))
+        let sessions = EpicGameSessions(FakeSessions(recovering: true), history: .temporary())
         XCTAssertTrue(sessions.isRecovering)
         XCTAssertTrue(sessions.protects("sandbox:unknown"))
 

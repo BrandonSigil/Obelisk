@@ -32,7 +32,7 @@ final class SteamIntegrationTests: XCTestCase {
             }
         }
         model.searchText = "  etoile  "
-        for sort in SteamLibrarySort.allCases {
+        for sort in StorefrontLibrarySort.allCases {
             model.sort = sort
             XCTAssertEqual(model.filteredGames.map(\.appId), [1])
         }
@@ -52,7 +52,7 @@ final class SteamIntegrationTests: XCTestCase {
         let session = CachedSteamSession(games: cachedSteamGames)
         let model = cachedSteamModel(session: session)
         await model.start()
-        for sort in SteamLibrarySort.allCases {
+        for sort in StorefrontLibrarySort.allCases {
             model.sort = sort
             _ = model.filteredGames
         }
@@ -67,7 +67,7 @@ final class SteamIntegrationTests: XCTestCase {
         model.refresh()
         try await waitForCachedLibrary { model.games.first?.name == "Zèbre" && !model.isLoadingGames }
 
-        let expected: [(SteamLibrarySort, [UInt32])] = [
+        let expected: [(StorefrontLibrarySort, [UInt32])] = [
             (.lastPlayed, [3, 1, 2, 4, 5]),
             (.name, [2, 4, 5, 3, 1]),
             (.playtime, [3, 2, 1, 4, 5]),
@@ -85,7 +85,7 @@ final class SteamIntegrationTests: XCTestCase {
         let session = CachedSteamSession(games: cachedSteamGames)
         let model = cachedSteamModel(session: session)
         await model.start()
-        for sort in SteamLibrarySort.allCases {
+        for sort in StorefrontLibrarySort.allCases {
             model.sort = sort
             XCTAssertFalse(model.filteredGames.isEmpty)
         }
@@ -96,7 +96,7 @@ final class SteamIntegrationTests: XCTestCase {
 
         XCTAssertFalse(model.isConnected)
         XCTAssertEqual(model.searchText, "")
-        for sort in SteamLibrarySort.allCases {
+        for sort in StorefrontLibrarySort.allCases {
             model.sort = sort
             XCTAssertTrue(model.filteredGames.isEmpty)
         }
@@ -372,7 +372,7 @@ private let cachedSteamGames = [
     SteamGame(appId: 4, name: "Portal", iconHash: "", lastPlayed: 200, playtimeMinutes: 100),
     SteamGame(appId: 5, name: "Zéro", iconHash: "", lastPlayed: 0, playtimeMinutes: 0),
 ]
-private let cachedSteamOrders: [(SteamLibrarySort, [UInt32])] = [
+private let cachedSteamOrders: [(StorefrontLibrarySort, [UInt32])] = [
     (.lastPlayed, [2, 4, 1, 3, 5]),
     (.name, [3, 1, 2, 4, 5]),
     (.playtime, [1, 2, 4, 3, 5]),

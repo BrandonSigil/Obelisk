@@ -6,15 +6,10 @@ struct RootView: View {
     @State private var friendsAvatars = FriendsAvatarCache()
 
     var body: some View {
-        HStack(spacing: 0) {
+        NavigationSplitView {
             SidebarView(model: model)
-                .frame(width: ObeliskStyle.sidebarWidth)
-
-            Rectangle()
-                .fill(ObeliskPalette(colorScheme: colorScheme).border)
-                .frame(width: 1)
-                .ignoresSafeArea(.container, edges: .top)
-
+                .navigationSplitViewColumnWidth(ObeliskStyle.sidebarWidth)
+        } detail: {
             Group {
                 if model.selection == .settings {
                     SettingsView(model: model)
@@ -27,9 +22,10 @@ struct RootView: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(ObeliskPalette(colorScheme: colorScheme).background)
         }
+        .toolbar(removing: .sidebarToggle)
         .frame(minWidth: 860, minHeight: 600)
-        .background(ObeliskPalette(colorScheme: colorScheme).background)
         .tint(ObeliskStyle.accent)
         .disabled(model.presentedFriends != nil)
         .allowsHitTesting(model.presentedFriends == nil)

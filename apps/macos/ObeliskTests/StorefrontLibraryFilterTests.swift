@@ -102,7 +102,7 @@ final class StorefrontLibraryFilterTests: XCTestCase {
         await model.start()
         defer { model.signOut() }
 
-        XCTAssertEqual(model.availableFilters, [.all, .installed, .macOS])
+        XCTAssertEqual(model.availableFilters, [.all, .installed, .played, .macOS], "Epic's playtimes tell which games were played")
         XCTAssertEqual(model.filteredGames.count, 5)
         model.searchText = "  etoiles  "
         XCTAssertEqual(model.filteredGames.map(\.libraryID), [otherNamespace, installedMac, availableMac, installedWindows].map(\.libraryID))

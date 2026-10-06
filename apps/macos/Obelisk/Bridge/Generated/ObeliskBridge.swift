@@ -1211,6 +1211,11 @@ public protocol EpicSessionProtocol: AnyObject, Sendable {
      */
     func persist(credentials: EpicCredentialSave) async 
     
+    /**
+     * Every game the account played, in one request.
+     */
+    func playtimes() async throws  -> [EpicPlaytime]
+    
     func reconnectFriends() async 
     
     func shutdownObservers() 
@@ -1436,6 +1441,25 @@ open func persist(credentials: EpicCredentialSave)async   {
             liftFunc: { $0 },
             errorHandler: nil
             
+        )
+}
+    
+    /**
+     * Every game the account played, in one request.
+     */
+open func playtimes()async throws  -> [EpicPlaytime]  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_obelisk_bridge_fn_method_epicsession_playtimes(
+                        self.uniffiCloneHandle()
+                )
+            },
+            pollFunc: ffi_obelisk_bridge_rust_future_poll_rust_buffer,
+            completeFunc: ffi_obelisk_bridge_rust_future_complete_rust_buffer,
+            freeFunc: ffi_obelisk_bridge_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterSequenceTypeEpicPlaytime.lift,
+            errorHandler: FfiConverterTypeEpicError_lift
         )
 }
     
@@ -3482,10 +3506,19 @@ public struct EpicGame: Equatable, Hashable {
     public var developer: String
     public var windows: Bool
     public var macos: Bool
+    /**
+     * Everything Epic returned for the game, as JSON: `catalogItems`,
+     * `libraryRecords` and `assets`.
+     */
+    public var metadata: String?
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(appName: String, namespace: String, catalogItemId: String, title: String, description: String, imageUrl: String?, headerImageUrl: String?, developer: String, windows: Bool, macos: Bool) {
+    public init(appName: String, namespace: String, catalogItemId: String, title: String, description: String, imageUrl: String?, headerImageUrl: String?, developer: String, windows: Bool, macos: Bool, 
+        /**
+         * Everything Epic returned for the game, as JSON: `catalogItems`,
+         * `libraryRecords` and `assets`.
+         */metadata: String? = nil) {
         self.appName = appName
         self.namespace = namespace
         self.catalogItemId = catalogItemId
@@ -3496,6 +3529,7 @@ public struct EpicGame: Equatable, Hashable {
         self.developer = developer
         self.windows = windows
         self.macos = macos
+        self.metadata = metadata
     }
 
     
@@ -3523,7 +3557,8 @@ public struct FfiConverterTypeEpicGame: FfiConverterRustBuffer {
                 headerImageUrl: FfiConverterOptionString.read(from: &buf), 
                 developer: FfiConverterString.read(from: &buf), 
                 windows: FfiConverterBool.read(from: &buf), 
-                macos: FfiConverterBool.read(from: &buf)
+                macos: FfiConverterBool.read(from: &buf), 
+                metadata: FfiConverterOptionString.read(from: &buf)
         )
     }
 
@@ -3538,6 +3573,7 @@ public struct FfiConverterTypeEpicGame: FfiConverterRustBuffer {
         FfiConverterString.write(value.developer, into: &buf)
         FfiConverterBool.write(value.windows, into: &buf)
         FfiConverterBool.write(value.macos, into: &buf)
+        FfiConverterOptionString.write(value.metadata, into: &buf)
     }
 }
 
@@ -3608,6 +3644,63 @@ public func FfiConverterTypeEpicGameDetails_lift(_ buf: RustBuffer) throws -> Ep
 #endif
 public func FfiConverterTypeEpicGameDetails_lower(_ value: EpicGameDetails) -> RustBuffer {
     return FfiConverterTypeEpicGameDetails.lower(value)
+}
+
+
+/**
+ * How long the account played one game, as Epic records it.
+ */
+public struct EpicPlaytime: Equatable, Hashable {
+    public var appName: String
+    public var seconds: UInt64
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(appName: String, seconds: UInt64) {
+        self.appName = appName
+        self.seconds = seconds
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension EpicPlaytime: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeEpicPlaytime: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> EpicPlaytime {
+        return
+            try EpicPlaytime(
+                appName: FfiConverterString.read(from: &buf), 
+                seconds: FfiConverterUInt64.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: EpicPlaytime, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.appName, into: &buf)
+        FfiConverterUInt64.write(value.seconds, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeEpicPlaytime_lift(_ buf: RustBuffer) throws -> EpicPlaytime {
+    return try FfiConverterTypeEpicPlaytime.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeEpicPlaytime_lower(_ value: EpicPlaytime) -> RustBuffer {
+    return FfiConverterTypeEpicPlaytime.lower(value)
 }
 
 
@@ -4964,15 +5057,23 @@ public struct SteamGame: Equatable, Hashable {
     public var iconHash: String
     public var lastPlayed: UInt64
     public var playtimeMinutes: UInt32
+    /**
+     * Every field Steam returned for the game, as JSON.
+     */
+    public var record: String?
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(appId: UInt32, name: String, iconHash: String, lastPlayed: UInt64, playtimeMinutes: UInt32) {
+    public init(appId: UInt32, name: String, iconHash: String, lastPlayed: UInt64, playtimeMinutes: UInt32, 
+        /**
+         * Every field Steam returned for the game, as JSON.
+         */record: String? = nil) {
         self.appId = appId
         self.name = name
         self.iconHash = iconHash
         self.lastPlayed = lastPlayed
         self.playtimeMinutes = playtimeMinutes
+        self.record = record
     }
 
     
@@ -4995,7 +5096,8 @@ public struct FfiConverterTypeSteamGame: FfiConverterRustBuffer {
                 name: FfiConverterString.read(from: &buf), 
                 iconHash: FfiConverterString.read(from: &buf), 
                 lastPlayed: FfiConverterUInt64.read(from: &buf), 
-                playtimeMinutes: FfiConverterUInt32.read(from: &buf)
+                playtimeMinutes: FfiConverterUInt32.read(from: &buf), 
+                record: FfiConverterOptionString.read(from: &buf)
         )
     }
 
@@ -5005,6 +5107,7 @@ public struct FfiConverterTypeSteamGame: FfiConverterRustBuffer {
         FfiConverterString.write(value.iconHash, into: &buf)
         FfiConverterUInt64.write(value.lastPlayed, into: &buf)
         FfiConverterUInt32.write(value.playtimeMinutes, into: &buf)
+        FfiConverterOptionString.write(value.record, into: &buf)
     }
 }
 
@@ -5097,12 +5200,20 @@ public func FfiConverterTypeSteamGameDetails_lower(_ value: SteamGameDetails) ->
 public struct SteamGamePlatforms: Equatable, Hashable {
     public var appId: UInt32
     public var platforms: [String]
+    /**
+     * The game's whole PICS app info as JSON, when PICS returned the game.
+     */
+    public var pics: String?
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(appId: UInt32, platforms: [String]) {
+    public init(appId: UInt32, platforms: [String], 
+        /**
+         * The game's whole PICS app info as JSON, when PICS returned the game.
+         */pics: String? = nil) {
         self.appId = appId
         self.platforms = platforms
+        self.pics = pics
     }
 
     
@@ -5122,13 +5233,15 @@ public struct FfiConverterTypeSteamGamePlatforms: FfiConverterRustBuffer {
         return
             try SteamGamePlatforms(
                 appId: FfiConverterUInt32.read(from: &buf), 
-                platforms: FfiConverterSequenceString.read(from: &buf)
+                platforms: FfiConverterSequenceString.read(from: &buf), 
+                pics: FfiConverterOptionString.read(from: &buf)
         )
     }
 
     public static func write(_ value: SteamGamePlatforms, into buf: inout [UInt8]) {
         FfiConverterUInt32.write(value.appId, into: &buf)
         FfiConverterSequenceString.write(value.platforms, into: &buf)
+        FfiConverterOptionString.write(value.pics, into: &buf)
     }
 }
 
@@ -8127,6 +8240,31 @@ fileprivate struct FfiConverterSequenceTypeEpicGame: FfiConverterRustBuffer {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterSequenceTypeEpicPlaytime: FfiConverterRustBuffer {
+    typealias SwiftType = [EpicPlaytime]
+
+    public static func write(_ value: [EpicPlaytime], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeEpicPlaytime.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [EpicPlaytime] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [EpicPlaytime]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeEpicPlaytime.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterSequenceTypeGame: FfiConverterRustBuffer {
     typealias SwiftType = [Game]
 
@@ -8636,6 +8774,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_obelisk_bridge_checksum_method_epicsession_persist() != 44085) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_obelisk_bridge_checksum_method_epicsession_playtimes() != 51139) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_obelisk_bridge_checksum_method_epicsession_reconnect_friends() != 49037) {

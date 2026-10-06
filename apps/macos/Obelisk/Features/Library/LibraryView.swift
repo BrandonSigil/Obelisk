@@ -18,8 +18,6 @@ struct LibraryView: View {
                 StorefrontTitleBar(
                     title: model.selection.title,
                     accountName: nil,
-                    searchText: $model.searchText,
-                    showsLibraryControls: false,
                     isConnected: false
                 ) {
                     EmptyView()

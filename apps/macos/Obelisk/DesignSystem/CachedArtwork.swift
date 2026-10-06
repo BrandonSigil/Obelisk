@@ -1,35 +1,70 @@
 import AppKit
 import SwiftUI
 
-struct CachedArtwork<Content: View, Placeholder: View>: View {
-    let url: URL?
+/// The first of `urls` that loads, decoded at `maxPixelSize` and shared
+/// through `ArtworkCache`.
+struct CachedArtwork<Content: View, Placeholder: View, Failure: View>: View {
+    /// Tried in order: a storefront does not publish every image of every game.
+    let urls: [URL]
     let maxPixelSize: Int
     @ViewBuilder var content: (Image) -> Content
     @ViewBuilder var placeholder: () -> Placeholder
-    @State private var loaded: (request: ArtworkCache.Request, image: NSImage)?
+    /// Shown once every URL failed.
+    @ViewBuilder var failure: () -> Failure
+    @State private var loaded: (requests: [ArtworkCache.Request], image: NSImage?)?
 
-    private var request: ArtworkCache.Request? {
-        url.map { ArtworkCache.Request(url: $0, maxPixelSize: maxPixelSize) }
+    init(
+        urls: [URL],
+        maxPixelSize: Int,
+        @ViewBuilder content: @escaping (Image) -> Content,
+        @ViewBuilder placeholder: @escaping () -> Placeholder,
+        @ViewBuilder failure: @escaping () -> Failure
+    ) {
+        self.urls = urls
+        self.maxPixelSize = maxPixelSize
+        self.content = content
+        self.placeholder = placeholder
+        self.failure = failure
     }
 
-    private var image: NSImage? {
-        guard let request else { return nil }
-        if loaded?.request == request { return loaded?.image }
-        // A recycled view can display an already decoded image on its first frame.
-        return ArtworkCache.shared.cachedImage(for: request)
+    private var requests: [ArtworkCache.Request] {
+        urls.map { ArtworkCache.Request(url: $0, maxPixelSize: maxPixelSize) }
     }
 
     var body: some View {
+        let requests = requests
         Group {
-            if let image { content(Image(nsImage: image)) }
-            else { placeholder() }
+            if let loaded, loaded.requests == requests {
+                if let image = loaded.image { content(Image(nsImage: image)) }
+                else { failure() }
+            } else if let image = requests.lazy.compactMap(ArtworkCache.shared.cachedImage(for:)).first {
+                // A recycled view can display an already decoded image on its first frame.
+                content(Image(nsImage: image))
+            } else {
+                placeholder()
+            }
         }
-        .task(id: request) {
-            guard let request else { loaded = nil; return }
-            let image = await ArtworkCache.shared.image(for: request)
-            guard !Task.isCancelled else { return }
-            loaded = image.map { (request, $0) }
+        .task(id: requests) {
+            for request in requests {
+                let image = await ArtworkCache.shared.image(for: request)
+                guard !Task.isCancelled else { return }
+                if let image { return loaded = (requests, image) }
+            }
+            loaded = (requests, nil)
         }
+    }
+}
+
+extension CachedArtwork where Failure == Placeholder {
+    /// The placeholder also stands for artwork that failed to load.
+    init(
+        url: URL?,
+        maxPixelSize: Int,
+        @ViewBuilder content: @escaping (Image) -> Content,
+        @ViewBuilder placeholder: @escaping () -> Placeholder
+    ) {
+        self.init(urls: url.map { [$0] } ?? [], maxPixelSize: maxPixelSize, content: content,
+                  placeholder: placeholder, failure: placeholder)
     }
 }
 

@@ -112,6 +112,8 @@ pub struct OwnedGameInfo {
     pub icon_hash: String,
     pub last_played: u64,
     pub playtime_minutes: u32,
+    /// Every field Steam returned for the game, named as Steam names them.
+    pub record: serde_json::Value,
 }
 
 /// An HTTPS CDN or SteamCache server. `vhost` is the download host and always
@@ -558,6 +560,7 @@ impl SteamConnection {
                     include_free_sub: true,
                     skip_unvetted_apps: Some(false),
                     language: "english".into(),
+                    include_extended_app_info: true,
                 },
             )
             .await?;
@@ -573,6 +576,7 @@ impl SteamConnection {
             .filter(|game| game.app_id > 0 && seen.insert(game.app_id))
             .map(|game| OwnedGameInfo {
                 app_id: game.app_id as u32,
+                record: serde_json::to_value(&game).unwrap_or_default(),
                 name: game.name,
                 icon_hash: game.icon_hash,
                 last_played: u64::from(game.last_played),

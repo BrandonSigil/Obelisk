@@ -223,6 +223,38 @@ final class EpicDownloadTests: XCTestCase {
         XCTAssertFalse(fixture.model.installations.canUninstallSelectedGame)
     }
 
+    func testLibraryDownloadsTheNativeBuildWithoutOpeningTheGame() async throws {
+        let fixture = try await fixture(game: game("native", macos: true))
+        fixture.model.closeGame()
+
+        fixture.model.downloadFromLibrary(fixture.game)
+
+        XCTAssertEqual(fixture.backend.actions, [.install(fixture.offer("Mac"))])
+        XCTAssertNil(fixture.model.selectedGame)
+    }
+
+    func testLibraryLaunchesTheNativeInstallationWithoutOpeningTheGame() async throws {
+        let fixture = try await fixture(game: game("native", macos: true), installed: "Mac")
+        fixture.model.closeGame()
+
+        fixture.model.launchFromLibrary(fixture.game)
+
+        XCTAssertEqual(fixture.backend.actions, [.launch(fixture.receipt("native", platform: "Mac"), verify: true)])
+        XCTAssertNil(fixture.model.selectedGame)
+    }
+
+    func testLibraryNeverDownloadsAGameEpicShipsForNoPlatform() async throws {
+        var unsupported = game("neither")
+        unsupported.windows = false
+        let fixture = try await fixture(game: unsupported)
+        fixture.model.closeGame()
+
+        XCTAssertFalse(fixture.model.canInstallFromLibrary(unsupported))
+        fixture.model.downloadFromLibrary(unsupported)
+
+        XCTAssertTrue(fixture.backend.actions.isEmpty)
+    }
+
     /// An account with `owned` on screen, installed for `installed`.
     private func fixture(game owned: EpicGame? = nil, installed: String? = nil) async throws -> EpicDownloadFixture {
         let owned = owned ?? game("one")

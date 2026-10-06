@@ -42,6 +42,9 @@ pub struct Game {
     pub developer: String,
     pub windows: bool,
     pub macos: bool,
+    /// Everything Epic returned for the game: `catalogItems` by catalog item
+    /// ID, `libraryRecords`, and `assets` by platform.
+    pub metadata: serde_json::Value,
 }
 
 /// Optional account history and manifest size for a single library entry.
@@ -137,7 +140,7 @@ impl Client {
         let (history, size) = self
             .with_access_token(|token| async move {
                 let (history, size) = tokio::join!(
-                    playtime(&self.api, &token, account_id, app_name),
+                    playtimes(&self.api, &token, account_id),
                     crate::details::installation_size(
                         &self.api,
                         &token,
@@ -162,10 +165,21 @@ impl Client {
         match (history, size) {
             (Err(error), Err(_)) => Err(error),
             (history, size) => Ok(GameDetails {
-                playtime_seconds: history.ok().flatten(),
+                playtime_seconds: history.ok().and_then(|times| times.get(app_name).copied()),
                 installation_bytes: size.ok(),
             }),
         }
+    }
+
+    /// Every game's playtime in seconds, by app name, in one request. A game
+    /// the account never played has no entry.
+    pub async fn playtimes(&self) -> Result<BTreeMap<String, u64>, EpicError> {
+        let account_id = self.credentials().await?.account_id;
+        let account_id = account_id.as_str();
+        self.with_access_token(
+            |token| async move { playtimes(&self.api, &token, account_id).await },
+        )
+        .await
     }
 
     pub(crate) fn from_session(api: Api, session: Session) -> Self {
@@ -381,9 +395,18 @@ struct LibraryItem {
     catalog_item_id: String,
     #[serde(default)]
     sandbox_type: String,
+    /// The record as Epic returned it.
+    #[serde(skip)]
+    raw: serde_json::Value,
 }
 
 impl LibraryItem {
+    fn parse(raw: serde_json::Value) -> Result<Self, EpicError> {
+        let mut item = Self::deserialize(&raw).map_err(|_| EpicError::Protocol)?;
+        item.raw = raw;
+        Ok(item)
+    }
+
     fn usable(&self) -> bool {
         !self.app_name.is_empty()
             && self.app_name != "1"
@@ -404,7 +427,7 @@ impl LibraryItem {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct LibraryPage {
-    records: Vec<LibraryItem>,
+    records: Vec<serde_json::Value>,
     response_metadata: PageMetadata,
 }
 
@@ -465,8 +488,24 @@ async fn library(api: &Api, access_token: &str) -> Result<Vec<Game>, EpicError> 
     let windows_keys: HashSet<_> = windows.iter().map(LibraryItem::key).collect();
     let macos_keys: HashSet<_> = macos.iter().map(LibraryItem::key).collect();
     let mut items = BTreeMap::new();
-    for item in owned.into_iter().chain(windows).chain(macos) {
+    // Every record Epic returned for each game, by where it came from.
+    let mut sources: BTreeMap<(String, String), BTreeMap<&str, Vec<serde_json::Value>>> =
+        BTreeMap::new();
+    let tagged = (owned.into_iter().map(|item| ("library", item)))
+        .chain(windows.into_iter().map(|item| ("Windows", item)))
+        .chain(macos.into_iter().map(|item| ("Mac", item)));
+    for (source, mut item) in tagged {
         if item.usable() && !excluded.contains(&item.key()) {
+            let records = sources
+                .entry((item.namespace.clone(), item.app_name.clone()))
+                .or_default()
+                .entry(source)
+                .or_default();
+            // `sources` keeps the record: nothing reads it from the item again.
+            let raw = std::mem::take(&mut item.raw);
+            if !records.contains(&raw) {
+                records.push(raw);
+            }
             items.insert(item.key(), item);
         }
     }
@@ -510,7 +549,14 @@ async fn library(api: &Api, access_token: &str) -> Result<Vec<Game>, EpicError> 
                     query.append_pair("id", &id);
                 }
             }
-            let result: BTreeMap<String, CatalogItem> = api.get(url, access_token).await?;
+            let result: BTreeMap<String, serde_json::Value> = api.get(url, access_token).await?;
+            let result = result
+                .into_iter()
+                .map(|(id, raw)| {
+                    let item = CatalogItem::deserialize(&raw).map_err(|_| EpicError::Protocol)?;
+                    Ok((id, (item, raw)))
+                })
+                .collect::<Result<BTreeMap<_, _>, EpicError>>()?;
             Ok::<_, EpicError>((namespace, result))
         })
         .buffer_unordered(6)
@@ -527,7 +573,8 @@ async fn library(api: &Api, access_token: &str) -> Result<Vec<Game>, EpicError> 
 
     let mut games: BTreeMap<(String, String), Game> = BTreeMap::new();
     for (key, item) in items {
-        let details = metadata.get(&(item.namespace.clone(), item.catalog_item_id.clone()));
+        let entry = metadata.get(&(item.namespace.clone(), item.catalog_item_id.clone()));
+        let details = entry.map(|(details, _)| details);
         if details.is_some_and(|details| {
             details.main_game_item.is_some()
                 || details.categories.iter().any(|category| {
@@ -580,6 +627,11 @@ async fn library(api: &Api, access_token: &str) -> Result<Vec<Game>, EpicError> 
                 .unwrap_or_default(),
             image_url: details.and_then(catalog_image),
             header_image_url: details.and_then(catalog_header_image),
+            metadata: game_metadata(
+                &item,
+                entry.map(|(_, raw)| raw),
+                sources.get(&(item.namespace.clone(), item.app_name.clone())),
+            ),
             app_name: item.app_name,
             namespace: item.namespace,
             catalog_item_id: item.catalog_item_id,
@@ -606,6 +658,15 @@ async fn library(api: &Api, access_token: &str) -> Result<Vec<Game>, EpicError> 
             if existing.header_image_url.is_none() {
                 existing.header_image_url = game.header_image_url;
             }
+            // Each catalog item of the game, under its own ID.
+            if let (Some(all), Some(added)) = (
+                existing.metadata["catalogItems"].as_object_mut(),
+                game.metadata["catalogItems"].as_object(),
+            ) {
+                for (id, raw) in added {
+                    all.entry(id.clone()).or_insert_with(|| raw.clone());
+                }
+            }
         } else {
             games.insert(identity, game);
         }
@@ -613,6 +674,30 @@ async fn library(api: &Api, access_token: &str) -> Result<Vec<Game>, EpicError> 
     let mut games: Vec<_> = games.into_values().collect();
     games.sort_by_cached_key(|game| (game.title.to_lowercase(), game.app_name.clone()));
     Ok(games)
+}
+
+/// Everything Epic returned for a game: its catalog item, its library records
+/// and its assets by platform.
+fn game_metadata(
+    item: &LibraryItem,
+    catalog: Option<&serde_json::Value>,
+    sources: Option<&BTreeMap<&str, Vec<serde_json::Value>>>,
+) -> serde_json::Value {
+    let records = |source: &str| {
+        sources
+            .and_then(|sources| sources.get(source))
+            .cloned()
+            .unwrap_or_default()
+    };
+    let mut catalog_items = serde_json::Map::new();
+    if let Some(catalog) = catalog {
+        catalog_items.insert(item.catalog_item_id.clone(), catalog.clone());
+    }
+    serde_json::json!({
+        "catalogItems": catalog_items,
+        "libraryRecords": records("library"),
+        "assets": { "Windows": records("Windows"), "Mac": records("Mac") },
+    })
 }
 
 fn catalog_image(item: &CatalogItem) -> Option<String> {
@@ -672,13 +757,18 @@ async fn library_items(api: &Api, access_token: &str) -> Result<Vec<LibraryItem>
             url.query_pairs_mut().append_pair("cursor", cursor);
         }
         let page: LibraryPage = api.get(url, access_token).await?;
-        if page.records.iter().any(|item| {
+        let page_records = page
+            .records
+            .into_iter()
+            .map(LibraryItem::parse)
+            .collect::<Result<Vec<_>, _>>()?;
+        if page_records.iter().any(|item| {
             !item.app_name.is_empty()
                 && (item.namespace.is_empty() || item.catalog_item_id.is_empty())
         }) {
             return Err(EpicError::Protocol);
         }
-        records.extend(page.records);
+        records.extend(page_records);
         if records.len() > MAX_LIBRARY_RECORDS {
             return Err(EpicError::Protocol);
         }
@@ -707,7 +797,8 @@ async fn assets(
         &["launcher", "api", "public", "assets", platform],
     )?;
     url.query_pairs_mut().append_pair("label", "Live");
-    api.get(url, access_token).await
+    let assets: Vec<serde_json::Value> = api.get(url, access_token).await?;
+    assets.into_iter().map(LibraryItem::parse).collect()
 }
 
 fn endpoint(base: &str, segments: &[&str]) -> Result<Url, EpicError> {
@@ -727,12 +818,12 @@ struct PlaytimeItem {
     total_time: u64,
 }
 
-async fn playtime(
+/// The account's playtime of every game it played, by app name.
+async fn playtimes(
     api: &Api,
     access_token: &str,
     account_id: &str,
-    app_name: &str,
-) -> Result<Option<u64>, EpicError> {
+) -> Result<BTreeMap<String, u64>, EpicError> {
     let url = endpoint(
         &api.library,
         &[
@@ -742,8 +833,9 @@ async fn playtime(
     let records: Vec<PlaytimeItem> = api.get(url, access_token).await?;
     Ok(records
         .into_iter()
-        .find(|record| record.account_id == account_id && record.artifact_id == app_name)
-        .map(|record| record.total_time))
+        .filter(|record| record.account_id == account_id)
+        .map(|record| (record.artifact_id, record.total_time))
+        .collect())
 }
 
 #[cfg(test)]

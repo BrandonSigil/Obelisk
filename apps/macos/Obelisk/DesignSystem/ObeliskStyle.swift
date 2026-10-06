@@ -8,6 +8,13 @@ enum ObeliskStyle {
     static let contentPadding: CGFloat = 32
     /// Fixed storefront title bar height; `StorefrontPage` reserves the same space.
     static let titleBarHeight: CGFloat = 58
+    /// A library hero's height below the bar it reaches under.
+    static let libraryHeroHeight: CGFloat = 330
+    /// Steam's colors to launch and to install a game, leading to trailing.
+    static let launchGradient = [Color(red: 0.46, green: 0.77, blue: 0.27), Color(red: 0.32, green: 0.63, blue: 0.20)]
+    static let installGradient = [Color(red: 0.28, green: 0.55, blue: 0.98), Color(red: 0.40, green: 0.38, blue: 0.88)]
+    /// How a library moves to a new filter or sort order.
+    static var selectionAnimation: Animation { .spring(response: 0.32, dampingFraction: 0.82) }
 }
 
 struct ObeliskPalette {
@@ -19,12 +26,6 @@ struct ObeliskPalette {
             : Color(red: 0.975, green: 0.97, blue: 0.97)
     }
 
-    var sidebar: Color {
-        colorScheme == .dark
-            ? Color(red: 0.16, green: 0.145, blue: 0.15)
-            : Color(red: 0.94, green: 0.925, blue: 0.93)
-    }
-
     var surface: Color {
         colorScheme == .dark
             ? Color.white.opacity(0.035)
@@ -33,10 +34,6 @@ struct ObeliskPalette {
 
     var border: Color {
         Color.primary.opacity(colorScheme == .dark ? 0.075 : 0.08)
-    }
-
-    var selection: Color {
-        Color.primary.opacity(colorScheme == .dark ? 0.12 : 0.075)
     }
 }
 

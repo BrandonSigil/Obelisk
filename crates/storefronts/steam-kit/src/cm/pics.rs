@@ -16,6 +16,9 @@ pub struct AppInfo {
     pub launch_configs: Vec<LaunchConfig>,
     /// Complete Steam UFS configuration, including unknown future fields.
     pub cloud: Option<crate::cloud::CloudMetadata>,
+    /// The whole app info as PICS returned it, such as its store details,
+    /// associations, assets, depots and launch options.
+    pub metadata: serde_json::Value,
 }
 
 /// App ownership and depot entitlement are distinct package fields.
@@ -155,6 +158,7 @@ pub(super) fn parse_app(app_id: u32, bytes: &[u8]) -> Result<AppInfo, CmError> {
         depots,
         launch_configs,
         cloud: root.get("ufs").map(crate::cloud::CloudMetadata::from),
+        metadata: root.to_json(),
     })
 }
 

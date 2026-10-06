@@ -93,15 +93,12 @@ struct GameActionButton: View {
 /// Steam's launch bar button: an uppercase title on a gradient, green to
 /// launch and blue to install.
 private struct GameActionButtonStyle: ButtonStyle {
-    private static let launchGradient = [Color(red: 0.46, green: 0.77, blue: 0.27), Color(red: 0.32, green: 0.63, blue: 0.20)]
-    private static let installGradient = [Color(red: 0.28, green: 0.55, blue: 0.98), Color(red: 0.40, green: 0.38, blue: 0.88)]
-
     let launches: Bool
     /// A button showing progress keeps its color while it cannot be pressed.
     let isBusy: Bool
 
     func makeBody(configuration: Configuration) -> some View {
-        Appearance(configuration: configuration, colors: launches ? Self.launchGradient : Self.installGradient,
+        Appearance(configuration: configuration, colors: launches ? ObeliskStyle.launchGradient : ObeliskStyle.installGradient,
                    isBusy: isBusy)
     }
 

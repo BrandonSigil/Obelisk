@@ -284,6 +284,7 @@ final class EpicFriendsTestSession: EpicSessionProtocol, @unchecked Sendable {
     var maximumWaiters: Int { lock.withLock { maximum } }
     func credentials() async throws -> EpicCredentials { lock.withLock { saved } }
     func games() async throws -> [EpicGame] { [] }
+    func playtimes() async throws -> [EpicPlaytime] { [] }
     func startFriends() async { lock.withLock { startCount += 1 } }
     func reconnectFriends() async {
         lock.withLock {

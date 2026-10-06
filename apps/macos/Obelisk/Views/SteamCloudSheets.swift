@@ -87,3 +87,19 @@ struct SteamCloudFailureView: View {
         .accessibilityIdentifier("\(storefront)-cloud-failure")
     }
 }
+
+extension SteamCloudFailureView {
+    /// The Cloud failure a storefront's model presents, answered through it.
+    init<Model: LibraryStorefront>(model: Model, storefront: String) {
+        self.init(
+            title: model.cloudTitle(for: model.cloud.promptGame),
+            message: model.cloud.promptMessage,
+            busy: model.cloud.promptWorking,
+            canLaunchAnyway: model.cloud.canLaunchAnyway,
+            onRetry: { model.cloud.respond(.retry) },
+            onCancel: { model.cloud.respond(.cancel) },
+            onLaunchAnyway: { model.cloud.respond(.launchAnyway) },
+            storefront: storefront
+        )
+    }
+}

@@ -339,6 +339,8 @@ pub(crate) struct OwnedGamesRequest {
     pub skip_unvetted_apps: Option<bool>,
     #[prost(string, tag = "7")]
     pub language: String,
+    #[prost(bool, tag = "8")]
+    pub include_extended_app_info: bool,
 }
 
 #[derive(Clone, PartialEq, prost::Message)]
@@ -349,16 +351,49 @@ pub(crate) struct OwnedGamesResponse {
     pub games: Vec<OwnedGame>,
 }
 
-#[derive(Clone, PartialEq, prost::Message)]
+/// Every field of a game in `Player.GetOwnedGames`, named as Steam names it.
+#[derive(Clone, PartialEq, prost::Message, serde::Serialize)]
 pub(crate) struct OwnedGame {
     #[prost(int32, tag = "1")]
+    #[serde(rename = "appid")]
     pub app_id: i32,
     #[prost(string, tag = "2")]
     pub name: String,
+    #[prost(int32, tag = "3")]
+    pub playtime_2weeks: i32,
     #[prost(int32, tag = "4")]
     pub playtime_forever: i32,
     #[prost(string, tag = "5")]
+    #[serde(rename = "img_icon_url")]
     pub icon_hash: String,
+    #[prost(bool, tag = "7")]
+    pub has_community_visible_stats: bool,
+    #[prost(int32, tag = "8")]
+    pub playtime_windows_forever: i32,
+    #[prost(int32, tag = "9")]
+    pub playtime_mac_forever: i32,
+    #[prost(int32, tag = "10")]
+    pub playtime_linux_forever: i32,
+    #[prost(int32, tag = "20")]
+    pub playtime_deck_forever: i32,
     #[prost(uint32, tag = "11")]
+    #[serde(rename = "rtime_last_played")]
     pub last_played: u32,
+    #[prost(string, tag = "12")]
+    pub capsule_filename: String,
+    #[prost(string, tag = "13")]
+    pub sort_as: String,
+    #[prost(bool, tag = "14")]
+    pub has_workshop: bool,
+    #[prost(bool, tag = "15")]
+    pub has_market: bool,
+    #[prost(bool, tag = "16")]
+    pub has_dlc: bool,
+    #[prost(bool, tag = "17")]
+    pub has_leaderboards: bool,
+    #[prost(uint32, repeated, tag = "18")]
+    #[serde(rename = "content_descriptorids")]
+    pub content_descriptor_ids: Vec<u32>,
+    #[prost(int32, tag = "19")]
+    pub playtime_disconnected: i32,
 }

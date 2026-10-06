@@ -18,7 +18,7 @@ final class SteamSortingPerformanceTests: XCTestCase {
             // Measure only the synchronous production filter/sort. Validation
             // and JSON logging remain outside the timed section.
             for iteration in 0..<5 {
-                for sort in [SteamLibrarySort.lastPlayed, .name, .playtime] {
+                for sort in [StorefrontLibrarySort.lastPlayed, .name, .playtime] {
                     let began = ContinuousClock.now
                     let result = SteamModel.filterAndSort(games, query: "", sort: sort)
                     let elapsed = milliseconds(since: began)
@@ -39,7 +39,7 @@ final class SteamSortingPerformanceTests: XCTestCase {
             // repeated sorting can reuse cached results even though the pure
             // filterAndSort implementation remains unchanged.
             for iteration in 0..<5 {
-                for sort in [SteamLibrarySort.lastPlayed, .name, .playtime] {
+                for sort in [StorefrontLibrarySort.lastPlayed, .name, .playtime] {
                     let began = ContinuousClock.now
                     model.sort = sort
                     let result = model.filteredGames
@@ -72,7 +72,7 @@ final class SteamSortingPerformanceTests: XCTestCase {
         return Double(components.seconds) * 1_000 + Double(components.attoseconds) / 1_000_000_000_000_000
     }
 
-    private func assertOrder(_ games: [SteamGame], count: Int, sort: SteamLibrarySort, file: StaticString = #filePath, line: UInt = #line) {
+    private func assertOrder(_ games: [SteamGame], count: Int, sort: StorefrontLibrarySort, file: StaticString = #filePath, line: UInt = #line) {
         XCTAssertEqual(games.count, count, file: file, line: line)
         for (left, right) in zip(games, games.dropFirst()) {
             switch sort {

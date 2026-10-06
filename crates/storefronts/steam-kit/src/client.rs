@@ -39,6 +39,8 @@ pub use crate::cm::achievements::Achievement;
 pub struct GamePlatforms {
     pub app_id: u32,
     pub platforms: Vec<String>,
+    /// The game's whole PICS app info, when PICS returned the game.
+    pub pics: Option<serde_json::Value>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -399,6 +401,7 @@ impl Client {
                 platforms: apps
                     .get(&app_id)
                     .map_or_else(Vec::new, |app| app.os_list.clone()),
+                pics: apps.get(&app_id).map(|app| app.metadata.clone()),
             })
             .collect())
     }
@@ -956,6 +959,7 @@ mod tests {
             os_list: vec!["windows".into(), "macos".into()],
             launch_configs: vec![],
             cloud: None,
+            metadata: serde_json::Value::Null,
             depots: vec![
                 depot(1, "", None, None),
                 depot(2, "windows", Some("english"), None),
@@ -988,6 +992,7 @@ mod tests {
             os_list: vec!["windows".into(), "macos".into()],
             launch_configs: vec![],
             cloud: None,
+            metadata: serde_json::Value::Null,
             depots,
         }
     }

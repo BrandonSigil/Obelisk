@@ -41,6 +41,21 @@ impl Kv {
             Self::Value(_) => &[],
         }
     }
+
+    /// The whole tree as JSON, every value a string as text VDF writes it. A
+    /// repeated key keeps its first value, the one `get` reads.
+    pub(crate) fn to_json(&self) -> serde_json::Value {
+        match self {
+            Self::Value(value) => serde_json::Value::String(value.clone()),
+            Self::Object(children) => {
+                let mut object = serde_json::Map::with_capacity(children.len());
+                for (key, value) in children {
+                    object.entry(key.clone()).or_insert_with(|| value.to_json());
+                }
+                serde_json::Value::Object(object)
+            }
+        }
+    }
 }
 
 pub(crate) fn text(bytes: &[u8]) -> Result<Kv, KvError> {

@@ -212,3 +212,83 @@ async fn library_platforms_failure_is_not_cached_as_unknown() {
     );
     assert_eq!(retry.unwrap()[0].platforms, ["windows", "macos"]);
 }
+
+#[tokio::test]
+async fn library_platforms_carry_the_whole_pics_app_info() {
+    let (client, mut server, _) = fixture().await;
+    let result = proto::ProductResponse {
+        apps: vec![proto::ProductInfo {
+            id: 620,
+            buffer: Bytes::from_static(
+                br#""appinfo" { "appid" "620" "common" { "name" "Portal 2" "oslist" "windows,macos"
+                    "associations" { "0" { "type" "developer" "name" "Valve" } } "review_score" "9" }
+                    "extended" { "homepage" "https://www.thinkwithportals.com" } }"#,
+            ),
+            ..Default::default()
+        }],
+        ..Default::default()
+    };
+    let (games, ()) = tokio::join!(
+        client.platforms(&[620]),
+        respond_batch(&mut server, &[620], result)
+    );
+    let pics = games
+        .unwrap()
+        .remove(0)
+        .pics
+        .expect("PICS answered for the game");
+    assert_eq!(pics["common"]["name"], "Portal 2");
+    assert_eq!(pics["common"]["associations"]["0"]["name"], "Valve");
+    assert_eq!(pics["common"]["review_score"], "9");
+    assert_eq!(
+        pics["extended"]["homepage"],
+        "https://www.thinkwithportals.com"
+    );
+}
+
+#[tokio::test]
+async fn library_asks_steam_for_every_owned_game_field() {
+    let (client, mut server, _) = fixture().await;
+    let answer = async {
+        let packet = server.request(SERVICE_REQUEST).await;
+        assert_eq!(
+            packet.header.target_name.as_deref(),
+            Some("Player.GetOwnedGames#1")
+        );
+        let request = proto::OwnedGamesRequest::decode(packet.body.clone()).unwrap();
+        assert!(
+            request.include_extended_app_info,
+            "Steam only sends the extended fields on request"
+        );
+        let response = proto::OwnedGamesResponse {
+            game_count: 1,
+            games: vec![proto::OwnedGame {
+                app_id: 620,
+                name: "Portal 2".into(),
+                playtime_forever: 824,
+                playtime_mac_forever: 120,
+                icon_hash: "icon".into(),
+                last_played: 1_789_430_000,
+                capsule_filename: "capsule.jpg".into(),
+                sort_as: "portal 2".into(),
+                has_dlc: true,
+                content_descriptor_ids: vec![2, 5],
+                ..Default::default()
+            }],
+        };
+        server.reply(&packet, SERVICE_RESPONSE, &response).await;
+    };
+    let (games, ()) = tokio::join!(client.games(), answer);
+    let game = games.unwrap().remove(0);
+    assert_eq!(game.playtime_minutes, 824);
+    assert_eq!(game.record["appid"], 620);
+    assert_eq!(game.record["img_icon_url"], "icon");
+    assert_eq!(game.record["rtime_last_played"], 1_789_430_000);
+    assert_eq!(game.record["playtime_mac_forever"], 120);
+    assert_eq!(game.record["capsule_filename"], "capsule.jpg");
+    assert_eq!(game.record["has_dlc"], true);
+    assert_eq!(
+        game.record["content_descriptorids"],
+        serde_json::json!([2, 5])
+    );
+}

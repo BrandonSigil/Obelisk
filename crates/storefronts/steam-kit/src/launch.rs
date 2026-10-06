@@ -87,6 +87,7 @@ mod tests {
             depots: vec![],
             launch_configs: configs,
             cloud: None,
+            metadata: serde_json::Value::Null,
         }
     }
     fn config(executable: &str, os: &str, kind: &str) -> LaunchConfig {

@@ -41,7 +41,7 @@ enum SteamGames: GameStorefront {
     static let recoveringSession = "model.steam.recoveringSession"
 
     @MainActor static let sessions = GameSessions<SteamGames>(
-        StorefrontSessions(storefront: storefront, locations: .live)
+        StorefrontSessions(storefront: storefront, locations: .live), history: .live
     )
 }
 
@@ -68,7 +68,7 @@ enum EpicGames: GameStorefront {
     static let recoveringSession = "model.epic.recoveringSession"
 
     @MainActor static let sessions = GameSessions<EpicGames>(
-        StorefrontSessions(storefront: storefront, locations: .live)
+        StorefrontSessions(storefront: storefront, locations: .live), history: .live
     )
 }
 
@@ -127,10 +127,13 @@ final class GameSessions<Store: GameStorefront> {
     private var rosetta: RosettaPrompt?
     /// Rust's Game sessions, which the account's installations admit launches into.
     @ObservationIgnored let core: any StorefrontSessionsProtocol
+    /// Where every game this Obelisk saw start is recorded.
+    @ObservationIgnored let history: LaunchHistory
     @ObservationIgnored private var revision: UInt64 = 0
 
-    init(_ core: any StorefrontSessionsProtocol) {
+    init(_ core: any StorefrontSessionsProtocol, history: LaunchHistory) {
         self.core = core
+        self.history = history
         apply(core.state())
         let revision = revision
         Task { [weak self] in
@@ -154,6 +157,11 @@ final class GameSessions<Store: GameStorefront> {
         guard state.revision > revision else { return }
         revision = state.revision
         let active = state.active.flatMap(Session.init)
+        // A launch this Obelisk saw start. A game recovered running started
+        // before, and was recorded then.
+        if let active, active.running, let previous = self.active, previous.id == active.id, !previous.running {
+            history.record(active.game, account: active.account, in: Store.self)
+        }
         // Repeated states do not invalidate unchanged presentation.
         if self.active != active { self.active = active }
         let last = state.last.flatMap(Session.init)

@@ -5033,7 +5033,7 @@
         }
       }
     },
-    "model.steam.sort.lastPlayed": {
+    "model.library.sort.lastPlayed": {
       "extractionState": "manual",
       "localizations": {
         "en": {
@@ -5050,7 +5050,7 @@
         }
       }
     },
-    "model.steam.sort.name": {
+    "model.library.sort.name": {
       "extractionState": "manual",
       "localizations": {
         "en": {
@@ -5067,7 +5067,7 @@
         }
       }
     },
-    "model.steam.sort.playtime": {
+    "model.library.sort.playtime": {
       "extractionState": "manual",
       "localizations": {
         "en": {
@@ -5084,7 +5084,7 @@
         }
       }
     },
-    "model.steam.sortMenu.lastPlayed": {
+    "model.library.sortMenu.lastPlayed": {
       "extractionState": "manual",
       "localizations": {
         "en": {
@@ -5101,7 +5101,7 @@
         }
       }
     },
-    "model.steam.sortMenu.name": {
+    "model.library.sortMenu.name": {
       "extractionState": "manual",
       "localizations": {
         "en": {
@@ -5118,7 +5118,7 @@
         }
       }
     },
-    "model.steam.sortMenu.playtime": {
+    "model.library.sortMenu.playtime": {
       "extractionState": "manual",
       "localizations": {
         "en": {
@@ -5624,23 +5624,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Installé"
-          }
-        }
-      }
-    },
-    "ui.filter.library": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Filter library"
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Filtrer la bibliothèque"
           }
         }
       }
@@ -7254,6 +7237,57 @@
         }
       }
     },
+    "ui.library.hero.open": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "View game"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Voir le jeu"
+          }
+        }
+      }
+    },
+    "ui.library.loading_playtime": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Loading playtime…"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Chargement du temps de jeu…"
+          }
+        }
+      }
+    },
+    "ui.library.playtime_unavailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Playtime could not be loaded."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Le temps de jeu n’a pas pu être chargé."
+          }
+        }
+      }
+    },
     "ui.search.clear": {
       "extractionState": "manual",
       "localizations": {
@@ -7543,23 +7577,6 @@
         }
       }
     },
-    "ui.sort.by_name": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Sort by name"
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Trier par nom"
-          }
-        }
-      }
-    },
     "ui.sort.library": {
       "extractionState": "manual",
       "localizations": {
@@ -7590,23 +7607,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Trier la bibliothèque %1$@"
-          }
-        }
-      }
-    },
-    "ui.sort.name": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Name"
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Nom"
           }
         }
       }
@@ -8700,6 +8700,23 @@
         }
       }
     },
+    "model.steam.noInstallableBuild": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Steam offers no build of this game that your account can install."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Steam ne propose aucune version de ce jeu installable avec votre compte."
+          }
+        }
+      }
+    },
     "ui.cloud.working": {
       "extractionState": "manual",
       "localizations": {
@@ -9466,6 +9483,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "Débloqué"
+          }
+        }
+      }
+    },
+    "ui.game.download_named": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Download %1$@"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Télécharger %1$@"
           }
         }
       }

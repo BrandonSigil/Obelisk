@@ -1,0 +1,248 @@
+import SwiftUI
+
+/// A game of a storefront library: its portrait cover, which lifts under the
+/// pointer and then shows a glass bar holding its title and its launch or
+/// download button.
+struct LibraryCoverCard<Artwork: View>: View {
+    let title: String
+    let accessibilityLabel: String
+    var help: String?
+    var platform: GamePlatform?
+    let action: LibraryCardAction
+    /// The Transfer's progress, read by the button alone so a progress tick
+    /// redraws only the button.
+    var progress: @MainActor () -> Double? = { nil }
+    let open: () -> Void
+    let perform: () -> Void
+    @ViewBuilder let artwork: Artwork
+    @State private var hovered = false
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private static var cornerRadius: CGFloat { 20 }
+    private static var barInset: CGFloat { 8 }
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous)
+        return Button(action: open) {
+            Color.clear
+                .aspectRatio(2.0 / 3.0, contentMode: .fit)
+                .overlay { artwork }
+                .contentShape(shape)
+        }
+        .obeliskButtonStyle(.plain)
+        .help(help ?? title)
+        .accessibilityLabel(accessibilityLabel)
+        .accessibilityValue(platform?.title ?? "")
+        // The bar only shows under the pointer; its action stays reachable.
+        .accessibilityActions {
+            if action.isEnabled, let label = action.label(title: title) {
+                Button(label, action: perform)
+            }
+        }
+        .overlay(alignment: .topTrailing) {
+            if hovered, let platform {
+                LibraryPlatformBadge(platform: platform)
+                    .padding(Self.barInset + 2)
+                    .transition(.opacity.combined(with: .scale(scale: 0.85)))
+            }
+        }
+        .overlay(alignment: .bottom) {
+            if hovered {
+                LibraryCardBar(
+                    title: title,
+                    action: action,
+                    progress: progress,
+                    // Concentric with the card: its radius less the margin.
+                    cornerRadius: Self.cornerRadius - Self.barInset,
+                    open: open,
+                    perform: perform
+                )
+                // A point closer to the sides than to the bottom.
+                .padding(.horizontal, Self.barInset - 1)
+                .padding(.bottom, Self.barInset)
+                .transition(.opacity.combined(with: .offset(y: 12)))
+            }
+        }
+        .clipShape(shape)
+        .overlay {
+            shape.strokeBorder(.white.opacity(hovered ? 0.3 : colorScheme == .dark ? 0.08 : 0.2), lineWidth: 1)
+                .allowsHitTesting(false)
+        }
+        .shadow(
+            color: .black.opacity(colorScheme == .dark ? (hovered ? 0.5 : 0.3) : (hovered ? 0.25 : 0.12)),
+            radius: hovered ? 18 : 7,
+            y: hovered ? 12 : 4
+        )
+        .scaleEffect(hovered && !reduceMotion ? 1.03 : 1)
+        .animation(reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 0.72), value: hovered)
+        .onHover { hovered = $0 }
+    }
+}
+
+/// What a library card's round button shows and does for its game.
+enum LibraryCardAction: Equatable {
+    case launch(enabled: Bool)
+    case download(enabled: Bool)
+    /// A launch, uninstall or download being prepared.
+    case busy
+    /// A Transfer runs for the game.
+    case transferring
+    case running
+
+    /// What the button does for `title`, when it launches or downloads.
+    func label(title: String) -> String? {
+        switch self {
+        case .launch: L10n.string("ui.game.launch_named", title)
+        case .download: L10n.string("ui.game.download_named", title)
+        case .busy, .transferring, .running: nil
+        }
+    }
+
+    var isEnabled: Bool {
+        switch self {
+        case let .launch(enabled), let .download(enabled): enabled
+        case .busy, .transferring, .running: false
+        }
+    }
+}
+
+/// The card's glass bar: the title opens the game, the button acts on it.
+private struct LibraryCardBar: View {
+    let title: String
+    let action: LibraryCardAction
+    let progress: @MainActor () -> Double?
+    let cornerRadius: CGFloat
+    let open: () -> Void
+    let perform: () -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Button(action: open) {
+                Text(title)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .shadow(color: .black.opacity(0.45), radius: 3, y: 1)
+                    .lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(.rect)
+            }
+            .obeliskButtonStyle(.plain)
+            // The cover already opens the game for assistive technologies.
+            .accessibilityHidden(true)
+
+            LibraryCardButton(title: title, action: action, progress: progress, perform: perform)
+        }
+        .padding(.leading, 12)
+        .padding(.trailing, 6)
+        .padding(.vertical, 6)
+        // Clear glass, as the Dock's, lets the cover show through; the light
+        // text and its shadow keep the title legible over any artwork.
+        .glassEffect(.clear, in: .rect(cornerRadius: cornerRadius, style: .continuous))
+        .environment(\.colorScheme, .dark)
+    }
+}
+
+private struct LibraryCardButton: View {
+    let title: String
+    let action: LibraryCardAction
+    let progress: @MainActor () -> Double?
+    let perform: () -> Void
+
+    private static var diameter: CGFloat { 32 }
+
+    var body: some View {
+        switch action {
+        case .launch:
+            button(symbol: "play.fill", colors: ObeliskStyle.launchGradient)
+        case .download:
+            button(symbol: "square.and.arrow.down", colors: ObeliskStyle.installGradient)
+        case .busy:
+            ProgressView()
+                .controlSize(.small)
+                .frame(width: Self.diameter, height: Self.diameter)
+                .accessibilityLabel(L10n.string("ui.transfer.preparing_accessibility"))
+        case .transferring:
+            LibraryCardProgress(progress: progress, diameter: Self.diameter)
+        case .running:
+            Image(systemName: "play.fill")
+                .font(.system(size: 12, weight: .bold))
+                .foregroundStyle(.green)
+                .frame(width: Self.diameter, height: Self.diameter)
+                .help(L10n.string("model.game.running"))
+                .accessibilityLabel(L10n.string("model.game.running"))
+        }
+    }
+
+    /// Green launches, blue downloads, as on the game's page, through glass.
+    private func button(symbol: String, colors: [Color]) -> some View {
+        let label = action.label(title: title) ?? title
+        return Button(action: perform) {
+            Image(systemName: symbol)
+                .font(.system(size: 12, weight: .bold))
+                .foregroundStyle(.white)
+                .shadow(color: .black.opacity(0.25), radius: 1.5, y: 0.5)
+                .frame(width: Self.diameter, height: Self.diameter)
+                .background {
+                    Circle()
+                        .fill(LinearGradient(colors: colors, startPoint: .leading, endPoint: .trailing))
+                        .opacity(0.75)
+                }
+                .glassEffect(.regular.interactive(), in: .circle)
+                .contentShape(.circle)
+        }
+        .obeliskButtonStyle(.plain)
+        .disabled(!action.isEnabled)
+        .help(label)
+        .accessibilityLabel(label)
+    }
+}
+
+/// A Transfer's progress around the card's button.
+private struct LibraryCardProgress: View {
+    let progress: @MainActor () -> Double?
+    let diameter: CGFloat
+
+    var body: some View {
+        let fraction = progress()
+        ZStack {
+            Circle().stroke(.primary.opacity(0.15), lineWidth: 3)
+            if let fraction {
+                Circle()
+                    .trim(from: 0, to: fraction)
+                    .stroke(LinearGradient(colors: ObeliskStyle.installGradient, startPoint: .leading, endPoint: .trailing),
+                            style: StrokeStyle(lineWidth: 3, lineCap: .round))
+                    .rotationEffect(.degrees(-90))
+            } else {
+                ProgressView().controlSize(.mini)
+            }
+            Image(systemName: "square.and.arrow.down")
+                .font(.system(size: 10, weight: .bold))
+                .opacity(fraction == nil ? 0 : 1)
+        }
+        .padding(4)
+        .frame(width: diameter, height: diameter)
+        .help(L10n.string("ui.transfer.downloading"))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(L10n.string("ui.transfer.downloading"))
+        .accessibilityValue(fraction.map { $0.formatted(.percent.precision(.fractionLength(0)).locale(L10n.locale)) } ?? "")
+    }
+}
+
+/// The system a game runs on, in glass over its cover.
+struct LibraryPlatformBadge: View {
+    let platform: GamePlatform
+
+    var body: some View {
+        Image(platform.logoAssetName)
+            .renderingMode(.template)
+            .resizable()
+            .scaledToFit()
+            .frame(width: 12, height: 12)
+            .frame(width: 26, height: 26)
+            .glassEffect(.regular, in: .circle)
+            .environment(\.colorScheme, .dark)
+            .accessibilityHidden(true)
+            .allowsHitTesting(false)
+    }
+}
