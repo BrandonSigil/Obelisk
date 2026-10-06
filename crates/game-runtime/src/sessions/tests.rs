@@ -392,6 +392,41 @@ async fn startup_recovery_reserves_the_storefront_until_the_recovered_game_exits
 }
 
 #[tokio::test]
+async fn a_launch_keeps_when_its_game_started_even_unseen_running_but_a_recovered_game_has_none() {
+    let sessions = sessions();
+    settled(&sessions).await;
+    let game = steam(42, Phase::Preparing);
+    let launch = follow(&sessions, 42, game.clone());
+    eventually(|| {
+        sessions
+            .state()
+            .active
+            .is_some_and(|active| active.observed)
+    })
+    .await;
+    assert_eq!(sessions.state().active.unwrap().started_at, None);
+
+    // The game ran and exited between two snapshots.
+    let before = crate::unix_now();
+    game.finish(false);
+    assert_eq!(launch.await.unwrap(), Ok(()));
+    let started = sessions.state().last.unwrap().started_at.expect("started");
+    assert!((before..=crate::unix_now()).contains(&started));
+
+    let recovered = steam(570, Phase::Running);
+    let found = recovered.clone();
+    let sessions = recovering(move || Ok(Some(found.clone() as Arc<dyn Supervised<Steam>>)));
+    eventually(|| running(&sessions)).await;
+    recovered.finish(false);
+    eventually(|| !sessions.state().busy()).await;
+    assert_eq!(
+        sessions.state().last.unwrap().started_at,
+        None,
+        "a game recovered running started before this Obelisk saw it"
+    );
+}
+
+#[tokio::test]
 async fn control_loss_is_uncertainty_and_cancelling_never_ends_a_running_game() {
     let sessions = sessions();
     settled(&sessions).await;

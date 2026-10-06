@@ -12,10 +12,14 @@ final class SteamIntegrationTests: XCTestCase {
             SteamGame(appId: 4, name: "Zéro", iconHash: "", lastPlayed: 0, playtimeMinutes: 0),
             SteamGame(appId: 3, name: "Alpha", iconHash: "", lastPlayed: 0, playtimeMinutes: 0),
         ]
-        XCTAssertEqual(SteamModel.filterAndSort(games, query: "", sort: .lastPlayed).map(\.appId), [2, 1, 3, 4])
-        XCTAssertEqual(SteamModel.filterAndSort(games, query: "  etoile  ", sort: .name).map(\.appId), [1])
-        XCTAssertEqual(SteamModel.filterAndSort(games, query: "", sort: .playtime).first?.appId, 1)
-        XCTAssertEqual(SteamModel.filterAndSort(games, query: "missing", sort: .lastPlayed).count, 0)
+        func order(_ sort: StorefrontLibrarySort) -> [UInt32] {
+            LibraryOrdering.order(games, by: sort, title: \.name, playtime: \.playtime,
+                                  lastPlayed: \.lastPlayedOnSteam)
+                .map(\.appId)
+        }
+        XCTAssertEqual(order(.lastPlayed), [2, 1, 3, 4])
+        XCTAssertEqual(order(.name), [3, 1, 2, 4])
+        XCTAssertEqual(order(.playtime), [1, 2, 3, 4])
     }
 
     @MainActor
@@ -330,7 +334,7 @@ final class SteamIntegrationTests: XCTestCase {
 
     func testMalformedSavedSessionIsRejectedAcrossAsyncRustBridge() async {
         do {
-            _ = try await SteamSession.connect(credentials: SteamCredentials(accountName: "fixture", steamId: 1, refreshToken: "invalid-token"))
+            _ = try await SteamSession.connect(credentials: SteamCredentials(accountName: "fixture", steamId: 1, refreshToken: "invalid-token"), library: nil)
             XCTFail("A malformed saved token must fail before a CM connection")
         } catch {
             guard case let SteamError.Failure(reason) = error else {

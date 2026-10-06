@@ -12,7 +12,7 @@ final class EpicFriendsIntegrationTests: XCTestCase {
         let store = EpicKeychain()
         let saved = try await store.load()
         let credentials = try XCTUnwrap(saved, "A saved Epic session is required")
-        let session = try await EpicSession.restore(credentials: credentials)
+        let session = try await EpicSession.restore(credentials: credentials, library: nil)
         try await store.save(session.credentials())
         let persistence = Task {
             var revision: UInt64 = 0

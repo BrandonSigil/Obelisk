@@ -8,7 +8,7 @@ struct SteamGameDetailView: View {
     private var installations: SteamInstallations { model.installations }
 
     private var estimatedBytes: UInt64 {
-        model.platform == "macos" ? model.details?.macosBytes ?? 0 : model.details?.windowsBytes ?? 0
+        model.platform == SteamGames.nativePlatform ? model.details?.macosBytes ?? 0 : model.details?.windowsBytes ?? 0
     }
 
     var body: some View {
@@ -18,8 +18,8 @@ struct SteamGameDetailView: View {
             name: game.name,
             libraryTitle: L10n.string("ui.steam.library"),
             size: sizeText,
-            lastPlayed: SteamFormatting.lastPlayed(game.lastPlayed),
-            playtime: SteamFormatting.playtime(game.playtimeMinutes),
+            lastPlayed: GameFormatting.lastPlayed(model.lastPlayed(of: game)),
+            playtime: GameFormatting.playtime(model.playtime(of: game) ?? .zero),
             back: model.backToLibrary
         ) {
             SteamArtwork(appId: game.appId, portrait: false, iconHash: game.iconHash)
@@ -43,7 +43,7 @@ struct SteamGameDetailView: View {
     // This view is only shown for `model.selectedGame`, so the receipts agree.
     private var sizeText: String {
         let bytes = installations.selectedReceipt?.totalBytes ?? estimatedBytes
-        return bytes > 0 ? SteamFormatting.bytes(bytes) : "—"
+        return bytes > 0 ? GameFormatting.bytes(bytes) : "—"
     }
 
     private var newsSection: some View {

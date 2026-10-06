@@ -56,6 +56,14 @@ impl Drop for Executor {
     }
 }
 
+/// Seconds since the Unix epoch.
+pub(crate) fn unix_now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+}
+
 /// The pinned engine hash lives only in the runtime manifest; this reads it back.
 pub fn client_sha256() -> &'static str {
     &package::entry("steamclient.dylib").sha256

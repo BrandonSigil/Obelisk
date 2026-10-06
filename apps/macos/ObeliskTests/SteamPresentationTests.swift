@@ -10,7 +10,7 @@ final class SteamPresentationTests: XCTestCase {
         // already on disk without requesting a single game-content chunk.
         let transfer = GameTransfer(game: "620", state: .verifying, completedBytes: 400_000_000, totalBytes: 522_734_781, networkBytes: 253, contentBytes: 0, currentFile: "Game_Data/resources.assets", message: "")
         XCTAssertEqual(transfer.activityTitle, L10n.string("ui.transfer.verifying_files"))
-        XCTAssertEqual(transfer.verifiedProgressText, L10n.string("ui.transfer.verified_files", SteamFormatting.bytes(400_000_000), SteamFormatting.bytes(522_734_781)))
+        XCTAssertEqual(transfer.verifiedProgressText, L10n.string("ui.transfer.verified_files", GameFormatting.bytes(400_000_000), GameFormatting.bytes(522_734_781)))
         XCTAssertEqual(transfer.downloadedGameDataText, L10n.string("ui.transfer.no_downloaded_data"))
     }
 
@@ -18,8 +18,8 @@ final class SteamPresentationTests: XCTestCase {
     func testActualChunkDownloadReportsReceivedGameDataSeparatelyFromVerifiedFiles() {
         let downloading = GameTransfer(game: "620", state: .downloading, completedBytes: 400_000_000, totalBytes: 522_734_781, networkBytes: 12_345 + 253, contentBytes: 12_345, currentFile: "Game_Data/resources.assets", message: "")
         XCTAssertEqual(downloading.activityTitle, L10n.string("ui.transfer.downloading"))
-        XCTAssertEqual(downloading.downloadedGameDataText, L10n.string("ui.transfer.downloaded_data", SteamFormatting.bytes(12_345)))
-        XCTAssertEqual(downloading.verifiedProgressText, L10n.string("ui.transfer.verified_files", SteamFormatting.bytes(400_000_000), SteamFormatting.bytes(522_734_781)))
+        XCTAssertEqual(downloading.downloadedGameDataText, L10n.string("ui.transfer.downloaded_data", GameFormatting.bytes(12_345)))
+        XCTAssertEqual(downloading.verifiedProgressText, L10n.string("ui.transfer.verified_files", GameFormatting.bytes(400_000_000), GameFormatting.bytes(522_734_781)))
 
         // Returning to disk verification must update the activity while preserving
         // the number of game bytes actually received earlier in this operation.
@@ -252,48 +252,24 @@ final class SteamPresentationTests: XCTestCase {
         try await eventually {
             host.layoutSubtreeIfNeeded()
             window.displayIfNeeded()
-            guard let scroll = self.firstScrollView(in: host), let document = scroll.documentView else { return false }
+            guard let scroll = firstScrollView(in: host), let document = scroll.documentView else { return false }
             return document.frame.height > scroll.contentView.bounds.height
         }
         // The library and a game's page each keep their own scroll view. The
         // library's scrollbar floats over its artwork; a game's page reserves a
         // persistent one. Neither changes the content width.
-        var originalScroll = try XCTUnwrap(firstScrollView(in: host))
-        var originalScroller = try XCTUnwrap(originalScroll.verticalScroller)
-        var viewportWidth = originalScroll.contentView.bounds.width
-        var scrollerStyle = NSScroller.Style.overlay
+        var scrolling = try StableScroller(in: host, style: .overlay)
         let librarySearchFrame = try XCTUnwrap(accessibilityFrame(in: host, label: L10n.string("ui.search.store_library", L10n.string("ui.store.steam"))), "The search field must be accessible for the layout regression")
-
-        func assertVisibleScroller(_ phase: String) throws {
-            let scroll = try XCTUnwrap(firstScrollView(in: host))
-            XCTAssertTrue(scroll === originalScroll, "The scroll view must survive \(phase)")
-            let scroller = try XCTUnwrap(scroll.verticalScroller)
-            let knob = scroller.rect(for: .knob).intersection(scroller.bounds)
-            let document = try XCTUnwrap(scroll.documentView)
-            let diagnostics = "Steam layout during \(phase), fixture \(size): sameScroller=\(scroller === originalScroller), hidden=\(scroller.isHidden), enabled=\(scroller.isEnabled), alpha=\(scroller.alphaValue), knob=\(NSStringFromRect(knob)), proportion=\(scroller.knobProportion), host=\(NSStringFromRect(host.bounds)), scroll=\(NSStringFromRect(scroll.frame)), scroller=\(NSStringFromRect(scroller.frame)), clipFrame=\(NSStringFromRect(scroll.contentView.frame)), clipBounds=\(NSStringFromRect(scroll.contentView.bounds)), documentFrame=\(NSStringFromRect(document.frame)), documentBounds=\(NSStringFromRect(document.bounds)), contentInsets=\(scroll.contentInsets), scrollerInsets=\(scroll.scrollerInsets), documentSafeArea=\(document.safeAreaInsets), autoInsets=\(scroll.automaticallyAdjustsContentInsets), searchAX=\(String(describing: accessibilityFrame(in: host, label: L10n.string("ui.search.store_library", L10n.string("ui.store.steam"))))), backAX=\(String(describing: accessibilityFrame(in: host, label: L10n.string("ui.steam.library")))), actionAX=\(String(describing: accessibilityFrame(in: host, label: L10n.string("model.game.download"))))"
-            XCTContext.runActivity(named: "Scrollbar during \(phase)") { activity in
-                activity.add(XCTAttachment(string: diagnostics))
-            }
-            XCTAssertTrue(scroller === originalScroller, "The same scrollbar must survive \(phase)")
-            // An overlay scroller takes no width, so AppKit may hide it while
-            // the whole document fits.
-            if scrollerStyle == .legacy {
-                XCTAssertFalse(scroller.isHidden, "The vertical scroller disappeared during \(phase)")
-                XCTAssertGreaterThan(scroller.alphaValue, 0, "The scrollbar is transparent during \(phase)")
-            }
-            XCTAssertEqual(scroll.scrollerStyle, scrollerStyle, "Unexpected scroller style during \(phase)")
-            XCTAssertEqual(scroll.contentView.bounds.width, viewportWidth, accuracy: 0.5, "The content width changed with the scroller during \(phase)")
-        }
-        try assertVisibleScroller("the library")
+        try scrolling.assertKept(in: host, during: "the library")
 
         model.searchText = "Portal 2"
         try await eventually {
             host.layoutSubtreeIfNeeded()
             window.displayIfNeeded()
-            guard let document = originalScroll.documentView else { return false }
-            return document.frame.height <= originalScroll.contentView.bounds.height
+            guard let document = scrolling.scroll.documentView else { return false }
+            return document.frame.height <= scrolling.scroll.contentView.bounds.height
         }
-        try assertVisibleScroller("the filtered library")
+        try scrolling.assertKept(in: host, during: "the filtered library")
         let filteredSearchFrame = try XCTUnwrap(accessibilityFrame(in: host, label: L10n.string("ui.search.store_library", L10n.string("ui.store.steam"))))
         // The clear button takes space at the field's right edge once text exists.
         XCTAssertEqual(filteredSearchFrame.minX, librarySearchFrame.minX, accuracy: 0.5, "The search field shifted horizontally when filtering the library")
@@ -301,8 +277,8 @@ final class SteamPresentationTests: XCTestCase {
         try await eventually {
             host.layoutSubtreeIfNeeded()
             window.displayIfNeeded()
-            guard let document = originalScroll.documentView else { return false }
-            return document.frame.height > originalScroll.contentView.bounds.height
+            guard let document = scrolling.scroll.documentView else { return false }
+            return document.frame.height > scrolling.scroll.contentView.bounds.height
         }
 
         // Keep both responses pending so the detail is temporarily shorter than
@@ -313,17 +289,13 @@ final class SteamPresentationTests: XCTestCase {
         try await eventually {
             host.layoutSubtreeIfNeeded()
             window.displayIfNeeded()
-            guard let scroll = self.firstScrollView(in: host), let document = scroll.documentView else { return false }
-            return scroll !== originalScroll && document.frame.height <= scroll.contentView.bounds.height
+            guard let scroll = firstScrollView(in: host), let document = scroll.documentView else { return false }
+            return scroll !== scrolling.scroll && document.frame.height <= scroll.contentView.bounds.height
         }
-        originalScroll = try XCTUnwrap(firstScrollView(in: host))
-        originalScroller = try XCTUnwrap(originalScroll.verticalScroller)
-        viewportWidth = originalScroll.contentView.bounds.width
-        // Overlay scrollers fade out even with autohiding disabled.
-        scrollerStyle = .legacy
+        scrolling = try StableScroller(in: host, style: .legacy)
         XCTAssertTrue(model.isLoadingNews)
-        XCTAssertFalse(originalScroller.isEnabled, "A page that fits must remain non-scrollable")
-        try assertVisibleScroller("detail loading")
+        XCTAssertFalse(scrolling.scroller.isEnabled, "A page that fits must remain non-scrollable")
+        try scrolling.assertKept(in: host, during: "detail loading")
         // This hosting fixture exposes the native search field, but not the
         // detail's virtual SwiftUI buttons, even in an onscreen window. The
         // mandatory search-frame assertion above covers the horizontal shift;
@@ -336,36 +308,33 @@ final class SteamPresentationTests: XCTestCase {
         try await eventually { model.details != nil && !model.isLoadingDetails }
         host.layoutSubtreeIfNeeded()
         window.displayIfNeeded()
-        try assertVisibleScroller("details loaded, news pending")
+        try scrolling.assertKept(in: host, during: "details loaded, news pending")
         await news.release(620, value: articles)
         try await eventually {
             host.layoutSubtreeIfNeeded()
             window.displayIfNeeded()
-            guard !model.isLoadingNews, let scroll = self.firstScrollView(in: host), let document = scroll.documentView else { return false }
+            guard !model.isLoadingNews, let scroll = firstScrollView(in: host), let document = scroll.documentView else { return false }
             return document.frame.height > scroll.contentView.bounds.height
         }
-        try assertVisibleScroller("loaded news")
-        XCTAssertTrue(originalScroller.isEnabled)
-        XCTAssertTrue(originalScroller.target === originalScroll)
-        XCTAssertNotNil(originalScroller.action)
-        let document = try XCTUnwrap(originalScroll.documentView)
-        let halfway = (document.frame.height - originalScroll.contentView.bounds.height) / 2
-        originalScroll.contentView.scroll(to: NSPoint(x: 0, y: halfway))
-        originalScroll.reflectScrolledClipView(originalScroll.contentView)
-        XCTAssertEqual(originalScroller.doubleValue, 0.5, accuracy: 0.02, "The same scrollbar must follow the document's position")
+        try scrolling.assertKept(in: host, during: "loaded news")
+        let (scroll, scroller) = (scrolling.scroll, scrolling.scroller)
+        XCTAssertTrue(scroller.isEnabled)
+        XCTAssertTrue(scroller.target === scroll)
+        XCTAssertNotNil(scroller.action)
+        let document = try XCTUnwrap(scroll.documentView)
+        let halfway = (document.frame.height - scroll.contentView.bounds.height) / 2
+        scroll.contentView.scroll(to: NSPoint(x: 0, y: halfway))
+        scroll.reflectScrolledClipView(scroll.contentView)
+        XCTAssertEqual(scroller.doubleValue, 0.5, accuracy: 0.02, "The same scrollbar must follow the document's position")
 
         model.backToLibrary()
         try await eventually {
             host.layoutSubtreeIfNeeded()
             window.displayIfNeeded()
-            guard let scroll = self.firstScrollView(in: host), let document = scroll.documentView else { return false }
-            return scroll !== originalScroll && document.frame.height > scroll.contentView.bounds.height
+            guard let scroll = firstScrollView(in: host), let document = scroll.documentView else { return false }
+            return scroll !== scrolling.scroll && document.frame.height > scroll.contentView.bounds.height
         }
-        originalScroll = try XCTUnwrap(firstScrollView(in: host))
-        originalScroller = try XCTUnwrap(originalScroll.verticalScroller)
-        viewportWidth = originalScroll.contentView.bounds.width
-        scrollerStyle = .overlay
-        try assertVisibleScroller("returning to the library")
+        try StableScroller(in: host, style: .overlay).assertKept(in: host, during: "returning to the library")
     }
 
     @MainActor
@@ -444,7 +413,7 @@ final class SteamPresentationTests: XCTestCase {
     }
 
     @MainActor
-    func testLibraryDownloadWaitsForTheAccountsBuildsWithoutOpeningTheGame() async throws {
+    func testLibraryDownloadLetsSteamPickTheBuildWithoutOpeningTheGame() async throws {
         let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
         let details = FixtureResponses<DetailsRequest, SteamGameDetails>()
@@ -454,31 +423,17 @@ final class SteamPresentationTests: XCTestCase {
         await model.start()
 
         model.downloadFromLibrary(fixtureGames[0])
-        XCTAssertEqual(model.preparingDownload, 620)
-        model.downloadFromLibrary(fixtureGames[1])
-        try await eventually { await details.wasRequested(DetailsRequest(appId: 620, language: "french")) }
-        XCTAssertTrue(backend.actions.isEmpty, "Only Steam's details tell which build the account can install")
-        await details.release(DetailsRequest(appId: 620, language: "french"), value: fixtureDetails(620))
-        try await eventually { model.preparingDownload == nil }
-        XCTAssertEqual(backend.actions, [.install(GameOffer.steam(appId: 620, name: "Portal 2", platform: "macos", language: "french"))])
+        XCTAssertEqual(backend.actions, [.install(GameOffer.steam(appId: 620, name: "Portal 2", platform: nil, language: "french"))],
+                       "Steam picks the build as the Transfer starts, without the game's details")
         XCTAssertNil(model.selectedGame)
         XCTAssertNil(model.errorMessage)
-
-        var unavailable = fixtureDetails(570)
-        unavailable.macos = false
-        unavailable.windows = false
-        model.downloadFromLibrary(fixtureGames[1])
-        await details.release(DetailsRequest(appId: 570, language: "french"), value: unavailable)
-        try await eventually { model.preparingDownload == nil }
-        XCTAssertEqual(backend.actions.count, 1)
-        XCTAssertEqual(model.errorMessage, L10n.string("model.steam.noInstallableBuild"))
     }
 
     @MainActor
-    func testTheFeaturedGameIsTheLatestLaunchOnSteamOrFromObelisk() async throws {
+    func testTheLastPlayedGameIsTheLatestLaunchOnSteamOrFromObeliskForTheHeroTheOrderAndTheFilter() async throws {
         let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
-        let history = LaunchHistory(cache: LibraryCache(file: root.appending(path: LibraryCache.fileName)))
+        let history = LaunchHistory(cache: LibraryCache(directory: root.path))
         let details = FixtureResponses<DetailsRequest, SteamGameDetails>()
         let fixture = FixtureSteamSession(games: fixtureGames, details: details)
         let model = SteamModel(directory: root, keychain: FixtureCredentialStore(), connect: { _ in fixture }, news: { _ in [] },
@@ -486,24 +441,30 @@ final class SteamPresentationTests: XCTestCase {
         await model.start()
 
         XCTAssertEqual(model.featuredGame?.appId, 620, "Steam's last played game")
+        XCTAssertEqual(model.filteredGames.map(\.appId), [620, 570, 440])
         let launched = Date(timeIntervalSince1970: 1_789_500_000)
         history.record(570, account: 42, in: SteamGames.self, at: launched)
         XCTAssertEqual(model.featuredGame?.appId, 570, "A later launch from Obelisk")
+        XCTAssertEqual(model.filteredGames.map(\.appId), [570, 620, 440], "The library orders again")
         XCTAssertEqual(model.lastPlayed(of: fixtureGames[1]), launched)
         XCTAssertEqual(model.lastPlayed(of: fixtureGames[0]), Date(timeIntervalSince1970: 1_789_430_000))
         XCTAssertNil(model.lastPlayed(of: fixtureGames[2]))
+
+        model.filter = .played
+        XCTAssertEqual(model.filteredGames.map(\.appId), [570, 620])
+        history.record(440, account: 42, in: SteamGames.self, at: launched + 60)
+        XCTAssertEqual(model.filteredGames.map(\.appId), [440, 570, 620], "Launched from Obelisk, never on Steam")
     }
 
     @MainActor
-    func testTheCachedLibraryShowsWhileSteamConnectsThenUpdatesTheCache() async throws {
+    func testTheCachedLibraryShowsWhileSteamConnectsAndSigningOutForgetsIt() async throws {
         let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
-        let cache = LibraryCache(file: root.appending(path: "library-cache.json"))
         let cached = SteamGame(appId: 620, name: "Portal 2 (cached)", iconHash: "", lastPlayed: 1_789_000_000, playtimeMinutes: 5)
-        cache.save([SteamLibraryEntry(cached, platforms: ["macos"])], in: .steam, account: "42")
+        let cache = try LibraryCache.holding(steam: [42: [CachedSteamGame(game: cached, platforms: ["macos"])]], in: root)
         let connection = GameSessionGate<FixtureSteamSession>()
         let fixture = FixtureSteamSession(games: fixtureGames, details: FixtureResponses<DetailsRequest, SteamGameDetails>()) { ids in
-            ids.map { SteamGamePlatforms(appId: $0, platforms: ["windows"], pics: #"{"common":{"review_score":"9"}}"#) }
+            ids.map { SteamGamePlatforms(appId: $0, platforms: ["windows"]) }
         }
         let model = SteamModel(directory: root, keychain: FixtureCredentialStore(), connect: { _ in try await connection.wait() },
                                news: { _ in [] }, localeIdentifier: "fr-FR", libraryCache: cache)
@@ -517,22 +478,17 @@ final class SteamPresentationTests: XCTestCase {
         await start.value
         try await eventually { model.games == fixtureGames && !model.libraryPlatforms.isLoading }
         XCTAssertTrue(model.showsLibrary)
-        try await eventually { cache.games(SteamLibraryEntry.self, in: .steam, account: "42")?.first?.pics != nil }
-        let saved = try XCTUnwrap(cache.games(SteamLibraryEntry.self, in: .steam, account: "42"))
-        XCTAssertEqual(saved.map(\.game), fixtureGames)
-        XCTAssertEqual(saved.first?.pics?["common"]?["review_score"], .string("9"), "The cache keeps each game's whole PICS")
-        XCTAssertEqual(saved.first?.platforms, ["windows"])
+        XCTAssertEqual(model.libraryPlatforms.platforms[620], ["windows"])
 
         model.signOut()
-        XCTAssertNil(cache.games(SteamLibraryEntry.self, in: .steam, account: "42"), "Signing out forgets the account's library")
+        XCTAssertTrue(cache.steamLibrary(steamId: 42).isEmpty, "Signing out forgets the account's library")
     }
 
     @MainActor
     func testAFailedRestorationHidesTheCachedLibrary() async throws {
         let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
-        let cache = LibraryCache(file: root.appending(path: "library-cache.json"))
-        cache.save([SteamLibraryEntry(fixtureGames[0], platforms: nil)], in: .steam, account: "42")
+        let cache = try LibraryCache.holding(steam: [42: [CachedSteamGame(game: fixtureGames[0], platforms: nil)]], in: root)
         let model = SteamModel(directory: root, keychain: FixtureCredentialStore(),
                                connect: { _ in throw SteamError.Failure(reason: "backend.steam.cm.directoryUnavailable") },
                                news: { _ in [] },
@@ -542,7 +498,7 @@ final class SteamPresentationTests: XCTestCase {
 
         XCTAssertFalse(model.showsLibrary)
         XCTAssertTrue(model.games.isEmpty, "Another account may sign in next")
-        XCTAssertNotNil(cache.games(SteamLibraryEntry.self, in: .steam, account: "42"), "The account may restore later")
+        XCTAssertFalse(cache.steamLibrary(steamId: 42).isEmpty, "The account may restore later")
     }
 
     @MainActor
@@ -906,7 +862,7 @@ final class SteamPresentationTests: XCTestCase {
         fixture.backend.publish { $0.cloudSync = .maintenance(620, question: .conflict(1)) }
 
         try await eventually { app.presentedPrompt == .steamCloud }
-        app.selection = .recent
+        app.selection = .home
         XCTAssertEqual(app.presentedPrompt, .steamCloud, "The question does not wait for the Steam tab")
         fixture.model.cloud.respond(.cancel)
         try await eventually { fixture.backend.actions.last == .answer(620, decision: 1, .cancel) }
@@ -1178,15 +1134,6 @@ final class SteamPresentationTests: XCTestCase {
             for child in view.subviews {
                 if let frame = accessibilityFrame(in: child, label: label, depth: depth + 1) { return frame }
             }
-        }
-        return nil
-    }
-
-    @MainActor
-    private func firstScrollView(in view: NSView) -> NSScrollView? {
-        if let scroll = view as? NSScrollView { return scroll }
-        for child in view.subviews {
-            if let scroll = firstScrollView(in: child) { return scroll }
         }
         return nil
     }

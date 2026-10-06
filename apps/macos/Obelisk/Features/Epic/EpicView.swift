@@ -8,8 +8,10 @@ struct EpicView: View {
         Group {
             if model.showsLibrary && model.selectedGame == nil {
                 library
-            } else {
+            } else if model.isConnected {
                 StorefrontPage { titleBar } content: { content }
+            } else {
+                EpicLoginView(model: model)
             }
         }
         .task { await model.start() }
@@ -30,18 +32,13 @@ struct EpicView: View {
             storeTitle: L10n.string("ui.store.epic"),
             libraryTitle: L10n.string("ui.epic.library"),
             accountName: model.accountName,
-            scrollMemory: libraryScroll,
-            hero: hero
+            scrollMemory: libraryScroll
         ) { game in
-            LibraryCardContent(
-                title: game.title,
-                help: [
-                    game.title,
-                    game.developer.isEmpty ? nil : game.developer,
-                    model.playtime(of: game).map(EpicFormatting.playtime),
-                ].compactMap { $0 }.joined(separator: " · "),
-                platform: .preferred(macos: game.macos, windows: game.windows)
-            )
+            EpicArtwork(imageURL: game.headerImageUrl ?? game.imageUrl, maxPixelSize: 2048)
+        } heroLogo: { _ in
+            // Epic's wide artwork already shows the game's name, and its
+            // catalog rarely has a separate logo.
+            EmptyView()
         } artwork: { game in
             EpicArtwork(imageURL: game.imageUrl)
         } accountMenu: {
@@ -49,34 +46,16 @@ struct EpicView: View {
         }
     }
 
-    private func hero(_ game: EpicGame) -> some View {
-        LibraryHero(
-            details: [
-                model.lastLaunch(of: game).map { .init(symbol: "calendar", text: SteamFormatting.lastPlayed($0)) },
-                model.playtime(of: game).map { .init(symbol: "clock", text: EpicFormatting.playtime($0)) },
-            ].compactMap { $0 },
-            open: { model.open(game) }
-        ) {
-            EpicArtwork(imageURL: game.headerImageUrl ?? game.imageUrl, maxPixelSize: 2048)
-        } logo: {
-            // Epic's wide artwork already shows the game's name, and its
-            // catalog rarely has a separate logo.
-            LibraryHeroLogo(url: nil, title: game.title, showsTitle: false)
-        }
-    }
-
-    /// A game's page, or the sign-in while no account is connected.
+    /// A game's page.
     private var content: some View {
         VStack(alignment: .leading, spacing: 25) {
             StorefrontWarningBanner(message: $model.storageWarning)
-            if model.isConnected {
-                if model.cloud.failurePresented {
-                    SteamCloudFailureView(model: model, storefront: "epic")
-                }
-                if let game = model.selectedGame {
-                    EpicGameDetailView(model: model, game: game)
-                }
-            } else { EpicLoginView(model: model).padding(.top, 28) }
+            if model.cloud.failurePresented {
+                SteamCloudFailureView(model: model, storefront: "epic")
+            }
+            if let game = model.selectedGame {
+                EpicGameDetailView(model: model, game: game)
+            }
         }
         .padding(ObeliskStyle.contentPadding)
         .padding(.top, 6)

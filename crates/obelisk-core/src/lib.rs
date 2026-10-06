@@ -8,6 +8,7 @@ pub mod install;
 pub mod installation;
 pub mod launch;
 mod library;
+pub mod library_cache;
 pub mod storefront;
 pub mod transfer;
 pub mod verification;

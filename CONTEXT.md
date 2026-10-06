@@ -11,8 +11,12 @@ One account-scoped attempt to install, verify or repair a game's files. Its life
 A record identifying a game installation whose required files were successfully installed. Partial download data is not an installation receipt.
 
 **Offer**:
-What a storefront says Obelisk can install of one game: its build for one platform, with Steam's language, before any folder is chosen. A new installation starts from an offer; an installed game launches, updates and uninstalls from its Installation receipt alone.
+What a storefront says Obelisk can install of one game: its build for one platform, with Steam's language, before any folder is chosen. A Steam offer may leave the platform to Steam, which picks the build the account's licenses grant, the native one first, as the Transfer starts. A new installation starts from an offer; an installed game launches, updates and uninstalls from its Installation receipt alone.
 _Avoid_: download request, install target
+
+**Library cache**:
+The last library each storefront account loaded, with everything the storefront returned for each game and the game's last launch from Obelisk. The library shows from it while the account's session connects; the session keeps it as it loads, and signing the account out forgets it. It is not the catalog of games added by hand.
+_Avoid_: library.json (the catalog's file), launch history file
 
 **Cloud archive**:
 Obelisk's own local store of each account's save versions, together with the record of which account currently owns each physical save location. One archive serves every storefront, so two storefront copies of a game that share a save location cannot silently adopt each other's saves.

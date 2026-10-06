@@ -29,10 +29,10 @@ final class CoreIntegrationTests: XCTestCase {
         try Data([0x4d, 0x5a]).write(to: executable)
         let added = try await CoreClient(storageDirectory: root.path).addLocalGame(path: executable.path)
 
-        LibraryCache(file: root.appending(path: LibraryCache.fileName)).save(
-            [SteamLibraryEntry(SteamGame(appId: 620, name: "Portal 2", iconHash: "", lastPlayed: 0, playtimeMinutes: 0), platforms: nil)],
-            in: .steam, account: "7"
-        )
+        let game = SteamGame(appId: 620, name: "Portal 2", iconHash: "", lastPlayed: 0, playtimeMinutes: 0)
+        let cache = try LibraryCache.holding(steam: [7: [CachedSteamGame(game: game, platforms: nil)]], in: root)
+        cache.recordLaunch(launch: GameLaunch(game: .steam(appId: 620, accountId: 7), at: 1_790_000_000))
+        cache.flush()
 
         let reloaded = try await CoreClient(storageDirectory: root.path).games()
         XCTAssertEqual(reloaded.map(\.id), [added.id], "The cache must never replace the core's catalog")

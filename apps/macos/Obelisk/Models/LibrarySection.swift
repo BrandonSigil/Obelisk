@@ -1,13 +1,13 @@
 import Foundation
 
 enum LibrarySection: String, CaseIterable, Identifiable, Sendable {
-    case recent, steam, epic, gog, other, settings
+    case home, steam, epic, gog, other, settings
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
-        case .recent: L10n.string("model.section.recent.title")
+        case .home: L10n.string("model.section.home.title")
         case .steam: L10n.string("model.section.steam.title")
         case .epic: L10n.string("model.section.epic.title")
         case .gog: L10n.string("model.section.gog.title")
@@ -18,7 +18,7 @@ enum LibrarySection: String, CaseIterable, Identifiable, Sendable {
 
     var symbol: String {
         switch self {
-        case .recent: "clock"
+        case .home: "house"
         case .steam: "gearshape.2"
         case .epic: "shield.lefthalf.filled"
         case .gog: "square.stack.3d.up"
@@ -38,7 +38,7 @@ enum LibrarySection: String, CaseIterable, Identifiable, Sendable {
 
     var subtitle: String {
         switch self {
-        case .recent: L10n.string("model.section.recent.subtitle")
+        case .home: L10n.string("model.section.home.subtitle")
         case .steam: L10n.string("model.section.steam.subtitle")
         case .epic: L10n.string("model.section.epic.subtitle")
         case .gog: L10n.string("model.section.gog.subtitle")

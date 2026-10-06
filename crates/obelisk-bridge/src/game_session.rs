@@ -237,6 +237,10 @@ pub struct GameSessionState {
     pub observed: bool,
     /// How much of Voile has downloaded while the launch waits for it.
     pub runtime_install: Option<f64>,
+    /// When this Obelisk saw the game start, in seconds since the Unix epoch,
+    /// even if it already exited. A game recovered running has none.
+    #[uniffi(default = None)]
+    pub started_at: Option<u64>,
 }
 
 /// A Rosetta requirement the player can answer.
@@ -274,6 +278,7 @@ fn session_state<P: Bridged>(session: sessions::Session<P>) -> GameSessionState 
         cloud: session.cloud.into(),
         observed: session.observed,
         runtime_install: session.runtime_install,
+        started_at: session.started_at,
     }
 }
 

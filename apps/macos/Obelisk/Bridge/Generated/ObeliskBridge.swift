@@ -1276,11 +1276,14 @@ open class EpicSession: EpicSessionProtocol, @unchecked Sendable {
     }
 
     
-public static func restore(credentials: EpicCredentials)async throws  -> EpicSession  {
+    /**
+     * Keeps every library it loads in `library`.
+     */
+public static func restore(credentials: EpicCredentials, library: LibraryCache?)async throws  -> EpicSession  {
     return
         try  await uniffiRustCallAsync(
             rustFutureFunc: {
-                uniffi_obelisk_bridge_fn_constructor_epicsession_restore(FfiConverterTypeEpicCredentials_lower(credentials)
+                uniffi_obelisk_bridge_fn_constructor_epicsession_restore(FfiConverterTypeEpicCredentials_lower(credentials),FfiConverterOptionTypeLibraryCache.lower(library)
                 )
             },
             pollFunc: ffi_obelisk_bridge_rust_future_poll_u64,
@@ -1291,11 +1294,14 @@ public static func restore(credentials: EpicCredentials)async throws  -> EpicSes
         )
 }
     
-public static func signIn(authorizationCode: String)async throws  -> EpicSession  {
+    /**
+     * Keeps every library it loads in `library`.
+     */
+public static func signIn(authorizationCode: String, library: LibraryCache?)async throws  -> EpicSession  {
     return
         try  await uniffiRustCallAsync(
             rustFutureFunc: {
-                uniffi_obelisk_bridge_fn_constructor_epicsession_sign_in(FfiConverterString.lower(authorizationCode)
+                uniffi_obelisk_bridge_fn_constructor_epicsession_sign_in(FfiConverterString.lower(authorizationCode),FfiConverterOptionTypeLibraryCache.lower(library)
                 )
             },
             pollFunc: ffi_obelisk_bridge_rust_future_poll_u64,
@@ -1724,13 +1730,245 @@ public func FfiConverterTypeLibrary_lower(_ value: Library) -> UInt64 {
 
 
 /**
+ * The last library of every storefront account, in the library directory.
+ */
+public protocol LibraryCacheProtocol: AnyObject, Sendable {
+    
+    /**
+     * The account's last Epic library, empty when it has none.
+     */
+    func epicLibrary(accountId: String)  -> [CachedEpicGame]
+    
+    /**
+     * Writes the last change now, as Obelisk quits.
+     */
+    func flush() 
+    
+    /**
+     * Removes the account's library and its launches, as signing it out
+     * does. Its session can no longer write it.
+     */
+    func forget(account: GameAccount) 
+    
+    /**
+     * Every launch the cache keeps, for every storefront and account.
+     */
+    func launches()  -> [GameLaunch]
+    
+    /**
+     * Records a launch in its game's entry. A game whose library was never
+     * kept has no entry to keep it.
+     */
+    func recordLaunch(launch: GameLaunch) 
+    
+    /**
+     * The account's last Steam library, empty when it has none.
+     */
+    func steamLibrary(steamId: UInt64)  -> [CachedSteamGame]
+    
+}
+/**
+ * The last library of every storefront account, in the library directory.
+ */
+open class LibraryCache: LibraryCacheProtocol, @unchecked Sendable {
+    fileprivate let handle: UInt64
+
+    /// Used to instantiate a [FFIObject] without an actual handle, for fakes in tests, mostly.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public struct NoHandle {
+        public init() {}
+    }
+
+    // TODO: We'd like this to be `private` but for Swifty reasons,
+    // we can't implement `FfiConverter` without making this `required` and we can't
+    // make it `required` without making it `public`.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    required public init(unsafeFromHandle handle: UInt64) {
+        self.handle = handle
+    }
+
+    // This constructor can be used to instantiate a fake object.
+    // - Parameter noHandle: Placeholder value so we can have a constructor separate from the default empty one that may be implemented for classes extending [FFIObject].
+    //
+    // - Warning:
+    //     Any object instantiated with this constructor cannot be passed to an actual Rust-backed object. Since there isn't a backing handle the FFI lower functions will crash.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public init(noHandle: NoHandle) {
+        self.handle = 0
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public func uniffiCloneHandle() -> UInt64 {
+        return try! rustCall { uniffi_obelisk_bridge_fn_clone_librarycache(self.handle, $0) }
+    }
+    /**
+     * The cache of the library in `directory`. Every cache of one directory
+     * shares one document.
+     */
+public convenience init(directory: String) {
+    let handle =
+        try! rustCall() {
+        uniffiCallStatus in
+    uniffi_obelisk_bridge_fn_constructor_librarycache_new(
+        FfiConverterString.lower(directory),uniffiCallStatus
+    )
+}
+    self.init(unsafeFromHandle: handle)
+}
+
+    deinit {
+        if handle == 0 {
+            // Mock objects have handle=0 don't try to free them
+            return
+        }
+
+        try! rustCall { uniffi_obelisk_bridge_fn_free_librarycache(handle, $0) }
+    }
+
+    
+
+    
+    /**
+     * The account's last Epic library, empty when it has none.
+     */
+open func epicLibrary(accountId: String) -> [CachedEpicGame]  {
+    return try!  FfiConverterSequenceTypeCachedEpicGame.lift(try! rustCall() {
+        uniffiCallStatus in
+    uniffi_obelisk_bridge_fn_method_librarycache_epic_library(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(accountId),uniffiCallStatus
+    )
+})
+}
+    
+    /**
+     * Writes the last change now, as Obelisk quits.
+     */
+open func flush()  {try! rustCall() {
+        uniffiCallStatus in
+    uniffi_obelisk_bridge_fn_method_librarycache_flush(
+            self.uniffiCloneHandle(),uniffiCallStatus
+    )
+}
+}
+    
+    /**
+     * Removes the account's library and its launches, as signing it out
+     * does. Its session can no longer write it.
+     */
+open func forget(account: GameAccount)  {try! rustCall() {
+        uniffiCallStatus in
+    uniffi_obelisk_bridge_fn_method_librarycache_forget(
+            self.uniffiCloneHandle(),
+        FfiConverterTypeGameAccount_lower(account),uniffiCallStatus
+    )
+}
+}
+    
+    /**
+     * Every launch the cache keeps, for every storefront and account.
+     */
+open func launches() -> [GameLaunch]  {
+    return try!  FfiConverterSequenceTypeGameLaunch.lift(try! rustCall() {
+        uniffiCallStatus in
+    uniffi_obelisk_bridge_fn_method_librarycache_launches(
+            self.uniffiCloneHandle(),uniffiCallStatus
+    )
+})
+}
+    
+    /**
+     * Records a launch in its game's entry. A game whose library was never
+     * kept has no entry to keep it.
+     */
+open func recordLaunch(launch: GameLaunch)  {try! rustCall() {
+        uniffiCallStatus in
+    uniffi_obelisk_bridge_fn_method_librarycache_record_launch(
+            self.uniffiCloneHandle(),
+        FfiConverterTypeGameLaunch_lower(launch),uniffiCallStatus
+    )
+}
+}
+    
+    /**
+     * The account's last Steam library, empty when it has none.
+     */
+open func steamLibrary(steamId: UInt64) -> [CachedSteamGame]  {
+    return try!  FfiConverterSequenceTypeCachedSteamGame.lift(try! rustCall() {
+        uniffiCallStatus in
+    uniffi_obelisk_bridge_fn_method_librarycache_steam_library(
+            self.uniffiCloneHandle(),
+        FfiConverterUInt64.lower(steamId),uniffiCallStatus
+    )
+})
+}
+    
+
+    
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeLibraryCache: FfiConverter {
+    typealias FfiType = UInt64
+    typealias SwiftType = LibraryCache
+
+    public static func lift(_ handle: UInt64) throws -> LibraryCache {
+        return LibraryCache(unsafeFromHandle: handle)
+    }
+
+    public static func lower(_ value: LibraryCache) -> UInt64 {
+        return value.uniffiCloneHandle()
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> LibraryCache {
+        let handle: UInt64 = try readInt(&buf)
+        return try lift(handle)
+    }
+
+    public static func write(_ value: LibraryCache, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeLibraryCache_lift(_ handle: UInt64) throws -> LibraryCache {
+    return try FfiConverterTypeLibraryCache.lift(handle)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeLibraryCache_lower(_ value: LibraryCache) -> UInt64 {
+    return FfiConverterTypeLibraryCache.lower(value)
+}
+
+
+
+
+
+
+/**
  * A single-use connection attempt with explicit cancellation across UniFFI.
  */
 public protocol SteamConnectionAttemptProtocol: AnyObject, Sendable {
     
     func cancel() 
     
-    func connect(credentials: SteamCredentials) async throws  -> SteamSession
+    func connect(credentials: SteamCredentials, library: LibraryCache?) async throws  -> SteamSession
     
 }
 /**
@@ -1805,12 +2043,12 @@ open func cancel()  {try! rustCall() {
 }
 }
     
-open func connect(credentials: SteamCredentials)async throws  -> SteamSession  {
+open func connect(credentials: SteamCredentials, library: LibraryCache?)async throws  -> SteamSession  {
     return
         try  await uniffiRustCallAsync(
             rustFutureFunc: {
                 uniffi_obelisk_bridge_fn_method_steamconnectionattempt_connect(
-                        self.uniffiCloneHandle(),FfiConverterTypeSteamCredentials_lower(credentials)
+                        self.uniffiCloneHandle(),FfiConverterTypeSteamCredentials_lower(credentials),FfiConverterOptionTypeLibraryCache.lower(library)
                 )
             },
             pollFunc: ffi_obelisk_bridge_rust_future_poll_u64,
@@ -2323,11 +2561,14 @@ open class SteamSession: SteamSessionProtocol, @unchecked Sendable {
     }
 
     
-public static func connect(credentials: SteamCredentials)async throws  -> SteamSession  {
+    /**
+     * Keeps every library it loads in `library`.
+     */
+public static func connect(credentials: SteamCredentials, library: LibraryCache?)async throws  -> SteamSession  {
     return
         try  await uniffiRustCallAsync(
             rustFutureFunc: {
-                uniffi_obelisk_bridge_fn_constructor_steamsession_connect(FfiConverterTypeSteamCredentials_lower(credentials)
+                uniffi_obelisk_bridge_fn_constructor_steamsession_connect(FfiConverterTypeSteamCredentials_lower(credentials),FfiConverterOptionTypeLibraryCache.lower(library)
                 )
             },
             pollFunc: ffi_obelisk_bridge_rust_future_poll_u64,
@@ -2844,6 +3085,120 @@ public func FfiConverterTypeStorefrontSessions_lower(_ value: StorefrontSessions
 }
 
 
+
+
+/**
+ * An Epic game of the cache, with its playtime once Epic told it.
+ */
+public struct CachedEpicGame: Equatable, Hashable {
+    public var game: EpicGame
+    public var playtimeSeconds: UInt64?
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(game: EpicGame, playtimeSeconds: UInt64?) {
+        self.game = game
+        self.playtimeSeconds = playtimeSeconds
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension CachedEpicGame: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeCachedEpicGame: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> CachedEpicGame {
+        return
+            try CachedEpicGame(
+                game: FfiConverterTypeEpicGame.read(from: &buf), 
+                playtimeSeconds: FfiConverterOptionUInt64.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: CachedEpicGame, into buf: inout [UInt8]) {
+        FfiConverterTypeEpicGame.write(value.game, into: &buf)
+        FfiConverterOptionUInt64.write(value.playtimeSeconds, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeCachedEpicGame_lift(_ buf: RustBuffer) throws -> CachedEpicGame {
+    return try FfiConverterTypeCachedEpicGame.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeCachedEpicGame_lower(_ value: CachedEpicGame) -> RustBuffer {
+    return FfiConverterTypeCachedEpicGame.lower(value)
+}
+
+
+/**
+ * A Steam game of the cache, with its platforms once Steam told them.
+ */
+public struct CachedSteamGame: Equatable, Hashable {
+    public var game: SteamGame
+    public var platforms: [String]?
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(game: SteamGame, platforms: [String]?) {
+        self.game = game
+        self.platforms = platforms
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension CachedSteamGame: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeCachedSteamGame: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> CachedSteamGame {
+        return
+            try CachedSteamGame(
+                game: FfiConverterTypeSteamGame.read(from: &buf), 
+                platforms: FfiConverterOptionSequenceString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: CachedSteamGame, into buf: inout [UInt8]) {
+        FfiConverterTypeSteamGame.write(value.game, into: &buf)
+        FfiConverterOptionSequenceString.write(value.platforms, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeCachedSteamGame_lift(_ buf: RustBuffer) throws -> CachedSteamGame {
+    return try FfiConverterTypeCachedSteamGame.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeCachedSteamGame_lower(_ value: CachedSteamGame) -> RustBuffer {
+    return FfiConverterTypeCachedSteamGame.lower(value)
+}
 
 
 /**
@@ -3506,19 +3861,10 @@ public struct EpicGame: Equatable, Hashable {
     public var developer: String
     public var windows: Bool
     public var macos: Bool
-    /**
-     * Everything Epic returned for the game, as JSON: `catalogItems`,
-     * `libraryRecords` and `assets`.
-     */
-    public var metadata: String?
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(appName: String, namespace: String, catalogItemId: String, title: String, description: String, imageUrl: String?, headerImageUrl: String?, developer: String, windows: Bool, macos: Bool, 
-        /**
-         * Everything Epic returned for the game, as JSON: `catalogItems`,
-         * `libraryRecords` and `assets`.
-         */metadata: String? = nil) {
+    public init(appName: String, namespace: String, catalogItemId: String, title: String, description: String, imageUrl: String?, headerImageUrl: String?, developer: String, windows: Bool, macos: Bool) {
         self.appName = appName
         self.namespace = namespace
         self.catalogItemId = catalogItemId
@@ -3529,7 +3875,6 @@ public struct EpicGame: Equatable, Hashable {
         self.developer = developer
         self.windows = windows
         self.macos = macos
-        self.metadata = metadata
     }
 
     
@@ -3557,8 +3902,7 @@ public struct FfiConverterTypeEpicGame: FfiConverterRustBuffer {
                 headerImageUrl: FfiConverterOptionString.read(from: &buf), 
                 developer: FfiConverterString.read(from: &buf), 
                 windows: FfiConverterBool.read(from: &buf), 
-                macos: FfiConverterBool.read(from: &buf), 
-                metadata: FfiConverterOptionString.read(from: &buf)
+                macos: FfiConverterBool.read(from: &buf)
         )
     }
 
@@ -3573,7 +3917,6 @@ public struct FfiConverterTypeEpicGame: FfiConverterRustBuffer {
         FfiConverterString.write(value.developer, into: &buf)
         FfiConverterBool.write(value.windows, into: &buf)
         FfiConverterBool.write(value.macos, into: &buf)
-        FfiConverterOptionString.write(value.metadata, into: &buf)
     }
 }
 
@@ -3593,14 +3936,21 @@ public func FfiConverterTypeEpicGame_lower(_ value: EpicGame) -> RustBuffer {
 }
 
 
+/**
+ * What a game's page adds to its library entry.
+ */
 public struct EpicGameDetails: Equatable, Hashable {
-    public var playtimeSeconds: UInt64?
+    /**
+     * Unknown when Epic serves no manifest of the build.
+     */
     public var installationBytes: UInt64?
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(playtimeSeconds: UInt64?, installationBytes: UInt64?) {
-        self.playtimeSeconds = playtimeSeconds
+    public init(
+        /**
+         * Unknown when Epic serves no manifest of the build.
+         */installationBytes: UInt64?) {
         self.installationBytes = installationBytes
     }
 
@@ -3620,13 +3970,11 @@ public struct FfiConverterTypeEpicGameDetails: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> EpicGameDetails {
         return
             try EpicGameDetails(
-                playtimeSeconds: FfiConverterOptionUInt64.read(from: &buf), 
                 installationBytes: FfiConverterOptionUInt64.read(from: &buf)
         )
     }
 
     public static func write(_ value: EpicGameDetails, into buf: inout [UInt8]) {
-        FfiConverterOptionUInt64.write(value.playtimeSeconds, into: &buf)
         FfiConverterOptionUInt64.write(value.installationBytes, into: &buf)
     }
 }
@@ -3831,6 +4179,69 @@ public func FfiConverterTypeGameCloudIndicator_lower(_ value: GameCloudIndicator
 }
 
 
+/**
+ * When an account launched a game from Obelisk.
+ */
+public struct GameLaunch: Equatable, Hashable {
+    public var game: GameIdentity
+    /**
+     * Seconds since the Unix epoch.
+     */
+    public var at: UInt64
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(game: GameIdentity, 
+        /**
+         * Seconds since the Unix epoch.
+         */at: UInt64) {
+        self.game = game
+        self.at = at
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension GameLaunch: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeGameLaunch: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> GameLaunch {
+        return
+            try GameLaunch(
+                game: FfiConverterTypeGameIdentity.read(from: &buf), 
+                at: FfiConverterUInt64.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: GameLaunch, into buf: inout [UInt8]) {
+        FfiConverterTypeGameIdentity.write(value.game, into: &buf)
+        FfiConverterUInt64.write(value.at, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeGameLaunch_lift(_ buf: RustBuffer) throws -> GameLaunch {
+    return try FfiConverterTypeGameLaunch.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeGameLaunch_lower(_ value: GameLaunch) -> RustBuffer {
+    return FfiConverterTypeGameLaunch.lower(value)
+}
+
+
 public struct GameSessionState: Equatable, Hashable {
     public var id: String
     public var game: GameIdentity
@@ -3852,6 +4263,11 @@ public struct GameSessionState: Equatable, Hashable {
      * How much of Voile has downloaded while the launch waits for it.
      */
     public var runtimeInstall: Double?
+    /**
+     * When this Obelisk saw the game start, in seconds since the Unix epoch,
+     * even if it already exited. A game recovered running has none.
+     */
+    public var startedAt: UInt64?
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
@@ -3867,7 +4283,11 @@ public struct GameSessionState: Equatable, Hashable {
          */observed: Bool, 
         /**
          * How much of Voile has downloaded while the launch waits for it.
-         */runtimeInstall: Double?) {
+         */runtimeInstall: Double?, 
+        /**
+         * When this Obelisk saw the game start, in seconds since the Unix epoch,
+         * even if it already exited. A game recovered running has none.
+         */startedAt: UInt64? = nil) {
         self.id = id
         self.game = game
         self.phase = phase
@@ -3876,6 +4296,7 @@ public struct GameSessionState: Equatable, Hashable {
         self.host = host
         self.observed = observed
         self.runtimeInstall = runtimeInstall
+        self.startedAt = startedAt
     }
 
     
@@ -3901,7 +4322,8 @@ public struct FfiConverterTypeGameSessionState: FfiConverterRustBuffer {
                 cloud: FfiConverterTypeCloudStatus.read(from: &buf), 
                 host: FfiConverterOptionTypeSteamHostState.read(from: &buf), 
                 observed: FfiConverterBool.read(from: &buf), 
-                runtimeInstall: FfiConverterOptionDouble.read(from: &buf)
+                runtimeInstall: FfiConverterOptionDouble.read(from: &buf), 
+                startedAt: FfiConverterOptionUInt64.read(from: &buf)
         )
     }
 
@@ -3914,6 +4336,7 @@ public struct FfiConverterTypeGameSessionState: FfiConverterRustBuffer {
         FfiConverterOptionTypeSteamHostState.write(value.host, into: &buf)
         FfiConverterBool.write(value.observed, into: &buf)
         FfiConverterOptionDouble.write(value.runtimeInstall, into: &buf)
+        FfiConverterOptionUInt64.write(value.startedAt, into: &buf)
     }
 }
 
@@ -5057,23 +5480,15 @@ public struct SteamGame: Equatable, Hashable {
     public var iconHash: String
     public var lastPlayed: UInt64
     public var playtimeMinutes: UInt32
-    /**
-     * Every field Steam returned for the game, as JSON.
-     */
-    public var record: String?
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(appId: UInt32, name: String, iconHash: String, lastPlayed: UInt64, playtimeMinutes: UInt32, 
-        /**
-         * Every field Steam returned for the game, as JSON.
-         */record: String? = nil) {
+    public init(appId: UInt32, name: String, iconHash: String, lastPlayed: UInt64, playtimeMinutes: UInt32) {
         self.appId = appId
         self.name = name
         self.iconHash = iconHash
         self.lastPlayed = lastPlayed
         self.playtimeMinutes = playtimeMinutes
-        self.record = record
     }
 
     
@@ -5096,8 +5511,7 @@ public struct FfiConverterTypeSteamGame: FfiConverterRustBuffer {
                 name: FfiConverterString.read(from: &buf), 
                 iconHash: FfiConverterString.read(from: &buf), 
                 lastPlayed: FfiConverterUInt64.read(from: &buf), 
-                playtimeMinutes: FfiConverterUInt32.read(from: &buf), 
-                record: FfiConverterOptionString.read(from: &buf)
+                playtimeMinutes: FfiConverterUInt32.read(from: &buf)
         )
     }
 
@@ -5107,7 +5521,6 @@ public struct FfiConverterTypeSteamGame: FfiConverterRustBuffer {
         FfiConverterString.write(value.iconHash, into: &buf)
         FfiConverterUInt64.write(value.lastPlayed, into: &buf)
         FfiConverterUInt32.write(value.playtimeMinutes, into: &buf)
-        FfiConverterOptionString.write(value.record, into: &buf)
     }
 }
 
@@ -5200,20 +5613,12 @@ public func FfiConverterTypeSteamGameDetails_lower(_ value: SteamGameDetails) ->
 public struct SteamGamePlatforms: Equatable, Hashable {
     public var appId: UInt32
     public var platforms: [String]
-    /**
-     * The game's whole PICS app info as JSON, when PICS returned the game.
-     */
-    public var pics: String?
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(appId: UInt32, platforms: [String], 
-        /**
-         * The game's whole PICS app info as JSON, when PICS returned the game.
-         */pics: String? = nil) {
+    public init(appId: UInt32, platforms: [String]) {
         self.appId = appId
         self.platforms = platforms
-        self.pics = pics
     }
 
     
@@ -5233,15 +5638,13 @@ public struct FfiConverterTypeSteamGamePlatforms: FfiConverterRustBuffer {
         return
             try SteamGamePlatforms(
                 appId: FfiConverterUInt32.read(from: &buf), 
-                platforms: FfiConverterSequenceString.read(from: &buf), 
-                pics: FfiConverterOptionString.read(from: &buf)
+                platforms: FfiConverterSequenceString.read(from: &buf)
         )
     }
 
     public static func write(_ value: SteamGamePlatforms, into buf: inout [UInt8]) {
         FfiConverterUInt32.write(value.appId, into: &buf)
         FfiConverterSequenceString.write(value.platforms, into: &buf)
-        FfiConverterOptionString.write(value.pics, into: &buf)
     }
 }
 
@@ -6613,9 +7016,11 @@ public func FfiConverterTypeGameKind_lower(_ value: GameKind) -> RustBuffer {
 public enum GameOffer: Equatable, Hashable {
     
     /**
-     * Its build for `platform`, with the depots of `language`.
+     * Its build for `platform`, with the depots of `language`. Without a
+     * platform, Steam picks the build the account can install, the native
+     * one first, as the Transfer starts.
      */
-    case steam(appId: UInt32, name: String, platform: String, language: String
+    case steam(appId: UInt32, name: String, platform: String?, language: String
     )
     /**
      * Its build for `platform`.
@@ -6643,7 +7048,7 @@ public struct FfiConverterTypeGameOffer: FfiConverterRustBuffer {
         let variant: Int32 = try readInt(&buf)
         switch variant {
         
-        case 1: return .steam(appId: try FfiConverterUInt32.read(from: &buf), name: try FfiConverterString.read(from: &buf), platform: try FfiConverterString.read(from: &buf), language: try FfiConverterString.read(from: &buf)
+        case 1: return .steam(appId: try FfiConverterUInt32.read(from: &buf), name: try FfiConverterString.read(from: &buf), platform: try FfiConverterOptionString.read(from: &buf), language: try FfiConverterString.read(from: &buf)
         )
         
         case 2: return .epic(namespace: try FfiConverterString.read(from: &buf), catalogItemId: try FfiConverterString.read(from: &buf), appName: try FfiConverterString.read(from: &buf), title: try FfiConverterString.read(from: &buf), platform: try FfiConverterString.read(from: &buf)
@@ -6661,7 +7066,7 @@ public struct FfiConverterTypeGameOffer: FfiConverterRustBuffer {
             writeInt(&buf, Int32(1))
             FfiConverterUInt32.write(appId, into: &buf)
             FfiConverterString.write(name, into: &buf)
-            FfiConverterString.write(platform, into: &buf)
+            FfiConverterOptionString.write(platform, into: &buf)
             FfiConverterString.write(language, into: &buf)
             
         
@@ -7851,6 +8256,30 @@ fileprivate struct FfiConverterOptionString: FfiConverterRustBuffer {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterOptionTypeLibraryCache: FfiConverterRustBuffer {
+    typealias SwiftType = LibraryCache?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypeLibraryCache.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypeLibraryCache.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterOptionTypeCloudQuestion: FfiConverterRustBuffer {
     typealias SwiftType = CloudQuestion?
 
@@ -8115,6 +8544,30 @@ fileprivate struct FfiConverterOptionTypeSteamHostState: FfiConverterRustBuffer 
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterOptionSequenceString: FfiConverterRustBuffer {
+    typealias SwiftType = [String]?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterSequenceString.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterSequenceString.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterSequenceUInt32: FfiConverterRustBuffer {
     typealias SwiftType = [UInt32]
 
@@ -8157,6 +8610,56 @@ fileprivate struct FfiConverterSequenceString: FfiConverterRustBuffer {
         seq.reserveCapacity(Int(len))
         for _ in 0 ..< len {
             seq.append(try FfiConverterString.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeCachedEpicGame: FfiConverterRustBuffer {
+    typealias SwiftType = [CachedEpicGame]
+
+    public static func write(_ value: [CachedEpicGame], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeCachedEpicGame.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [CachedEpicGame] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [CachedEpicGame]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeCachedEpicGame.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeCachedSteamGame: FfiConverterRustBuffer {
+    typealias SwiftType = [CachedSteamGame]
+
+    public static func write(_ value: [CachedSteamGame], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeCachedSteamGame.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [CachedSteamGame] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [CachedSteamGame]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeCachedSteamGame.read(from: &buf))
         }
         return seq
     }
@@ -8307,6 +8810,31 @@ fileprivate struct FfiConverterSequenceTypeGameCloudIndicator: FfiConverterRustB
         seq.reserveCapacity(Int(len))
         for _ in 0 ..< len {
             seq.append(try FfiConverterTypeGameCloudIndicator.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeGameLaunch: FfiConverterRustBuffer {
+    typealias SwiftType = [GameLaunch]
+
+    public static func write(_ value: [GameLaunch], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeGameLaunch.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [GameLaunch] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [GameLaunch]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeGameLaunch.read(from: &buf))
         }
         return seq
     }
@@ -8848,6 +9376,24 @@ private let initializationResult: InitializationResult = {
     if (uniffi_obelisk_bridge_checksum_method_accountinstallations_update() != 2263) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_obelisk_bridge_checksum_method_librarycache_epic_library() != 25582) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_obelisk_bridge_checksum_method_librarycache_flush() != 18958) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_obelisk_bridge_checksum_method_librarycache_forget() != 18350) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_obelisk_bridge_checksum_method_librarycache_launches() != 47486) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_obelisk_bridge_checksum_method_librarycache_record_launch() != 30827) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_obelisk_bridge_checksum_method_librarycache_steam_library() != 34747) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_obelisk_bridge_checksum_method_steamlogin_challenge() != 44547) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -8899,7 +9445,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_obelisk_bridge_checksum_method_steamconnectionattempt_cancel() != 56619) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_obelisk_bridge_checksum_method_steamconnectionattempt_connect() != 8952) {
+    if (uniffi_obelisk_bridge_checksum_method_steamconnectionattempt_connect() != 54392) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_obelisk_bridge_checksum_method_steamfriendsfixture_disconnect() != 38477) {
@@ -8914,10 +9460,10 @@ private let initializationResult: InitializationResult = {
     if (uniffi_obelisk_bridge_checksum_constructor_library_new() != 47156) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_obelisk_bridge_checksum_constructor_epicsession_restore() != 21283) {
+    if (uniffi_obelisk_bridge_checksum_constructor_epicsession_restore() != 11917) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_obelisk_bridge_checksum_constructor_epicsession_sign_in() != 31850) {
+    if (uniffi_obelisk_bridge_checksum_constructor_epicsession_sign_in() != 3967) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_obelisk_bridge_checksum_constructor_storefrontsessions_new() != 8407) {
@@ -8929,13 +9475,16 @@ private let initializationResult: InitializationResult = {
     if (uniffi_obelisk_bridge_checksum_constructor_accountinstallations_steam() != 8384) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_obelisk_bridge_checksum_constructor_librarycache_new() != 37002) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_obelisk_bridge_checksum_constructor_steamlogin_begin_credentials() != 63849) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_obelisk_bridge_checksum_constructor_steamlogin_begin_qr() != 58090) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_obelisk_bridge_checksum_constructor_steamsession_connect() != 4138) {
+    if (uniffi_obelisk_bridge_checksum_constructor_steamsession_connect() != 9835) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_obelisk_bridge_checksum_constructor_steamconnectionattempt_new() != 29670) {

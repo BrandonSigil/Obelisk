@@ -7,13 +7,17 @@ struct SidebarView: View {
 
     var body: some View {
         List(selection: selection(where: { $0 != .settings })) {
-            row(.recent)
+            row(.home)
 
-            Section(L10n.string("ui.library.title")) {
+            Section {
                 ForEach(stores) { row($0) }
+            } header: {
+                Text(L10n.string("ui.library.title"))
+                    .font(.system(size: 13, weight: .semibold))
             }
         }
         .listStyle(.sidebar)
+        .environment(\.sidebarRowSize, .large)
         .toolbar(removing: .sidebarToggle)
         // Settings stays at the bottom of the sidebar, whatever its height.
         .safeAreaInset(edge: .bottom, spacing: 0) {
@@ -21,6 +25,7 @@ struct SidebarView: View {
                 row(.settings)
             }
             .listStyle(.sidebar)
+            .environment(\.sidebarRowSize, .large)
             .scrollDisabled(true)
             .frame(height: 52)
         }
@@ -52,7 +57,7 @@ struct SidebarView: View {
                 .renderingMode(.template)
                 .resizable()
                 .scaledToFit()
-                .frame(width: 16, height: 16)
+                .frame(width: 20, height: 20)
                 .accessibilityHidden(true)
         } else {
             Image(systemName: section.symbol)

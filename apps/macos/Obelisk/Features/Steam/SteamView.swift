@@ -8,8 +8,10 @@ struct SteamView: View {
         Group {
             if model.showsLibrary && model.selectedGame == nil {
                 library
-            } else {
+            } else if model.isConnected {
                 StorefrontPage { titleBar } content: { content }
+            } else {
+                SteamLoginView(model: model)
             }
         }
         .task { await model.start() }
@@ -31,15 +33,11 @@ struct SteamView: View {
             libraryTitle: L10n.string("ui.steam.library"),
             accountName: model.displayName,
             avatarURL: model.avatarURL,
-            scrollMemory: libraryScroll,
-            hero: hero
+            scrollMemory: libraryScroll
         ) { game in
-            LibraryCardContent(
-                title: game.name,
-                accessibilityLabel: L10n.string("ui.steam.game_accessibility", game.name, SteamFormatting.lastPlayed(game.lastPlayed)),
-                help: L10n.string("ui.steam.game_help", game.name, SteamFormatting.playtime(game.playtimeMinutes)),
-                platform: .preferred(platforms: model.libraryPlatforms.platforms[game.appId] ?? [])
-            )
+            SteamArtwork(appId: game.appId, portrait: false, iconHash: game.iconHash)
+        } heroLogo: { game in
+            LibraryHeroLogo(url: SteamArtwork.logoURL(appId: game.appId), title: game.name)
         } artwork: { game in
             SteamArtwork(appId: game.appId, iconHash: game.iconHash)
         } accountMenu: {
@@ -47,35 +45,16 @@ struct SteamView: View {
         }
     }
 
-    private func hero(_ game: SteamGame) -> some View {
-        LibraryHero(
-            details: [
-                model.lastPlayed(of: game).map { .init(symbol: "calendar", text: SteamFormatting.lastPlayed($0)) },
-                .init(symbol: "clock", text: SteamFormatting.playtime(game.playtimeMinutes)),
-            ].compactMap { $0 },
-            open: { model.open(game) }
-        ) {
-            SteamArtwork(appId: game.appId, portrait: false, iconHash: game.iconHash)
-        } logo: {
-            LibraryHeroLogo(url: SteamArtwork.logoURL(appId: game.appId), title: game.name)
-        }
-    }
-
-    /// A game's page, or the sign-in while no account is connected.
+    /// A game's page.
     private var content: some View {
         VStack(alignment: .leading, spacing: 25) {
             StorefrontWarningBanner(message: $model.storageWarning)
 
-            if model.isConnected {
-                if model.cloud.failurePresented {
-                    SteamCloudFailureView(model: model, storefront: "steam")
-                }
-                if let game = model.selectedGame {
-                    SteamGameDetailView(model: model, game: game)
-                }
-            } else {
-                SteamLoginView(model: model)
-                    .padding(.top, 28)
+            if model.cloud.failurePresented {
+                SteamCloudFailureView(model: model, storefront: "steam")
+            }
+            if let game = model.selectedGame {
+                SteamGameDetailView(model: model, game: game)
             }
         }
         .padding(ObeliskStyle.contentPadding)
@@ -121,12 +100,12 @@ extension GameTransfer {
     }
 
     var verifiedProgressText: String {
-        L10n.string("ui.transfer.verified_files", SteamFormatting.bytes(completedBytes), SteamFormatting.bytes(totalBytes))
+        L10n.string("ui.transfer.verified_files", GameFormatting.bytes(completedBytes), GameFormatting.bytes(totalBytes))
     }
 
     var downloadedGameDataText: String? {
         if contentBytes > 0 {
-            L10n.string("ui.transfer.downloaded_data", SteamFormatting.bytes(contentBytes))
+            L10n.string("ui.transfer.downloaded_data", GameFormatting.bytes(contentBytes))
         } else if state == .verifying {
             L10n.string("ui.transfer.no_downloaded_data")
         } else {

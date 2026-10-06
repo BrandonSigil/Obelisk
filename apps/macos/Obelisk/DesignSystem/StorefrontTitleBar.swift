@@ -8,8 +8,8 @@ struct StorefrontSortOption: Identifiable {
     let action: @MainActor () -> Void
 }
 
-/// The title bar of a storefront's sign-in and game pages: the account and the
-/// storefront's name.
+/// The title bar of a storefront's game pages and of a store still to come:
+/// the account and the storefront's name.
 struct StorefrontTitleBar<AccountMenu: View>: View {
     let title: String
 

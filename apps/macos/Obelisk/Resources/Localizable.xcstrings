@@ -4829,6 +4829,40 @@
         }
       }
     },
+    "model.section.home.subtitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Your recently added and played games."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Vos jeux ajoutés et lancés récemment."
+          }
+        }
+      }
+    },
+    "model.section.home.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Home"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Accueil"
+          }
+        }
+      }
+    },
     "model.section.other.subtitle": {
       "extractionState": "manual",
       "localizations": {
@@ -4859,40 +4893,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Autres"
-          }
-        }
-      }
-    },
-    "model.section.recent.subtitle": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Your recently added and played games."
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Vos jeux ajoutés et lancés récemment."
-          }
-        }
-      }
-    },
-    "model.section.recent.title": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Recent"
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Récent"
           }
         }
       }
@@ -5148,23 +5148,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Mot de passe"
-          }
-        }
-      }
-    },
-    "ui.account.password_caption": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "PASSWORD"
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "MOT DE PASSE"
           }
         }
       }
@@ -7645,23 +7628,6 @@
         }
       }
     },
-    "ui.steam.account_name_caption": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "ACCOUNT NAME"
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "NOM DU COMPTE"
-          }
-        }
-      }
-    },
     "ui.steam.account_name_placeholder": {
       "extractionState": "manual",
       "localizations": {
@@ -7747,7 +7713,7 @@
         }
       }
     },
-    "ui.steam.game_accessibility": {
+    "ui.library.game_accessibility": {
       "extractionState": "manual",
       "localizations": {
         "en": {
@@ -7760,23 +7726,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "%1$@, dernier lancement : %2$@"
-          }
-        }
-      }
-    },
-    "ui.steam.game_help": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%1$@ · %2$@"
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%1$@ · %2$@"
           }
         }
       }
@@ -8696,23 +8645,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Récupération de la session de jeu Steam…"
-          }
-        }
-      }
-    },
-    "model.steam.noInstallableBuild": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Steam offers no build of this game that your account can install."
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Steam ne propose aucune version de ce jeu installable avec votre compte."
           }
         }
       }

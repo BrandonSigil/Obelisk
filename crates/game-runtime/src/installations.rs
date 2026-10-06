@@ -47,13 +47,15 @@ pub trait Storefront: sessions::Storefront {
     fn needs_verification(receipt: &Self::Receipt) -> bool;
     fn mark_needs_verification(receipt: &mut Self::Receipt);
     fn request_game(request: &Self::Request) -> Self::Game;
-    fn request_platform(request: &Self::Request) -> &str;
+    /// None while the storefront picks the build, as the Transfer starts.
+    fn request_platform(request: &Self::Request) -> Option<&str>;
     /// The parent folder the storefront's installation directory goes in.
     fn request_directory(request: &Self::Request) -> &Path;
     /// The name a Transfer's progress gives the game.
     fn transfer_name(request: &Self::Request) -> String;
     fn offer_game(offer: &Self::Offer) -> Self::Game;
-    fn offer_platform(offer: &Self::Offer) -> &str;
+    /// None when the storefront picks the build.
+    fn offer_platform(offer: &Self::Offer) -> Option<&str>;
     /// The Transfer that installs `offer` under `directory`.
     fn install_request(offer: &Self::Offer, directory: &Path) -> Self::Request;
     /// The Transfer that verifies `receipt`'s installation, or updates it in
@@ -362,7 +364,7 @@ impl<S: Storefront> Shared<S> {
             inner.state.downloading = true;
             let (game, platform) = (S::request_game(request), S::request_platform(request));
             if let Some(receipt) = inner.state.receipts.iter_mut().find(|receipt| {
-                S::receipt_game(receipt) == game && S::receipt_platform(receipt) == platform
+                S::receipt_game(receipt) == game && Some(S::receipt_platform(receipt)) == platform
             }) {
                 S::mark_needs_verification(receipt);
                 self.save(inner);
@@ -752,15 +754,17 @@ impl<S: Storefront> Installations<S> {
     }
 
     /// Installs what `offer` names under Obelisk's library, or updates the
-    /// installation of its platform in place. A Transfer of the game that
-    /// stopped before its receipt resumes instead.
+    /// installation of its platform in place; an offer that leaves the build
+    /// to the storefront updates the game's installation. A Transfer of the
+    /// game that stopped before its receipt resumes instead.
     pub fn install(&self, offer: S::Offer) {
         let request = {
             let inner = self.shared.inner.lock().unwrap();
             let game = S::offer_game(&offer);
             let installed = inner.state.receipts.iter().find(|receipt| {
                 S::receipt_game(receipt) == game
-                    && S::receipt_platform(receipt) == S::offer_platform(&offer)
+                    && S::offer_platform(&offer)
+                        .is_none_or(|platform| S::receipt_platform(receipt) == platform)
             });
             inner
                 .resumable(&game)
@@ -961,7 +965,9 @@ impl<S: Storefront> Installations<S> {
                         inner.state.receipts = remaining;
                         if inner.state.last_download.as_ref().is_some_and(|last| {
                             S::request_game(last) == game
-                                && S::request_platform(last) == S::receipt_platform(&receipt)
+                                && S::request_platform(last).is_none_or(|platform| {
+                                    platform == S::receipt_platform(&receipt)
+                                })
                         }) {
                             inner.state.last_download = None;
                         }

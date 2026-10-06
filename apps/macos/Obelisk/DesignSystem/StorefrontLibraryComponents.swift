@@ -55,6 +55,106 @@ enum StorefrontLibrarySort: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
+/// Orders and narrows a storefront's library, the same way for every
+/// storefront. Ordering every game is the costly part: each order is kept
+/// until the library's revision changes, and a search or a filter only
+/// narrows a kept order.
+@MainActor
+final class LibraryOrdering<Game: Identifiable> where Game.ID: Comparable {
+    private struct Criteria: Equatable {
+        var query: String
+        var sort: StorefrontLibrarySort
+        var filter: StorefrontLibraryFilter
+        /// Read only by the installed filter.
+        var installed: Set<Game.ID>
+    }
+
+    private var revision: Int?
+    private var filterRevision: Int?
+    private var orders: [StorefrontLibrarySort: [Game]] = [:]
+    private var narrowed: (criteria: Criteria, games: [Game])?
+
+    /// The games the model's search and filter keep, in its order.
+    func games<Model: LibraryStorefront>(of model: Model) -> [Game] where Model.Game == Game {
+        // Read every input even when a result is kept, so the library keeps
+        // updating after a search, a filter, an installation or new metadata.
+        let games = model.games
+        let revision = model.libraryRevision
+        let filterRevision = model.filterRevision
+        let filter = model.filter
+        let criteria = Criteria(
+            query: model.searchText.trimmingCharacters(in: .whitespacesAndNewlines), sort: model.sort, filter: filter,
+            installed: filter == .installed ? Set(model.installations.receipts.map(\.gameID)) : []
+        )
+        if revision != self.revision {
+            self.revision = revision
+            orders.removeAll()
+            narrowed = nil
+        }
+        // What only a filter reads, such as platforms, never changes an order.
+        if filterRevision != self.filterRevision {
+            self.filterRevision = filterRevision
+            narrowed = nil
+        }
+        if let narrowed, narrowed.criteria == criteria { return narrowed.games }
+        let ordered = orders[criteria.sort] ?? Self.order(
+            games, by: criteria.sort, title: model.title(of:), playtime: model.playtime(of:), lastPlayed: model.lastPlayed(of:)
+        )
+        orders[criteria.sort] = ordered
+        let kept = criteria.query.isEmpty && filter == .all ? ordered : ordered.filter { game in
+            guard criteria.query.isEmpty || model.title(of: game).localizedStandardContains(criteria.query) else { return false }
+            switch filter {
+            case .all: return true
+            case .installed: return criteria.installed.contains(game.id)
+            case .played: return model.playtime(of: game) != nil || model.lastPlayed(of: game) != nil
+            case .macOS: return model.platform(of: game) == .macOS
+            }
+        }
+        narrowed = (criteria, kept)
+        return kept
+    }
+
+    /// `games` in `sort` order: the most played or the last played first,
+    /// equal ones by name, then by ID.
+    static func order(_ games: [Game], by sort: StorefrontLibrarySort, title: (Game) -> String,
+                      playtime: (Game) -> Duration?, lastPlayed: (Game) -> Date?) -> [Game] {
+        // Each game's keys are read once, not at every comparison.
+        let keyed = games.map { game in
+            let rank: Double = switch sort {
+            case .name: 0
+            case .playtime: Double(playtime(game)?.components.seconds ?? 0)
+            case .lastPlayed: lastPlayed(game)?.timeIntervalSince1970 ?? -.infinity
+            }
+            return (game: game, title: title(game), rank: rank)
+        }
+        return keyed.sorted { left, right in
+            if left.rank != right.rank { return left.rank > right.rank }
+            let comparison = left.title.localizedStandardCompare(right.title)
+            return comparison == .orderedSame ? left.game.id < right.game.id : comparison == .orderedAscending
+        }.map(\.game)
+    }
+}
+
+/// How every storefront presents a game's history and size.
+enum GameFormatting {
+    static func playtime(_ playtime: Duration) -> String {
+        let seconds = max(0, playtime.components.seconds)
+        if seconds == 0 { return L10n.string("ui.game.never_played") }
+        if seconds < 3600 { return L10n.string("ui.game.playtime_minutes", seconds / 60) }
+        let hours = Double(seconds) / 3600
+        return L10n.string("ui.game.playtime_hours", hours.formatted(.number.precision(.fractionLength(0...1)).locale(L10n.locale)))
+    }
+
+    static func lastPlayed(_ date: Date?) -> String {
+        guard let date else { return L10n.string("ui.game.never_launched") }
+        return date.formatted(.dateTime.day().month(.abbreviated).year().locale(L10n.locale))
+    }
+
+    static func bytes(_ value: UInt64) -> String {
+        Int64(clamping: value).formatted(.byteCount(style: .file).locale(L10n.locale))
+    }
+}
+
 /// Dismissable notice for a Keychain or receipt storage problem.
 struct StorefrontWarningBanner: View {
     @Binding var message: String?
@@ -62,15 +162,17 @@ struct StorefrontWarningBanner: View {
     var body: some View {
         if let message {
             HStack(alignment: .top, spacing: 10) {
-                Image(systemName: "exclamationmark.triangle").foregroundStyle(.orange)
+                Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
                 Text(L10n.message(message)).font(.system(size: 12))
+                    .fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 0)
                 Button { self.message = nil } label: { Image(systemName: "xmark") }
                     .obeliskButtonStyle(.plain)
                     .accessibilityLabel(L10n.string("ui.common.dismiss_warning"))
             }
-            .padding(13)
-            .background(.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+            .padding(.horizontal, 16)
+            .padding(.vertical, 13)
+            .modifier(StorefrontPanelGlass(cornerRadius: 16, tint: .orange.opacity(0.12)))
         }
     }
 }

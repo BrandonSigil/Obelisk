@@ -11,6 +11,8 @@ protocol InstallationStorefront: GameStorefront {
     static func name(_ game: GameID) -> String
     /// Shown on a game's page while another game's operation holds the storefront.
     static var otherGameOperation: String { get }
+    /// How the storefront names a build for macOS, which Obelisk prefers.
+    static var nativePlatform: String { get }
 }
 
 /// One installation of the account, as its Installation receipt in Rust
@@ -464,6 +466,7 @@ extension TransferState {
 }
 
 extension SteamGames: InstallationStorefront {
+    static let nativePlatform = "macos"
     static func game(_ id: String) -> UInt32? { UInt32(id) }
     static func name(_ game: UInt32) -> String { String(game) }
     static let otherGameOperation = "ui.steam.other_game_operation"
@@ -471,6 +474,7 @@ extension SteamGames: InstallationStorefront {
 }
 
 extension EpicGames: InstallationStorefront {
+    static let nativePlatform = "Mac"
     /// Rust names an Epic game as its library ID does.
     static func game(_ id: String) -> String? { epicGameID(id) == nil ? nil : id }
     static func name(_ game: String) -> String { game }

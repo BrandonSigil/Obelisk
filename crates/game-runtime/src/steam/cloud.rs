@@ -166,12 +166,6 @@ impl From<Failure> for crate::Error {
     }
 }
 
-fn now() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs()
-}
 fn scope(config: &Config, account: u64) -> cloud_vault::Scope {
     cloud_vault::Scope {
         steam_id: account,

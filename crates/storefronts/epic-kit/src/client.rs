@@ -47,10 +47,10 @@ pub struct Game {
     pub metadata: serde_json::Value,
 }
 
-/// Optional account history and manifest size for a single library entry.
+/// What a game's page adds to its library entry: the size of its build.
 #[derive(Clone, Debug, Default)]
 pub struct GameDetails {
-    pub playtime_seconds: Option<u64>,
+    /// Unknown when Epic serves no manifest of the build.
     pub installation_bytes: Option<u64>,
 }
 
@@ -135,40 +135,28 @@ impl Client {
         platform: &str,
     ) -> Result<GameDetails, EpicError> {
         validate_identity(namespace, catalog_item_id, app_name, platform)?;
-        let account_id = self.credentials().await?.account_id;
-        let account_id = account_id.as_str();
-        let (history, size) = self
+        let size = self
             .with_access_token(|token| async move {
-                let (history, size) = tokio::join!(
-                    playtimes(&self.api, &token, account_id),
-                    crate::details::installation_size(
-                        &self.api,
-                        &token,
-                        namespace,
-                        catalog_item_id,
-                        app_name,
-                        platform,
-                    ),
-                );
+                let size = crate::details::installation_size(
+                    &self.api,
+                    &token,
+                    namespace,
+                    catalog_item_id,
+                    app_name,
+                    platform,
+                )
+                .await;
                 // Re-raise so the funnel refreshes the token once; the funnel
                 // also rejects the result if the session went away meanwhile.
-                if matches!(history, Err(EpicError::Unauthorized))
-                    || matches!(size, Err(EpicError::Unauthorized))
-                {
-                    return Err(EpicError::Unauthorized);
+                match size {
+                    Err(EpicError::Unauthorized) => Err(EpicError::Unauthorized),
+                    size => Ok(size.ok()),
                 }
-                Ok((history, size))
             })
             .await?;
-        // An unavailable manifest must not hide the account's playtime,
-        // and a failed history request must not hide a usable size.
-        match (history, size) {
-            (Err(error), Err(_)) => Err(error),
-            (history, size) => Ok(GameDetails {
-                playtime_seconds: history.ok().and_then(|times| times.get(app_name).copied()),
-                installation_bytes: size.ok(),
-            }),
-        }
+        Ok(GameDetails {
+            installation_bytes: size,
+        })
     }
 
     /// Every game's playtime in seconds, by app name, in one request. A game

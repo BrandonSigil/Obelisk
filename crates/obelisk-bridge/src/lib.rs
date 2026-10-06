@@ -24,6 +24,8 @@ mod locations;
 pub use locations::*;
 mod installations;
 pub use installations::*;
+mod library_cache;
+pub use library_cache::{CachedEpicGame, CachedSteamGame, GameLaunch, LibraryCache};
 
 uniffi::setup_scaffolding!();
 

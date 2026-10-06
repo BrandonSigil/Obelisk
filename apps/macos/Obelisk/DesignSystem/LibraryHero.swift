@@ -4,10 +4,12 @@ import SwiftUI
 /// library's floating bar. Its text stays light, with its own shadow, in both
 /// appearances.
 struct LibraryHero<Artwork: View, Logo: View>: View {
+    /// The game's name, read aloud as the hero's heading.
+    let title: String
     let details: [Detail]
     let open: () -> Void
     @ViewBuilder let artwork: Artwork
-    /// The game's logo, or its title when the storefront has no logo.
+    /// What shows the game's name over its artwork, if the artwork does not.
     @ViewBuilder let logo: Logo
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -41,6 +43,7 @@ struct LibraryHero<Artwork: View, Logo: View>: View {
                 VStack(alignment: .leading, spacing: 14) {
                     logo
                         .shadow(color: .black.opacity(0.35), radius: 14, y: 4)
+                        .accessibilityHidden(true)
                     HStack(spacing: 16) {
                         ForEach(details) { detail in
                             Label(detail.text, systemImage: detail.symbol)
@@ -61,6 +64,9 @@ struct LibraryHero<Artwork: View, Logo: View>: View {
                 }
                 .padding(.horizontal, ObeliskStyle.contentPadding)
                 .padding(.bottom, 28)
+                .accessibilityElement(children: .contain)
+                .accessibilityLabel(title)
+                .accessibilityAddTraits(.isHeader)
                 // The text fades out as it slides under the bar's controls.
                 .visualEffect { [reach] content, geometry in
                     // Fully visible until its top nears the bar, gone a little
@@ -93,12 +99,9 @@ private struct TrailingIconLabelStyle: LabelStyle {
 }
 
 /// The featured game's logo, or its title when its store publishes none.
-/// Without `showsTitle`, the title is only read aloud, for artwork that
-/// already shows it.
 struct LibraryHeroLogo: View {
     let url: URL?
     let title: String
-    var showsTitle = true
 
     var body: some View {
         Group {
@@ -112,16 +115,11 @@ struct LibraryHeroLogo: View {
                         Color.clear
                     }
                 }
-            } else if showsTitle {
-                titleText
             } else {
-                Color.clear
+                titleText
             }
         }
-        .frame(width: 360, height: url != nil || showsTitle ? 120 : 0, alignment: .bottomLeading)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(title)
-        .accessibilityAddTraits(.isHeader)
+        .frame(width: 360, height: 120, alignment: .bottomLeading)
     }
 
     private var titleText: some View {

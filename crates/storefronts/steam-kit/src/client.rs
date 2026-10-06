@@ -180,6 +180,9 @@ pub struct Client {
     catalog: AsyncMutex<Option<Arc<ContentLicenses>>>,
     app_infos: Mutex<HashMap<u32, (Instant, Arc<AppInfo>)>>,
     downloads: Transfers<TransferProgress>,
+    /// Lets a cancellation reach a download still picking its build, before
+    /// its Transfer exists.
+    picking: Mutex<Option<CancelToken>>,
 }
 
 impl Client {
@@ -214,6 +217,7 @@ impl Client {
             catalog: AsyncMutex::new(None),
             app_infos: Mutex::new(HashMap::new()),
             downloads: Transfers::default(),
+            picking: Mutex::new(None),
         }
     }
 
@@ -238,6 +242,7 @@ impl Client {
             catalog: AsyncMutex::new(None),
             app_infos: Mutex::new(HashMap::new()),
             downloads: Transfers::default(),
+            picking: Mutex::new(None),
         })
     }
 
@@ -401,7 +406,7 @@ impl Client {
                 platforms: apps
                     .get(&app_id)
                     .map_or_else(Vec::new, |app| app.os_list.clone()),
-                pics: apps.get(&app_id).map(|app| app.metadata.clone()),
+                pics: apps.get(&app_id).map(|app| app.metadata()),
             })
             .collect())
     }
@@ -423,6 +428,14 @@ impl Client {
     }
 
     pub fn cancel_download(&self) {
+        if let Some(picking) = self
+            .picking
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .as_ref()
+        {
+            picking.cancel();
+        }
         self.downloads.cancel();
     }
 
@@ -454,17 +467,52 @@ impl Client {
         crate::launch::plan(&app, platform, directory).map_err(client_error)
     }
 
+    /// Installs the game's build for `platform` under `parent`. Without a
+    /// platform, it installs the build the account's licenses grant, the
+    /// native one first.
     pub async fn download(
         &self,
         app_id: u32,
-        platform: &str,
+        platform: Option<&str>,
         language: &str,
         parent: &Path,
     ) -> Result<Installation, ClientError> {
-        if !matches!(platform, "windows" | "macos") || !crate::language::is_supported(language) {
-            return Err(ClientError(
-                "backend.steam.client.unsupportedPlatformOrLanguage".into(),
-            ));
+        let picking = CancelToken::new();
+        *self.picking.lock().unwrap_or_else(PoisonError::into_inner) = Some(picking.clone());
+        let installed = self
+            .install_build(app_id, platform, language, parent, &picking)
+            .await;
+        self.picking
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take();
+        installed
+    }
+
+    /// `download`, which `picking` cancels until its Transfer starts.
+    async fn install_build(
+        &self,
+        app_id: u32,
+        platform: Option<&str>,
+        language: &str,
+        parent: &Path,
+        picking: &CancelToken,
+    ) -> Result<Installation, ClientError> {
+        let unsupported =
+            || ClientError("backend.steam.client.unsupportedPlatformOrLanguage".into());
+        if !crate::language::is_supported(language) {
+            return Err(unsupported());
+        }
+        let platform = match platform {
+            Some(platform) => platform,
+            None => tokio::select! {
+                biased;
+                () = picking.cancelled() => return Err(Cancelled.into()),
+                picked = self.pick_platform(app_id, language) => picked?,
+            },
+        };
+        if !matches!(platform, "windows" | "macos") {
+            return Err(unsupported());
         }
         // The chosen folder is the only caller-controlled path. App IDs and depot
         // manifest validation determine every path beneath it.
@@ -477,6 +525,8 @@ impl Client {
                 directory: &directory,
             },
             |_, cancel| async move {
+                // A cancellation that arrived while the build was picked.
+                picking.check()?;
                 self.prepare_depots(app_id, platform, language, &cancel)
                     .await
             },
@@ -493,6 +543,21 @@ impl Client {
             },
         )
         .await
+    }
+
+    /// The build the account owns, the native one first.
+    async fn pick_platform(
+        &self,
+        app_id: u32,
+        language: &str,
+    ) -> Result<&'static str, ClientError> {
+        let owned = self.licensed_content(&self.cm).await?;
+        if !owned.apps.contains(&app_id) {
+            return Err(ClientError("backend.steam.client.gameNotOwned".into()));
+        }
+        let app = self.app_info(&self.cm, app_id).await?;
+        installable_platform(&app, &owned, language)
+            .ok_or_else(|| ClientError("backend.steam.client.noCompatibleDepot".into()))
     }
 
     /// Installs every prepared depot under the installation lock, including
@@ -748,6 +813,17 @@ impl CdnAuthorization for DepotAuthorization<'_> {
     }
 }
 
+/// The build the account's licenses grant, the native one first.
+fn installable_platform(
+    app: &AppInfo,
+    owned: &ContentLicenses,
+    language: &str,
+) -> Option<&'static str> {
+    ["macos", "windows"]
+        .into_iter()
+        .find(|platform| !select_depots(app, owned, platform, language).is_empty())
+}
+
 fn select_depots<'a>(
     app: &'a AppInfo,
     owned: &ContentLicenses,
@@ -918,6 +994,29 @@ mod tests {
     }
 
     #[test]
+    fn without_a_platform_the_native_build_the_account_owns_comes_first() {
+        let app = AppInfo {
+            os_list: vec!["windows".into(), "macos".into()],
+            ..app(vec![
+                depot(2, "windows", None, None),
+                depot(3, "macos", None, None),
+            ])
+        };
+        assert_eq!(
+            installable_platform(&app, &licenses([1], [2, 3]), "english"),
+            Some("macos")
+        );
+        assert_eq!(
+            installable_platform(&app, &licenses([1], [2]), "english"),
+            Some("windows")
+        );
+        assert_eq!(
+            installable_platform(&app, &licenses([1], []), "english"),
+            None
+        );
+    }
+
+    #[test]
     fn depot_rights_do_not_grant_dlc_app_ownership() {
         let app = app(vec![depot(2, "macos", None, Some(99))]);
         assert!(select_depots(&app, &licenses([1], [2, 99]), "macos", "english").is_empty());
@@ -959,7 +1058,7 @@ mod tests {
             os_list: vec!["windows".into(), "macos".into()],
             launch_configs: vec![],
             cloud: None,
-            metadata: serde_json::Value::Null,
+            tree: crate::kv::Kv::Object(Vec::new()),
             depots: vec![
                 depot(1, "", None, None),
                 depot(2, "windows", Some("english"), None),
@@ -992,7 +1091,7 @@ mod tests {
             os_list: vec!["windows".into(), "macos".into()],
             launch_configs: vec![],
             cloud: None,
-            metadata: serde_json::Value::Null,
+            tree: crate::kv::Kv::Object(Vec::new()),
             depots,
         }
     }

@@ -34,11 +34,11 @@ final class EpicModelTests: XCTestCase {
             EpicPlaytime(appName: "a", seconds: 0),
         ])
         let model = EpicModel(directory: root, keychain: EpicMemoryStore(stored), restore: { _ in session })
-        XCTAssertEqual(model.availableSorts, [.name, .playtime], "Epic records no last played date")
+        XCTAssertEqual(model.availableSorts, StorefrontLibrarySort.allCases)
         XCTAssertTrue(model.availableFilters.contains(.played))
         await model.start()
         defer { model.signOut() }
-        await eventually { !model.isLoadingPlaytimes && model.playtime(of: games[2]) == 36_000 }
+        await eventually { !model.isLoadingPlaytimes && model.playtime(of: games[2]) == .seconds(36_000) }
 
         XCTAssertEqual(model.filteredGames.map(\.appName), ["a", "b", "d", "c"])
         model.sort = .playtime
@@ -70,16 +70,16 @@ final class EpicModelTests: XCTestCase {
         model.sort = .playtime
         XCTAssertNotNil(model.missingMetadata)
         model.refresh()
-        await eventually { !model.isLoadingGames && !model.isLoadingPlaytimes && model.playtime(of: games[1]) == 60 }
+        await eventually { !model.isLoadingGames && !model.isLoadingPlaytimes && model.playtime(of: games[1]) == .seconds(60) }
         XCTAssertNil(model.missingMetadata)
         XCTAssertEqual(model.filteredGames.map(\.appName), ["b", "a"])
     }
 
-    func testTheFeaturedGameIsTheLastLaunchedElseTheMostPlayed() async throws {
+    func testTheLastLaunchFromObeliskLeadsTheHeroTheOrderAndThePlayedFilter() async throws {
         let games = [game("a", title: "Alpha"), game("b", title: "Beta"), game("c", title: "Gamma")]
-        let file = FileManager.default.temporaryDirectory.appending(path: "ObeliskEpicFeatured-\(UUID().uuidString).json")
-        defer { try? FileManager.default.removeItem(at: file) }
-        let history = LaunchHistory(cache: LibraryCache(file: file))
+        let directory = FileManager.default.temporaryDirectory.appending(path: "ObeliskEpicFeatured-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let history = LaunchHistory(cache: LibraryCache(directory: directory.path))
         let stored = credentials("current")
         let session = EpicTestSession(credentials: stored, games: games, playtimes: [
             EpicPlaytime(appName: "b", seconds: 600), EpicPlaytime(appName: "c", seconds: 36_000),
@@ -90,9 +90,13 @@ final class EpicModelTests: XCTestCase {
         await eventually { !model.isLoadingPlaytimes && model.playtime(of: games[2]) != nil }
 
         XCTAssertEqual(model.featuredGame?.appName, "c", "Without a launch from Obelisk, the most played game")
+        model.sort = .lastPlayed
+        model.filter = .played
+        XCTAssertEqual(model.filteredGames.map(\.appName), ["b", "c"], "Played, never launched: by name")
         history.record(games[0].libraryID, account: stored.accountId, in: EpicGames.self)
         XCTAssertEqual(model.featuredGame?.appName, "a")
-        XCTAssertNotNil(model.lastLaunch(of: games[0]))
+        XCTAssertNotNil(model.lastPlayed(of: games[0]))
+        XCTAssertEqual(model.filteredGames.map(\.appName), ["a", "b", "c"], "Launched from Obelisk, never played on Epic")
         history.record(games[1].libraryID, account: "another-account", in: EpicGames.self, at: .now + 60)
         XCTAssertEqual(model.featuredGame?.appName, "a", "Only this account's launches count")
 
@@ -103,45 +107,47 @@ final class EpicModelTests: XCTestCase {
 
     func testNoGameIsFeaturedBeforeOneWasPlayed() async throws {
         let games = [game("a"), game("b")]
-        let file = FileManager.default.temporaryDirectory.appending(path: "ObeliskEpicFeatured-\(UUID().uuidString).json")
-        defer { try? FileManager.default.removeItem(at: file) }
+        let directory = FileManager.default.temporaryDirectory.appending(path: "ObeliskEpicFeatured-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: directory) }
         let stored = credentials("current")
         let session = EpicTestSession(credentials: stored, games: games, playtimes: [EpicPlaytime(appName: "a", seconds: 0)])
         let model = EpicModel(keychain: EpicMemoryStore(stored), restore: { _ in session },
-                              gameSessions: EpicGameSessions(FakeSessions(), history: LaunchHistory(cache: LibraryCache(file: file))))
+                              gameSessions: EpicGameSessions(FakeSessions(), history: LaunchHistory(cache: LibraryCache(directory: directory.path))))
         await model.start()
         defer { model.signOut() }
         await eventually { !model.isLoadingPlaytimes }
         XCTAssertNil(model.featuredGame)
     }
 
-    func testTheCachedLibraryShowsWhileEpicRestoresThenUpdatesTheCache() async throws {
-        let file = FileManager.default.temporaryDirectory.appending(path: "ObeliskEpicCache-\(UUID().uuidString).json")
-        defer { try? FileManager.default.removeItem(at: file) }
-        let cache = LibraryCache(file: file)
+    func testTheCachedLibraryShowsWhileEpicRestoresAndSigningOutForgetsIt() async throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: "ObeliskEpicCache-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: directory) }
         let cached = game("old", title: "Cached game")
-        cache.save([EpicLibraryEntry(cached, playtimeSeconds: 7200)], in: .epic, account: "fixture-id")
+        let cache = try LibraryCache.holding(epic: ["fixture-id": [CachedEpicGame(game: cached, playtimeSeconds: 7200)]],
+                                             in: directory)
         let stored = credentials("current")
         let session = EpicTestSession(credentials: stored, games: [game("a", title: "Alpha")],
                                       playtimes: [EpicPlaytime(appName: "a", seconds: 60)])
+        let history = LaunchHistory(cache: cache)
+        let launched = Date(timeIntervalSince1970: 1_790_000_000)
+        history.record(cached.libraryID, account: "fixture-id", in: EpicGames.self, at: launched)
         let restoration = GameSessionGate<EpicTestSession>()
         let model = EpicModel(keychain: EpicMemoryStore(stored), restore: { _ in try await restoration.wait() },
-                              gameSessions: EpicGameSessions(FakeSessions(), history: .temporary()), libraryCache: cache)
+                              gameSessions: EpicGameSessions(FakeSessions(), history: history), libraryCache: cache)
         let start = Task { await model.start() }
 
         await eventually { model.showsLibrary }
         XCTAssertFalse(model.isConnected, "The cached library shows before Epic answers")
         XCTAssertEqual(model.games, [cached])
-        XCTAssertEqual(model.playtime(of: cached), 7200)
+        XCTAssertEqual(model.playtime(of: cached), .seconds(7200))
+        XCTAssertEqual(model.lastPlayed(of: cached), launched, "The cached account's launches already count")
         await restoration.resolve(session)
         await start.value
         await eventually { model.games.map(\.appName) == ["a"] && !model.isLoadingPlaytimes }
-        let saved = cache.games(EpicLibraryEntry.self, in: .epic, account: "fixture-id")
-        XCTAssertEqual(saved?.map(\.game.appName), ["a"])
-        XCTAssertEqual(saved?.first?.playtimeSeconds, 60)
+        XCTAssertEqual(model.playtime(of: model.games[0]), .seconds(60))
 
         model.signOut()
-        XCTAssertNil(cache.games(EpicLibraryEntry.self, in: .epic, account: "fixture-id"))
+        XCTAssertTrue(cache.epicLibrary(accountId: "fixture-id").isEmpty, "Signing out forgets the account's library")
     }
 
     func testRestoreRunsOnceAndSavesRotatedRefreshToken() async {
@@ -526,7 +532,7 @@ final class EpicModelTests: XCTestCase {
         XCTAssertTrue(model.isLoadingGameDetails)
         XCTAssertNil(model.selectedGameDetails)
 
-        let details = EpicGameDetails(playtimeSeconds: 3660, installationBytes: 2_000_000)
+        let details = EpicGameDetails(installationBytes: 2_000_000)
         await session.completeDetails(1, with: details)
         await eventually { !model.isLoadingGameDetails }
         XCTAssertEqual(model.selectedGameDetails, details)
@@ -563,7 +569,7 @@ final class EpicModelTests: XCTestCase {
         model.open(second)
         await eventually { !model.isLoadingGameDetails }
         let secondDetails = model.selectedGameDetails
-        await session.completeDetails(1, with: EpicGameDetails(playtimeSeconds: 999, installationBytes: 999))
+        await session.completeDetails(1, with: EpicGameDetails(installationBytes: 999))
         await eventually { await session.returnedDetails == 2 }
         await Task.yield()
 
@@ -585,13 +591,13 @@ final class EpicModelTests: XCTestCase {
         model.open(owned)
         await eventually { await session.detailsCalls.count == 2 }
 
-        await session.completeDetails(1, with: EpicGameDetails(playtimeSeconds: 999, installationBytes: 999))
+        await session.completeDetails(1, with: EpicGameDetails(installationBytes: 999))
         await eventually { await session.returnedDetails == 1 }
         await Task.yield()
         XCTAssertNil(model.selectedGameDetails)
         XCTAssertTrue(model.isLoadingGameDetails)
 
-        let current = EpicGameDetails(playtimeSeconds: 60, installationBytes: nil)
+        let current = EpicGameDetails(installationBytes: nil)
         await session.completeDetails(2, with: current)
         await eventually { !model.isLoadingGameDetails }
         XCTAssertEqual(model.selectedGameDetails, current)
@@ -608,7 +614,7 @@ final class EpicModelTests: XCTestCase {
         await eventually { await session.detailsCalls.count == 1 }
 
         model.signOut()
-        await session.completeDetails(1, with: EpicGameDetails(playtimeSeconds: 999, installationBytes: 999))
+        await session.completeDetails(1, with: EpicGameDetails(installationBytes: 999))
         await eventually {
             let returned = await session.returnedDetails
             return returned == 1 && !model.isSigningOut
@@ -635,7 +641,7 @@ final class EpicModelTests: XCTestCase {
         model.closeGame()
         await session.completeDetails(
             1,
-            with: EpicGameDetails(playtimeSeconds: 999, installationBytes: 999),
+            with: EpicGameDetails(installationBytes: 999),
             rotated: credentials("late-rotation")
         )
         await eventually { await store.value?.refreshToken == "late-rotation" }
@@ -810,7 +816,7 @@ actor EpicTestSession: EpicSessionProtocol {
             let invocation = detailsCalls.count
             return await withCheckedContinuation { detailsContinuations[invocation] = $0 }
         }
-        return EpicGameDetails(playtimeSeconds: nil, installationBytes: nil)
+        return EpicGameDetails(installationBytes: nil)
     }
     func holdNextDetails() { shouldHoldDetails = true }
     func completeDetails(_ invocation: Int, with details: EpicGameDetails, rotated: EpicCredentials? = nil) {

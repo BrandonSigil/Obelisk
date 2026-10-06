@@ -99,7 +99,8 @@ extension InstallationReceipt where GameID == String {
 }
 
 extension GameOffer {
-    var platform: String {
+    /// Nil when Steam picks the build.
+    var platform: String? {
         switch self {
         case let .steam(_, _, platform, _): platform
         case let .epic(_, _, _, _, platform): platform

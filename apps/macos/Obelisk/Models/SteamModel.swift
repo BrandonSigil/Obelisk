@@ -19,11 +19,10 @@ final class SteamModel {
     private(set) var friends: FriendsPresentationState?
     var isFriendsPresented = false
     private(set) var games: [SteamGame] = [] {
-        didSet {
-            libraryOrderCache.removeAll()
-            filteredLibraryCache = nil
-        }
+        didSet { libraryChanges &+= 1 }
     }
+    /// Changes with the games and the account whose launches they read.
+    private var libraryChanges = 0
     private(set) var isRestoring = false
     private(set) var isConnecting = false
     private(set) var isLoadingGames = false
@@ -43,9 +42,6 @@ final class SteamModel {
     var availableFilters: [StorefrontLibraryFilter] { StorefrontLibraryFilter.allCases }
     var guardKind: SteamGuardKind = .deviceConfirmation
 
-    /// The game the library downloads once Steam tells which build the
-    /// account can install.
-    private(set) var preparingDownload: UInt32?
     private(set) var selectedGame: SteamGame? {
         // Every path that opens, closes or replaces the selection invalidates
         // the panel here, so no caller has to remember to.
@@ -62,8 +58,8 @@ final class SteamModel {
         if let details, details.appId == selectedGame?.appId { return details.preferredPlatform }
         // Installation receipts are available before remote details. Never use
         // the previous game's platform to present the newly selected game.
-        return installations.receipts.contains { $0.gameID == selectedGame?.appId && $0.platform == "macos" }
-            ? "macos" : "windows"
+        return installations.receipts.contains { $0.gameID == selectedGame?.appId && $0.platform == SteamGames.nativePlatform }
+            ? SteamGames.nativePlatform : "windows"
     }
     private(set) var language: String
     var verifyBeforeLaunch: Bool {
@@ -87,10 +83,13 @@ final class SteamModel {
     let rosetta: SteamRosettaModel
     let libraryPlatforms = SteamLibraryPlatforms()
     @ObservationIgnored private let preferences: UserDefaults
-    /// Where the account's last library is kept between launches.
+    /// Where the account's last library is kept between launches. The
+    /// account's session keeps every library it loads there.
     @ObservationIgnored private let libraryCache: LibraryCache?
     /// The account whose cached library shows while its session connects.
-    private var cachedAccount: UInt64?
+    private var cachedAccount: UInt64? {
+        didSet { if cachedAccount != oldValue { libraryChanges &+= 1 } }
+    }
     @ObservationIgnored private var session: (any SteamSessionProtocol)?
     @ObservationIgnored private var login: (any SteamLoginProtocol)?
     private var steamId: UInt64? { sessionCredentials?.steamId }
@@ -103,21 +102,19 @@ final class SteamModel {
     @ObservationIgnored private var friendsTask: Task<Void, Never>?
     @ObservationIgnored private var friendsObservationGeneration = 0
     /// The connected account; observed because `isConnected` derives from it.
-    private var sessionCredentials: SteamCredentials?
+    private var sessionCredentials: SteamCredentials? {
+        didSet { if sessionCredentials?.steamId != oldValue?.steamId { libraryChanges &+= 1 } }
+    }
     @ObservationIgnored private let reconnectDelay: @Sendable (Int) async throws -> Void
     @ObservationIgnored private var wakeObserver: SystemWakeObservation?
     @ObservationIgnored private var connectionTask: Task<any SteamSessionProtocol, Error>?
     @ObservationIgnored private var pollingActive = false
-    @ObservationIgnored private var libraryOrderCache: [StorefrontLibrarySort: [SteamGame]] = [:]
-    @ObservationIgnored private var filteredLibraryCache: (
-        query: String, sort: StorefrontLibrarySort, filter: StorefrontLibraryFilter,
-        installed: Set<UInt32>, platforms: [UInt32: [String]], games: [SteamGame]
-    )?
+    @ObservationIgnored let libraryOrdering = LibraryOrdering<SteamGame>()
 
     init(
         directory: URL,
         keychain: any SteamCredentialStore = SteamKeychain(),
-        connect: @escaping @Sendable (SteamCredentials) async throws -> any SteamSessionProtocol = { try await SteamSessionConnection.connect($0) },
+        connect: (@Sendable (SteamCredentials) async throws -> any SteamSessionProtocol)? = nil,
         news: @escaping @Sendable (UInt32) async throws -> [SteamNews] = { try await steamNews(appId: $0) },
         beginLogin: @escaping @Sendable (SteamLoginStart) async throws -> any SteamLoginProtocol = { start in
             switch start {
@@ -138,7 +135,7 @@ final class SteamModel {
     ) {
         self.directory = directory
         self.keychain = keychain
-        self.connectSession = connect
+        self.connectSession = connect ?? { [libraryCache] in try await SteamSessionConnection.connect($0, library: libraryCache) }
         self.loadNews = news
         self.beginLogin = beginLogin
         self.language = steamLanguage(locale: localeIdentifier)
@@ -225,39 +222,27 @@ final class SteamModel {
         }
     }
 
-    var filteredGames: [SteamGame] {
-        // Read every observable input even on cache hits so the library keeps
-        // updating after search, filters, installation changes or platform replies.
-        let source = games
-        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-        let order = sort
-        let selectedFilter = filter
-        let installedAppIds = selectedFilter == .installed ? Set(installations.receipts.map(\.gameID)) : []
-        // Dictionary snapshots share storage until the next metadata batch changes it.
-        let platforms = selectedFilter == .macOS ? libraryPlatforms.platforms : [:]
-        if let cached = filteredLibraryCache, cached.query == query, cached.sort == order,
-           cached.filter == selectedFilter, cached.installed == installedAppIds, cached.platforms == platforms {
-            return cached.games
+    func title(of game: SteamGame) -> String { game.name }
+
+    func playtime(of game: SteamGame) -> Duration? { game.playtime }
+
+    /// When the game was last played: on Steam, or later from Obelisk.
+    func lastPlayed(of game: SteamGame) -> Date? {
+        // The cached library's account, while its session connects.
+        let launched = (steamId ?? cachedAccount).flatMap {
+            gameSessions.history.lastLaunch(of: game.appId, account: $0, in: SteamGames.self)
         }
-        let ordered: [SteamGame]
-        if let cached = libraryOrderCache[order] {
-            ordered = cached
-        } else {
-            ordered = Self.filterAndSort(source, query: "", sort: order)
-            libraryOrderCache[order] = ordered
-        }
-        let filtered = query.isEmpty && selectedFilter == .all ? ordered : ordered.filter { game in
-            guard query.isEmpty || game.name.localizedStandardContains(query) else { return false }
-            switch selectedFilter {
-            case .all: return true
-            case .installed: return installedAppIds.contains(game.appId)
-            case .played: return game.lastPlayed > 0 || game.playtimeMinutes > 0
-            case .macOS: return platforms[game.appId]?.contains("macos") == true
-            }
-        }
-        filteredLibraryCache = (query, order, selectedFilter, installedAppIds, platforms, filtered)
-        return filtered
+        return [game.lastPlayedOnSteam, launched].compactMap { $0 }.max()
     }
+
+    /// Nil until Steam told the game's platforms.
+    func platform(of game: SteamGame) -> GamePlatform? {
+        libraryPlatforms.platforms[game.appId].flatMap(GamePlatform.preferred(platforms:))
+    }
+
+    var libraryRevision: Int { libraryChanges &+ gameSessions.history.revision }
+
+    var filterRevision: Int { libraryPlatforms.revision }
 
     var pendingMetadata: String? {
         filter == .macOS && libraryPlatforms.isLoading ? L10n.string("ui.filter.loading_platforms") : nil
@@ -265,19 +250,6 @@ final class SteamModel {
 
     var missingMetadata: String? {
         filter == .macOS && libraryPlatforms.hasFailures ? L10n.string("ui.filter.platforms_unavailable") : nil
-    }
-
-    static func filterAndSort(_ games: [SteamGame], query: String, sort: StorefrontLibrarySort) -> [SteamGame] {
-        let query = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        return games.filter { query.isEmpty || $0.name.localizedStandardContains(query) }.sorted {
-            switch sort {
-            case .lastPlayed where $0.lastPlayed != $1.lastPlayed: return $0.lastPlayed > $1.lastPlayed
-            case .playtime where $0.playtimeMinutes != $1.playtimeMinutes: return $0.playtimeMinutes > $1.playtimeMinutes
-            default:
-                let comparison = $0.name.localizedStandardCompare($1.name)
-                return comparison == .orderedSame ? $0.appId < $1.appId : comparison == .orderedAscending
-            }
-        }
     }
 
     func start() async {
@@ -305,17 +277,13 @@ final class SteamModel {
 
     /// Shows the account's last library at once, while its session connects.
     private func showCachedLibrary(of account: UInt64) {
-        guard games.isEmpty,
-              let cached = libraryCache?.games(SteamLibraryEntry.self, in: .steam, account: String(account)),
-              !cached.isEmpty else { return }
+        guard games.isEmpty, let cached = libraryCache?.steamLibrary(steamId: account), !cached.isEmpty else { return }
         cachedAccount = account
         games = cached.map(\.game)
-        libraryPlatforms.show(
-            platforms: Dictionary(cached.compactMap { entry in entry.platforms.map { (entry.appId, $0) } },
-                                  uniquingKeysWith: { first, _ in first }),
-            pics: Dictionary(cached.compactMap { entry in entry.pics.map { (entry.appId, $0) } },
-                             uniquingKeysWith: { first, _ in first })
-        )
+        libraryPlatforms.show(platforms: Dictionary(
+            cached.compactMap { entry in entry.platforms.map { (entry.game.appId, $0) } },
+            uniquingKeysWith: { first, _ in first }
+        ))
     }
 
     /// Hides a cached library whose session did not restore: another account
@@ -325,15 +293,6 @@ final class SteamModel {
         cachedAccount = nil
         games = []
         libraryPlatforms.reset()
-    }
-
-    /// Saves the library as it now shows, with every game's platforms and
-    /// PICS app info.
-    private func saveLibrary() {
-        guard let libraryCache, let steamId else { return }
-        let platforms = libraryPlatforms.platforms, pics = libraryPlatforms.pics
-        libraryCache.save(games.map { SteamLibraryEntry($0, platforms: platforms[$0.appId], pics: pics[$0.appId]) },
-                          in: .steam, account: String(steamId))
     }
 
     func beginQR() {
@@ -588,11 +547,7 @@ final class SteamModel {
                 selectedGame = updated
             }
             isLoadingGames = false
-            saveLibrary()
-            libraryPlatforms.load(appIds: loaded.map(\.appId), session: session) { [weak self] in
-                guard let self, current == generation, self.session === session else { return }
-                saveLibrary()
-            }
+            libraryPlatforms.load(appIds: loaded.map(\.appId), session: session)
         } catch {
             guard current == generation && self.session === session else { return }
             isLoadingGames = false
@@ -766,7 +721,7 @@ final class SteamModel {
 
     func signOut() {
         if let account = steamId ?? cachedAccount {
-            libraryCache?.forget(.steam, account: String(account))
+            libraryCache?.forget(account: .steam(steamId: account))
             gameSessions.history.forget(account: account, in: SteamGames.self)
         }
         cachedAccount = nil
@@ -792,7 +747,6 @@ final class SteamModel {
         avatarURL = nil
         games = []
         selectedGame = nil
-        preparingDownload = nil
         details = nil
         news = []
         challenge = nil
@@ -878,46 +832,11 @@ final class SteamModel {
         }
     }
 
-    /// When the game was last played: on Steam, or later from Obelisk.
-    func lastPlayed(of game: SteamGame) -> Date? {
-        let steam = game.lastPlayed > 0 ? Date(timeIntervalSince1970: TimeInterval(game.lastPlayed)) : nil
-        let launched = steamId.flatMap { gameSessions.history.lastLaunch(of: game.appId, account: $0, in: SteamGames.self) }
-        return [steam, launched].compactMap { $0 }.max()
-    }
-
-    /// The game the library shows first: the last one played.
-    var featuredGame: SteamGame? {
-        games.compactMap { game in lastPlayed(of: game).map { (game, $0) } }.max { $0.1 < $1.1 }?.0
-    }
-
-    /// Launches the game's native installation first.
-    func launchFromLibrary(_ game: SteamGame) {
-        guard let receipt = installations.receipt(for: game.appId, preferring: "macos") else { return }
-        installations.launch(receipt)
-    }
-
-    /// Downloads a game without opening its page. Only Steam's details tell
-    /// which build the account can install, so the download waits for them.
+    /// Downloads a game without opening its page: Steam picks the build the
+    /// account can install, the native one first, as the Transfer starts.
     func downloadFromLibrary(_ game: SteamGame) {
-        guard let session, preparingDownload == nil, installations.canInstall(game.appId) else { return }
-        preparingDownload = game.appId
-        let current = generation
-        let language = language
-        Task {
-            defer { if current == generation { preparingDownload = nil } }
-            do {
-                let details = try await session.details(appId: game.appId, language: language)
-                guard current == generation && self.session === session else { return }
-                guard let offer = details.offer(for: game, language: language) else {
-                    errorMessage = L10n.string("model.steam.noInstallableBuild")
-                    return
-                }
-                installations.install(offer, of: game.appId)
-            } catch {
-                guard current == generation && self.session === session else { return }
-                errorMessage = Self.message(error)
-            }
-        }
+        guard session != nil, installations.canInstall(game.appId) else { return }
+        installations.install(.steam(appId: game.appId, name: game.name, platform: nil, language: language), of: game.appId)
     }
 
     func backToLibrary() {
@@ -957,49 +876,19 @@ final class SteamModel {
     }
 }
 
-/// What the library cache keeps of a Steam game: everything Steam returned,
-/// its library record and its whole PICS app info, beside the fields the
-/// library reads.
-struct SteamLibraryEntry: LibraryCacheEntry, Equatable {
-    var id: String
-    var appId: UInt32
-    var name: String
-    var iconHash: String
-    var lastPlayed: UInt64
-    var playtimeMinutes: UInt32
-    /// Nil until Steam told the game's platforms.
-    var platforms: [String]?
-    /// Every field `Player.GetOwnedGames` returned for the game.
-    var record: JSONValue?
-    /// The game's whole PICS app info: store details, associations, assets,
-    /// depots and launch options.
-    var pics: JSONValue?
-
-    init(_ game: SteamGame, platforms: [String]?, pics: JSONValue? = nil) {
-        id = String(game.appId)
-        appId = game.appId
-        name = game.name
-        iconHash = game.iconHash
-        lastPlayed = game.lastPlayed
-        playtimeMinutes = game.playtimeMinutes
-        self.platforms = platforms
-        record = JSONValue(json: game.record)
-        self.pics = pics
-    }
-
-    var game: SteamGame {
-        SteamGame(appId: appId, name: name, iconHash: iconHash, lastPlayed: lastPlayed, playtimeMinutes: playtimeMinutes,
-                  record: record?.json)
-    }
-}
-
 extension SteamGame: Identifiable {
     public var id: UInt32 { appId }
+
+    /// Nil when the game was never played.
+    var playtime: Duration? { playtimeMinutes > 0 ? .seconds(Int64(playtimeMinutes) * 60) : nil }
+
+    /// When Steam last saw the game played; nil when it never did.
+    var lastPlayedOnSteam: Date? { lastPlayed > 0 ? Date(timeIntervalSince1970: TimeInterval(lastPlayed)) : nil }
 }
 
 extension SteamGameDetails {
     /// Obelisk installs the native build when Steam ships one, otherwise Windows.
-    var preferredPlatform: String { macos ? "macos" : "windows" }
+    var preferredPlatform: String { macos ? SteamGames.nativePlatform : "windows" }
 
     /// What Steam can install of `game` for the account: its native build first.
     func offer(for game: SteamGame, language: String) -> GameOffer? {

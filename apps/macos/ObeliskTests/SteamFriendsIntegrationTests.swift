@@ -299,7 +299,7 @@ final class SteamFriendsIntegrationTests: XCTestCase {
         let attempt = SteamConnectionAttempt()
         attempt.cancel()
         do {
-            _ = try await attempt.connect(credentials: SteamCredentials(accountName: "fixture", steamId: 1, refreshToken: "unused"))
+            _ = try await attempt.connect(credentials: SteamCredentials(accountName: "fixture", steamId: 1, refreshToken: "unused"), library: nil)
             XCTFail("Cancelled connection unexpectedly succeeded")
         } catch {
             guard case SteamError.Cancelled = error else { return XCTFail("Unexpected error: \(error)") }

@@ -2,10 +2,25 @@ import SwiftUI
 
 /// What a storefront model gives its library page.
 @MainActor protocol LibraryStorefront: GameDetailModel, Observable {
-    associatedtype Game: Identifiable where Game.ID == Store.GameID
+    associatedtype Game: Identifiable where Game.ID == Store.GameID, Game.ID: Comparable
     var games: [Game] { get }
-    /// The games the search and the filter keep, in the library's order.
-    var filteredGames: [Game] { get }
+    func title(of game: Game) -> String
+    /// How long the account played the game; nil until the storefront told
+    /// it, or when it was never played.
+    func playtime(of game: Game) -> Duration?
+    /// When the account last played the game: on the storefront, or later
+    /// from Obelisk.
+    func lastPlayed(of game: Game) -> Date?
+    /// The build Obelisk installs or launches first, once the storefront told
+    /// the game's platforms.
+    func platform(of game: Game) -> GamePlatform?
+    /// Changes whenever a game, or what an order reads of one, may have.
+    var libraryRevision: Int { get }
+    /// Changes whenever what only a filter reads of the games may have, such
+    /// as their platforms.
+    var filterRevision: Int { get }
+    /// Keeps the library's orders between two reads.
+    var libraryOrdering: LibraryOrdering<Game> { get }
     var searchText: String { get set }
     var filter: StorefrontLibraryFilter { get set }
     var availableFilters: [StorefrontLibraryFilter] { get }
@@ -15,9 +30,6 @@ import SwiftUI
     var isLoadingGames: Bool { get }
     var storageWarning: String? { get set }
     var cloud: CloudModel<Store> { get }
-    /// The game a library download waits on while the storefront finds which
-    /// build the account can install.
-    var preparingDownload: Store.GameID? { get }
     /// What the filter or the order still waits for, such as games'
     /// platforms or playtimes, while it loads.
     var pendingMetadata: String? { get }
@@ -26,25 +38,32 @@ import SwiftUI
     func refresh()
     func open(_ game: Game)
     func cloudTitle(for game: Store.GameID?) -> String
-    func launchFromLibrary(_ game: Game)
     func downloadFromLibrary(_ game: Game)
     /// Whether the storefront may have a build of `game` to install.
     func canInstallFromLibrary(_ game: Game) -> Bool
-    /// The game the whole library shows first, as its hero.
-    var featuredGame: Game? { get }
 }
 
 extension LibraryStorefront {
-    var preparingDownload: Store.GameID? { nil }
     func canInstallFromLibrary(_ game: Game) -> Bool { true }
-}
+    var filterRevision: Int { 0 }
 
-/// How a library card presents its game.
-struct LibraryCardContent {
-    let title: String
-    var accessibilityLabel: String?
-    var help: String?
-    var platform: GamePlatform?
+    /// The games the search and the filter keep, in the library's order.
+    var filteredGames: [Game] { libraryOrdering.games(of: self) }
+
+    /// The game the whole library shows first, as its hero: the last one
+    /// played, else the most played.
+    var featuredGame: Game? {
+        if let played = games.compactMap({ game in lastPlayed(of: game).map { (game, $0) } }).max(by: { $0.1 < $1.1 }) {
+            return played.0
+        }
+        return games.compactMap { game in playtime(of: game).map { (game, $0) } }.max { $0.1 < $1.1 }?.0
+    }
+
+    /// Launches the game's native installation first.
+    func launchFromLibrary(_ game: Game) {
+        guard let receipt = installations.receipt(for: game.id, preferring: Store.nativePlatform) else { return }
+        installations.launch(receipt)
+    }
 }
 
 /// Where a library was scrolled, kept while a game's page replaces it. Nothing
@@ -54,10 +73,11 @@ final class LibraryScrollMemory {
     var offset: CGFloat = 0
 }
 
-/// A storefront's signed-in library: an optional hero, then every game of the
-/// account under a floating glass bar, and the storefront's Transfer floating
-/// at the bottom.
-struct StorefrontLibraryPage<Model: LibraryStorefront, Hero: View, Artwork: View, AccountMenu: View>: View {
+/// A storefront's signed-in library: the featured game as its hero, then every
+/// game of the account under a floating glass bar, and the storefront's
+/// Transfer floating at the bottom.
+struct StorefrontLibraryPage<Model: LibraryStorefront, HeroArtwork: View, HeroLogo: View, Artwork: View,
+                             AccountMenu: View>: View {
     @Bindable var model: Model
     /// Names the storefront in accessibility identifiers.
     let storeID: String
@@ -66,9 +86,10 @@ struct StorefrontLibraryPage<Model: LibraryStorefront, Hero: View, Artwork: View
     let accountName: String?
     let avatarURL: URL?
     let scrollMemory: LibraryScrollMemory
-    /// The featured game at the top, its artwork reaching under the bar.
-    @ViewBuilder let hero: (Model.Game) -> Hero
-    let card: (Model.Game) -> LibraryCardContent
+    /// The featured game's wide artwork, reaching under the bar.
+    @ViewBuilder let heroArtwork: (Model.Game) -> HeroArtwork
+    @ViewBuilder let heroLogo: (Model.Game) -> HeroLogo
+    /// A game's cover.
     @ViewBuilder let artwork: (Model.Game) -> Artwork
     @ViewBuilder let accountMenu: AccountMenu
     @State private var position: ScrollPosition
@@ -77,7 +98,7 @@ struct StorefrontLibraryPage<Model: LibraryStorefront, Hero: View, Artwork: View
     @State private var contentUnderBar = false
 
     private static var columns: [GridItem] {
-        [GridItem(.adaptive(minimum: 200, maximum: 270), spacing: 16, alignment: .top)]
+        [GridItem(.adaptive(minimum: 160, maximum: 220), spacing: 16, alignment: .top)]
     }
 
     init(
@@ -88,8 +109,8 @@ struct StorefrontLibraryPage<Model: LibraryStorefront, Hero: View, Artwork: View
         accountName: String?,
         avatarURL: URL? = nil,
         scrollMemory: LibraryScrollMemory,
-        @ViewBuilder hero: @escaping (Model.Game) -> Hero,
-        card: @escaping (Model.Game) -> LibraryCardContent,
+        @ViewBuilder heroArtwork: @escaping (Model.Game) -> HeroArtwork,
+        @ViewBuilder heroLogo: @escaping (Model.Game) -> HeroLogo,
         @ViewBuilder artwork: @escaping (Model.Game) -> Artwork,
         @ViewBuilder accountMenu: () -> AccountMenu
     ) {
@@ -100,8 +121,8 @@ struct StorefrontLibraryPage<Model: LibraryStorefront, Hero: View, Artwork: View
         self.accountName = accountName
         self.avatarURL = avatarURL
         self.scrollMemory = scrollMemory
-        self.hero = hero
-        self.card = card
+        self.heroArtwork = heroArtwork
+        self.heroLogo = heroLogo
         self.artwork = artwork
         self.accountMenu = accountMenu()
         // A library opened at its top stays free to grow above, as its hero
@@ -163,6 +184,21 @@ struct StorefrontLibraryPage<Model: LibraryStorefront, Hero: View, Artwork: View
             LibraryTransferBar(installations: model.installations, name: name)
         }
         .ignoresSafeArea(.container, edges: .top)
+    }
+
+    private func hero(_ game: Model.Game) -> some View {
+        LibraryHero(
+            title: model.title(of: game),
+            details: [
+                model.lastPlayed(of: game).map { .init(symbol: "calendar", text: GameFormatting.lastPlayed($0)) },
+                model.playtime(of: game).map { .init(symbol: "clock", text: GameFormatting.playtime($0)) },
+            ].compactMap { $0 },
+            open: { model.open(game) }
+        ) {
+            heroArtwork(game)
+        } logo: {
+            heroLogo(game)
+        }
     }
 
     private var library: some View {
@@ -253,30 +289,29 @@ struct StorefrontLibraryPage<Model: LibraryStorefront, Hero: View, Artwork: View
         let transferring = installations.activeTransferGame
         let session = installations.sessions.active
         let running = session.flatMap { $0.running ? $0.game : nil }
-        let preparingDownload = model.preparingDownload
         let preparing = Set([
             session?.game,
             installations.isLaunching ? installations.launchGame : nil,
             installations.isUninstalling ? installations.uninstallGame : nil,
-            preparingDownload,
         ].compactMap { $0 })
         func action(for game: Model.Game) -> LibraryCardAction {
             if game.id == running { return .running }
             if game.id == transferring { return .transferring }
             if preparing.contains(game.id) { return .busy }
             if installed.contains(game.id) { return .launch(enabled: installations.canLaunch(game.id)) }
-            return .download(enabled: preparingDownload == nil && installations.canModify(game.id)
-                && model.canInstallFromLibrary(game))
+            return .download(enabled: installations.canModify(game.id) && model.canInstallFromLibrary(game))
         }
         return LazyVGrid(columns: Self.columns, alignment: .leading, spacing: 18) {
             ForEach(games) { game in
                 let action = action(for: game)
-                let content = card(game)
+                let title = model.title(of: game)
                 LibraryCoverCard(
-                    title: content.title,
-                    accessibilityLabel: content.accessibilityLabel ?? content.title,
-                    help: content.help,
-                    platform: content.platform,
+                    title: title,
+                    accessibilityLabel: L10n.string("ui.library.game_accessibility", title,
+                                                    GameFormatting.lastPlayed(model.lastPlayed(of: game))),
+                    help: [title, model.playtime(of: game).map(GameFormatting.playtime)].compactMap { $0 }
+                        .joined(separator: " · "),
+                    platform: model.platform(of: game),
                     action: action,
                     progress: { installations.transfer(for: game.id)?.progressFraction },
                     open: { model.open(game) },
@@ -293,7 +328,7 @@ struct StorefrontLibraryPage<Model: LibraryStorefront, Hero: View, Artwork: View
 
     /// The game a Transfer belongs to, also once it left the library.
     private func name(_ game: Model.Store.GameID) -> String? {
-        model.games.first { $0.id == game }.map { card($0).title }
+        model.games.first { $0.id == game }.map(model.title(of:))
             ?? model.installations.receipts.first { $0.gameID == game }?.name
     }
 }

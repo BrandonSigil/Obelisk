@@ -191,6 +191,10 @@ pub struct Session<P: Storefront> {
     pub observed: bool,
     /// How much of Voile has downloaded while the launch waits for it.
     pub runtime_install: Option<f64>,
+    /// When this Obelisk saw the game start, in seconds since the Unix
+    /// epoch: once a session it saw preparing is past it, even if its game
+    /// already exited. A game recovered running started before, and has none.
+    pub started_at: Option<u64>,
     rosetta: Option<u64>,
 }
 impl<P: Storefront> Session<P> {
@@ -205,6 +209,7 @@ impl<P: Storefront> Session<P> {
             store: None,
             observed: false,
             runtime_install: None,
+            started_at: None,
             rosetta: None,
         }
     }
@@ -219,6 +224,7 @@ impl<P: Storefront> Session<P> {
             store: Some(observation.store.clone()),
             observed: true,
             runtime_install: None,
+            started_at: None,
             rosetta: observation.rosetta,
         }
     }
@@ -492,6 +498,13 @@ impl<P: Storefront> Shared<P> {
             self.update(|inner| {
                 if let Some(active) = &inner.active {
                     session.runtime_install = active.runtime_install;
+                    let started = matches!(
+                        session.phase,
+                        Phase::Running | Phase::Finalizing | Phase::Finished
+                    );
+                    session.started_at = active.started_at.or_else(|| {
+                        (active.phase == Phase::Preparing && started).then(crate::unix_now)
+                    });
                 }
                 inner.active = Some(session.clone());
                 inner.last = Some(Session {

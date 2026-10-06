@@ -59,7 +59,7 @@ struct LibraryView: View {
                     }
                 }
 
-                if model.selection == .recent && !hasSearch {
+                if model.selection == .home && !hasSearch {
                     storeCards
                 }
             }
@@ -148,7 +148,7 @@ struct LibraryView: View {
                 .background(ObeliskStyle.accent.opacity(0.09), in: RoundedRectangle(cornerRadius: 22))
 
             VStack(spacing: 8) {
-                Text(model.selection == .recent ? L10n.string("ui.library.recent_empty_title") : L10n.string("ui.library.local_empty_title"))
+                Text(model.selection == .home ? L10n.string("ui.library.recent_empty_title") : L10n.string("ui.library.local_empty_title"))
                     .font(.system(size: 23, weight: .semibold))
                     .tracking(-0.4)
                 Text(L10n.string("ui.library.local_empty_description", AppIdentity.name))

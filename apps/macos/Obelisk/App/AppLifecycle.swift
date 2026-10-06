@@ -14,6 +14,8 @@ final class AppLifecycle: NSObject, NSApplicationDelegate {
 
     /// Whether a game runs, and how to stop every one of them.
     var games: (running: @MainActor () -> Bool, stop: @MainActor () async -> Void) = ({ false }, {})
+    /// The library cache, whose last changes are still being written.
+    var libraryCache: LibraryCache?
     private var quitting = false
     private var windowClosing: NSObjectProtocol?
 
@@ -51,6 +53,10 @@ final class AppLifecycle: NSObject, NSApplicationDelegate {
             NSApp.reply(toApplicationShouldTerminate: true)
         }
         return .terminateLater
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        libraryCache?.flush()
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
@@ -119,6 +125,7 @@ struct AppMenuBarLabel: View {
     var body: some View {
         Image(systemName: "sailboat.fill")
             .onAppear {
+                lifecycle.libraryCache = model.libraryCache
                 let (steam, epic) = (model.steam.gameSessions, model.epic.gameSessions)
                 lifecycle.games = (
                     running: { steam.active != nil || epic.active != nil },

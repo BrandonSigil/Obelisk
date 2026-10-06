@@ -6,7 +6,7 @@ import UniformTypeIdentifiers
 @MainActor
 @Observable
 final class AppModel {
-    var selection: LibrarySection = .recent {
+    var selection: LibrarySection = .home {
         didSet { searchText = "" }
     }
     var searchText = ""
@@ -23,6 +23,8 @@ final class AppModel {
     }
 
     @ObservationIgnored private let core: CoreClient
+    /// The last library of every storefront account.
+    @ObservationIgnored let libraryCache: LibraryCache
     @ObservationIgnored private let defaults: UserDefaults
     @ObservationIgnored private var revision = 0
 
@@ -31,9 +33,9 @@ final class AppModel {
         self.defaults = defaults
         appearance = AppAppearance(rawValue: defaults.string(forKey: "appearance") ?? "system") ?? .system
         core = CoreClient(storageDirectory: directory.path)
-        // Every storefront's library shares one file. `LaunchHistory.live`
-        // records launches into the app library's copy of it.
-        let libraryCache = LibraryCache(file: directory.appending(path: LibraryCache.fileName))
+        // Every storefront's library shares one cache, as every cache of the
+        // directory does, `LaunchHistory.live`'s included.
+        libraryCache = LibraryCache(directory: directory.path)
         self.steam = steam ?? SteamModel(directory: directory, preferences: defaults, libraryCache: libraryCache)
         self.epic = epic ?? EpicModel(directory: directory, libraryCache: libraryCache)
     }
@@ -89,7 +91,7 @@ final class AppModel {
     }
 
     var filteredGames: [LibraryGame] {
-        guard selection == .recent || selection == .other else { return [] }
+        guard selection == .home || selection == .other else { return [] }
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
         let matching = games.filter { query.isEmpty || $0.title.localizedStandardContains(query) }
         if selection == .other {

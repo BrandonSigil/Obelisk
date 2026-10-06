@@ -314,26 +314,19 @@ const PLAYTIME_PATH: &str = "/library/api/public/playtime/account/account-a/all"
 const MANIFEST_PATH: &str = "/launcher/api/public/assets/v2/platform/Mac/namespace/space/catalogItem/base/app/game/label/Live";
 
 #[tokio::test]
-async fn game_details_preserve_epic_seconds_when_the_manifest_is_unavailable() {
-    let mock = Mock::new(vec![
-        reply(
-            PLAYTIME_PATH,
-            200,
-            json!([
-                {"accountId":"account-b","artifactId":"game","totalTime":999},
-                {"accountId":"account-a","artifactId":"other","totalTime":123},
-                {"accountId":"account-a","artifactId":"game","totalTime":68363}
-            ]),
-        ),
-        reply(MANIFEST_PATH, 404, json!({})),
-    ]);
+async fn game_details_read_only_the_build_size_whose_manifest_may_be_unavailable() {
+    let mock = Mock::new(vec![reply(MANIFEST_PATH, 404, json!({}))]);
     let details = mock
         .client(false)
         .game_details("space", "base", "game", "Mac")
         .await
         .unwrap();
-    assert_eq!(details.playtime_seconds, Some(68363));
     assert_eq!(details.installation_bytes, None);
+    assert_eq!(
+        mock.requests().len(),
+        1,
+        "the library already read every playtime"
+    );
     assert!(
         mock.requests()
             .iter()
@@ -366,51 +359,21 @@ async fn playtimes_read_every_game_of_the_account_in_one_request() {
 }
 
 #[tokio::test]
-async fn missing_history_stays_unknown_but_explicit_zero_is_preserved() {
-    for (body, expected) in [
-        (json!([]), None),
-        (
-            json!([{"accountId":"account-a","artifactId":"game","totalTime":0}]),
-            Some(0),
-        ),
-    ] {
-        let mock = Mock::new(vec![
-            reply(PLAYTIME_PATH, 200, body),
-            reply(MANIFEST_PATH, 404, json!({})),
-        ]);
-        let details = mock
-            .client(false)
-            .game_details("space", "base", "game", "Mac")
-            .await
-            .unwrap();
-        assert_eq!(details.playtime_seconds, expected);
-    }
-}
-
-#[tokio::test]
 async fn game_details_retry_auth_once_and_keep_rotated_credentials() {
-    for status in [200, 401] {
-        let mut replies = vec![reply("/account/api/oauth/token", 200, token("account-a"))];
-        for (path, success_status, body) in [
-            (
-                PLAYTIME_PATH,
-                status,
-                json!([{"accountId":"account-a","artifactId":"game","totalTime":120}]),
-            ),
-            (MANIFEST_PATH, 404, json!({})),
-        ] {
-            let mut rejected = reply(path, 401, json!({}));
-            rejected.bearer = Some("access-old");
-            replies.push(rejected);
-            let mut retried = reply(path, success_status, body);
-            retried.bearer = Some("access-new");
-            replies.push(retried);
-        }
-        let mock = Mock::new(replies);
+    for status in [404, 401] {
+        let mut rejected = reply(MANIFEST_PATH, 401, json!({}));
+        rejected.bearer = Some("access-old");
+        let mut retried = reply(MANIFEST_PATH, status, json!({}));
+        retried.bearer = Some("access-new");
+        let mock = Mock::new(vec![
+            reply("/account/api/oauth/token", 200, token("account-a")),
+            rejected,
+            retried,
+        ]);
         let client = mock.client(false);
         let result = client.game_details("space", "base", "game", "Mac").await;
-        if status == 200 {
-            assert_eq!(result.unwrap().playtime_seconds, Some(120));
+        if status == 404 {
+            assert_eq!(result.unwrap().installation_bytes, None);
         } else {
             assert!(matches!(result, Err(EpicError::Unauthorized)));
         }
@@ -430,15 +393,10 @@ async fn game_details_retry_auth_once_and_keep_rotated_credentials() {
 
 #[tokio::test]
 async fn disconnect_discards_in_flight_game_details() {
-    let mut slow = reply(
-        PLAYTIME_PATH,
-        200,
-        json!([{"accountId":"account-a","artifactId":"game","totalTime":120}]),
-    );
+    let mut slow = reply(MANIFEST_PATH, 404, json!({}));
     slow.delay_ms = 200;
     let mock = Mock::new(vec![
         slow,
-        reply(MANIFEST_PATH, 404, json!({})),
         reply(
             "/account/api/oauth/sessions/kill/access-old",
             204,

@@ -9,6 +9,8 @@ protocol GameStorefront {
     static var storefront: SessionStorefront { get }
     /// The game and account a session names, when it is this storefront's.
     static func identity(of game: GameIdentity) -> (game: GameID, account: AccountID)?
+    /// How a session names `game` of `account`.
+    static func identity(_ game: GameID, account: AccountID) -> GameIdentity?
     static func account(_ account: AccountID) -> GameAccount
     static func account(of account: GameAccount) -> AccountID?
     /// A refused or failed session call, as this storefront reports errors.
@@ -24,6 +26,7 @@ enum SteamGames: GameStorefront {
         guard case let .steam(appId, accountId) = game else { return nil }
         return (appId, accountId)
     }
+    static func identity(_ game: UInt32, account: UInt64) -> GameIdentity? { .steam(appId: game, accountId: account) }
     static func account(_ account: UInt64) -> GameAccount { .steam(steamId: account) }
     static func account(of account: GameAccount) -> UInt64? {
         guard case let .steam(steamId) = account else { return nil }
@@ -50,6 +53,9 @@ enum EpicGames: GameStorefront {
     static func identity(of game: GameIdentity) -> (game: String, account: String)? {
         guard case let .epic(accountId, namespace, appName) = game else { return nil }
         return (epicLibraryID(namespace: namespace, appName: appName), accountId)
+    }
+    static func identity(_ game: String, account: String) -> GameIdentity? {
+        epicGameID(game).map { .epic(accountId: account, namespace: $0.namespace, appName: $0.appName) }
     }
     static func account(_ account: String) -> GameAccount { .epic(accountId: account) }
     static func account(of account: GameAccount) -> String? {
@@ -101,6 +107,9 @@ final class GameSessions<Store: GameStorefront> {
         var observed: Bool
         /// How much of Voile has downloaded while the launch waits for it.
         var runtimeInstall: Double?
+        /// When this Obelisk saw the game start, even if it already exited. A
+        /// game recovered running started before, and has none.
+        var startedAt: Date?
         var running: Bool { phase == .running }
 
         init?(_ state: GameSessionState) {
@@ -114,6 +123,7 @@ final class GameSessions<Store: GameStorefront> {
             host = state.host
             observed = state.observed
             runtimeInstall = state.runtimeInstall
+            startedAt = state.startedAt.map { Date(timeIntervalSince1970: TimeInterval($0)) }
         }
     }
 
@@ -129,6 +139,8 @@ final class GameSessions<Store: GameStorefront> {
     @ObservationIgnored let core: any StorefrontSessionsProtocol
     /// Where every game this Obelisk saw start is recorded.
     @ObservationIgnored let history: LaunchHistory
+    /// The last session whose launch `history` recorded.
+    @ObservationIgnored private var recordedLaunch: String?
     @ObservationIgnored private var revision: UInt64 = 0
 
     init(_ core: any StorefrontSessionsProtocol, history: LaunchHistory) {
@@ -157,14 +169,16 @@ final class GameSessions<Store: GameStorefront> {
         guard state.revision > revision else { return }
         revision = state.revision
         let active = state.active.flatMap(Session.init)
-        // A launch this Obelisk saw start. A game recovered running started
-        // before, and was recorded then.
-        if let active, active.running, let previous = self.active, previous.id == active.id, !previous.running {
-            history.record(active.game, account: active.account, in: Store.self)
+        let last = state.last.flatMap(Session.init)
+        // The last session is the one observed most recently: a short game may
+        // show only there, already finished, as Rust publishes only its latest
+        // state.
+        if let last, let startedAt = last.startedAt, last.id != recordedLaunch {
+            recordedLaunch = last.id
+            history.record(last.game, account: last.account, in: Store.self, at: startedAt)
         }
         // Repeated states do not invalidate unchanged presentation.
         if self.active != active { self.active = active }
-        let last = state.last.flatMap(Session.init)
         if self.last != last { self.last = last }
         if isRecovering != state.recovering { isRecovering = state.recovering }
         let recoveryError = state.recoveryFailed ? L10n.string(Store.recoveringSession) : nil

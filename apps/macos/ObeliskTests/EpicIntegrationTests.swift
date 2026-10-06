@@ -61,14 +61,14 @@ final class EpicIntegrationTests: XCTestCase {
         return try XCTUnwrap(context.makeImage())
     }
 
-    func testEpicPlaytimeFormattingDistinguishesZeroAndPositiveDurations() {
-        XCTAssertEqual(EpicFormatting.playtime(0), L10n.string("ui.game.never_played"))
-        XCTAssertEqual(EpicFormatting.playtime(59), "0 min")
-        XCTAssertEqual(EpicFormatting.playtime(125), "2 min")
-        XCTAssertEqual(EpicFormatting.playtime(3600), "1 h")
+    func testPlaytimeFormattingDistinguishesZeroAndPositiveDurations() {
+        XCTAssertEqual(GameFormatting.playtime(.zero), L10n.string("ui.game.never_played"))
+        XCTAssertEqual(GameFormatting.playtime(.seconds(59)), "0 min")
+        XCTAssertEqual(GameFormatting.playtime(.seconds(125)), "2 min")
+        XCTAssertEqual(GameFormatting.playtime(.seconds(3600)), "1 h")
         let fractionalHours = 1.5.formatted(.number.precision(.fractionLength(0...1)).locale(L10n.locale))
-        XCTAssertEqual(EpicFormatting.playtime(5400), L10n.string("ui.game.playtime_hours", fractionalHours))
-        XCTAssertFalse(EpicFormatting.playtime(UInt64.max).isEmpty)
+        XCTAssertEqual(GameFormatting.playtime(.seconds(5400)), L10n.string("ui.game.playtime_hours", fractionalHours))
+        XCTAssertFalse(GameFormatting.playtime(.seconds(Int64.max)).isEmpty)
     }
 
     func testEpicKeychainRoundTripUsesSeparateItemFromSteam() async throws {
@@ -110,7 +110,7 @@ final class EpicIntegrationTests: XCTestCase {
 
     func testMalformedSavedSessionFailsWithoutExposingToken() async {
         do {
-            _ = try await EpicSession.restore(credentials: EpicCredentials(accountId: "", displayName: "Fixture", refreshToken: "private-test-token"))
+            _ = try await EpicSession.restore(credentials: EpicCredentials(accountId: "", displayName: "Fixture", refreshToken: "private-test-token"), library: nil)
             XCTFail("Missing account identity must fail before authentication")
         } catch {
             XCTAssertTrue(error is EpicError)

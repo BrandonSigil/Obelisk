@@ -30,10 +30,14 @@ impl Network for Fake {
                 name: request.name.clone(),
                 directory: request
                     .directory
-                    .join(format!("steam-{}-{}", request.app_id, request.platform))
+                    .join(format!(
+                        "steam-{}-{}",
+                        request.app_id,
+                        request.platform.as_deref().unwrap_or("macos")
+                    ))
                     .to_string_lossy()
                     .into_owned(),
-                platform: request.platform.clone(),
+                platform: request.platform.clone().unwrap_or_else(|| "macos".into()),
                 language: request.language.clone(),
                 total_bytes: 100,
                 manifests: Vec::new(),
@@ -128,7 +132,7 @@ impl Fixture {
         let request = Download {
             app_id: 620,
             name: "Portal 2".into(),
-            platform: platform.into(),
+            platform: Some(platform.into()),
             language: "french".into(),
             directory: games,
         };

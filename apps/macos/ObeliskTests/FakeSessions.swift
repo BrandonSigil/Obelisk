@@ -206,7 +206,44 @@ extension LaunchHistory {
     /// A history no other test reads, never the live library's.
     static func temporary() -> LaunchHistory {
         LaunchHistory(cache: LibraryCache(
-            file: FileManager.default.temporaryDirectory.appending(path: "ObeliskLibraryCache-\(UUID().uuidString).json")
+            directory: FileManager.default.temporaryDirectory.appending(path: "ObeliskLibraryCache-\(UUID().uuidString)").path
         ))
+    }
+}
+
+extension LibraryCache {
+    /// The cache of `directory` once it holds these libraries, in the file as
+    /// Obelisk writes it: Steam's by account ID, Epic's by account.
+    static func holding(steam: [UInt64: [CachedSteamGame]] = [:], epic: [String: [CachedEpicGame]] = [:],
+                        in directory: URL) throws -> LibraryCache {
+        let steam = steam.map { account, games in
+            (String(account), games.map { cached -> [String: Any] in
+                var entry: [String: Any] = [
+                    "id": String(cached.game.appId), "appId": cached.game.appId, "name": cached.game.name,
+                    "iconHash": cached.game.iconHash, "lastPlayed": cached.game.lastPlayed,
+                    "playtimeMinutes": cached.game.playtimeMinutes,
+                ]
+                entry["platforms"] = cached.platforms
+                return entry
+            })
+        }
+        let epic = epic.mapValues { games in
+            games.map { cached -> [String: Any] in
+                let game = cached.game
+                var entry: [String: Any] = [
+                    "id": game.libraryID, "appName": game.appName, "namespace": game.namespace,
+                    "catalogItemId": game.catalogItemId, "title": game.title, "description": game.description,
+                    "developer": game.developer, "windows": game.windows, "macos": game.macos,
+                ]
+                entry["imageUrl"] = game.imageUrl
+                entry["headerImageUrl"] = game.headerImageUrl
+                entry["playtimeSeconds"] = cached.playtimeSeconds
+                return entry
+            }
+        }
+        let document: [String: Any] = ["version": 1, "steam": Dictionary(uniqueKeysWithValues: steam), "epic": epic]
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try JSONSerialization.data(withJSONObject: document).write(to: directory.appending(path: "library-cache.json"))
+        return LibraryCache(directory: directory.path)
     }
 }

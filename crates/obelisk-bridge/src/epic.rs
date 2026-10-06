@@ -2,6 +2,7 @@
 //! the account access token stays inside the Rust session.
 use std::sync::Arc;
 
+use crate::{LibraryCache, library_cache::EpicLibrary};
 use epic_kit::{auth, client};
 
 #[derive(Debug, thiserror::Error, uniffi::Error)]
@@ -82,22 +83,21 @@ impl From<EpicCredentials> for auth::Credentials {
     }
 }
 
-#[derive(Clone, Debug, uniffi::Record)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, uniffi::Record)]
+#[serde(rename_all = "camelCase")]
 pub struct EpicGame {
     pub app_name: String,
     pub namespace: String,
     pub catalog_item_id: String,
     pub title: String,
     pub description: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub image_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub header_image_url: Option<String>,
     pub developer: String,
     pub windows: bool,
     pub macos: bool,
-    /// Everything Epic returned for the game, as JSON: `catalogItems`,
-    /// `libraryRecords` and `assets`.
-    #[uniffi(default = None)]
-    pub metadata: Option<String>,
 }
 
 impl From<client::Game> for EpicGame {
@@ -113,7 +113,6 @@ impl From<client::Game> for EpicGame {
             developer: game.developer,
             windows: game.windows,
             macos: game.macos,
-            metadata: Some(game.metadata.to_string()),
         }
     }
 }
@@ -142,16 +141,16 @@ impl From<client::Achievement> for EpicAchievement {
     }
 }
 
+/// What a game's page adds to its library entry.
 #[derive(Clone, Debug, uniffi::Record)]
 pub struct EpicGameDetails {
-    pub playtime_seconds: Option<u64>,
+    /// Unknown when Epic serves no manifest of the build.
     pub installation_bytes: Option<u64>,
 }
 
 impl From<client::GameDetails> for EpicGameDetails {
     fn from(details: client::GameDetails) -> Self {
         Self {
-            playtime_seconds: details.playtime_seconds,
             installation_bytes: details.installation_bytes,
         }
     }
@@ -169,13 +168,23 @@ pub struct EpicSession {
     /// Shared with the Cloud maintenance this session starts.
     pub(crate) client: Arc<client::Client>,
     pub(crate) persistence: Arc<crate::epic_credentials::Persistence>,
+    /// Where the account's library is kept as it loads.
+    library: Option<EpicLibrary>,
 }
 impl EpicSession {
-    fn with(client: client::Client) -> Arc<Self> {
-        Arc::new(Self {
+    async fn with(
+        client: client::Client,
+        library: Option<Arc<LibraryCache>>,
+    ) -> Result<Arc<Self>, EpicError> {
+        let library = match library {
+            Some(library) => Some(library.epic(&client.credentials().await?.account_id)),
+            None => None,
+        };
+        Ok(Arc::new(Self {
             client: Arc::new(client),
             persistence: Default::default(),
-        })
+            library,
+        }))
     }
 }
 
@@ -195,18 +204,22 @@ impl EpicSession {
             .collect())
     }
 
+    /// Keeps every library it loads in `library`.
     #[uniffi::constructor]
-    pub async fn sign_in(authorization_code: String) -> Result<Arc<Self>, EpicError> {
-        Ok(Self::with(
-            client::Client::sign_in(&authorization_code).await?,
-        ))
+    pub async fn sign_in(
+        authorization_code: String,
+        library: Option<Arc<LibraryCache>>,
+    ) -> Result<Arc<Self>, EpicError> {
+        Self::with(client::Client::sign_in(&authorization_code).await?, library).await
     }
 
+    /// Keeps every library it loads in `library`.
     #[uniffi::constructor]
-    pub async fn restore(credentials: EpicCredentials) -> Result<Arc<Self>, EpicError> {
-        Ok(Self::with(
-            client::Client::restore(credentials.into()).await?,
-        ))
+    pub async fn restore(
+        credentials: EpicCredentials,
+        library: Option<Arc<LibraryCache>>,
+    ) -> Result<Arc<Self>, EpicError> {
+        Self::with(client::Client::restore(credentials.into()).await?, library).await
     }
 
     pub async fn credentials(&self) -> Result<EpicCredentials, EpicError> {
@@ -244,21 +257,20 @@ impl EpicSession {
     }
 
     pub async fn games(&self) -> Result<Vec<EpicGame>, EpicError> {
-        Ok(self
-            .client
-            .games()
-            .await?
-            .into_iter()
-            .map(Into::into)
-            .collect())
+        let games = self.client.games().await?;
+        Ok(match &self.library {
+            Some(library) => library.games(games),
+            None => games.into_iter().map(Into::into).collect(),
+        })
     }
 
     /// Every game the account played, in one request.
     pub async fn playtimes(&self) -> Result<Vec<EpicPlaytime>, EpicError> {
-        Ok(self
-            .client
-            .playtimes()
-            .await?
+        let playtimes = self.client.playtimes().await?;
+        if let Some(library) = &self.library {
+            library.playtimes(&playtimes);
+        }
+        Ok(playtimes
             .into_iter()
             .map(|(app_name, seconds)| EpicPlaytime { app_name, seconds })
             .collect())

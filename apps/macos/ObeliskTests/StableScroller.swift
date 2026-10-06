@@ -1,0 +1,44 @@
+import AppKit
+import XCTest
+
+/// What a page's scrolling must keep while its content changes: the same
+/// scroll view and scrollbar, the scrollbar's style, and the content width.
+@MainActor
+struct StableScroller {
+    let scroll: NSScrollView
+    let scroller: NSScroller
+    let style: NSScroller.Style
+    let width: CGFloat
+
+    /// The first scroll view in `host` as it is now, whose content keeps
+    /// `width`, else its current width.
+    init(in host: NSView, style: NSScroller.Style, width: CGFloat? = nil) throws {
+        scroll = try XCTUnwrap(firstScrollView(in: host))
+        scroller = try XCTUnwrap(scroll.verticalScroller)
+        self.style = style
+        self.width = width ?? scroll.contentView.bounds.width
+    }
+
+    func assertKept(in host: NSView, during phase: String, file: StaticString = #filePath, line: UInt = #line) throws {
+        let current = try XCTUnwrap(firstScrollView(in: host), file: file, line: line)
+        XCTAssertTrue(current === scroll, "The scroll view changed during \(phase)", file: file, line: line)
+        XCTAssertTrue(current.verticalScroller === scroller, "The scrollbar changed during \(phase)", file: file, line: line)
+        XCTAssertTrue(current.hasVerticalScroller, file: file, line: line)
+        XCTAssertEqual(current.scrollerStyle, style, "Unexpected scroller style during \(phase)", file: file, line: line)
+        // An overlay scroller fades out even with autohiding disabled, and
+        // AppKit may hide it while the whole document fits.
+        if style == .legacy {
+            XCTAssertFalse(current.autohidesScrollers, file: file, line: line)
+            XCTAssertFalse(scroller.isHidden, "The scrollbar disappeared during \(phase)", file: file, line: line)
+            XCTAssertGreaterThan(scroller.alphaValue, 0, "The scrollbar is transparent during \(phase)", file: file, line: line)
+        }
+        XCTAssertEqual(current.contentView.bounds.width, width, accuracy: 0.5,
+                       "The content width changed during \(phase)", file: file, line: line)
+    }
+}
+
+@MainActor
+func firstScrollView(in view: NSView) -> NSScrollView? {
+    if let scroll = view as? NSScrollView { return scroll }
+    return view.subviews.lazy.compactMap { firstScrollView(in: $0) }.first
+}

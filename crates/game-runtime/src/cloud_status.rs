@@ -84,7 +84,10 @@ pub(crate) fn update(
 pub(crate) fn unavailable(reason: UnavailableReason) -> impl FnOnce(&mut Record) {
     move |record| {
         if record.unavailable.as_ref().map(|u| u.reason) != Some(reason) {
-            record.unavailable = Some(Unavailable { reason, at: now() });
+            record.unavailable = Some(Unavailable {
+                reason,
+                at: crate::unix_now(),
+            });
         }
     }
 }
@@ -98,7 +101,7 @@ pub(crate) fn problem(kind: ProblemKind, key: &str) -> impl FnOnce(&mut Record) 
         record.problem = Some(Problem {
             kind,
             key: key.into(),
-            at: now(),
+            at: crate::unix_now(),
         });
     }
 }
@@ -197,13 +200,6 @@ pub(crate) fn indicator(
         pending_upload: pending || uncertain,
         installation_removed: journal.installation_removed,
     }
-}
-
-fn now() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs()
 }
 
 #[cfg(test)]

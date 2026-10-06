@@ -24,7 +24,6 @@ struct RootView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(ObeliskPalette(colorScheme: colorScheme).background)
         }
-        .toolbar(removing: .sidebarToggle)
         .frame(minWidth: 860, minHeight: 600)
         .tint(ObeliskStyle.accent)
         .disabled(model.presentedFriends != nil)

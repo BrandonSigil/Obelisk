@@ -5,7 +5,7 @@ use std::sync::Arc;
 use obelisk_core::transfer::CancelToken;
 use steam_kit::friends;
 
-use crate::{SteamCredentials, SteamError, SteamSession};
+use crate::{LibraryCache, SteamCredentials, SteamError, SteamSession};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Enum)]
 pub enum SteamFriendPresence {
@@ -126,11 +126,12 @@ impl SteamConnectionAttempt {
     pub async fn connect(
         &self,
         credentials: SteamCredentials,
+        library: Option<Arc<LibraryCache>>,
     ) -> Result<Arc<SteamSession>, SteamError> {
         tokio::select! {
             biased;
             () = self.cancel.cancelled() => Err(SteamError::Cancelled),
-            result = SteamSession::connect(credentials) => result,
+            result = SteamSession::connect(credentials, library) => result,
         }
     }
 }

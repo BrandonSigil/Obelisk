@@ -59,7 +59,7 @@ impl Network for steam_kit::client::Client {
             steam_kit::client::Client::download(
                 self,
                 request.app_id,
-                &request.platform,
+                request.platform.as_deref(),
                 &request.language,
                 &request.directory,
             )

@@ -316,8 +316,8 @@ impl crate::installations::Storefront for Epic {
             app_name: request.app_name.clone(),
         }
     }
-    fn request_platform(request: &Download) -> &str {
-        &request.platform
+    fn request_platform(request: &Download) -> Option<&str> {
+        Some(&request.platform)
     }
     fn request_directory(request: &Download) -> &std::path::Path {
         &request.directory
@@ -331,8 +331,8 @@ impl crate::installations::Storefront for Epic {
             app_name: offer.app_name.clone(),
         }
     }
-    fn offer_platform(offer: &Offer) -> &str {
-        &offer.platform
+    fn offer_platform(offer: &Offer) -> Option<&str> {
+        Some(&offer.platform)
     }
     fn install_request(offer: &Offer, directory: &std::path::Path) -> Download {
         Download {

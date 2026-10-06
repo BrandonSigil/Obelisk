@@ -204,7 +204,8 @@ pub struct Receipt {
 pub struct Download {
     pub app_id: u32,
     pub name: String,
-    pub platform: String,
+    /// None while Steam picks the build the account can install.
+    pub platform: Option<String>,
     pub language: String,
     /// The parent folder the installation directory goes in.
     pub directory: PathBuf,
@@ -216,7 +217,8 @@ pub struct Download {
 pub struct Offer {
     pub app_id: u32,
     pub name: String,
-    pub platform: String,
+    /// None for the build the account can install, the native one first.
+    pub platform: Option<String>,
     pub language: String,
 }
 
@@ -248,8 +250,8 @@ impl crate::installations::Storefront for Steam {
     fn request_game(request: &Download) -> u32 {
         request.app_id
     }
-    fn request_platform(request: &Download) -> &str {
-        &request.platform
+    fn request_platform(request: &Download) -> Option<&str> {
+        request.platform.as_deref()
     }
     fn request_directory(request: &Download) -> &Path {
         &request.directory
@@ -260,8 +262,8 @@ impl crate::installations::Storefront for Steam {
     fn offer_game(offer: &Offer) -> u32 {
         offer.app_id
     }
-    fn offer_platform(offer: &Offer) -> &str {
-        &offer.platform
+    fn offer_platform(offer: &Offer) -> Option<&str> {
+        offer.platform.as_deref()
     }
     fn install_request(offer: &Offer, directory: &Path) -> Download {
         Download {
@@ -276,7 +278,7 @@ impl crate::installations::Storefront for Steam {
         Download {
             app_id: receipt.app_id,
             name: receipt.name.clone(),
-            platform: receipt.platform.clone(),
+            platform: Some(receipt.platform.clone()),
             language: receipt.language.clone(),
             directory: parent(&receipt.directory),
         }

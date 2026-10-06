@@ -335,7 +335,7 @@ impl<R: CloudRemote> Storefront for Adapter<R> {
                 uploads.push(CloudUpload {
                     name: name.clone(),
                     bytes: vault.read_content(file)?,
-                    timestamp: now(),
+                    timestamp: crate::unix_now(),
                     platforms: file.platforms,
                 });
             }

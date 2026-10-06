@@ -46,25 +46,3 @@ struct SteamArtwork: View {
         }
     }
 }
-
-enum SteamFormatting {
-    static func playtime(_ minutes: UInt32) -> String {
-        if minutes == 0 { return L10n.string("ui.game.never_played") }
-        if minutes < 60 { return L10n.string("ui.game.playtime_minutes", Int64(minutes)) }
-        let hours = Double(minutes) / 60
-        return L10n.string("ui.game.playtime_hours", hours.formatted(.number.precision(.fractionLength(0...1)).locale(L10n.locale)))
-    }
-
-    static func lastPlayed(_ timestamp: UInt64) -> String {
-        guard timestamp > 0 else { return L10n.string("ui.game.never_launched") }
-        return lastPlayed(Date(timeIntervalSince1970: TimeInterval(timestamp)))
-    }
-
-    static func lastPlayed(_ date: Date) -> String {
-        date.formatted(.dateTime.day().month(.abbreviated).year().locale(L10n.locale))
-    }
-
-    static func bytes(_ value: UInt64) -> String {
-        Int64(clamping: value).formatted(.byteCount(style: .file).locale(L10n.locale))
-    }
-}

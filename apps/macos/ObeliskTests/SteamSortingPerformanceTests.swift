@@ -15,15 +15,18 @@ final class SteamSortingPerformanceTests: XCTestCase {
             XCTAssertGreaterThan(games.filter { $0.lastPlayed == 0 }.count, count / 2)
             XCTAssertEqual(Set(games.map(\.appId)).count, count)
 
-            // Measure only the synchronous production filter/sort. Validation
+            // Measure only the synchronous production order. Validation
             // and JSON logging remain outside the timed section.
             for iteration in 0..<5 {
                 for sort in [StorefrontLibrarySort.lastPlayed, .name, .playtime] {
                     let began = ContinuousClock.now
-                    let result = SteamModel.filterAndSort(games, query: "", sort: sort)
+                    let result = LibraryOrdering.order(
+                        games, by: sort, title: \.name, playtime: \.playtime,
+                        lastPlayed: \.lastPlayedOnSteam
+                    )
                     let elapsed = milliseconds(since: began)
                     assertOrder(result, count: count, sort: sort)
-                    samples.append(SortingSample(phase: "filterAndSort", games: count, sort: sort.rawValue, iteration: iteration, milliseconds: elapsed))
+                    samples.append(SortingSample(phase: "order", games: count, sort: sort.rawValue, iteration: iteration, milliseconds: elapsed))
                 }
             }
 
@@ -37,7 +40,7 @@ final class SteamSortingPerformanceTests: XCTestCase {
 
             // Profile the model path separately from the standalone algorithm:
             // repeated sorting can reuse cached results even though the pure
-            // filterAndSort implementation remains unchanged.
+            // order implementation remains unchanged.
             for iteration in 0..<5 {
                 for sort in [StorefrontLibrarySort.lastPlayed, .name, .playtime] {
                     let began = ContinuousClock.now

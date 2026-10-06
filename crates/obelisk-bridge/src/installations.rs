@@ -33,11 +33,13 @@ pub struct Installation {
 /// What a storefront offers to install of one game.
 #[derive(Clone, Debug, PartialEq, Eq, uniffi::Enum)]
 pub enum GameOffer {
-    /// Its build for `platform`, with the depots of `language`.
+    /// Its build for `platform`, with the depots of `language`. Without a
+    /// platform, Steam picks the build the account can install, the native
+    /// one first, as the Transfer starts.
     Steam {
         app_id: u32,
         name: String,
-        platform: String,
+        platform: Option<String>,
         language: String,
     },
     /// Its build for `platform`.
@@ -166,7 +168,7 @@ pub struct InstallationsState {
 }
 
 /// How a storefront's games, receipts and offers cross UniFFI.
-trait Named: installations::Storefront {
+pub(crate) trait Named: installations::Storefront {
     fn name(game: &Self::Game) -> String;
     /// The game Swift names `name`.
     fn named(name: &str) -> Option<Self::Game>;
@@ -595,7 +597,7 @@ mod tests {
         let offer = GameOffer::Steam {
             app_id: 620,
             name: "Portal 2".into(),
-            platform: "macos".into(),
+            platform: Some("macos".into()),
             language: "french".into(),
         };
         assert_eq!(

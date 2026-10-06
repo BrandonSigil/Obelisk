@@ -104,9 +104,11 @@ impl super::Content<Steam> for Content {
                 .with(|script| script.downloads.pop_front())
                 .unwrap_or(Ok(()));
             outcome?;
+            // Steam picks the native build of a game that ships one.
+            let platform = request.platform.clone().unwrap_or_else(|| "macos".into());
             let directory = request
                 .directory
-                .join(format!("steam-{}-{}", request.app_id, request.platform));
+                .join(format!("steam-{}-{platform}", request.app_id));
             std::fs::create_dir_all(&directory).unwrap();
             self.0.with(|script| {
                 if let Some(progress) = &mut script.progress {
@@ -118,7 +120,7 @@ impl super::Content<Steam> for Content {
                 app_id: request.app_id,
                 name: request.name.clone(),
                 directory: directory.to_string_lossy().into_owned(),
-                platform: request.platform.clone(),
+                platform,
                 language: request.language.clone(),
                 total_bytes: 100,
                 needs_verification: None,
@@ -370,7 +372,7 @@ impl Fixture {
         Download {
             app_id: 620,
             name: "Portal 2".into(),
-            platform: platform.into(),
+            platform: Some(platform.into()),
             language: "french".into(),
             directory: self.root.join("Games/Steam"),
         }
@@ -379,7 +381,7 @@ impl Fixture {
         Offer {
             app_id: 620,
             name: "Portal 2".into(),
-            platform: platform.into(),
+            platform: Some(platform.into()),
             language: "french".into(),
         }
     }
@@ -485,6 +487,42 @@ async fn a_transfer_reports_its_progress_and_publishes_its_receipt_once_complete
     assert_eq!(state.last_download, None);
     assert_eq!(state.report, None);
     assert_eq!(fixture.saved(), state.receipts);
+}
+
+#[tokio::test]
+async fn an_offer_without_a_platform_shows_its_transfer_at_once_and_keeps_the_build_steam_picked() {
+    let fixture = Fixture::new(false).await;
+    fixture.fake.hold();
+    fixture.installations.install(Offer {
+        platform: None,
+        ..fixture.offer("macos")
+    });
+    let state = fixture.installations.state();
+    assert_eq!(
+        state.transfer_game,
+        Some(620),
+        "the game waits on its Transfer"
+    );
+    assert_eq!(state.transfer.unwrap().state, TransferState::Preparing);
+
+    fixture.fake.release();
+    eventually(|| !fixture.installations.state().downloading).await;
+    let receipt = fixture.receipt();
+    assert_eq!(receipt.platform, "macos");
+    assert!(receipt.directory.ends_with("steam-620-macos"));
+
+    fixture.fake.hold();
+    fixture.installations.install(Offer {
+        platform: None,
+        ..fixture.offer("macos")
+    });
+    assert!(
+        fixture.receipt().needs_verification == Some(true),
+        "the installed build updates in place"
+    );
+    fixture.fake.release();
+    eventually(|| !fixture.installations.state().downloading).await;
+    assert_eq!(fixture.installations.state().receipts.len(), 1);
 }
 
 #[tokio::test]
@@ -958,7 +996,7 @@ async fn a_new_installation_goes_to_the_library_and_an_update_or_launch_stays_wh
     moved.launch("620-macos", true);
     eventually(|| !moved.state().launching).await;
     moved.install(Offer {
-        platform: "macos".into(),
+        platform: Some("macos".into()),
         ..fixture.offer("macos")
     });
     eventually(|| fake.calls().len() == 4).await;

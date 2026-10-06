@@ -1,5 +1,6 @@
 //! Asynchronous, account-scoped Steam API for Swift. Secrets cross this seam only
 //! for authentication and the macOS Keychain; they are never part of a catalog.
+use crate::{LibraryCache, library_cache::SteamLibrary};
 use std::{path::Path, sync::Arc};
 use steam_kit::{auth, client};
 use tokio::sync::Mutex;
@@ -198,16 +199,14 @@ impl From<client::Achievement> for SteamAchievement {
     }
 }
 
-#[derive(Clone, Debug, uniffi::Record)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, uniffi::Record)]
+#[serde(rename_all = "camelCase")]
 pub struct SteamGame {
     pub app_id: u32,
     pub name: String,
     pub icon_hash: String,
     pub last_played: u64,
     pub playtime_minutes: u32,
-    /// Every field Steam returned for the game, as JSON.
-    #[uniffi(default = None)]
-    pub record: Option<String>,
 }
 impl From<client::OwnedGame> for SteamGame {
     fn from(game: client::OwnedGame) -> Self {
@@ -217,7 +216,6 @@ impl From<client::OwnedGame> for SteamGame {
             icon_hash: game.icon_hash,
             last_played: game.last_played,
             playtime_minutes: game.playtime_minutes,
-            record: Some(game.record.to_string()),
         }
     }
 }
@@ -225,18 +223,6 @@ impl From<client::OwnedGame> for SteamGame {
 pub struct SteamGamePlatforms {
     pub app_id: u32,
     pub platforms: Vec<String>,
-    /// The game's whole PICS app info as JSON, when PICS returned the game.
-    #[uniffi(default = None)]
-    pub pics: Option<String>,
-}
-impl From<client::GamePlatforms> for SteamGamePlatforms {
-    fn from(game: client::GamePlatforms) -> Self {
-        Self {
-            app_id: game.app_id,
-            platforms: game.platforms,
-            pics: game.pics.map(|pics| pics.to_string()),
-        }
-    }
 }
 #[derive(Clone, Debug, uniffi::Record)]
 pub struct SteamGameDetails {
@@ -251,6 +237,8 @@ pub struct SteamGameDetails {
 pub struct SteamSession {
     /// Shared with the account's installations.
     pub(crate) client: Arc<client::Client>,
+    /// Where the account's library is kept as it loads.
+    library: Option<SteamLibrary>,
 }
 
 #[derive(Clone, Debug, uniffi::Record)]
@@ -261,8 +249,12 @@ pub struct SteamProfile {
 
 #[uniffi::export(async_runtime = "tokio")]
 impl SteamSession {
+    /// Keeps every library it loads in `library`.
     #[uniffi::constructor]
-    pub async fn connect(credentials: SteamCredentials) -> Result<Arc<Self>, SteamError> {
+    pub async fn connect(
+        credentials: SteamCredentials,
+        library: Option<Arc<LibraryCache>>,
+    ) -> Result<Arc<Self>, SteamError> {
         // Decode the routing identity before sending the token, then let Steam
         // validate its signature, expiry, revocation and account ownership.
         let token = auth::AuthTokens::restore(credentials.account_name, credentials.refresh_token)?;
@@ -274,16 +266,15 @@ impl SteamSession {
                 client::Client::connect(&token.account_name, token.steam_id, &token.refresh_token)
                     .await?,
             ),
+            library: library.map(|library| library.steam(token.steam_id)),
         }))
     }
     pub async fn games(&self) -> Result<Vec<SteamGame>, SteamError> {
-        Ok(self
-            .client
-            .games()
-            .await?
-            .into_iter()
-            .map(Into::into)
-            .collect())
+        let games = self.client.games().await?;
+        Ok(match &self.library {
+            Some(library) => library.games(games),
+            None => games.into_iter().map(Into::into).collect(),
+        })
     }
     pub async fn achievements(
         &self,
@@ -334,13 +325,18 @@ impl SteamSession {
         &self,
         app_ids: Vec<u32>,
     ) -> Result<Vec<SteamGamePlatforms>, SteamError> {
-        Ok(self
-            .client
-            .platforms(&app_ids)
-            .await?
-            .into_iter()
-            .map(Into::into)
-            .collect())
+        let games = self.client.platforms(&app_ids).await?;
+        let platforms = games
+            .iter()
+            .map(|game| SteamGamePlatforms {
+                app_id: game.app_id,
+                platforms: game.platforms.clone(),
+            })
+            .collect();
+        if let Some(library) = &self.library {
+            library.platforms(games);
+        }
+        Ok(platforms)
     }
     pub async fn details(
         &self,

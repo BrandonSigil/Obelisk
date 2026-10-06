@@ -1248,6 +1248,7 @@ dependencies = [
  "game-runtime",
  "gog-kit",
  "obelisk-core",
+ "serde",
  "serde_json",
  "steam-kit",
  "tempfile",
