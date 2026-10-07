@@ -1,34 +1,104 @@
 import AppKit
 import WebKit
 
-enum EpicWebAuthenticationError: LocalizedError {
-    case invalidResponse
-    case network
-    case unsupportedPage
+/// The storefront whose web sign-in a window shows, and the text it shows.
+enum WebSignInStore: Sendable {
+    case epic, gog
+
+    fileprivate enum Text {
+        case title, host, loading, connecting, invalidResponse, network, unsupportedPage
+    }
+
+    fileprivate func string(_ text: Text) -> String {
+        switch (self, text) {
+        case (.epic, .title): L10n.string("model.epicWeb.title")
+        case (.gog, .title): L10n.string("model.gogWeb.title")
+        case (.epic, .host): L10n.string("model.epicWeb.host")
+        case (.gog, .host): L10n.string("model.gogWeb.host")
+        case (.epic, .loading): L10n.string("model.epicWeb.loading")
+        case (.gog, .loading): L10n.string("model.gogWeb.loading")
+        case (.epic, .connecting): L10n.string("model.epicWeb.connecting")
+        case (.gog, .connecting): L10n.string("model.gogWeb.connecting")
+        case (.epic, .invalidResponse): L10n.string("model.epicWeb.invalidResponse")
+        case (.gog, .invalidResponse): L10n.string("model.gogWeb.invalidResponse")
+        case (.epic, .network): L10n.string("model.epicWeb.network")
+        case (.gog, .network): L10n.string("model.gogWeb.network")
+        case (.epic, .unsupportedPage): L10n.string("model.epicWeb.unsupportedPage")
+        case (.gog, .unsupportedPage): L10n.string("model.gogWeb.unsupportedPage")
+        }
+    }
+}
+
+enum WebAuthenticationError: LocalizedError {
+    case invalidResponse(WebSignInStore)
+    case network(WebSignInStore)
+    case unsupportedPage(WebSignInStore)
 
     var errorDescription: String? {
         switch self {
-        case .invalidResponse:
-            L10n.string("model.epicWeb.invalidResponse")
-        case .network:
-            L10n.string("model.epicWeb.network")
-        case .unsupportedPage:
-            L10n.string("model.epicWeb.unsupportedPage")
+        case let .invalidResponse(store): store.string(.invalidResponse)
+        case let .network(store): store.string(.network)
+        case let .unsupportedPage(store): store.string(.unsupportedPage)
         }
     }
+}
+
+/// How one storefront's web sign-in returns its authorization code.
+struct WebSignIn: Sendable {
+    let store: WebSignInStore
+    let loginURL: @Sendable () -> URL
+    /// Fixed for the protocol, including its popups, when the storefront
+    /// recognizes its launcher by it.
+    var userAgent: String?
+    /// The code a main-frame navigation carries, or nil when it carries
+    /// none; it throws when the navigation is the callback but malformed.
+    let code: @MainActor @Sendable (URL) throws -> String?
+    /// A page whose JSON body carries the code, never shown.
+    var isJSONEndpoint: @MainActor @Sendable (URL) -> Bool = { _ in false }
+    var codeFromJSON: @MainActor @Sendable (String, URL) throws -> String = { _, _ in
+        throw CocoaError(.featureUnsupported)
+    }
+
+    static let epic = WebSignIn(
+        store: .epic,
+        loginURL: { URL(string: epicLoginUrl())! },
+        // Epic uses the launcher marker to return an authorization code to
+        // localhost.
+        userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) EpicGamesLauncher",
+        code: EpicAuthorizationCallback.code(from:),
+        isJSONEndpoint: EpicAuthorizationCallback.isJSONEndpoint,
+        codeFromJSON: EpicAuthorizationCallback.code(fromJSON:at:)
+    )
+
+    static let gog = WebSignIn(
+        store: .gog,
+        loginURL: { URL(string: gogLoginUrl())! },
+        code: { url in
+            guard gogIsLoginRedirect(url: url.absoluteString) else { return nil }
+            guard let code = try? gogAuthorizationCode(input: url.absoluteString) else {
+                throw WebAuthenticationError.invalidResponse(.gog)
+            }
+            return code
+        }
+    )
 }
 
 /// Owns one login attempt and its popup windows. No callback is registered with
 /// the OS: only navigations made inside this attempt can complete the login.
 @MainActor
-final class EpicWebAuthentication: NSObject, WKNavigationDelegate, WKUIDelegate, NSWindowDelegate {
+final class WebAuthentication: NSObject, WKNavigationDelegate, WKUIDelegate, NSWindowDelegate {
+    private let flow: WebSignIn
     private var continuation: CheckedContinuation<String, Error>?
     private var windows: [LoginWindow] = []
 
-    static func authorize() async throws -> String {
-        let attempt = EpicWebAuthentication()
+    init(_ flow: WebSignIn) {
+        self.flow = flow
+    }
+
+    static func authorize(_ flow: WebSignIn) async throws -> String {
+        let attempt = WebAuthentication(flow)
         return try await attempt.authorize { webView in
-            webView.load(URLRequest(url: URL(string: epicLoginUrl())!))
+            webView.load(URLRequest(url: flow.loginURL()))
         }
     }
 
@@ -54,13 +124,11 @@ final class EpicWebAuthentication: NSObject, WKNavigationDelegate, WKUIDelegate,
     }
 
     private func makeWindow(configuration: WKWebViewConfiguration, primary: Bool) -> LoginWindow {
-        let window = LoginWindow(configuration: configuration, primary: primary)
+        let window = LoginWindow(configuration: configuration, store: flow.store, primary: primary)
         window.delegate = self
         window.webView.navigationDelegate = self
         window.webView.uiDelegate = self
-        // Epic uses the launcher marker to return an authorization code to
-        // localhost. Keep it fixed for this protocol, including its popups.
-        window.webView.customUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) EpicGamesLauncher"
+        window.webView.customUserAgent = flow.userAgent
         windows.append(window)
         window.center()
         window.makeKeyAndOrderFront(nil)
@@ -113,26 +181,26 @@ final class EpicWebAuthentication: NSObject, WKNavigationDelegate, WKUIDelegate,
         }
         if navigationAction.targetFrame?.isMainFrame == true {
             do {
-                if let code = try EpicAuthorizationCallback.code(from: url) {
+                if let code = try flow.code(url) {
                     decisionHandler(.cancel)
                     finish(.success(code))
                     return
                 }
             } catch {
                 decisionHandler(.cancel)
-                finish(.failure(EpicWebAuthenticationError.invalidResponse))
+                finish(.failure(WebAuthenticationError.invalidResponse(flow.store)))
                 return
             }
-            // Never show the raw JSON endpoint, even briefly, if Epic returns
-            // that variant instead of navigating directly to localhost.
-            if EpicAuthorizationCallback.isJSONEndpoint(url) {
-                window(for: webView)?.showProgress(L10n.string("model.epicWeb.connecting"))
+            // Never show the raw JSON endpoint, even briefly, if the
+            // storefront returns that variant instead of its callback.
+            if flow.isJSONEndpoint(url) {
+                window(for: webView)?.showProgress(flow.store.string(.connecting))
             }
         }
         guard url.scheme == "https" || url.absoluteString == "about:blank" else {
             decisionHandler(.cancel)
             if navigationAction.targetFrame?.isMainFrame == true {
-                finish(.failure(EpicWebAuthenticationError.unsupportedPage))
+                finish(.failure(WebAuthenticationError.unsupportedPage(flow.store)))
             }
             return
         }
@@ -147,13 +215,13 @@ final class EpicWebAuthentication: NSObject, WKNavigationDelegate, WKUIDelegate,
         guard continuation != nil, window(for: webView) != nil,
               navigationResponse.canShowMIMEType else {
             decisionHandler(.cancel)
-            if continuation != nil { finish(.failure(EpicWebAuthenticationError.unsupportedPage)) }
+            if continuation != nil { finish(.failure(WebAuthenticationError.unsupportedPage(flow.store))) }
             return
         }
         if navigationResponse.isForMainFrame,
            let url = navigationResponse.response.url,
-           EpicAuthorizationCallback.isJSONEndpoint(url) {
-            window(for: webView)?.showProgress(L10n.string("model.epicWeb.connecting"))
+           flow.isJSONEndpoint(url) {
+            window(for: webView)?.showProgress(flow.store.string(.connecting))
         }
         decisionHandler(.allow)
     }
@@ -161,12 +229,12 @@ final class EpicWebAuthentication: NSObject, WKNavigationDelegate, WKUIDelegate,
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
         guard continuation != nil, let window = window(for: webView), let url = webView.url else { return }
         window.setHost(url.host)
-        if !EpicAuthorizationCallback.isJSONEndpoint(url) { window.showPage() }
+        if !flow.isJSONEndpoint(url) { window.showPage() }
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         guard continuation != nil, let window = window(for: webView), let url = webView.url else { return }
-        guard EpicAuthorizationCallback.isJSONEndpoint(url) else {
+        guard flow.isJSONEndpoint(url) else {
             window.showPage()
             return
         }
@@ -176,14 +244,14 @@ final class EpicWebAuthentication: NSObject, WKNavigationDelegate, WKUIDelegate,
             guard let self, let webView, self.continuation != nil,
                   self.window(for: webView) != nil, webView.url == url else { return }
             guard error == nil, let json = body as? String else {
-                self.finish(.failure(EpicWebAuthenticationError.invalidResponse))
+                self.finish(.failure(WebAuthenticationError.invalidResponse(self.flow.store)))
                 return
             }
             do {
-                let code = try EpicAuthorizationCallback.code(fromJSON: json, at: url)
+                let code = try self.flow.codeFromJSON(json, url)
                 self.finish(.success(code))
             } catch {
-                self.finish(.failure(EpicWebAuthenticationError.invalidResponse))
+                self.finish(.failure(WebAuthenticationError.invalidResponse(self.flow.store)))
             }
         }
     }
@@ -200,11 +268,11 @@ final class EpicWebAuthentication: NSObject, WKNavigationDelegate, WKUIDelegate,
         guard continuation != nil, window(for: webView) != nil else { return }
         let error = error as NSError
         if error.domain == NSURLErrorDomain && error.code == NSURLErrorCancelled { return }
-        finish(.failure(EpicWebAuthenticationError.network))
+        finish(.failure(WebAuthenticationError.network(flow.store)))
     }
 
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
-        if window(for: webView) != nil { finish(.failure(EpicWebAuthenticationError.network)) }
+        if window(for: webView) != nil { finish(.failure(WebAuthenticationError.network(flow.store))) }
     }
 
     func webView(
@@ -231,25 +299,28 @@ final class EpicWebAuthentication: NSObject, WKNavigationDelegate, WKUIDelegate,
 private final class LoginWindow: NSWindow {
     let webView: WKWebView
     let isPrimary: Bool
-    private let hostLabel = NSTextField(labelWithString: "epicgames.com")
+    private let store: WebSignInStore
+    private let hostLabel = NSTextField(labelWithString: "")
     private let loading = NSProgressIndicator()
-    private let statusLabel = NSTextField(labelWithString: L10n.string("model.epicWeb.loading"))
+    private let statusLabel = NSTextField(labelWithString: "")
     private let progress = NSStackView()
 
-    init(configuration: WKWebViewConfiguration, primary: Bool) {
+    init(configuration: WKWebViewConfiguration, store: WebSignInStore, primary: Bool) {
         webView = WKWebView(frame: .zero, configuration: configuration)
         isPrimary = primary
+        self.store = store
         super.init(
             contentRect: NSRect(x: 0, y: 0, width: 540, height: 720),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
             defer: false
         )
-        title = L10n.string("model.epicWeb.title")
+        title = store.string(.title)
         isReleasedWhenClosed = false
         minSize = NSSize(width: 480, height: 560)
         let content = NSView()
         contentView = content
+        hostLabel.stringValue = store.string(.host)
         hostLabel.font = .systemFont(ofSize: 12, weight: .medium)
         hostLabel.textColor = .secondaryLabelColor
         hostLabel.alignment = .center
@@ -278,10 +349,10 @@ private final class LoginWindow: NSWindow {
             progress.centerXAnchor.constraint(equalTo: webView.centerXAnchor),
             progress.centerYAnchor.constraint(equalTo: webView.centerYAnchor),
         ])
-        showProgress(L10n.string("model.epicWeb.loading"))
+        showProgress(store.string(.loading))
     }
 
-    func setHost(_ host: String?) { hostLabel.stringValue = host ?? L10n.string("model.epicWeb.epicGames") }
+    func setHost(_ host: String?) { hostLabel.stringValue = host ?? store.string(.host) }
 
     func showProgress(_ message: String) {
         webView.isHidden = true

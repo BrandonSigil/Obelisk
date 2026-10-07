@@ -104,6 +104,7 @@ extension GameOffer {
         switch self {
         case let .steam(_, _, platform, _): platform
         case let .epic(_, _, _, _, platform): platform
+        case let .gog(_, _, platform): platform
         }
     }
     var steamApp: UInt32? {

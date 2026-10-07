@@ -30,6 +30,7 @@ struct RosettaLaunchPrompt<SessionID: Hashable, AccountID: Equatable>: Equatable
 
 typealias SteamRosettaModel = RosettaModel<SteamGameSessions>
 typealias EpicRosettaModel = RosettaModel<EpicGameSessions>
+typealias GogRosettaModel = RosettaModel<GogGameSessions>
 
 /// Presents a supervisor-owned launch requirement. Only macOS installs Rosetta;
 /// only the supervisor decides whether the waiting game can proceed.

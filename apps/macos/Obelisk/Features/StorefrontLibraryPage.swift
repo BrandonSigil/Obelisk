@@ -50,13 +50,13 @@ extension LibraryStorefront {
     /// The games the search and the filter keep, in the library's order.
     var filteredGames: [Game] { libraryOrdering.games(of: self) }
 
-    /// The game the whole library shows first, as its hero: the last one
-    /// played, else the most played.
+    /// The game the whole library shows first, as its hero, so a library
+    /// always has one: the last one played, else the first of the library
+    /// ordered by playtime, the most played first and equal ones by name.
     var featuredGame: Game? {
-        if let played = games.compactMap({ game in lastPlayed(of: game).map { (game, $0) } }).max(by: { $0.1 < $1.1 }) {
-            return played.0
-        }
-        return games.compactMap { game in playtime(of: game).map { (game, $0) } }.max { $0.1 < $1.1 }?.0
+        let sort: StorefrontLibrarySort = games.contains { lastPlayed(of: $0) != nil } ? .lastPlayed : .playtime
+        return LibraryOrdering<Game>.first(games, by: sort, title: title(of:), playtime: playtime(of:),
+                                           lastPlayed: lastPlayed(of:))
     }
 
     /// Launches the game's native installation first.
@@ -354,3 +354,4 @@ private struct LibraryTransferBar<Store: InstallationStorefront>: View {
 
 extension SteamModel: LibraryStorefront {}
 extension EpicModel: LibraryStorefront {}
+extension GogModel: LibraryStorefront {}

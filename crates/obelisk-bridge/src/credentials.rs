@@ -1,14 +1,14 @@
-//! An Epic account's credentials rotate with its calls. Each rotation is
-//! saved in order, one save at a time, so no call has to remember to.
+//! An Epic or GOG account's credentials rotate with its calls. Each rotation
+//! is saved in order, one save at a time, so no call has to remember to.
 use std::{
     sync::{Arc, Condvar, Mutex},
     time::{Duration, Instant},
 };
 
-/// Saves the Epic account's current credentials, which account calls rotate.
-/// It may block.
+/// Saves a storefront account's current credentials, which account calls
+/// rotate. It may block.
 #[uniffi::export(with_foreign)]
-pub trait EpicCredentialSave: Send + Sync {
+pub trait CredentialSave: Send + Sync {
     fn save(&self);
 }
 
@@ -77,11 +77,20 @@ impl Rotating for epic_kit::client::Client {
     }
 }
 
+impl Rotating for gog_kit::client::Client {
+    fn revision(&self) -> u64 {
+        self.credentials_revision()
+    }
+    async fn next(&self, after: u64) -> Option<u64> {
+        self.next_credentials_revision(after).await
+    }
+}
+
 /// Starts saving `account`'s credentials through `saver`, once per session.
 pub(crate) fn persist<A: Rotating>(
     account: Arc<A>,
     persistence: Arc<Persistence>,
-    saver: Arc<dyn EpicCredentialSave>,
+    saver: Arc<dyn CredentialSave>,
 ) {
     {
         let mut state = persistence.state.lock().unwrap();
@@ -130,7 +139,7 @@ mod tests {
 
     /// Records the revision it saw at each save.
     struct Saver(Arc<Account>, Mutex<Vec<u64>>, AtomicU64);
-    impl EpicCredentialSave for Saver {
+    impl CredentialSave for Saver {
         fn save(&self) {
             std::thread::sleep(Duration::from_millis(self.2.load(Ordering::Acquire)));
             self.1.lock().unwrap().push(self.0.revision());

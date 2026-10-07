@@ -44,7 +44,7 @@ extension SteamSessionProtocol {
 // session never has to build a Rust-backed object.
 extension EpicSessionProtocol {
     /// Saves as Rust does: now, then after every rotation, in order.
-    func persist(credentials: any EpicCredentialSave) async {
+    func persist(credentials: any CredentialSave) async {
         let session = self
         Task.detached {
             credentials.save()

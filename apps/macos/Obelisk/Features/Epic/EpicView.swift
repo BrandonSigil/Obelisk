@@ -34,13 +34,13 @@ struct EpicView: View {
             accountName: model.accountName,
             scrollMemory: libraryScroll
         ) { game in
-            EpicArtwork(imageURL: game.headerImageUrl ?? game.imageUrl, maxPixelSize: 2048)
+            StorefrontArtwork(imageURL: game.headerImageUrl ?? game.imageUrl, maxPixelSize: 2048)
         } heroLogo: { _ in
             // Epic's wide artwork already shows the game's name, and its
             // catalog rarely has a separate logo.
             EmptyView()
         } artwork: { game in
-            EpicArtwork(imageURL: game.imageUrl)
+            StorefrontArtwork(imageURL: game.imageUrl)
         } accountMenu: {
             accountMenu
         }
@@ -84,19 +84,5 @@ struct EpicView: View {
         Toggle(L10n.string("ui.account.remember_me"), isOn: $model.rememberSession)
         Divider()
         Button(L10n.string("ui.account.sign_out"), systemImage: "rectangle.portrait.and.arrow.right", action: model.signOut)
-    }
-}
-
-struct EpicArtwork: View {
-    let imageURL: String?
-    var maxPixelSize = 768
-
-    var body: some View {
-        CachedArtwork(url: imageURL.flatMap(URL.init(string:)), maxPixelSize: maxPixelSize) { image in
-            image.resizable().scaledToFill()
-        } placeholder: {
-            ArtworkPlaceholder()
-        }
-        .accessibilityHidden(true)
     }
 }

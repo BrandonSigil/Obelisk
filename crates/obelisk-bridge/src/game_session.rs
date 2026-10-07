@@ -3,7 +3,7 @@
 //! the state and forwards the player's answers.
 use crate::{ObeliskLocations, SteamHostState};
 use game_runtime::{
-    cloud, epic,
+    cloud, epic, gog,
     sessions::{self, Failure, Sessions, Storefront, Supervised},
     steam, supervisor,
 };
@@ -117,6 +117,7 @@ impl From<cloud::Status> for CloudStatus {
 pub enum GameAccount {
     Steam { steam_id: u64 },
     Epic { account_id: String },
+    Gog { user_id: String },
 }
 
 /// A refused or failed session call, as a localization key.
@@ -161,7 +162,7 @@ impl Bridged for steam::Steam {
     fn account(account: GameAccount) -> Option<u64> {
         match account {
             GameAccount::Steam { steam_id } => Some(steam_id),
-            GameAccount::Epic { .. } => None,
+            GameAccount::Epic { .. } | GameAccount::Gog { .. } => None,
         }
     }
     fn game_account(account: &u64) -> GameAccount {
@@ -182,7 +183,7 @@ impl Bridged for epic::Epic {
     fn account(account: GameAccount) -> Option<String> {
         match account {
             GameAccount::Epic { account_id } => Some(account_id),
-            GameAccount::Steam { .. } => None,
+            GameAccount::Steam { .. } | GameAccount::Gog { .. } => None,
         }
     }
     fn game_account(account: &String) -> GameAccount {
@@ -202,11 +203,35 @@ impl Bridged for epic::Epic {
     }
 }
 
+impl Bridged for gog::Gog {
+    fn account(account: GameAccount) -> Option<String> {
+        match account {
+            GameAccount::Gog { user_id } => Some(user_id),
+            GameAccount::Steam { .. } | GameAccount::Epic { .. } => None,
+        }
+    }
+    fn game_account(account: &String) -> GameAccount {
+        GameAccount::Gog {
+            user_id: account.clone(),
+        }
+    }
+    fn identity(game: &String, account: &String) -> GameIdentity {
+        GameIdentity::Gog {
+            account_id: account.clone(),
+            product_id: game.clone(),
+        }
+    }
+    fn host(_: &gog::Store) -> Option<SteamHostState> {
+        None
+    }
+}
+
 /// The storefront whose Game sessions an object holds.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Enum)]
 pub enum SessionStorefront {
     Steam,
     Epic,
+    Gog,
 }
 
 /// The game and account a launch is admitted for.
@@ -220,6 +245,10 @@ pub enum GameIdentity {
         account_id: String,
         namespace: String,
         app_name: String,
+    },
+    Gog {
+        account_id: String,
+        product_id: String,
     },
 }
 
@@ -314,6 +343,7 @@ where
 pub(crate) enum Storefronts {
     Steam(Arc<Sessions<steam::Steam>>),
     Epic(Arc<Sessions<epic::Epic>>),
+    Gog(Arc<Sessions<gog::Gog>>),
 }
 impl Storefronts {
     /// A session call that failed without a reason of its own.
@@ -321,6 +351,7 @@ impl Storefronts {
         match self {
             Self::Steam(_) => steam::Steam::SESSION_FAILED,
             Self::Epic(_) => epic::Epic::SESSION_FAILED,
+            Self::Gog(_) => gog::Gog::SESSION_FAILED,
         }
     }
 }
@@ -352,6 +383,9 @@ impl StorefrontSessions {
             SessionStorefront::Epic => Storefronts::Epic(Arc::new(Sessions::new(
                 supervisor_recovery(Path::new(&locations.epic_sessions), helper),
             ))),
+            SessionStorefront::Gog => Storefronts::Gog(Arc::new(Sessions::new(
+                supervisor_recovery(Path::new(&locations.gog_sessions), helper),
+            ))),
         })
     }
 
@@ -359,6 +393,7 @@ impl StorefrontSessions {
         match &*self.sessions {
             Storefronts::Steam(sessions) => state(sessions.state()),
             Storefronts::Epic(sessions) => state(sessions.state()),
+            Storefronts::Gog(sessions) => state(sessions.state()),
         }
     }
 
@@ -367,6 +402,7 @@ impl StorefrontSessions {
         match &*self.sessions {
             Storefronts::Steam(sessions) => state(sessions.changed(after).await),
             Storefronts::Epic(sessions) => state(sessions.changed(after).await),
+            Storefronts::Gog(sessions) => state(sessions.changed(after).await),
         }
     }
 
@@ -380,6 +416,11 @@ impl StorefrontSessions {
             }
             Storefronts::Epic(sessions) => {
                 if let Some(account) = epic::Epic::account(account) {
+                    sessions.revoke(account);
+                }
+            }
+            Storefronts::Gog(sessions) => {
+                if let Some(account) = gog::Gog::account(account) {
                     sessions.revoke(account);
                 }
             }
@@ -402,6 +443,10 @@ impl StorefrontSessions {
                 Some(account) => sessions.resume_after_rosetta(&session_id, &account, decision_id),
                 None => Err(Failure::Failed(epic::Epic::INVALID_SESSION.into())),
             },
+            Storefronts::Gog(sessions) => match gog::Gog::account(account) {
+                Some(account) => sessions.resume_after_rosetta(&session_id, &account, decision_id),
+                None => Err(Failure::Failed(gog::Gog::INVALID_SESSION.into())),
+            },
         })
         .await
     }
@@ -413,6 +458,7 @@ impl StorefrontSessions {
         blocking(self.sessions.failed(), move || match &*sessions {
             Storefronts::Steam(sessions) => sessions.stop(),
             Storefronts::Epic(sessions) => sessions.stop(),
+            Storefronts::Gog(sessions) => sessions.stop(),
         })
         .await
     }
@@ -427,6 +473,11 @@ impl StorefrontSessions {
             }
             Storefronts::Epic(sessions) => {
                 if let Some(account) = epic::Epic::account(account) {
+                    sessions.decline_rosetta(&session_id, &account, decision_id);
+                }
+            }
+            Storefronts::Gog(sessions) => {
+                if let Some(account) = gog::Gog::account(account) {
                     sessions.decline_rosetta(&session_id, &account, decision_id);
                 }
             }

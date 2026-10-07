@@ -10,11 +10,11 @@ enum EpicAuthorizationCallback {
               hasHTTPSOrigin(components, hosts: ["localhost"]),
               components.percentEncodedPath == "/launcher/authorized" else { return nil }
         guard hasNoCredentialsOrFragment(components) else {
-            throw EpicWebAuthenticationError.invalidResponse
+            throw WebAuthenticationError.invalidResponse(.epic)
         }
         let codes = (components.queryItems ?? []).filter { $0.name == "code" }
         guard codes.count == 1, let code = codes.first?.value, !code.isEmpty else {
-            throw EpicWebAuthenticationError.invalidResponse
+            throw WebAuthenticationError.invalidResponse(.epic)
         }
         return try validatedCode(code)
     }
@@ -32,13 +32,13 @@ enum EpicAuthorizationCallback {
 
     static func code(fromJSON json: String, at url: URL) throws -> String {
         guard isJSONEndpoint(url), json.utf8.count <= maximumJSONBytes else {
-            throw EpicWebAuthenticationError.invalidResponse
+            throw WebAuthenticationError.invalidResponse(.epic)
         }
         let response: AuthorizationResponse
         do {
             response = try JSONDecoder().decode(AuthorizationResponse.self, from: Data(json.utf8))
         } catch {
-            throw EpicWebAuthenticationError.invalidResponse
+            throw WebAuthenticationError.invalidResponse(.epic)
         }
         return try validatedCode(response.authorizationCode)
     }
@@ -57,7 +57,7 @@ enum EpicAuthorizationCallback {
         // The Rust entry point also accepts pasted URLs and JSON. Values
         // extracted from a callback must already be a code themselves.
         guard (try? epicAuthorizationCode(input: code)) == code else {
-            throw EpicWebAuthenticationError.invalidResponse
+            throw WebAuthenticationError.invalidResponse(.epic)
         }
         return code
     }

@@ -1,0 +1,527 @@
+//! GOG's side of an installation Transfer: obelisk-core runs the order around
+//! it, this module picks the build, its depots and redistributables, and runs
+//! the content engine.
+use std::{collections::HashSet, path::Path, sync::Arc};
+
+use futures_util::{FutureExt, StreamExt, TryStreamExt, stream};
+use md5::Digest as _;
+use obelisk_core::{
+    install::hex,
+    installation::{self, Destination, InstallFailure, InstalledFiles, TransferError},
+    transfer::{TransferBusy, TransferContext, Transfers},
+};
+use serde::{Deserialize, Serialize};
+
+use super::{Client, content_platform, valid_product_id};
+use crate::{
+    GogError,
+    auth::Api,
+    content::{self, Endpoint, SecureLinks},
+    http::{bounded_bytes, check_status, inflate_json},
+    library::endpoint,
+    manifest::{
+        self, BuildManifest, Builds, DEPENDENCIES, DependencyDepot, DependencyRepository,
+        DepotManifest, Installed, Product, galaxy_path,
+    },
+};
+
+pub use obelisk_core::{installation::TransferProgress, transfer::TransferState};
+
+/// Manifests are small; anything larger is not one.
+const MAX_MANIFEST_BYTES: usize = 64 * 1024 * 1024;
+const MANIFEST_CONCURRENCY: usize = 8;
+
+/// A GOG installation, as its own receipt records it.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Installation {
+    pub product_id: String,
+    pub user_id: String,
+    pub directory: String,
+    /// `macos` or `windows`.
+    pub platform: String,
+    pub total_bytes: u64,
+    pub build_id: String,
+    pub version_name: String,
+    /// The language whose depots it holds, such as `fr-FR`.
+    pub language: String,
+    /// Where the build's files are inside the installation folder: its
+    /// bundle, for a Mac build that names one.
+    #[serde(default)]
+    pub content_root: String,
+    /// The installer scripts run in the Install Script Interpreter.
+    #[serde(default)]
+    pub script_interpreter: bool,
+    /// The game and the DLCs it holds.
+    #[serde(default)]
+    pub products: Vec<Product>,
+    /// The redistributables to run once before the game first starts.
+    #[serde(default)]
+    pub dependencies: Vec<Dependency>,
+}
+
+/// A redistributable installed with the game, which runs once in its prefix.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct Dependency {
+    pub id: String,
+    /// The program, from the installation's content root.
+    pub path: String,
+    pub arguments: String,
+}
+
+pub(super) type Downloads = Transfers<TransferProgress>;
+
+impl From<TransferBusy> for GogError {
+    fn from(_: TransferBusy) -> Self {
+        Self::AlreadyDownloading
+    }
+}
+
+impl From<InstallFailure> for GogError {
+    fn from(failure: InstallFailure) -> Self {
+        match failure {
+            InstallFailure::ParentMissing => Self::Service {
+                message: "backend.gog.choose_existing_folder".into(),
+            },
+            InstallFailure::UnsafeDirectory(name) => Self::UnsafePath(name),
+            InstallFailure::DestinationIsLink(path)
+            | InstallFailure::DestinationIsFile(path)
+            | InstallFailure::UnsafeLock(path)
+            | InstallFailure::UnsafeReceipt(path) => {
+                Self::UnsafePath(path.to_string_lossy().into_owned())
+            }
+            InstallFailure::Locked => Self::AlreadyDownloading,
+            InstallFailure::Io(error) => Self::Io(error),
+        }
+    }
+}
+
+impl TransferError for GogError {
+    fn is_cancellation(&self) -> bool {
+        matches!(self, Self::Cancelled)
+    }
+}
+
+/// Everything fetched before the installation lock is taken.
+struct Prepared {
+    manifest: BuildManifest,
+    version_name: String,
+    products: Vec<Product>,
+    dependencies: Vec<Dependency>,
+    installed: Installed,
+    user_id: String,
+}
+
+/// The build Obelisk installs of `product_id` for `platform` (`osx` or
+/// `windows`), and its manifest.
+async fn current_build(
+    api: &Api,
+    product_id: &str,
+    platform: &str,
+) -> Result<(BuildManifest, String), GogError> {
+    let mut url = endpoint(
+        &api.content,
+        &["products", product_id, "os", platform, "builds"],
+    )?;
+    url.query_pairs_mut().append_pair("generation", "2");
+    let builds: Builds = api.get_public(url).await?;
+    let build = builds.current().ok_or(GogError::NoBuild)?;
+    let link = content::checked_url(&build.link)?;
+    let manifest: BuildManifest = document(api, link).await?;
+    if manifest.base_product_id != product_id {
+        return Err(GogError::Protocol);
+    }
+    Ok((manifest, build.version_name))
+}
+
+/// A content-system document, without any account credential.
+async fn document<T: serde::de::DeserializeOwned>(
+    api: &Api,
+    url: reqwest::Url,
+) -> Result<T, GogError> {
+    let response = api
+        .http
+        .get(url)
+        .send()
+        .await
+        .map_err(|_| GogError::Network)?;
+    check_status(response.status())?;
+    let bytes = bounded_bytes(response, MAX_MANIFEST_BYTES).await?;
+    inflate_json(&bytes, MAX_MANIFEST_BYTES as u64 * 4)
+}
+
+/// A depot's items, from its manifest under the CDN's `folder`, with the
+/// secure link `source` names.
+async fn depot_items(
+    api: &Api,
+    folder: &str,
+    manifest: &str,
+    source: &str,
+) -> Result<(String, Vec<manifest::Item>), GogError> {
+    let url = content::checked_url(&format!(
+        "{}/content-system/v2/{folder}/{}",
+        api.cdn,
+        galaxy_path(manifest)?
+    ))?;
+    let manifest: DepotManifest = document(api, url).await?;
+    Ok((source.to_owned(), manifest.depot.items))
+}
+
+/// Every product the account owns, DLCs included.
+async fn owned(api: &Api, access_token: &str) -> Result<HashSet<String>, GogError> {
+    #[derive(Deserialize)]
+    struct Owned {
+        #[serde(default)]
+        owned: Vec<serde_json::Value>,
+    }
+    let owned: Owned = api
+        .get(
+            endpoint(&api.embed, &["user", "data", "games"])?,
+            access_token,
+        )
+        .await?;
+    Ok(owned
+        .owned
+        .into_iter()
+        .filter_map(|id| match id {
+            serde_json::Value::Number(id) => Some(id.to_string()),
+            serde_json::Value::String(id) => Some(id),
+            _ => None,
+        })
+        .collect())
+}
+
+/// The products of the build the account owns: the game, and its DLCs.
+fn owned_products(
+    manifest: &BuildManifest,
+    owned: &HashSet<String>,
+) -> Result<Vec<Product>, GogError> {
+    if !owned.contains(&manifest.base_product_id) {
+        return Err(GogError::Service {
+            message: "backend.gog.game_not_owned".into(),
+        });
+    }
+    let mut products: Vec<Product> = manifest
+        .products
+        .iter()
+        .filter(|product| {
+            owned.contains(&product.product_id) && valid_product_id(&product.product_id)
+        })
+        .cloned()
+        .collect();
+    if !products
+        .iter()
+        .any(|product| product.product_id == manifest.base_product_id)
+    {
+        products.insert(
+            0,
+            Product {
+                product_id: manifest.base_product_id.clone(),
+                name: String::new(),
+                temp_executable: String::new(),
+                temp_arguments: String::new(),
+            },
+        );
+    }
+    Ok(products)
+}
+
+impl Client {
+    pub fn progress(&self) -> Option<TransferProgress> {
+        self.downloads.snapshot()
+    }
+
+    pub fn cancel_download(&self) {
+        self.downloads.cancel();
+    }
+
+    /// The size of the build an installation in `language` holds.
+    pub(super) async fn installation_size(
+        &self,
+        access_token: &str,
+        product_id: &str,
+        platform: &str,
+        language: &str,
+    ) -> Result<u64, GogError> {
+        let (manifest, _) = current_build(&self.api, product_id, platform).await?;
+        let products = owned_products(&manifest, &owned(&self.api, access_token).await?)?;
+        let ids: HashSet<&str> = products
+            .iter()
+            .map(|product| product.product_id.as_str())
+            .collect();
+        Ok(manifest::depots(&manifest, &ids, language)
+            .iter()
+            .map(|depot| depot.size)
+            .sum())
+    }
+
+    /// Installs `product_id`'s current build for `platform`, with the depots
+    /// of `language`, in its dedicated folder under `parent`, or updates and
+    /// repairs the installation there.
+    pub async fn download(
+        &self,
+        product_id: &str,
+        platform: &str,
+        language: &str,
+        parent: &Path,
+    ) -> Result<Installation, GogError> {
+        if !valid_product_id(product_id) || language.is_empty() || language.len() > 32 {
+            return Err(GogError::Protocol);
+        }
+        let content_platform = content_platform(platform)?;
+        let directory = installation_directory_name(product_id, platform);
+        installation::install(
+            &self.downloads,
+            product_id,
+            Destination {
+                parent,
+                directory: &directory,
+            },
+            |_, cancel| async move {
+                let prepared = tokio::select! {
+                    biased;
+                    () = cancel.cancelled() => return Err(GogError::Cancelled),
+                    result = self.prepare_download(product_id, content_platform, language) => result?,
+                };
+                // A revoked account withdraws nothing: the receipt stays until
+                // the installation lock is taken.
+                if self.session.lock().await.is_none() {
+                    return Err(GogError::Unauthorized);
+                }
+                Ok(prepared)
+            },
+            |prepared, destination, transfer| async move {
+                self.install_files(product_id, platform, language, prepared, &destination, &transfer)
+                    .await
+            },
+        )
+        .await
+    }
+
+    async fn prepare_download(
+        &self,
+        product_id: &str,
+        platform: &str,
+        language: &str,
+    ) -> Result<Prepared, GogError> {
+        let user_id = self.credentials().await?.user_id;
+        let (manifest, version_name) = current_build(&self.api, product_id, platform).await?;
+        let owned = self
+            .with_access_token(|token| async move { owned(&self.api, &token).await })
+            .await?;
+        let products = owned_products(&manifest, &owned)?;
+        let ids: HashSet<&str> = products
+            .iter()
+            .map(|product| product.product_id.as_str())
+            .collect();
+        let content_root = manifest.content_root()?;
+        let mut installed = Installed::default();
+        let depots = manifest::depots(&manifest, &ids, language);
+        let fetches: Vec<_> = depots
+            .into_iter()
+            .map(|depot| depot_items(&self.api, "meta", &depot.manifest, &depot.product_id))
+            .collect();
+        let items: Vec<(String, Vec<manifest::Item>)> = stream::iter(fetches)
+            .buffered(MANIFEST_CONCURRENCY)
+            .try_collect()
+            .await?;
+        for (product, items) in items {
+            installed.add(&content_root, &product, items)?;
+        }
+        let dependencies = match (platform, manifest.dependencies.is_empty()) {
+            ("windows", false) => {
+                self.add_dependencies(&manifest, &content_root, &mut installed)
+                    .await?
+            }
+            _ => Vec::new(),
+        };
+        installed.validate()?;
+        Ok(Prepared {
+            manifest,
+            version_name,
+            products,
+            dependencies,
+            installed,
+            user_id,
+        })
+    }
+
+    /// Adds the redistributables the build names to the installation, and
+    /// returns those that run once in its prefix.
+    async fn add_dependencies(
+        &self,
+        manifest: &BuildManifest,
+        content_root: &str,
+        installed: &mut Installed,
+    ) -> Result<Vec<Dependency>, GogError> {
+        #[derive(Deserialize)]
+        struct Repository {
+            repository_manifest: String,
+        }
+        let mut url = endpoint(&self.api.content, &["dependencies", "repository"])?;
+        url.query_pairs_mut().append_pair("generation", "2");
+        let repository: Repository = self.api.get_public(url).await?;
+        let repository: DependencyRepository = document(
+            &self.api,
+            content::checked_url(&repository.repository_manifest)?,
+        )
+        .await?;
+        let wanted: Vec<&DependencyDepot> = manifest
+            .dependencies
+            .iter()
+            .filter_map(|id| {
+                repository
+                    .depots
+                    .iter()
+                    .find(|depot| &depot.dependency_id == id)
+            })
+            .filter(|depot| depot.installs_in_wine())
+            .collect();
+        let fetches: Vec<_> = wanted
+            .iter()
+            .map(|depot| {
+                depot_items(
+                    &self.api,
+                    "dependencies/meta",
+                    &depot.manifest,
+                    DEPENDENCIES,
+                )
+            })
+            .collect();
+        let items: Vec<(String, Vec<manifest::Item>)> = stream::iter(fetches)
+            .buffered(MANIFEST_CONCURRENCY)
+            .try_collect()
+            .await?;
+        for (source, items) in items {
+            installed.add(content_root, &source, items)?;
+        }
+        Ok(wanted
+            .into_iter()
+            .filter(|depot| !depot.executable.path.is_empty())
+            .map(|depot| Dependency {
+                id: depot.dependency_id.clone(),
+                path: depot.executable.path.replace('\\', "/"),
+                arguments: depot.executable.arguments.clone(),
+            })
+            .collect())
+    }
+
+    async fn install_files(
+        &self,
+        product_id: &str,
+        platform: &str,
+        language: &str,
+        prepared: Prepared,
+        destination: &Path,
+        transfer: &TransferContext<TransferProgress>,
+    ) -> Result<InstalledFiles<Installation>, GogError> {
+        let cancel = transfer.cancel_token();
+        let Prepared {
+            manifest,
+            version_name,
+            products,
+            dependencies,
+            installed,
+            user_id,
+        } = prepared;
+        let key = hex(&md5::Md5::digest(
+            format!("{product_id}\0{}\0{language}", manifest.build_id).as_bytes(),
+        ));
+        let links = Arc::new(SecureLinks::new(self.secure_links()));
+        let progress = transfer.clone();
+        let summary = content::download(
+            self.api.http.clone(),
+            links,
+            Arc::new(installed),
+            key,
+            destination,
+            cancel,
+            move |snapshot| {
+                progress.update(|progress| {
+                    progress.state = snapshot.phase.into();
+                    progress.completed_bytes = snapshot
+                        .verification_bytes
+                        .unwrap_or(snapshot.completed_bytes);
+                    progress.total_bytes = snapshot.total_bytes;
+                    progress.network_bytes = snapshot.network_bytes;
+                    progress.content_bytes = snapshot.content_bytes;
+                    progress.current_file = snapshot.current_file;
+                    progress.message.clear();
+                });
+            },
+        )
+        .await?;
+        cancel.check()?;
+        if self.session.lock().await.is_none() {
+            return Err(GogError::Unauthorized);
+        }
+        Ok(InstalledFiles {
+            receipt: Installation {
+                product_id: product_id.into(),
+                user_id,
+                directory: destination.to_string_lossy().into_owned(),
+                platform: platform.into(),
+                total_bytes: summary.total_bytes,
+                build_id: manifest.build_id.clone(),
+                version_name,
+                language: language.into(),
+                content_root: manifest.content_root()?,
+                script_interpreter: manifest.script_interpreter,
+                products,
+                dependencies,
+            },
+            total_bytes: summary.total_bytes,
+            network_bytes: summary.downloaded_bytes,
+            content_bytes: summary.content_bytes,
+        })
+    }
+
+    /// Renews a product's secure link with the account's credentials, or the
+    /// redistributables' open link.
+    fn secure_links(&self) -> content::Renew {
+        let (api, tokens) = (self.api.clone(), self.tokens());
+        Arc::new(move |source: String| {
+            let (api, tokens) = (api.clone(), tokens.clone());
+            async move {
+                #[derive(Deserialize)]
+                struct Links {
+                    #[serde(default)]
+                    urls: Vec<Endpoint>,
+                }
+                if source == DEPENDENCIES {
+                    let mut url = endpoint(&api.content, &["open_link"])?;
+                    url.query_pairs_mut()
+                        .append_pair("generation", "2")
+                        .append_pair("_version", "2")
+                        .append_pair("path", "/dependencies/store/");
+                    let links: Links = api.get_public(url).await?;
+                    return Ok(links.urls);
+                }
+                if !valid_product_id(&source) {
+                    return Err(GogError::Protocol);
+                }
+                let mut url = endpoint(&api.content, &["products", &source, "secure_link"])?;
+                url.query_pairs_mut()
+                    .append_pair("generation", "2")
+                    .append_pair("_version", "2")
+                    .append_pair("path", "/");
+                let token = tokens.access_token(None).await?;
+                let links: Links = match api.get(url.clone(), &token).await {
+                    Err(GogError::Unauthorized) => {
+                        let token = tokens.access_token(Some(&token)).await?;
+                        api.get(url, &token).await?
+                    }
+                    links => links?,
+                };
+                Ok(links.urls)
+            }
+            .boxed()
+        })
+    }
+}
+
+/// The dedicated directory name for one GOG installation. The host relies on
+/// this exact scheme to recognise and remove installations it created.
+pub fn installation_directory_name(product_id: &str, platform: &str) -> String {
+    format!("gog-{product_id}-{platform}")
+}

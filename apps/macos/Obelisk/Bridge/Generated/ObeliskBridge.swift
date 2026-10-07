@@ -749,6 +749,26 @@ public static func epic(session: EpicSession, accountId: String, language: Strin
 }
     
     /**
+     * The installations of the GOG account `user_id`, which `session`
+     * signed in. `language` names the depots Transfers install, such as
+     * `fr-FR`. The session's own persistence saves the credentials their
+     * calls rotate.
+     */
+public static func gog(session: GogSession, userId: String, language: String, sessions: StorefrontSessions, receipts: String, locations: ObeliskLocations)throws  -> AccountInstallations  {
+    return try  FfiConverterTypeAccountInstallations_lift(try rustCallWithError(FfiConverterTypeGameSessionError_lift) {
+        uniffiCallStatus in
+    uniffi_obelisk_bridge_fn_constructor_accountinstallations_gog(
+        FfiConverterTypeGogSession_lower(session),
+        FfiConverterString.lower(userId),
+        FfiConverterString.lower(language),
+        FfiConverterTypeStorefrontSessions_lower(sessions),
+        FfiConverterString.lower(receipts),
+        FfiConverterTypeObeliskLocations_lower(locations),uniffiCallStatus
+    )
+})
+}
+    
+    /**
      * The installations of the Steam account `session` signed in, whose
      * receipts `receipts` keeps.
      */
@@ -986,19 +1006,19 @@ public func FfiConverterTypeAccountInstallations_lower(_ value: AccountInstallat
 
 
 /**
- * Saves the Epic account's current credentials, which account calls rotate.
- * It may block.
+ * Saves a storefront account's current credentials, which account calls
+ * rotate. It may block.
  */
-public protocol EpicCredentialSave: AnyObject, Sendable {
+public protocol CredentialSave: AnyObject, Sendable {
     
     func save() 
     
 }
 /**
- * Saves the Epic account's current credentials, which account calls rotate.
- * It may block.
+ * Saves a storefront account's current credentials, which account calls
+ * rotate. It may block.
  */
-open class EpicCredentialSaveImpl: EpicCredentialSave, @unchecked Sendable {
+open class CredentialSaveImpl: CredentialSave, @unchecked Sendable {
     fileprivate let handle: UInt64
 
     /// Used to instantiate a [FFIObject] without an actual handle, for fakes in tests, mostly.
@@ -1035,7 +1055,7 @@ open class EpicCredentialSaveImpl: EpicCredentialSave, @unchecked Sendable {
     @_documentation(visibility: private)
 #endif
     public func uniffiCloneHandle() -> UInt64 {
-        return try! rustCall { uniffi_obelisk_bridge_fn_clone_epiccredentialsave(self.handle, $0) }
+        return try! rustCall { uniffi_obelisk_bridge_fn_clone_credentialsave(self.handle, $0) }
     }
     // No primary constructor declared for this class.
 
@@ -1045,7 +1065,7 @@ open class EpicCredentialSaveImpl: EpicCredentialSave, @unchecked Sendable {
             return
         }
 
-        try! rustCall { uniffi_obelisk_bridge_fn_free_epiccredentialsave(handle, $0) }
+        try! rustCall { uniffi_obelisk_bridge_fn_free_credentialsave(handle, $0) }
     }
 
     
@@ -1053,7 +1073,7 @@ open class EpicCredentialSaveImpl: EpicCredentialSave, @unchecked Sendable {
     
 open func save()  {try! rustCall() {
         uniffiCallStatus in
-    uniffi_obelisk_bridge_fn_method_epiccredentialsave_save(
+    uniffi_obelisk_bridge_fn_method_credentialsave_save(
             self.uniffiCloneHandle(),uniffiCallStatus
     )
 }
@@ -1066,25 +1086,25 @@ open func save()  {try! rustCall() {
 
 
 // Put the implementation in a struct so we don't pollute the top-level namespace
-fileprivate struct UniffiCallbackInterfaceEpicCredentialSave {
+fileprivate struct UniffiCallbackInterfaceCredentialSave {
 
     // Create the VTable using a series of closures.
     // Swift automatically converts these into C callback functions.
     //
     // Store the vtable directly.
-    static let vtable: UniffiVTableCallbackInterfaceEpicCredentialSave = UniffiVTableCallbackInterfaceEpicCredentialSave(
+    static let vtable: UniffiVTableCallbackInterfaceCredentialSave = UniffiVTableCallbackInterfaceCredentialSave(
         uniffiFree: { (uniffiHandle: UInt64) -> () in
             do {
-                try FfiConverterTypeEpicCredentialSave.handleMap.remove(handle: uniffiHandle)
+                try FfiConverterTypeCredentialSave.handleMap.remove(handle: uniffiHandle)
             } catch {
-                print("Uniffi callback interface EpicCredentialSave: handle missing in uniffiFree")
+                print("Uniffi callback interface CredentialSave: handle missing in uniffiFree")
             }
         },
         uniffiClone: { (uniffiHandle: UInt64) -> UInt64 in
             do {
-                return try FfiConverterTypeEpicCredentialSave.handleMap.clone(handle: uniffiHandle)
+                return try FfiConverterTypeCredentialSave.handleMap.clone(handle: uniffiHandle)
             } catch {
-                fatalError("Uniffi callback interface EpicCredentialSave: handle missing in uniffiClone")
+                fatalError("Uniffi callback interface CredentialSave: handle missing in uniffiClone")
             }
         },
         save: { (
@@ -1094,7 +1114,7 @@ fileprivate struct UniffiCallbackInterfaceEpicCredentialSave {
         ) in
             let makeCall = {
                 () throws -> () in
-                guard let uniffiObj = try? FfiConverterTypeEpicCredentialSave.handleMap.get(handle: uniffiHandle) else {
+                guard let uniffiObj = try? FfiConverterTypeCredentialSave.handleMap.get(handle: uniffiHandle) else {
                     throw UniffiInternalError.unexpectedStaleHandle
                 }
                 return uniffiObj.save(
@@ -1117,39 +1137,39 @@ fileprivate struct UniffiCallbackInterfaceEpicCredentialSave {
     // `nonisolated(unsafe)` is needed under Swift 6 strict concurrency.
     // This is safe because the pointee is initialized once during static init
     // and never mutated by either side of the FFI.  Its fields are C function pointers.
-    nonisolated(unsafe) static let vtablePtr: UnsafePointer<UniffiVTableCallbackInterfaceEpicCredentialSave> = {
-        let ptr = UnsafeMutablePointer<UniffiVTableCallbackInterfaceEpicCredentialSave>.allocate(capacity: 1)
+    nonisolated(unsafe) static let vtablePtr: UnsafePointer<UniffiVTableCallbackInterfaceCredentialSave> = {
+        let ptr = UnsafeMutablePointer<UniffiVTableCallbackInterfaceCredentialSave>.allocate(capacity: 1)
         ptr.initialize(to: vtable)
         return UnsafePointer(ptr)
     }()
 }
 
-private func uniffiCallbackInitEpicCredentialSave() {
-    uniffi_obelisk_bridge_fn_init_callback_vtable_epiccredentialsave(UniffiCallbackInterfaceEpicCredentialSave.vtablePtr)
+private func uniffiCallbackInitCredentialSave() {
+    uniffi_obelisk_bridge_fn_init_callback_vtable_credentialsave(UniffiCallbackInterfaceCredentialSave.vtablePtr)
 }
 
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
-public struct FfiConverterTypeEpicCredentialSave: FfiConverter {
-    fileprivate static let handleMap = UniffiHandleMap<EpicCredentialSave>()
+public struct FfiConverterTypeCredentialSave: FfiConverter {
+    fileprivate static let handleMap = UniffiHandleMap<CredentialSave>()
 
     typealias FfiType = UInt64
-    typealias SwiftType = EpicCredentialSave
+    typealias SwiftType = CredentialSave
 
-    public static func lift(_ handle: UInt64) throws -> EpicCredentialSave {
+    public static func lift(_ handle: UInt64) throws -> CredentialSave {
         if ((handle & 1) == 0) {
             // Rust-generated handle, construct a new class that uses the handle to implement the
             // interface
-            return EpicCredentialSaveImpl(unsafeFromHandle: handle)
+            return CredentialSaveImpl(unsafeFromHandle: handle)
         } else {
             // Swift-generated handle, get the object from the handle map
             return try handleMap.remove(handle: handle)
         }
     }
 
-    public static func lower(_ value: EpicCredentialSave) -> UInt64 {
-         if let rustImpl = value as? EpicCredentialSaveImpl {
+    public static func lower(_ value: CredentialSave) -> UInt64 {
+         if let rustImpl = value as? CredentialSaveImpl {
              // Rust-implemented object.  Clone the handle and return it
             return rustImpl.uniffiCloneHandle()
          } else {
@@ -1158,12 +1178,12 @@ public struct FfiConverterTypeEpicCredentialSave: FfiConverter {
          }
     }
 
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> EpicCredentialSave {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> CredentialSave {
         let handle: UInt64 = try readInt(&buf)
         return try lift(handle)
     }
 
-    public static func write(_ value: EpicCredentialSave, into buf: inout [UInt8]) {
+    public static func write(_ value: CredentialSave, into buf: inout [UInt8]) {
         writeInt(&buf, lower(value))
     }
 }
@@ -1172,15 +1192,15 @@ public struct FfiConverterTypeEpicCredentialSave: FfiConverter {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
-public func FfiConverterTypeEpicCredentialSave_lift(_ handle: UInt64) throws -> EpicCredentialSave {
-    return try FfiConverterTypeEpicCredentialSave.lift(handle)
+public func FfiConverterTypeCredentialSave_lift(_ handle: UInt64) throws -> CredentialSave {
+    return try FfiConverterTypeCredentialSave.lift(handle)
 }
 
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
-public func FfiConverterTypeEpicCredentialSave_lower(_ value: EpicCredentialSave) -> UInt64 {
-    return FfiConverterTypeEpicCredentialSave.lower(value)
+public func FfiConverterTypeCredentialSave_lower(_ value: CredentialSave) -> UInt64 {
+    return FfiConverterTypeCredentialSave.lower(value)
 }
 
 
@@ -1209,7 +1229,7 @@ public protocol EpicSessionProtocol: AnyObject, Sendable {
      * every rotation, one save at a time and in order, until the session's
      * observers stop. Every account call relies on it.
      */
-    func persist(credentials: EpicCredentialSave) async 
+    func persist(credentials: CredentialSave) async 
     
     /**
      * Every game the account played, in one request.
@@ -1433,12 +1453,12 @@ open func nextFriends(afterRevision: UInt64)async  -> EpicFriendsSnapshot  {
      * every rotation, one save at a time and in order, until the session's
      * observers stop. Every account call relies on it.
      */
-open func persist(credentials: EpicCredentialSave)async   {
+open func persist(credentials: CredentialSave)async   {
     return
         try!  await uniffiRustCallAsync(
             rustFutureFunc: {
                 uniffi_obelisk_bridge_fn_method_epicsession_persist(
-                        self.uniffiCloneHandle(),FfiConverterTypeEpicCredentialSave_lower(credentials)
+                        self.uniffiCloneHandle(),FfiConverterTypeCredentialSave_lower(credentials)
                 )
             },
             pollFunc: ffi_obelisk_bridge_rust_future_poll_void,
@@ -1562,6 +1582,351 @@ public func FfiConverterTypeEpicSession_lift(_ handle: UInt64) throws -> EpicSes
 #endif
 public func FfiConverterTypeEpicSession_lower(_ value: EpicSession) -> UInt64 {
     return FfiConverterTypeEpicSession.lower(value)
+}
+
+
+
+
+
+
+public protocol GogSessionProtocol: AnyObject, Sendable {
+    
+    /**
+     * The game's achievements, named in `locale`, such as `fr-FR`.
+     */
+    func achievements(productId: String, locale: String) async throws  -> [GogAchievement]
+    
+    /**
+     * The account's avatar, as its GOG profile shows it.
+     */
+    func avatarUrl()  -> String?
+    
+    func credentials() async throws  -> GogCredentials
+    
+    func disconnect() async throws 
+    
+    /**
+     * `language` names the depots, such as `fr-FR`.
+     */
+    func gameDetails(productId: String, platform: String, language: String) async throws  -> GogGameDetails
+    
+    func games() async throws  -> [GogGame]
+    
+    func nextCredentialsRevision(afterRevision: UInt64) async  -> UInt64?
+    
+    /**
+     * Saves the account's credentials through `credentials` now and after
+     * every rotation, one save at a time and in order, until the session's
+     * observers stop. Every account call relies on it.
+     */
+    func persist(credentials: CredentialSave) async 
+    
+    /**
+     * How long the account played each of `product_ids`; a game never
+     * played has no entry. GOG answers one game at a time.
+     */
+    func playtimes(productIds: [String]) async throws  -> [GogPlaytime]
+    
+    func shutdownObservers() 
+    
+}
+open class GogSession: GogSessionProtocol, @unchecked Sendable {
+    fileprivate let handle: UInt64
+
+    /// Used to instantiate a [FFIObject] without an actual handle, for fakes in tests, mostly.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public struct NoHandle {
+        public init() {}
+    }
+
+    // TODO: We'd like this to be `private` but for Swifty reasons,
+    // we can't implement `FfiConverter` without making this `required` and we can't
+    // make it `required` without making it `public`.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    required public init(unsafeFromHandle handle: UInt64) {
+        self.handle = handle
+    }
+
+    // This constructor can be used to instantiate a fake object.
+    // - Parameter noHandle: Placeholder value so we can have a constructor separate from the default empty one that may be implemented for classes extending [FFIObject].
+    //
+    // - Warning:
+    //     Any object instantiated with this constructor cannot be passed to an actual Rust-backed object. Since there isn't a backing handle the FFI lower functions will crash.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public init(noHandle: NoHandle) {
+        self.handle = 0
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public func uniffiCloneHandle() -> UInt64 {
+        return try! rustCall { uniffi_obelisk_bridge_fn_clone_gogsession(self.handle, $0) }
+    }
+    // No primary constructor declared for this class.
+
+    deinit {
+        if handle == 0 {
+            // Mock objects have handle=0 don't try to free them
+            return
+        }
+
+        try! rustCall { uniffi_obelisk_bridge_fn_free_gogsession(handle, $0) }
+    }
+
+    
+    /**
+     * Keeps every library it loads in `library`.
+     */
+public static func restore(credentials: GogCredentials, library: LibraryCache?)async throws  -> GogSession  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_obelisk_bridge_fn_constructor_gogsession_restore(FfiConverterTypeGogCredentials_lower(credentials),FfiConverterOptionTypeLibraryCache.lower(library)
+                )
+            },
+            pollFunc: ffi_obelisk_bridge_rust_future_poll_u64,
+            completeFunc: ffi_obelisk_bridge_rust_future_complete_u64,
+            freeFunc: ffi_obelisk_bridge_rust_future_free_u64,
+            liftFunc: FfiConverterTypeGogSession_lift,
+            errorHandler: FfiConverterTypeGogError_lift
+        )
+}
+    
+    /**
+     * Keeps every library it loads in `library`.
+     */
+public static func signIn(authorizationCode: String, library: LibraryCache?)async throws  -> GogSession  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_obelisk_bridge_fn_constructor_gogsession_sign_in(FfiConverterString.lower(authorizationCode),FfiConverterOptionTypeLibraryCache.lower(library)
+                )
+            },
+            pollFunc: ffi_obelisk_bridge_rust_future_poll_u64,
+            completeFunc: ffi_obelisk_bridge_rust_future_complete_u64,
+            freeFunc: ffi_obelisk_bridge_rust_future_free_u64,
+            liftFunc: FfiConverterTypeGogSession_lift,
+            errorHandler: FfiConverterTypeGogError_lift
+        )
+}
+    
+
+    
+    /**
+     * The game's achievements, named in `locale`, such as `fr-FR`.
+     */
+open func achievements(productId: String, locale: String)async throws  -> [GogAchievement]  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_obelisk_bridge_fn_method_gogsession_achievements(
+                        self.uniffiCloneHandle(),FfiConverterString.lower(productId),FfiConverterString.lower(locale)
+                )
+            },
+            pollFunc: ffi_obelisk_bridge_rust_future_poll_rust_buffer,
+            completeFunc: ffi_obelisk_bridge_rust_future_complete_rust_buffer,
+            freeFunc: ffi_obelisk_bridge_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterSequenceTypeGogAchievement.lift,
+            errorHandler: FfiConverterTypeGogError_lift
+        )
+}
+    
+    /**
+     * The account's avatar, as its GOG profile shows it.
+     */
+open func avatarUrl() -> String?  {
+    return try!  FfiConverterOptionString.lift(try! rustCall() {
+        uniffiCallStatus in
+    uniffi_obelisk_bridge_fn_method_gogsession_avatar_url(
+            self.uniffiCloneHandle(),uniffiCallStatus
+    )
+})
+}
+    
+open func credentials()async throws  -> GogCredentials  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_obelisk_bridge_fn_method_gogsession_credentials(
+                        self.uniffiCloneHandle()
+                )
+            },
+            pollFunc: ffi_obelisk_bridge_rust_future_poll_rust_buffer,
+            completeFunc: ffi_obelisk_bridge_rust_future_complete_rust_buffer,
+            freeFunc: ffi_obelisk_bridge_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterTypeGogCredentials_lift,
+            errorHandler: FfiConverterTypeGogError_lift
+        )
+}
+    
+open func disconnect()async throws   {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_obelisk_bridge_fn_method_gogsession_disconnect(
+                        self.uniffiCloneHandle()
+                )
+            },
+            pollFunc: ffi_obelisk_bridge_rust_future_poll_void,
+            completeFunc: ffi_obelisk_bridge_rust_future_complete_void,
+            freeFunc: ffi_obelisk_bridge_rust_future_free_void,
+            liftFunc: { $0 },
+            errorHandler: FfiConverterTypeGogError_lift
+        )
+}
+    
+    /**
+     * `language` names the depots, such as `fr-FR`.
+     */
+open func gameDetails(productId: String, platform: String, language: String)async throws  -> GogGameDetails  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_obelisk_bridge_fn_method_gogsession_game_details(
+                        self.uniffiCloneHandle(),FfiConverterString.lower(productId),FfiConverterString.lower(platform),FfiConverterString.lower(language)
+                )
+            },
+            pollFunc: ffi_obelisk_bridge_rust_future_poll_rust_buffer,
+            completeFunc: ffi_obelisk_bridge_rust_future_complete_rust_buffer,
+            freeFunc: ffi_obelisk_bridge_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterTypeGogGameDetails_lift,
+            errorHandler: FfiConverterTypeGogError_lift
+        )
+}
+    
+open func games()async throws  -> [GogGame]  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_obelisk_bridge_fn_method_gogsession_games(
+                        self.uniffiCloneHandle()
+                )
+            },
+            pollFunc: ffi_obelisk_bridge_rust_future_poll_rust_buffer,
+            completeFunc: ffi_obelisk_bridge_rust_future_complete_rust_buffer,
+            freeFunc: ffi_obelisk_bridge_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterSequenceTypeGogGame.lift,
+            errorHandler: FfiConverterTypeGogError_lift
+        )
+}
+    
+open func nextCredentialsRevision(afterRevision: UInt64)async  -> UInt64?  {
+    return
+        try!  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_obelisk_bridge_fn_method_gogsession_next_credentials_revision(
+                        self.uniffiCloneHandle(),FfiConverterUInt64.lower(afterRevision)
+                )
+            },
+            pollFunc: ffi_obelisk_bridge_rust_future_poll_rust_buffer,
+            completeFunc: ffi_obelisk_bridge_rust_future_complete_rust_buffer,
+            freeFunc: ffi_obelisk_bridge_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterOptionUInt64.lift,
+            errorHandler: nil
+            
+        )
+}
+    
+    /**
+     * Saves the account's credentials through `credentials` now and after
+     * every rotation, one save at a time and in order, until the session's
+     * observers stop. Every account call relies on it.
+     */
+open func persist(credentials: CredentialSave)async   {
+    return
+        try!  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_obelisk_bridge_fn_method_gogsession_persist(
+                        self.uniffiCloneHandle(),FfiConverterTypeCredentialSave_lower(credentials)
+                )
+            },
+            pollFunc: ffi_obelisk_bridge_rust_future_poll_void,
+            completeFunc: ffi_obelisk_bridge_rust_future_complete_void,
+            freeFunc: ffi_obelisk_bridge_rust_future_free_void,
+            liftFunc: { $0 },
+            errorHandler: nil
+            
+        )
+}
+    
+    /**
+     * How long the account played each of `product_ids`; a game never
+     * played has no entry. GOG answers one game at a time.
+     */
+open func playtimes(productIds: [String])async throws  -> [GogPlaytime]  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_obelisk_bridge_fn_method_gogsession_playtimes(
+                        self.uniffiCloneHandle(),FfiConverterSequenceString.lower(productIds)
+                )
+            },
+            pollFunc: ffi_obelisk_bridge_rust_future_poll_rust_buffer,
+            completeFunc: ffi_obelisk_bridge_rust_future_complete_rust_buffer,
+            freeFunc: ffi_obelisk_bridge_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterSequenceTypeGogPlaytime.lift,
+            errorHandler: FfiConverterTypeGogError_lift
+        )
+}
+    
+open func shutdownObservers()  {try! rustCall() {
+        uniffiCallStatus in
+    uniffi_obelisk_bridge_fn_method_gogsession_shutdown_observers(
+            self.uniffiCloneHandle(),uniffiCallStatus
+    )
+}
+}
+    
+
+    
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeGogSession: FfiConverter {
+    typealias FfiType = UInt64
+    typealias SwiftType = GogSession
+
+    public static func lift(_ handle: UInt64) throws -> GogSession {
+        return GogSession(unsafeFromHandle: handle)
+    }
+
+    public static func lower(_ value: GogSession) -> UInt64 {
+        return value.uniffiCloneHandle()
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> GogSession {
+        let handle: UInt64 = try readInt(&buf)
+        return try lift(handle)
+    }
+
+    public static func write(_ value: GogSession, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeGogSession_lift(_ handle: UInt64) throws -> GogSession {
+    return try FfiConverterTypeGogSession.lift(handle)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeGogSession_lower(_ value: GogSession) -> UInt64 {
+    return FfiConverterTypeGogSession.lower(value)
 }
 
 
@@ -1751,6 +2116,11 @@ public protocol LibraryCacheProtocol: AnyObject, Sendable {
     func forget(account: GameAccount) 
     
     /**
+     * The account's last GOG library, empty when it has none.
+     */
+    func gogLibrary(userId: String)  -> [CachedGogGame]
+    
+    /**
      * Every launch the cache keeps, for every storefront and account.
      */
     func launches()  -> [GameLaunch]
@@ -1871,6 +2241,19 @@ open func forget(account: GameAccount)  {try! rustCall() {
         FfiConverterTypeGameAccount_lower(account),uniffiCallStatus
     )
 }
+}
+    
+    /**
+     * The account's last GOG library, empty when it has none.
+     */
+open func gogLibrary(userId: String) -> [CachedGogGame]  {
+    return try!  FfiConverterSequenceTypeCachedGogGame.lift(try! rustCall() {
+        uniffiCallStatus in
+    uniffi_obelisk_bridge_fn_method_librarycache_gog_library(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(userId),uniffiCallStatus
+    )
+})
 }
     
     /**
@@ -3141,6 +3524,63 @@ public func FfiConverterTypeCachedEpicGame_lift(_ buf: RustBuffer) throws -> Cac
 #endif
 public func FfiConverterTypeCachedEpicGame_lower(_ value: CachedEpicGame) -> RustBuffer {
     return FfiConverterTypeCachedEpicGame.lower(value)
+}
+
+
+/**
+ * A GOG game of the cache, with its playtime once GOG told it.
+ */
+public struct CachedGogGame: Equatable, Hashable {
+    public var game: GogGame
+    public var playtimeMinutes: UInt64?
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(game: GogGame, playtimeMinutes: UInt64?) {
+        self.game = game
+        self.playtimeMinutes = playtimeMinutes
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension CachedGogGame: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeCachedGogGame: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> CachedGogGame {
+        return
+            try CachedGogGame(
+                game: FfiConverterTypeGogGame.read(from: &buf), 
+                playtimeMinutes: FfiConverterOptionUInt64.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: CachedGogGame, into buf: inout [UInt8]) {
+        FfiConverterTypeGogGame.write(value.game, into: &buf)
+        FfiConverterOptionUInt64.write(value.playtimeMinutes, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeCachedGogGame_lift(_ buf: RustBuffer) throws -> CachedGogGame {
+    return try FfiConverterTypeCachedGogGame.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeCachedGogGame_lower(_ value: CachedGogGame) -> RustBuffer {
+    return FfiConverterTypeCachedGogGame.lower(value)
 }
 
 
@@ -4553,6 +4993,394 @@ public func FfiConverterTypeGameTransfer_lower(_ value: GameTransfer) -> RustBuf
 }
 
 
+public struct GogAchievement: Equatable, Hashable {
+    public var id: String
+    public var name: String
+    public var description: String
+    public var iconUrl: String
+    public var hidden: Bool
+    public var unlocked: Bool
+    /**
+     * Seconds since the Unix epoch.
+     */
+    public var unlockTime: UInt64?
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(id: String, name: String, description: String, iconUrl: String, hidden: Bool, unlocked: Bool, 
+        /**
+         * Seconds since the Unix epoch.
+         */unlockTime: UInt64?) {
+        self.id = id
+        self.name = name
+        self.description = description
+        self.iconUrl = iconUrl
+        self.hidden = hidden
+        self.unlocked = unlocked
+        self.unlockTime = unlockTime
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension GogAchievement: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeGogAchievement: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> GogAchievement {
+        return
+            try GogAchievement(
+                id: FfiConverterString.read(from: &buf), 
+                name: FfiConverterString.read(from: &buf), 
+                description: FfiConverterString.read(from: &buf), 
+                iconUrl: FfiConverterString.read(from: &buf), 
+                hidden: FfiConverterBool.read(from: &buf), 
+                unlocked: FfiConverterBool.read(from: &buf), 
+                unlockTime: FfiConverterOptionUInt64.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: GogAchievement, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.id, into: &buf)
+        FfiConverterString.write(value.name, into: &buf)
+        FfiConverterString.write(value.description, into: &buf)
+        FfiConverterString.write(value.iconUrl, into: &buf)
+        FfiConverterBool.write(value.hidden, into: &buf)
+        FfiConverterBool.write(value.unlocked, into: &buf)
+        FfiConverterOptionUInt64.write(value.unlockTime, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeGogAchievement_lift(_ buf: RustBuffer) throws -> GogAchievement {
+    return try FfiConverterTypeGogAchievement.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeGogAchievement_lower(_ value: GogAchievement) -> RustBuffer {
+    return FfiConverterTypeGogAchievement.lower(value)
+}
+
+
+public struct GogCredentials: Equatable, Hashable {
+    public var userId: String
+    public var username: String
+    public var refreshToken: String
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(userId: String, username: String, refreshToken: String) {
+        self.userId = userId
+        self.username = username
+        self.refreshToken = refreshToken
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension GogCredentials: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeGogCredentials: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> GogCredentials {
+        return
+            try GogCredentials(
+                userId: FfiConverterString.read(from: &buf), 
+                username: FfiConverterString.read(from: &buf), 
+                refreshToken: FfiConverterString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: GogCredentials, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.userId, into: &buf)
+        FfiConverterString.write(value.username, into: &buf)
+        FfiConverterString.write(value.refreshToken, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeGogCredentials_lift(_ buf: RustBuffer) throws -> GogCredentials {
+    return try FfiConverterTypeGogCredentials.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeGogCredentials_lower(_ value: GogCredentials) -> RustBuffer {
+    return FfiConverterTypeGogCredentials.lower(value)
+}
+
+
+public struct GogGame: Equatable, Hashable {
+    public var productId: String
+    public var title: String
+    /**
+     * The portrait cover.
+     */
+    public var imageUrl: String?
+    /**
+     * The wide artwork the hero and the game's page show.
+     */
+    public var headerImageUrl: String?
+    public var windows: Bool
+    public var macos: Bool
+    /**
+     * In English: gamesdb has no other language.
+     */
+    public var summary: String
+    public var developers: [String]
+    public var publishers: [String]
+    /**
+     * Seconds since the Unix epoch.
+     */
+    public var releaseDate: UInt64?
+    public var genres: [String]
+    /**
+     * The critics' rating, out of 100.
+     */
+    public var rating: UInt32?
+    /**
+     * The languages the game speaks, such as `fr-FR`.
+     */
+    public var languages: [String]
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(productId: String, title: String, 
+        /**
+         * The portrait cover.
+         */imageUrl: String?, 
+        /**
+         * The wide artwork the hero and the game's page show.
+         */headerImageUrl: String?, windows: Bool, macos: Bool, 
+        /**
+         * In English: gamesdb has no other language.
+         */summary: String, developers: [String], publishers: [String], 
+        /**
+         * Seconds since the Unix epoch.
+         */releaseDate: UInt64?, genres: [String], 
+        /**
+         * The critics' rating, out of 100.
+         */rating: UInt32?, 
+        /**
+         * The languages the game speaks, such as `fr-FR`.
+         */languages: [String]) {
+        self.productId = productId
+        self.title = title
+        self.imageUrl = imageUrl
+        self.headerImageUrl = headerImageUrl
+        self.windows = windows
+        self.macos = macos
+        self.summary = summary
+        self.developers = developers
+        self.publishers = publishers
+        self.releaseDate = releaseDate
+        self.genres = genres
+        self.rating = rating
+        self.languages = languages
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension GogGame: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeGogGame: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> GogGame {
+        return
+            try GogGame(
+                productId: FfiConverterString.read(from: &buf), 
+                title: FfiConverterString.read(from: &buf), 
+                imageUrl: FfiConverterOptionString.read(from: &buf), 
+                headerImageUrl: FfiConverterOptionString.read(from: &buf), 
+                windows: FfiConverterBool.read(from: &buf), 
+                macos: FfiConverterBool.read(from: &buf), 
+                summary: FfiConverterString.read(from: &buf), 
+                developers: FfiConverterSequenceString.read(from: &buf), 
+                publishers: FfiConverterSequenceString.read(from: &buf), 
+                releaseDate: FfiConverterOptionUInt64.read(from: &buf), 
+                genres: FfiConverterSequenceString.read(from: &buf), 
+                rating: FfiConverterOptionUInt32.read(from: &buf), 
+                languages: FfiConverterSequenceString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: GogGame, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.productId, into: &buf)
+        FfiConverterString.write(value.title, into: &buf)
+        FfiConverterOptionString.write(value.imageUrl, into: &buf)
+        FfiConverterOptionString.write(value.headerImageUrl, into: &buf)
+        FfiConverterBool.write(value.windows, into: &buf)
+        FfiConverterBool.write(value.macos, into: &buf)
+        FfiConverterString.write(value.summary, into: &buf)
+        FfiConverterSequenceString.write(value.developers, into: &buf)
+        FfiConverterSequenceString.write(value.publishers, into: &buf)
+        FfiConverterOptionUInt64.write(value.releaseDate, into: &buf)
+        FfiConverterSequenceString.write(value.genres, into: &buf)
+        FfiConverterOptionUInt32.write(value.rating, into: &buf)
+        FfiConverterSequenceString.write(value.languages, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeGogGame_lift(_ buf: RustBuffer) throws -> GogGame {
+    return try FfiConverterTypeGogGame.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeGogGame_lower(_ value: GogGame) -> RustBuffer {
+    return FfiConverterTypeGogGame.lower(value)
+}
+
+
+/**
+ * What a game's page adds to its library entry.
+ */
+public struct GogGameDetails: Equatable, Hashable {
+    /**
+     * Unknown when GOG serves no build for the platform.
+     */
+    public var installationBytes: UInt64?
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(
+        /**
+         * Unknown when GOG serves no build for the platform.
+         */installationBytes: UInt64?) {
+        self.installationBytes = installationBytes
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension GogGameDetails: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeGogGameDetails: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> GogGameDetails {
+        return
+            try GogGameDetails(
+                installationBytes: FfiConverterOptionUInt64.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: GogGameDetails, into buf: inout [UInt8]) {
+        FfiConverterOptionUInt64.write(value.installationBytes, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeGogGameDetails_lift(_ buf: RustBuffer) throws -> GogGameDetails {
+    return try FfiConverterTypeGogGameDetails.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeGogGameDetails_lower(_ value: GogGameDetails) -> RustBuffer {
+    return FfiConverterTypeGogGameDetails.lower(value)
+}
+
+
+/**
+ * How long the account played one game, as GOG records it.
+ */
+public struct GogPlaytime: Equatable, Hashable {
+    public var productId: String
+    public var minutes: UInt64
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(productId: String, minutes: UInt64) {
+        self.productId = productId
+        self.minutes = minutes
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension GogPlaytime: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeGogPlaytime: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> GogPlaytime {
+        return
+            try GogPlaytime(
+                productId: FfiConverterString.read(from: &buf), 
+                minutes: FfiConverterUInt64.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: GogPlaytime, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.productId, into: &buf)
+        FfiConverterUInt64.write(value.minutes, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeGogPlaytime_lift(_ buf: RustBuffer) throws -> GogPlaytime {
+    return try FfiConverterTypeGogPlaytime.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeGogPlaytime_lower(_ value: GogPlaytime) -> RustBuffer {
+    return FfiConverterTypeGogPlaytime.lower(value)
+}
+
+
 /**
  * One installation of the account, as its receipt records it.
  */
@@ -4915,6 +5743,7 @@ public struct ObeliskLocations: Equatable, Hashable {
     public var cloudArchive: String
     public var steamSessions: String
     public var epicSessions: String
+    public var gogSessions: String
     /**
      * The bundled native host every supervisor runs as.
      */
@@ -4927,6 +5756,10 @@ public struct ObeliskLocations: Equatable, Hashable {
      * Where Wine logs the Windows builds of Epic games.
      */
     public var epicDiagnostics: String
+    /**
+     * Where Wine logs the Windows builds of GOG games.
+     */
+    public var gogDiagnostics: String
     /**
      * The Voile runtimes that run Windows games: the pinned release and a
      * development runtime.
@@ -4943,13 +5776,16 @@ public struct ObeliskLocations: Equatable, Hashable {
         /**
          * The Cloud archive every storefront shares. The folder keeps its first
          * name so existing save versions and running Game sessions stay valid.
-         */cloudArchive: String, steamSessions: String, epicSessions: String, 
+         */cloudArchive: String, steamSessions: String, epicSessions: String, gogSessions: String, 
         /**
          * The bundled native host every supervisor runs as.
          */helper: String, helpers: String, steamRuntimePackage: String, steamRuntimeCache: String, steamDiagnostics: String, 
         /**
          * Where Wine logs the Windows builds of Epic games.
          */epicDiagnostics: String, 
+        /**
+         * Where Wine logs the Windows builds of GOG games.
+         */gogDiagnostics: String, 
         /**
          * The Voile runtimes that run Windows games: the pinned release and a
          * development runtime.
@@ -4962,12 +5798,14 @@ public struct ObeliskLocations: Equatable, Hashable {
         self.cloudArchive = cloudArchive
         self.steamSessions = steamSessions
         self.epicSessions = epicSessions
+        self.gogSessions = gogSessions
         self.helper = helper
         self.helpers = helpers
         self.steamRuntimePackage = steamRuntimePackage
         self.steamRuntimeCache = steamRuntimeCache
         self.steamDiagnostics = steamDiagnostics
         self.epicDiagnostics = epicDiagnostics
+        self.gogDiagnostics = gogDiagnostics
         self.voile = voile
         self.winePrefixes = winePrefixes
     }
@@ -4993,12 +5831,14 @@ public struct FfiConverterTypeObeliskLocations: FfiConverterRustBuffer {
                 cloudArchive: FfiConverterString.read(from: &buf), 
                 steamSessions: FfiConverterString.read(from: &buf), 
                 epicSessions: FfiConverterString.read(from: &buf), 
+                gogSessions: FfiConverterString.read(from: &buf), 
                 helper: FfiConverterString.read(from: &buf), 
                 helpers: FfiConverterString.read(from: &buf), 
                 steamRuntimePackage: FfiConverterString.read(from: &buf), 
                 steamRuntimeCache: FfiConverterString.read(from: &buf), 
                 steamDiagnostics: FfiConverterString.read(from: &buf), 
                 epicDiagnostics: FfiConverterString.read(from: &buf), 
+                gogDiagnostics: FfiConverterString.read(from: &buf), 
                 voile: FfiConverterString.read(from: &buf), 
                 winePrefixes: FfiConverterString.read(from: &buf)
         )
@@ -5010,12 +5850,14 @@ public struct FfiConverterTypeObeliskLocations: FfiConverterRustBuffer {
         FfiConverterString.write(value.cloudArchive, into: &buf)
         FfiConverterString.write(value.steamSessions, into: &buf)
         FfiConverterString.write(value.epicSessions, into: &buf)
+        FfiConverterString.write(value.gogSessions, into: &buf)
         FfiConverterString.write(value.helper, into: &buf)
         FfiConverterString.write(value.helpers, into: &buf)
         FfiConverterString.write(value.steamRuntimePackage, into: &buf)
         FfiConverterString.write(value.steamRuntimeCache, into: &buf)
         FfiConverterString.write(value.steamDiagnostics, into: &buf)
         FfiConverterString.write(value.epicDiagnostics, into: &buf)
+        FfiConverterString.write(value.gogDiagnostics, into: &buf)
         FfiConverterString.write(value.voile, into: &buf)
         FfiConverterString.write(value.winePrefixes, into: &buf)
     }
@@ -6800,6 +7642,8 @@ public enum GameAccount: Equatable, Hashable {
     )
     case epic(accountId: String
     )
+    case gog(userId: String
+    )
 
 
 
@@ -6827,6 +7671,9 @@ public struct FfiConverterTypeGameAccount: FfiConverterRustBuffer {
         case 2: return .epic(accountId: try FfiConverterString.read(from: &buf)
         )
         
+        case 3: return .gog(userId: try FfiConverterString.read(from: &buf)
+        )
+        
         default: throw UniffiInternalError.unexpectedEnumCase
         }
     }
@@ -6843,6 +7690,11 @@ public struct FfiConverterTypeGameAccount: FfiConverterRustBuffer {
         case let .epic(accountId):
             writeInt(&buf, Int32(2))
             FfiConverterString.write(accountId, into: &buf)
+            
+        
+        case let .gog(userId):
+            writeInt(&buf, Int32(3))
+            FfiConverterString.write(userId, into: &buf)
             
         }
     }
@@ -6875,6 +7727,8 @@ public enum GameIdentity: Equatable, Hashable {
     )
     case epic(accountId: String, namespace: String, appName: String
     )
+    case gog(accountId: String, productId: String
+    )
 
 
 
@@ -6902,6 +7756,9 @@ public struct FfiConverterTypeGameIdentity: FfiConverterRustBuffer {
         case 2: return .epic(accountId: try FfiConverterString.read(from: &buf), namespace: try FfiConverterString.read(from: &buf), appName: try FfiConverterString.read(from: &buf)
         )
         
+        case 3: return .gog(accountId: try FfiConverterString.read(from: &buf), productId: try FfiConverterString.read(from: &buf)
+        )
+        
         default: throw UniffiInternalError.unexpectedEnumCase
         }
     }
@@ -6921,6 +7778,12 @@ public struct FfiConverterTypeGameIdentity: FfiConverterRustBuffer {
             FfiConverterString.write(accountId, into: &buf)
             FfiConverterString.write(namespace, into: &buf)
             FfiConverterString.write(appName, into: &buf)
+            
+        
+        case let .gog(accountId,productId):
+            writeInt(&buf, Int32(3))
+            FfiConverterString.write(accountId, into: &buf)
+            FfiConverterString.write(productId, into: &buf)
             
         }
     }
@@ -7027,6 +7890,11 @@ public enum GameOffer: Equatable, Hashable {
      */
     case epic(namespace: String, catalogItemId: String, appName: String, title: String, platform: String
     )
+    /**
+     * Its build for `platform`, `macos` or `windows`.
+     */
+    case gog(productId: String, title: String, platform: String
+    )
 
 
 
@@ -7054,6 +7922,9 @@ public struct FfiConverterTypeGameOffer: FfiConverterRustBuffer {
         case 2: return .epic(namespace: try FfiConverterString.read(from: &buf), catalogItemId: try FfiConverterString.read(from: &buf), appName: try FfiConverterString.read(from: &buf), title: try FfiConverterString.read(from: &buf), platform: try FfiConverterString.read(from: &buf)
         )
         
+        case 3: return .gog(productId: try FfiConverterString.read(from: &buf), title: try FfiConverterString.read(from: &buf), platform: try FfiConverterString.read(from: &buf)
+        )
+        
         default: throw UniffiInternalError.unexpectedEnumCase
         }
     }
@@ -7075,6 +7946,13 @@ public struct FfiConverterTypeGameOffer: FfiConverterRustBuffer {
             FfiConverterString.write(namespace, into: &buf)
             FfiConverterString.write(catalogItemId, into: &buf)
             FfiConverterString.write(appName, into: &buf)
+            FfiConverterString.write(title, into: &buf)
+            FfiConverterString.write(platform, into: &buf)
+            
+        
+        case let .gog(productId,title,platform):
+            writeInt(&buf, Int32(3))
+            FfiConverterString.write(productId, into: &buf)
             FfiConverterString.write(title, into: &buf)
             FfiConverterString.write(platform, into: &buf)
             
@@ -7348,6 +8226,105 @@ public func FfiConverterTypeGameSessionError_lower(_ value: GameSessionError) ->
 }
 
 
+public 
+enum GogError: Swift.Error, Equatable, Hashable, Foundation.LocalizedError {
+
+    
+    
+    case Network
+    case Unauthorized
+    case InvalidCode
+    case InvalidResponse
+    case Service(message: String
+    )
+
+    
+
+    
+
+    
+    public var errorDescription: String? {
+        String(reflecting: self)
+    }
+    
+}
+
+#if compiler(>=6)
+extension GogError: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeGogError: FfiConverterRustBuffer {
+    typealias SwiftType = GogError
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> GogError {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+
+        
+
+        
+        case 1: return .Network
+        case 2: return .Unauthorized
+        case 3: return .InvalidCode
+        case 4: return .InvalidResponse
+        case 5: return .Service(
+            message: try FfiConverterString.read(from: &buf)
+            )
+
+         default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: GogError, into buf: inout [UInt8]) {
+        switch value {
+
+        
+
+        
+        
+        case .Network:
+            writeInt(&buf, Int32(1))
+        
+        
+        case .Unauthorized:
+            writeInt(&buf, Int32(2))
+        
+        
+        case .InvalidCode:
+            writeInt(&buf, Int32(3))
+        
+        
+        case .InvalidResponse:
+            writeInt(&buf, Int32(4))
+        
+        
+        case let .Service(message):
+            writeInt(&buf, Int32(5))
+            FfiConverterString.write(message, into: &buf)
+            
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeGogError_lift(_ buf: RustBuffer) throws -> GogError {
+    return try FfiConverterTypeGogError.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeGogError_lower(_ value: GogError) -> RustBuffer {
+    return FfiConverterTypeGogError.lower(value)
+}
+
+
 /**
  * A failure the player sees, and what it is about.
  */
@@ -7450,6 +8427,7 @@ public enum SessionStorefront: Equatable, Hashable {
     
     case steam
     case epic
+    case gog
 
 
 
@@ -7475,6 +8453,8 @@ public struct FfiConverterTypeSessionStorefront: FfiConverterRustBuffer {
         
         case 2: return .epic
         
+        case 3: return .gog
+        
         default: throw UniffiInternalError.unexpectedEnumCase
         }
     }
@@ -7489,6 +8469,10 @@ public struct FfiConverterTypeSessionStorefront: FfiConverterRustBuffer {
         
         case .epic:
             writeInt(&buf, Int32(2))
+        
+        
+        case .gog:
+            writeInt(&buf, Int32(3))
         
         }
     }
@@ -8643,6 +9627,31 @@ fileprivate struct FfiConverterSequenceTypeCachedEpicGame: FfiConverterRustBuffe
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterSequenceTypeCachedGogGame: FfiConverterRustBuffer {
+    typealias SwiftType = [CachedGogGame]
+
+    public static func write(_ value: [CachedGogGame], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeCachedGogGame.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [CachedGogGame] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [CachedGogGame]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeCachedGogGame.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterSequenceTypeCachedSteamGame: FfiConverterRustBuffer {
     typealias SwiftType = [CachedSteamGame]
 
@@ -8835,6 +9844,81 @@ fileprivate struct FfiConverterSequenceTypeGameLaunch: FfiConverterRustBuffer {
         seq.reserveCapacity(Int(len))
         for _ in 0 ..< len {
             seq.append(try FfiConverterTypeGameLaunch.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeGogAchievement: FfiConverterRustBuffer {
+    typealias SwiftType = [GogAchievement]
+
+    public static func write(_ value: [GogAchievement], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeGogAchievement.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [GogAchievement] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [GogAchievement]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeGogAchievement.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeGogGame: FfiConverterRustBuffer {
+    typealias SwiftType = [GogGame]
+
+    public static func write(_ value: [GogGame], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeGogGame.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [GogGame] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [GogGame]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeGogGame.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeGogPlaytime: FfiConverterRustBuffer {
+    typealias SwiftType = [GogPlaytime]
+
+    public static func write(_ value: [GogPlaytime], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeGogPlaytime.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [GogPlaytime] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [GogPlaytime]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeGogPlaytime.read(from: &buf))
         }
         return seq
     }
@@ -9181,6 +10265,32 @@ public func epicLoginUrl() -> String  {
     )
 })
 }
+public func gogAuthorizationCode(input: String)throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeGogError_lift) {
+        uniffiCallStatus in
+    uniffi_obelisk_bridge_fn_func_gog_authorization_code(
+        FfiConverterString.lower(input),uniffiCallStatus
+    )
+})
+}
+/**
+ * Whether the sign-in window reached the page that carries GOG's code.
+ */
+public func gogIsLoginRedirect(url: String) -> Bool  {
+    return try!  FfiConverterBool.lift(try! rustCall() {
+        uniffiCallStatus in
+    uniffi_obelisk_bridge_fn_func_gog_is_login_redirect(
+        FfiConverterString.lower(url),uniffiCallStatus
+    )
+})
+}
+public func gogLoginUrl() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+        uniffiCallStatus in
+    uniffi_obelisk_bridge_fn_func_gog_login_url(uniffiCallStatus
+    )
+})
+}
 /**
  * Ends the Windows game processes an Obelisk that died left frozen. Runs
  * once at startup, before any launch.
@@ -9256,6 +10366,15 @@ private let initializationResult: InitializationResult = {
     if (uniffi_obelisk_bridge_checksum_func_epic_login_url() != 45052) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_obelisk_bridge_checksum_func_gog_authorization_code() != 19621) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_obelisk_bridge_checksum_func_gog_is_login_redirect() != 36862) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_obelisk_bridge_checksum_func_gog_login_url() != 21271) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_obelisk_bridge_checksum_func_end_orphaned_windows_games() != 9000) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -9280,6 +10399,9 @@ private let initializationResult: InitializationResult = {
     if (uniffi_obelisk_bridge_checksum_method_library_remove_game() != 9491) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_obelisk_bridge_checksum_method_credentialsave_save() != 31513) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_obelisk_bridge_checksum_method_epicsession_achievements() != 19240) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -9301,7 +10423,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_obelisk_bridge_checksum_method_epicsession_next_friends() != 61821) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_obelisk_bridge_checksum_method_epicsession_persist() != 44085) {
+    if (uniffi_obelisk_bridge_checksum_method_epicsession_persist() != 43492) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_obelisk_bridge_checksum_method_epicsession_playtimes() != 51139) {
@@ -9317,9 +10439,6 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_obelisk_bridge_checksum_method_epicsession_stop_friends() != 62372) {
-        return InitializationResult.apiChecksumMismatch
-    }
-    if (uniffi_obelisk_bridge_checksum_method_epiccredentialsave_save() != 53146) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_obelisk_bridge_checksum_method_storefrontsessions_changed() != 25993) {
@@ -9338,6 +10457,36 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_obelisk_bridge_checksum_method_storefrontsessions_stop() != 44469) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_obelisk_bridge_checksum_method_gogsession_achievements() != 38252) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_obelisk_bridge_checksum_method_gogsession_avatar_url() != 16894) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_obelisk_bridge_checksum_method_gogsession_credentials() != 12372) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_obelisk_bridge_checksum_method_gogsession_disconnect() != 50347) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_obelisk_bridge_checksum_method_gogsession_game_details() != 64607) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_obelisk_bridge_checksum_method_gogsession_games() != 62040) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_obelisk_bridge_checksum_method_gogsession_next_credentials_revision() != 16908) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_obelisk_bridge_checksum_method_gogsession_persist() != 28298) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_obelisk_bridge_checksum_method_gogsession_playtimes() != 65023) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_obelisk_bridge_checksum_method_gogsession_shutdown_observers() != 36493) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_obelisk_bridge_checksum_method_accountinstallations_answer_cloud() != 37495) {
@@ -9383,6 +10532,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_obelisk_bridge_checksum_method_librarycache_forget() != 18350) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_obelisk_bridge_checksum_method_librarycache_gog_library() != 31194) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_obelisk_bridge_checksum_method_librarycache_launches() != 47486) {
@@ -9469,7 +10621,16 @@ private let initializationResult: InitializationResult = {
     if (uniffi_obelisk_bridge_checksum_constructor_storefrontsessions_new() != 8407) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_obelisk_bridge_checksum_constructor_gogsession_restore() != 909) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_obelisk_bridge_checksum_constructor_gogsession_sign_in() != 34826) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_obelisk_bridge_checksum_constructor_accountinstallations_epic() != 4009) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_obelisk_bridge_checksum_constructor_accountinstallations_gog() != 4525) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_obelisk_bridge_checksum_constructor_accountinstallations_steam() != 8384) {
@@ -9494,7 +10655,7 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
 
-    uniffiCallbackInitEpicCredentialSave()
+    uniffiCallbackInitCredentialSave()
     return InitializationResult.ok
 }()
 

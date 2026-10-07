@@ -7,6 +7,18 @@ publish.workspace = true
 
 [dependencies]
 obelisk-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+reqwest.workspace = true
+futures-util.workspace = true
+flate2.workspace = true
+md-5.workspace = true
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }
+tempfile.workspace = true

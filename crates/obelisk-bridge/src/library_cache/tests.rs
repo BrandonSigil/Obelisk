@@ -216,3 +216,76 @@ fn a_cache_written_by_obelisk_before_still_shows() {
     assert_eq!(cached[0].playtime_seconds, Some(3600));
     assert_eq!(cache.launches().len(), 1);
 }
+
+fn gog(product_id: &str) -> gog_kit::client::Game {
+    gog_kit::client::Game {
+        product_id: product_id.into(),
+        title: format!("Game {product_id}"),
+        image_url: None,
+        header_image_url: None,
+        windows: true,
+        macos: false,
+        info: gog_kit::client::GameInfo {
+            summary: "Survival horror.".into(),
+            developers: vec!["Tango Gameworks".into()],
+            release_date: Some(1_413_158_400),
+            rating: Some(75),
+            ..Default::default()
+        },
+        metadata: json!({"catalog": {"type": "game"}}),
+    }
+}
+
+#[test]
+fn a_gog_session_keeps_each_games_page_and_playtime() {
+    let directory = TempDir::new().unwrap();
+    let cache = cache(&directory);
+    let library = cache.gog("48628349957132247");
+    let shown = library.games(vec![gog("1"), gog("2")]);
+    assert_eq!(shown[0].developers, ["Tango Gameworks"]);
+    library.playtimes(&BTreeMap::from([("2".to_owned(), 90)]));
+    // A later load keeps the playtimes the session last loaded.
+    library.games(vec![gog("1"), gog("2")]);
+    let cached = cache.gog_library("48628349957132247".into());
+    let read: Vec<_> = cached
+        .iter()
+        .map(|cached| (cached.game.product_id.as_str(), cached.playtime_minutes))
+        .collect();
+    assert_eq!(read, [("1", None), ("2", Some(90))]);
+    assert_eq!(cached[0].game.release_date, Some(1_413_158_400));
+    assert_eq!(cached[0].game.rating, Some(75));
+    let file = file(&cache, &directory);
+    assert_eq!(
+        file["gog"]["48628349957132247"][1]["metadata"]["catalog"]["type"],
+        "game"
+    );
+
+    let launch = GameLaunch {
+        game: GameIdentity::Gog {
+            account_id: "48628349957132247".into(),
+            product_id: "2".into(),
+        },
+        at: 1_790_000_000,
+    };
+    cache.record_launch(launch.clone());
+    assert_eq!(cache.launches(), [launch]);
+    cache.forget(GameAccount::Gog {
+        user_id: "48628349957132247".into(),
+    });
+    assert!(cache.gog_library("48628349957132247".into()).is_empty());
+}
+
+#[test]
+fn a_gog_game_cached_before_its_page_still_shows() {
+    let directory = TempDir::new().unwrap();
+    std::fs::write(
+        directory.path().join(library_cache::FILE_NAME),
+        json!({"version": 1, "gog": {"7": [{"id": "1", "productId": "1", "title": "Old",
+                                            "windows": true, "macos": false}]}})
+        .to_string(),
+    )
+    .unwrap();
+    let cached = cache(&directory).gog_library("7".into());
+    assert_eq!(cached[0].game.title, "Old");
+    assert!(cached[0].game.developers.is_empty());
+}

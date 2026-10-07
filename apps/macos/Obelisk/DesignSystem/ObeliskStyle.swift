@@ -108,14 +108,3 @@ struct StoreMark: View {
             .accessibilityHidden(true)
     }
 }
-
-struct ComingSoonBadge: View {
-    var body: some View {
-        Text(L10n.string("ui.common.coming_soon"))
-            .font(.system(size: 10, weight: .medium))
-            .foregroundStyle(.secondary)
-            .padding(.horizontal, 7)
-            .padding(.vertical, 4)
-            .background(.primary.opacity(0.055), in: Capsule())
-    }
-}

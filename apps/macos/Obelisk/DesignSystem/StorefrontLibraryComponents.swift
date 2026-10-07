@@ -118,8 +118,25 @@ final class LibraryOrdering<Game: Identifiable> where Game.ID: Comparable {
     /// equal ones by name, then by ID.
     static func order(_ games: [Game], by sort: StorefrontLibrarySort, title: (Game) -> String,
                       playtime: (Game) -> Duration?, lastPlayed: (Game) -> Date?) -> [Game] {
-        // Each game's keys are read once, not at every comparison.
-        let keyed = games.map { game in
+        keyed(games, by: sort, title: title, playtime: playtime, lastPlayed: lastPlayed)
+            .sorted(by: precedes)
+            .map(\.game)
+    }
+
+    /// The first of `games` in `sort` order, without ordering the others.
+    static func first(_ games: [Game], by sort: StorefrontLibrarySort, title: (Game) -> String,
+                      playtime: (Game) -> Duration?, lastPlayed: (Game) -> Date?) -> Game? {
+        keyed(games, by: sort, title: title, playtime: playtime, lastPlayed: lastPlayed)
+            .min(by: precedes)?
+            .game
+    }
+
+    private typealias Keyed = (game: Game, title: String, rank: Double)
+
+    /// Each game's keys, read once rather than at every comparison.
+    private static func keyed(_ games: [Game], by sort: StorefrontLibrarySort, title: (Game) -> String,
+                              playtime: (Game) -> Duration?, lastPlayed: (Game) -> Date?) -> [Keyed] {
+        games.map { game in
             let rank: Double = switch sort {
             case .name: 0
             case .playtime: Double(playtime(game)?.components.seconds ?? 0)
@@ -127,11 +144,12 @@ final class LibraryOrdering<Game: Identifiable> where Game.ID: Comparable {
             }
             return (game: game, title: title(game), rank: rank)
         }
-        return keyed.sorted { left, right in
-            if left.rank != right.rank { return left.rank > right.rank }
-            let comparison = left.title.localizedStandardCompare(right.title)
-            return comparison == .orderedSame ? left.game.id < right.game.id : comparison == .orderedAscending
-        }.map(\.game)
+    }
+
+    private static func precedes(_ left: Keyed, _ right: Keyed) -> Bool {
+        if left.rank != right.rank { return left.rank > right.rank }
+        let comparison = left.title.localizedStandardCompare(right.title)
+        return comparison == .orderedSame ? left.game.id < right.game.id : comparison == .orderedAscending
     }
 }
 
@@ -210,6 +228,22 @@ struct StorefrontEmptyLibrary: View {
             .obeliskButtonStyle(.bordered)
         }
         .frame(maxWidth: .infinity, minHeight: 260)
+    }
+}
+
+/// A storefront's artwork at the location its catalog gives, filling its
+/// frame, or neutral artwork without one.
+struct StorefrontArtwork: View {
+    let imageURL: String?
+    var maxPixelSize = 768
+
+    var body: some View {
+        CachedArtwork(url: imageURL.flatMap(URL.init(string:)), maxPixelSize: maxPixelSize) { image in
+            image.resizable().scaledToFill()
+        } placeholder: {
+            ArtworkPlaceholder()
+        }
+        .accessibilityHidden(true)
     }
 }
 

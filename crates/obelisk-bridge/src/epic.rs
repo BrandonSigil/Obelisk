@@ -167,7 +167,7 @@ pub struct EpicPlaytime {
 pub struct EpicSession {
     /// Shared with the Cloud maintenance this session starts.
     pub(crate) client: Arc<client::Client>,
-    pub(crate) persistence: Arc<crate::epic_credentials::Persistence>,
+    pub(crate) persistence: Arc<crate::credentials::Persistence>,
     /// Where the account's library is kept as it loads.
     library: Option<EpicLibrary>,
 }
@@ -248,12 +248,8 @@ impl EpicSession {
     /// Saves the account's credentials through `credentials` now and after
     /// every rotation, one save at a time and in order, until the session's
     /// observers stop. Every account call relies on it.
-    pub async fn persist(&self, credentials: Arc<dyn crate::EpicCredentialSave>) {
-        crate::epic_credentials::persist(
-            self.client.clone(),
-            self.persistence.clone(),
-            credentials,
-        );
+    pub async fn persist(&self, credentials: Arc<dyn crate::CredentialSave>) {
+        crate::credentials::persist(self.client.clone(), self.persistence.clone(), credentials);
     }
 
     pub async fn games(&self) -> Result<Vec<EpicGame>, EpicError> {

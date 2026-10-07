@@ -18,7 +18,7 @@ struct EpicGameDetailView: View {
             playtime: model.playtime(of: game).map(GameFormatting.playtime),
             back: model.closeGame
         ) {
-            EpicArtwork(imageURL: game.headerImageUrl ?? game.imageUrl, maxPixelSize: 2048)
+            StorefrontArtwork(imageURL: game.headerImageUrl ?? game.imageUrl, maxPixelSize: 2048)
         } content: {
             GameOperationStatus(installations: installations, game: game.libraryID)
         }

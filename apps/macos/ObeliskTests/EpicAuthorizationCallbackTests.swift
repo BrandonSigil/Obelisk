@@ -132,7 +132,7 @@ final class EpicAuthorizationCallbackTests: XCTestCase {
         _ operation: () throws -> Void
     ) {
         XCTAssertThrowsError(try operation(), file: file, line: line) { error in
-            guard case EpicWebAuthenticationError.invalidResponse = error else {
+            guard case WebAuthenticationError.invalidResponse = error else {
                 return XCTFail("Expected a sanitized invalid response error", file: file, line: line)
             }
         }

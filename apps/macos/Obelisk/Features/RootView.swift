@@ -17,6 +17,8 @@ struct RootView: View {
                     SteamView(model: model.steam)
                 } else if model.selection == .epic {
                     EpicView(model: model.epic)
+                } else if model.selection == .gog {
+                    GogView(model: model.gog)
                 } else {
                     LibraryView(model: model)
                 }
@@ -83,6 +85,8 @@ struct RootView: View {
                 onChooseCloud: { cloud.respond(.cloud) },
                 storefront: "epic"
             )
+        case .gogRosetta:
+            RosettaPromptView(model: model.gog.rosetta, storefront: "gog")
         case nil:
             EmptyView()
         }

@@ -4370,7 +4370,7 @@
         }
       }
     },
-    "model.epicWeb.epicGames": {
+    "model.epicWeb.host": {
       "extractionState": "manual",
       "localizations": {
         "en": {
@@ -5301,23 +5301,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Annuler"
-          }
-        }
-      }
-    },
-    "ui.common.coming_soon": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Coming soon"
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "À venir"
           }
         }
       }
@@ -6965,23 +6948,6 @@
         }
       }
     },
-    "ui.library.gog_coming_soon": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "GOG library, coming soon"
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Bibliothèque GOG, à venir"
-          }
-        }
-      }
-    },
     "ui.library.loading": {
       "extractionState": "manual",
       "localizations": {
@@ -7131,40 +7097,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Bibliothèque %1$@"
-          }
-        }
-      }
-    },
-    "ui.library.store_title": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Your %1$@ library"
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Votre bibliothèque %1$@"
-          }
-        }
-      }
-    },
-    "ui.library.store_unavailable": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "You cannot sign in to %1$@ yet."
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "La connexion à %1$@ n’est pas encore disponible."
           }
         }
       }
@@ -10111,6 +10043,1264 @@
           "stringUnit": {
             "state": "translated",
             "value": "Arrêter le jeu et quitter"
+          }
+        }
+      }
+    },
+    "model.gogWeb.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sign in to GOG"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Connexion à GOG"
+          }
+        }
+      }
+    },
+    "model.gogWeb.host": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "GOG.com"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "GOG.com"
+          }
+        }
+      }
+    },
+    "model.gogWeb.loading": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Loading sign-in…"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Chargement de la connexion…"
+          }
+        }
+      }
+    },
+    "model.gogWeb.connecting": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Signing in to GOG…"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Connexion à GOG…"
+          }
+        }
+      }
+    },
+    "model.gogWeb.invalidResponse": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "GOG did not confirm your sign-in. Try again."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "GOG n’a pas confirmé la connexion. Réessayez."
+          }
+        }
+      }
+    },
+    "model.gogWeb.network": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Unable to load the GOG sign-in page. Check your connection and try again."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "La page de connexion GOG n’a pas pu être chargée. Vérifiez votre connexion puis réessayez."
+          }
+        }
+      }
+    },
+    "model.gogWeb.unsupportedPage": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This page cannot be opened in the sign-in window. Try again with your GOG account."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cette page ne peut pas être ouverte dans la fenêtre de connexion. Réessayez avec votre compte GOG."
+          }
+        }
+      }
+    },
+    "model.brand.gog": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "GOG"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "GOG"
+          }
+        }
+      }
+    },
+    "model.gog.sessionNotSaved": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Your GOG session could not be saved. Sign in again the next time you open the app."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "La session GOG n’a pas pu être mémorisée. Reconnectez-vous au prochain démarrage."
+          }
+        }
+      }
+    },
+    "model.gog.recoveringSession": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reconnecting to the running GOG game…"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reconnexion au jeu GOG en cours…"
+          }
+        }
+      }
+    },
+    "model.gog.otherGameRunning": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A GOG game session is still active. Wait for it to finish before changing installed files."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Une session de jeu GOG est encore active. Attendez sa fin avant de modifier les fichiers installés."
+          }
+        }
+      }
+    },
+    "model.gog.network": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Unable to reach GOG. Check your connection and try again."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Impossible de joindre GOG. Vérifiez votre connexion puis réessayez."
+          }
+        }
+      }
+    },
+    "model.gog.unauthorized": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Your GOG session has expired. Sign in again."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Votre session GOG a expiré. Connectez-vous à nouveau."
+          }
+        }
+      }
+    },
+    "model.gog.invalidCode": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Your GOG sign-in attempt has expired. Try signing in again."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "La connexion GOG a expiré. Réessayez de vous connecter."
+          }
+        }
+      }
+    },
+    "model.gog.invalidResponse": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The response from GOG could not be read. Try again later."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "La réponse de GOG n’a pas pu être lue. Réessayez plus tard."
+          }
+        }
+      }
+    },
+    "model.gog.failure": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Unable to sign in to GOG. Try again."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "La connexion à GOG a échoué. Réessayez."
+          }
+        }
+      }
+    },
+    "model.gog.receiptsUnavailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Saved GOG installations could not be read."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Les installations GOG enregistrées ne peuvent pas être lues."
+          }
+        }
+      }
+    },
+    "model.gog.receiptsNotSaved": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "GOG installation details could not be saved."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Les informations des installations GOG ne peuvent pas être enregistrées."
+          }
+        }
+      }
+    },
+    "ui.store.gog": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "GOG"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "GOG"
+          }
+        }
+      }
+    },
+    "ui.gog.library": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "GOG library"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Bibliothèque GOG"
+          }
+        }
+      }
+    },
+    "ui.gog.account": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "GOG account"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Compte GOG"
+          }
+        }
+      }
+    },
+    "ui.gog.sign_in_title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sign in to GOG"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Connexion à GOG"
+          }
+        }
+      }
+    },
+    "ui.gog.sign_in_subtitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Find the games in your GOG library."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Retrouvez les jeux de votre bibliothèque GOG."
+          }
+        }
+      }
+    },
+    "ui.gog.connecting": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Connecting to your GOG account…"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Connexion à votre compte GOG…"
+          }
+        }
+      }
+    },
+    "ui.gog.account_sign_in": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "With your GOG account"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Avec votre compte GOG"
+          }
+        }
+      }
+    },
+    "ui.gog.sign_in_instructions": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Use the GOG window to sign in. You will return to your library automatically."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Connectez-vous dans la fenêtre GOG. Vous reviendrez automatiquement à votre bibliothèque."
+          }
+        }
+      }
+    },
+    "ui.gog.sign_in": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sign in to GOG"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Se connecter à GOG"
+          }
+        }
+      }
+    },
+    "ui.gog.other_game_operation": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Another GOG game is being downloaded or verified."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Un autre jeu GOG est en cours de téléchargement ou de vérification."
+          }
+        }
+      }
+    },
+    "backend.gog.network": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Unable to reach GOG. Try again when your connection is restored."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Impossible de joindre GOG. Réessayez lorsque la connexion est rétablie."
+          }
+        }
+      }
+    },
+    "backend.gog.unauthorized": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Your GOG session has expired. Sign in again."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "La session GOG a expiré. Reconnectez votre compte."
+          }
+        }
+      }
+    },
+    "backend.gog.invalid_code": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The GOG code is invalid or has expired. Open the sign-in page again."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Le code GOG est invalide ou a expiré. Ouvrez à nouveau la page de connexion."
+          }
+        }
+      }
+    },
+    "backend.gog.invalid_response": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "GOG returned an unexpected response."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "GOG a renvoyé une réponse inattendue."
+          }
+        }
+      }
+    },
+    "backend.gog.cancelled": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Download stopped"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Téléchargement arrêté"
+          }
+        }
+      }
+    },
+    "backend.gog.storage": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Unable to write game files"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Impossible d’écrire les fichiers du jeu"
+          }
+        }
+      }
+    },
+    "backend.gog.download_in_progress": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A GOG download is already in progress"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Un téléchargement GOG est déjà en cours"
+          }
+        }
+      }
+    },
+    "backend.gog.unsafe_path": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Unsafe file path in the game manifest"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Chemin de fichier non sûr dans le manifeste du jeu"
+          }
+        }
+      }
+    },
+    "backend.gog.integrity": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Game file verification failed"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "La vérification des fichiers du jeu a échoué"
+          }
+        }
+      }
+    },
+    "backend.gog.content_http": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The content server rejected the request"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Le serveur de contenu a refusé la demande"
+          }
+        }
+      }
+    },
+    "backend.gog.no_build": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "GOG offers no build of this game that Obelisk can install yet."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "GOG ne propose pas encore de version de ce jeu installable par Obelisk."
+          }
+        }
+      }
+    },
+    "backend.gog.rate_limited": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "GOG is receiving too many requests. Try again in a few minutes."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "GOG reçoit trop de demandes. Réessayez dans quelques minutes."
+          }
+        }
+      }
+    },
+    "backend.gog.forbidden": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "GOG denied access. Check your account on the GOG website."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "GOG refuse cet accès. Vérifiez votre compte sur le site GOG."
+          }
+        }
+      }
+    },
+    "backend.gog.http": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "GOG is unavailable for this request (HTTP %@)."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "GOG est indisponible pour cette demande (HTTP %@)."
+          }
+        }
+      }
+    },
+    "backend.gog.choose_existing_folder": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choose the existing installation folder to resume"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choisissez le dossier d’installation existant pour reprendre"
+          }
+        }
+      }
+    },
+    "backend.gog.game_not_owned": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This game is not in your GOG library"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ce jeu ne figure pas dans votre bibliothèque GOG"
+          }
+        }
+      }
+    },
+    "backend.gog.session": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The GOG game session could not be started. Try again."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "La session du jeu GOG n’a pas pu démarrer. Réessayez."
+          }
+        }
+      }
+    },
+    "backend.gog.busy": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A GOG game is already running."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Un jeu GOG est déjà en cours."
+          }
+        }
+      }
+    },
+    "backend.gog.unsupported": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This GOG installation cannot be started on this Mac."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cette installation GOG ne peut pas être lancée sur ce Mac."
+          }
+        }
+      }
+    },
+    "backend.gog.invalidSession": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reconnect your GOG account before continuing."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reconnectez votre compte GOG avant de continuer."
+          }
+        }
+      }
+    },
+    "backend.gog.launch.incompleteInstallation": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Installation is incomplete. Download or verify the game before launching it."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "L’installation est incomplète. Téléchargez ou vérifiez le jeu avant de le lancer."
+          }
+        }
+      }
+    },
+    "backend.gog.launch.noPlayTask": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "GOG did not specify how to launch this game. Verify the game files."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "GOG n’indique pas comment lancer ce jeu. Vérifiez les fichiers du jeu."
+          }
+        }
+      }
+    },
+    "backend.gog.launch.directoryMissing": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The game installation folder could not be found."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Le dossier d’installation du jeu est introuvable."
+          }
+        }
+      }
+    },
+    "backend.gog.launch.directoryUnreadable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Unable to read the game installation folder."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Impossible de lire le dossier d’installation du jeu."
+          }
+        }
+      }
+    },
+    "backend.gog.launch.executableMissing": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "GOG did not specify a file to launch."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "GOG n’a pas indiqué de fichier à lancer."
+          }
+        }
+      }
+    },
+    "backend.gog.launch.fileMissing": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A launch file or folder could not be found. Verify the game files."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Un fichier ou dossier de lancement est introuvable. Vérifiez les fichiers du jeu."
+          }
+        }
+      }
+    },
+    "backend.gog.launch.incompleteEscape": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The GOG arguments end with an incomplete escape sequence."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Les arguments GOG se terminent par un échappement incomplet."
+          }
+        }
+      }
+    },
+    "backend.gog.launch.invalidApplication": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The game's macOS application is invalid. Verify the files."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "L’application macOS du jeu est invalide. Vérifiez les fichiers."
+          }
+        }
+      }
+    },
+    "backend.gog.launch.invalidArguments": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The launch arguments provided by GOG are invalid."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Les arguments de lancement fournis par GOG sont invalides."
+          }
+        }
+      }
+    },
+    "backend.gog.launch.invalidPath": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "GOG provided an absolute or invalid launch path."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "GOG a fourni un chemin de lancement absolu ou invalide."
+          }
+        }
+      }
+    },
+    "backend.gog.launch.invalidUtf8Path": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The game installation path is not valid UTF-8 text."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Le chemin d’installation du jeu n’est pas un texte UTF-8 valide."
+          }
+        }
+      }
+    },
+    "backend.gog.launch.invalidWorkingDirectory": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The game working directory is invalid. Verify the files."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Le dossier de travail du jeu est invalide. Vérifiez les fichiers."
+          }
+        }
+      }
+    },
+    "backend.gog.launch.linkOutsideGame": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A game link points outside the installation folder."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Un lien du jeu pointe hors du dossier d’installation."
+          }
+        }
+      }
+    },
+    "backend.gog.launch.notExecutable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The launch file provided by GOG is not executable."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Le fichier de lancement fourni par GOG n’est pas exécutable."
+          }
+        }
+      }
+    },
+    "backend.gog.launch.pathOutsideGame": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The launch path points outside the game folder."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Le chemin de lancement sort du dossier du jeu."
+          }
+        }
+      }
+    },
+    "backend.gog.launch.unclosedQuotes": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The GOG arguments contain unclosed quotation marks."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Les arguments GOG contiennent des guillemets non fermés."
+          }
+        }
+      }
+    },
+    "backend.gog.launch.unsupportedPlatform": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This launch platform is not supported."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cette plateforme de lancement n’est pas prise en charge."
+          }
+        }
+      }
+    },
+    "backend.gog.launch.windowsExecutable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The launch file provided by GOG is a Windows program."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Le fichier de lancement fourni par GOG est un programme Windows."
+          }
+        }
+      }
+    },
+    "ui.game.about": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "About"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "À propos"
+          }
+        }
+      }
+    },
+    "ui.game.developer": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Developer"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Développeur"
+          }
+        }
+      }
+    },
+    "ui.game.publisher": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Publisher"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Éditeur"
+          }
+        }
+      }
+    },
+    "ui.game.release_date": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Release date"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Date de sortie"
+          }
+        }
+      }
+    },
+    "ui.game.genres": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Genres"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Genres"
+          }
+        }
+      }
+    },
+    "ui.game.rating": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Critics' rating"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Note de la critique"
+          }
+        }
+      }
+    },
+    "ui.game.rating_value": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld/100"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld/100"
+          }
+        }
+      }
+    },
+    "ui.game.languages": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Languages"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Langues"
           }
         }
       }

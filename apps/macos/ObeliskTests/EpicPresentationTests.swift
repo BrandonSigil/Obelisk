@@ -62,13 +62,14 @@ final class EpicPresentationTests: XCTestCase {
         }
 
         // Wait for the actual decoded image, so pending or cancelled downloads
-        // cannot masquerade as a loaded library cover.
+        // cannot masquerade as a loaded library cover. The only game is the
+        // library's hero too, which decodes the same artwork at its own size.
         try await eventually {
             fixture.layout()
-            return self.searchFrame(in: fixture.host) != nil && artworkIsRendered()
+            return self.searchFrame(in: fixture.host) != nil && artworkIsRendered() && server.requestCount == 2
         }
         let libraryRequests = server.requestCount
-        XCTAssertEqual(libraryRequests, 1)
+        XCTAssertEqual(libraryRequests, 2, "One request for the cover, one for the hero")
 
         model.open(game)
         navigationPhase = "detail"
@@ -555,7 +556,7 @@ struct EpicPresentationWindow {
     var sheetContent: NSView? { window.sheets.first?.contentView }
 }
 
-private actor EpicPresentationCredentials: EpicCredentialStore {
+private actor EpicPresentationCredentials: CredentialStore {
     private var value: EpicCredentials?
     private(set) var loads = 0
     init(_ value: EpicCredentials? = epicPresentationCredentials) { self.value = value }

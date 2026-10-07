@@ -78,14 +78,48 @@ enum EpicGames: GameStorefront {
     )
 }
 
+enum GogGames: GameStorefront {
+    static let storefront = SessionStorefront.gog
+    static func identity(of game: GameIdentity) -> (game: String, account: String)? {
+        guard case let .gog(accountId, productId) = game else { return nil }
+        return (productId, accountId)
+    }
+    static func identity(_ game: String, account: String) -> GameIdentity? {
+        .gog(accountId: account, productId: game)
+    }
+    static func account(_ account: String) -> GameAccount { .gog(userId: account) }
+    static func account(of account: GameAccount) -> String? {
+        guard case let .gog(userId) = account else { return nil }
+        return userId
+    }
+    /// A signed-out account still signs Obelisk out, as any GOG call does.
+    static func failure(_ key: String) -> Error {
+        switch key {
+        case "backend.gog.unauthorized": GogError.Unauthorized
+        case "backend.gog.network": GogError.Network
+        default: GogError.Service(message: key)
+        }
+    }
+    static let invalidSession = "backend.gog.invalidSession"
+    static let recoveringSession = "model.gog.recoveringSession"
+
+    @MainActor static let sessions = GameSessions<GogGames>(
+        StorefrontSessions(storefront: storefront, locations: .live), history: .live
+    )
+}
+
 typealias SteamGameSessions = GameSessions<SteamGames>
 typealias EpicGameSessions = GameSessions<EpicGames>
+typealias GogGameSessions = GameSessions<GogGames>
 
 extension GameSessions where Store == SteamGames {
     static var shared: SteamGameSessions { SteamGames.sessions }
 }
 extension GameSessions where Store == EpicGames {
     static var shared: EpicGameSessions { EpicGames.sessions }
+}
+extension GameSessions where Store == GogGames {
+    static var shared: GogGameSessions { GogGames.sessions }
 }
 
 /// A storefront's Game sessions as Rust keeps them: the Reservation, recovery,
@@ -251,6 +285,7 @@ extension GameSessions: RosettaSessions {
         switch error {
         case let SteamError.Failure(reason): reason == rosettaUnavailableKey
         case let EpicError.Service(message): message == rosettaUnavailableKey
+        case let GogError.Service(message): message == rosettaUnavailableKey
         default: false
         }
     }

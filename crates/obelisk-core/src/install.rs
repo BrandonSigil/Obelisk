@@ -1,6 +1,6 @@
 //! Filesystem primitives shared by storefront installers: paths confined to an
 //! installation root, the per-installation advisory lock, bounded cache files,
-//! SHA-1 file checks and permission bits. Storefronts keep their manifest
+//! SHA-1 and MD5 file checks and permission bits. Storefronts keep their manifest
 //! formats and error vocabularies; these helpers never follow a symlink.
 use std::{
     fs::{self, File, OpenOptions},
@@ -8,6 +8,7 @@ use std::{
     path::{Component, Path, PathBuf},
 };
 
+use md5::Md5;
 use sha1::{Digest, Sha1};
 use thiserror::Error;
 
@@ -234,6 +235,100 @@ pub fn write_cached_file(root: &Path, relative: &Path, bytes: &[u8]) -> Result<(
     ensure_directory(root, relative.parent().unwrap_or(Path::new("")))?;
     let path = checked_file_path(root, relative)?;
     write_atomic_with(&path, bytes, || checked_file_path(root, relative).map(drop))
+}
+
+/// What a whole installed file must hash to.
+#[derive(Clone, Copy, Debug)]
+pub enum FileDigest<'a> {
+    /// The SHA-1 of the whole file, as Steam and Epic record it.
+    Sha1(&'a [u8]),
+    /// The MD5 of each consecutive part of the file, as GOG records its
+    /// chunks.
+    Md5Parts(&'a [Md5Part]),
+}
+
+/// One consecutive part of a file and its MD5.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Md5Part {
+    pub size: u64,
+    pub md5: [u8; 16],
+}
+
+/// Reads a file through its digest in 64 KiB reads, reporting bytes read in
+/// bounded batches. A missing file or a size mismatch is simply `false`.
+pub(crate) fn verify_file_with_progress(
+    path: &Path,
+    size: u64,
+    digest: FileDigest<'_>,
+    cancel: &CancelToken,
+    progress: impl FnMut(u64),
+) -> Result<bool, InstallError> {
+    match digest {
+        FileDigest::Sha1(expected) => {
+            verify_sha1_file_with_progress(path, size, expected, cancel, progress)
+        }
+        FileDigest::Md5Parts(parts) => {
+            verify_md5_parts_with_progress(path, size, parts, cancel, progress)
+        }
+    }
+}
+
+/// Checks a file part by part through MD5, stopping at the first part that
+/// differs.
+pub fn verify_md5_parts(
+    path: &Path,
+    size: u64,
+    parts: &[Md5Part],
+    cancel: &CancelToken,
+) -> Result<bool, InstallError> {
+    verify_md5_parts_with_progress(path, size, parts, cancel, |_| {})
+}
+
+fn verify_md5_parts_with_progress(
+    path: &Path,
+    size: u64,
+    parts: &[Md5Part],
+    cancel: &CancelToken,
+    mut progress: impl FnMut(u64),
+) -> Result<bool, InstallError> {
+    let mut file = match File::open(path) {
+        Ok(file) => file,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => return Err(error.into()),
+    };
+    if file.metadata()?.len() != size || parts.iter().map(|part| part.size).sum::<u64>() != size {
+        return Ok(false);
+    }
+    let mut buffer = [0_u8; 64 * 1024];
+    let mut pending = 0_u64;
+    for part in parts {
+        let mut hasher = Md5::new();
+        let mut remaining = part.size;
+        while remaining > 0 {
+            cancel.check()?;
+            let count = buffer
+                .len()
+                .min(usize::try_from(remaining).unwrap_or(usize::MAX));
+            file.read_exact(&mut buffer[..count])?;
+            hasher.update(&buffer[..count]);
+            remaining -= count as u64;
+            pending += count as u64;
+            if pending >= 1024 * 1024 {
+                progress(pending);
+                pending = 0;
+            }
+        }
+        if hasher.finalize()[..] != part.md5 {
+            if pending != 0 {
+                progress(pending);
+            }
+            return Ok(false);
+        }
+    }
+    if pending != 0 {
+        progress(pending);
+    }
+    Ok(true)
 }
 
 /// Streams a file through SHA-1 in 64 KiB reads. A missing file or a size

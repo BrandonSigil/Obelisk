@@ -81,12 +81,8 @@ struct SettingsView: View {
                                 Text(section.title)
                                     .font(.system(size: 13, weight: .medium))
                                 Spacer()
-                                if section == .steam || section == .epic {
-                                    Button(L10n.string("ui.settings.open_store", section.title)) { model.selection = section }
-                                        .obeliskButtonStyle(.bordered)
-                                } else {
-                                    ComingSoonBadge()
-                                }
+                                Button(L10n.string("ui.settings.open_store", section.title)) { model.selection = section }
+                                    .obeliskButtonStyle(.bordered)
                             }
                             .padding(.horizontal, 18)
                             .padding(.vertical, 12)

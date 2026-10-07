@@ -2,14 +2,15 @@
 //! keeps the Installation receipts, runs the Transfers, launches, uninstalls
 //! and Cloud maintenance, and holds the account's Cloud question; Swift
 //! presents the state and forwards the player's actions. Games cross as Swift
-//! names them: a Steam app id, or an Epic `namespace:app` pair; installations
-//! as their receipt's id.
+//! names them: a Steam app id, an Epic `namespace:app` pair or a GOG product
+//! id; installations as their receipt's id.
 use crate::{
-    CloudChoice, CloudIndicator, EpicSession, GameSessionError, GameTransfer, ObeliskLocations,
-    SteamCredentials, SteamSession, StorefrontSessions, game_session::Storefronts,
+    CloudChoice, CloudIndicator, EpicSession, GameSessionError, GameTransfer, GogSession,
+    ObeliskLocations, SteamCredentials, SteamSession, StorefrontSessions,
+    game_session::Storefronts,
 };
 use game_runtime::{
-    Locations, epic,
+    Locations, epic, gog,
     installations::{self, Installations, Report},
     sessions::{Failure, Sessions, Storefront as _},
     steam,
@@ -47,6 +48,12 @@ pub enum GameOffer {
         namespace: String,
         catalog_item_id: String,
         app_name: String,
+        title: String,
+        platform: String,
+    },
+    /// Its build for `platform`, `macos` or `windows`.
+    Gog {
+        product_id: String,
         title: String,
         platform: String,
     },
@@ -196,7 +203,7 @@ impl Named for steam::Steam {
                 platform,
                 language,
             }),
-            GameOffer::Epic { .. } => None,
+            GameOffer::Epic { .. } | GameOffer::Gog { .. } => None,
         }
     }
     fn installation(receipt: steam::Receipt) -> Installation {
@@ -239,13 +246,47 @@ impl Named for epic::Epic {
                 title,
                 platform,
             }),
-            GameOffer::Steam { .. } => None,
+            GameOffer::Steam { .. } | GameOffer::Gog { .. } => None,
         }
     }
     fn installation(receipt: epic::Receipt) -> Installation {
         Installation {
             id: <Self as installations::Storefront>::receipt_id(&receipt),
             game: Self::name(&<Self as installations::Storefront>::receipt_game(&receipt)),
+            name: receipt.name,
+            directory: receipt.directory,
+            platform: receipt.platform,
+            total_bytes: receipt.total_bytes,
+            needs_verification: receipt.needs_verification == Some(true),
+        }
+    }
+}
+
+impl Named for gog::Gog {
+    fn name(game: &String) -> String {
+        game.clone()
+    }
+    fn named(name: &str) -> Option<String> {
+        gog_kit::client::valid_product_id(name).then(|| name.to_owned())
+    }
+    fn offer(offer: GameOffer) -> Option<gog::Offer> {
+        match offer {
+            GameOffer::Gog {
+                product_id,
+                title,
+                platform,
+            } => Some(gog::Offer {
+                product_id,
+                title,
+                platform,
+            }),
+            GameOffer::Steam { .. } | GameOffer::Epic { .. } => None,
+        }
+    }
+    fn installation(receipt: gog::Receipt) -> Installation {
+        Installation {
+            id: <Self as installations::Storefront>::receipt_id(&receipt),
+            game: receipt.product_id,
             name: receipt.name,
             directory: receipt.directory,
             platform: receipt.platform,
@@ -377,6 +418,7 @@ fn account<S: installations::Storefront>(
 enum Account {
     Steam(Installations<steam::Steam>),
     Epic(Installations<epic::Epic>),
+    Gog(Installations<gog::Gog>),
 }
 
 /// Runs `$body` with the account's installations as `$installations`,
@@ -386,6 +428,7 @@ macro_rules! each {
         match &$account.account {
             Account::Steam($installations) => $body,
             Account::Epic($installations) => $body,
+            Account::Gog($installations) => $body,
         }
     };
 }
@@ -460,6 +503,33 @@ impl AccountInstallations {
         }))
     }
 
+    /// The installations of the GOG account `user_id`, which `session`
+    /// signed in. `language` names the depots Transfers install, such as
+    /// `fr-FR`. The session's own persistence saves the credentials their
+    /// calls rotate.
+    #[uniffi::constructor]
+    pub fn gog(
+        session: Arc<GogSession>,
+        user_id: String,
+        language: String,
+        sessions: Arc<StorefrontSessions>,
+        receipts: String,
+        locations: ObeliskLocations,
+    ) -> Result<Arc<Self>, GameSessionError> {
+        let Storefronts::Gog(sessions) = &*sessions.sessions else {
+            return Err(GameSessionError::new(gog::Gog::INVALID_SESSION));
+        };
+        let locations: Locations = (&locations).into();
+        let (persistence, client) = (session.persistence.clone(), session.client.clone());
+        let saved = Arc::new(move || persistence.wait(|| client.credentials_revision()));
+        let content =
+            gog::content::Content::new(session.client.clone(), saved, language, locations.clone());
+        let installations = account(content, sessions.clone(), user_id, receipts, &locations);
+        Ok(Arc::new(Self {
+            account: Account::Gog(installations),
+        }))
+    }
+
     pub fn state(&self) -> InstallationsState {
         each!(self, installations => state(installations.state()))
     }
@@ -486,6 +556,11 @@ impl AccountInstallations {
             }
             Account::Epic(installations) => {
                 if let Some(offer) = <epic::Epic as Named>::offer(offer) {
+                    installations.install(offer);
+                }
+            }
+            Account::Gog(installations) => {
+                if let Some(offer) = <gog::Gog as Named>::offer(offer) {
                     installations.install(offer);
                 }
             }
@@ -533,6 +608,11 @@ impl AccountInstallations {
                     installations.maintain_cloud(game, installation.as_deref());
                 }
             }
+            Account::Gog(installations) => {
+                if let Some(game) = <gog::Gog as Named>::named(&game) {
+                    installations.maintain_cloud(game, installation.as_deref());
+                }
+            }
         }
     }
 
@@ -573,6 +653,12 @@ mod tests {
         assert_eq!(<epic::Epic as Named>::named("no-colon"), None);
         assert_eq!(<steam::Steam as Named>::named("620"), Some(620));
         assert_eq!(<steam::Steam as Named>::named("sandbox:game"), None);
+        assert_eq!(
+            <gog::Gog as Named>::named("1207658924").as_deref(),
+            Some("1207658924")
+        );
+        assert_eq!(<gog::Gog as Named>::named("../1207658924"), None);
+        assert_eq!(<gog::Gog as Named>::named("sandbox:game"), None);
     }
 
     #[test]

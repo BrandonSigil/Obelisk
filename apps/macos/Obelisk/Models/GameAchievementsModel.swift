@@ -95,4 +95,10 @@ extension GameAchievement {
         self.init(id: value.id, name: value.name, description: value.description, iconUrl: value.iconUrl,
                   hidden: value.hidden, unlocked: value.unlocked, unlockDate: value.unlocked ? date : nil)
     }
+
+    init(_ value: GogAchievement) {
+        self.init(id: value.id, name: value.name, description: value.description, iconUrl: value.iconUrl,
+                  hidden: value.hidden, unlocked: value.unlocked,
+                  unlockDate: value.unlockTime.map { Date(timeIntervalSince1970: TimeInterval($0)) })
+    }
 }

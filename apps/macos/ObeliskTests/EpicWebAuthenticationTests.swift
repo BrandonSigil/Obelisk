@@ -6,7 +6,7 @@ import XCTest
 @MainActor
 final class EpicWebAuthenticationTests: XCTestCase {
     func testWebKitNavigationReturnsCodeAndClosesWindowBeforeLocalhostLoads() async throws {
-        let attempt = EpicWebAuthentication()
+        let attempt = WebAuthentication(.epic)
         var loginWindow: NSWindow?
         let completed = expectation(description: "Epic callback intercepted")
         let task = Task {
@@ -34,7 +34,7 @@ final class EpicWebAuthenticationTests: XCTestCase {
         var loginWebView: WKWebView?
         let task = Task {
             defer { completed.fulfill() }
-            return try await EpicWebAuthentication().authorize { webView in
+            return try await WebAuthentication(.epic).authorize { webView in
                 loginWebView = webView
                 let url = URL(string: "https://www.epicgames.com/id/api/redirect?clientId=34a02cf8f4414e29b15921876da36f9a&responseType=code")!
                 webView.loadHTMLString("<html><body><pre>{\"authorizationCode\":\"fixture-json\"}</pre></body></html>", baseURL: url)
@@ -51,7 +51,7 @@ final class EpicWebAuthenticationTests: XCTestCase {
         let completed = expectation(description: "Popup callback intercepted")
         let task = Task {
             defer { completed.fulfill() }
-            return try await EpicWebAuthentication().authorize { webView in
+            return try await WebAuthentication(.epic).authorize { webView in
                 webView.loadHTMLString("""
                     <html><body><script>
                     const popup = window.open('about:blank');
@@ -70,7 +70,7 @@ final class EpicWebAuthenticationTests: XCTestCase {
         let opened = expectation(description: "Epic window opened")
         var loginWindow: NSWindow?
         let task = Task {
-            try await EpicWebAuthentication().authorize { webView in
+            try await WebAuthentication(.epic).authorize { webView in
                 loginWindow = webView.window
                 opened.fulfill()
             }
@@ -90,7 +90,7 @@ final class EpicWebAuthenticationTests: XCTestCase {
         let opened = expectation(description: "Epic window opened")
         var loginWindow: NSWindow?
         let task = Task {
-            try await EpicWebAuthentication().authorize { webView in
+            try await WebAuthentication(.epic).authorize { webView in
                 loginWindow = webView.window
                 XCTAssertFalse(webView.configuration.websiteDataStore.isPersistent)
                 opened.fulfill()

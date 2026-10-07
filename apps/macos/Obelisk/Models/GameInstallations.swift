@@ -13,6 +13,12 @@ protocol InstallationStorefront: GameStorefront {
     static var otherGameOperation: String { get }
     /// How the storefront names a build for macOS, which Obelisk prefers.
     static var nativePlatform: String { get }
+    /// Whether Obelisk syncs the storefront's Cloud saves.
+    static var syncsCloud: Bool { get }
+}
+
+extension InstallationStorefront {
+    static var syncsCloud: Bool { true }
 }
 
 /// One installation of the account, as its Installation receipt in Rust
@@ -361,7 +367,7 @@ final class GameInstallations<Store: InstallationStorefront> {
 
     /// The game on screen's Cloud indicator, or nil when it is hidden.
     var cloudIndicator: CloudIndicatorPresentation? {
-        guard let game = selection()?.game, account != nil else { return nil }
+        guard Store.syncsCloud, let game = selection()?.game, account != nil else { return nil }
         let playing = sessions.active.map { $0.game == game && $0.account == account } ?? false
         return CloudIndicatorPresentation.make(saved: cloud.indicator(for: game), isSyncing: isSynchronizingSaves,
                                                isPlaying: playing, isInstalled: selectedReceipt != nil)
@@ -482,8 +488,20 @@ extension EpicGames: InstallationStorefront {
     @MainActor static func describe(_ error: Error) -> String { EpicModel.message(error) }
 }
 
+extension GogGames: InstallationStorefront {
+    static let nativePlatform = "macos"
+    /// GOG product ids are decimal numbers.
+    static func game(_ id: String) -> String? { gogProductID(id) }
+    static func name(_ game: String) -> String { game }
+    static let otherGameOperation = "ui.gog.other_game_operation"
+    /// GOG Cloud saves need each game's own Galaxy credentials: not yet.
+    static let syncsCloud = false
+    @MainActor static func describe(_ error: Error) -> String { GogModel.message(error) }
+}
+
 typealias SteamInstallations = GameInstallations<SteamGames>
 typealias EpicInstallations = GameInstallations<EpicGames>
+typealias GogInstallations = GameInstallations<GogGames>
 
 /// The installations of a session that is not Rust's: it has none, and every
 /// action does nothing.

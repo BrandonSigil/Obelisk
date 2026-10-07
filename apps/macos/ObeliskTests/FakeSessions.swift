@@ -118,6 +118,7 @@ extension GameIdentity {
         switch self {
         case let .steam(_, accountId): .steam(steamId: accountId)
         case let .epic(accountId, _, _): .epic(accountId: accountId)
+        case let .gog(accountId, _): .gog(userId: accountId)
         }
     }
 }
@@ -215,7 +216,7 @@ extension LibraryCache {
     /// The cache of `directory` once it holds these libraries, in the file as
     /// Obelisk writes it: Steam's by account ID, Epic's by account.
     static func holding(steam: [UInt64: [CachedSteamGame]] = [:], epic: [String: [CachedEpicGame]] = [:],
-                        in directory: URL) throws -> LibraryCache {
+                        gog: [String: [CachedGogGame]] = [:], in directory: URL) throws -> LibraryCache {
         let steam = steam.map { account, games in
             (String(account), games.map { cached -> [String: Any] in
                 var entry: [String: Any] = [
@@ -241,7 +242,21 @@ extension LibraryCache {
                 return entry
             }
         }
-        let document: [String: Any] = ["version": 1, "steam": Dictionary(uniqueKeysWithValues: steam), "epic": epic]
+        let gog = gog.mapValues { games in
+            games.map { cached -> [String: Any] in
+                let game = cached.game
+                var entry: [String: Any] = [
+                    "id": game.productId, "productId": game.productId, "title": game.title,
+                    "windows": game.windows, "macos": game.macos,
+                ]
+                entry["imageUrl"] = game.imageUrl
+                entry["headerImageUrl"] = game.headerImageUrl
+                entry["playtimeMinutes"] = cached.playtimeMinutes
+                return entry
+            }
+        }
+        let document: [String: Any] = ["version": 1, "steam": Dictionary(uniqueKeysWithValues: steam), "epic": epic,
+                                       "gog": gog]
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         try JSONSerialization.data(withJSONObject: document).write(to: directory.appending(path: "library-cache.json"))
         return LibraryCache(directory: directory.path)

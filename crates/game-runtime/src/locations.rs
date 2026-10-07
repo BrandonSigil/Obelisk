@@ -12,6 +12,7 @@ pub struct Locations {
     pub cloud_archive: PathBuf,
     pub steam_sessions: PathBuf,
     pub epic_sessions: PathBuf,
+    pub gog_sessions: PathBuf,
     /// The bundled native host every supervisor runs as.
     pub helper: PathBuf,
     pub helpers: PathBuf,
@@ -20,6 +21,8 @@ pub struct Locations {
     pub steam_diagnostics: PathBuf,
     /// Where Wine logs the Windows builds of Epic games.
     pub epic_diagnostics: PathBuf,
+    /// Where Wine logs the Windows builds of GOG games.
+    pub gog_diagnostics: PathBuf,
     /// The Voile runtimes that run Windows games: the pinned release and a
     /// development runtime.
     pub voile: PathBuf,
@@ -34,12 +37,14 @@ impl Locations {
             cloud_archive: library.join("SteamCloud"),
             steam_sessions: library.join("SteamSessions"),
             epic_sessions: library.join("EpicSessions"),
+            gog_sessions: library.join("GOGSessions"),
             helper: helpers.join(crate::package::HOST),
             helpers,
             steam_runtime_package: bundle.join("Contents/Resources/SteamRuntime/runtime.zip"),
             steam_runtime_cache: home.join("Library/Caches/com.zagrios.obelisk/SteamRuntime"),
             steam_diagnostics: home.join("Library/Logs/Obelisk/Steam"),
             epic_diagnostics: home.join("Library/Logs/Obelisk/Epic"),
+            gog_diagnostics: home.join("Library/Logs/Obelisk/GOG"),
             voile: library.join("Voile"),
             wine_prefixes: library.join("Prefixes"),
             library: library.to_owned(),

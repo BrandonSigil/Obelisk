@@ -6,33 +6,12 @@ struct LibraryView: View {
 
     private let columns = [GridItem(.adaptive(minimum: 220, maximum: 340), spacing: 18, alignment: .top)]
 
-    private var isStore: Bool { model.selection.isStorefront }
-
     private var hasSearch: Bool {
         !model.searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
+    /// Home and the games added by hand; each storefront has its own page.
     var body: some View {
-        if isStore {
-            StorefrontPage {
-                StorefrontTitleBar(
-                    title: model.selection.title,
-                    accountName: nil,
-                    isConnected: false
-                ) {
-                    EmptyView()
-                }
-            } content: {
-                storeEmptyState
-                    .padding(ObeliskStyle.contentPadding)
-                    .frame(maxWidth: 1300, alignment: .leading)
-            }
-        } else {
-            localLibrary
-        }
-    }
-
-    private var localLibrary: some View {
         let filtered = model.filteredGames
         return ScrollView {
             VStack(alignment: .leading, spacing: 26) {
@@ -191,32 +170,6 @@ struct LibraryView: View {
         }
     }
 
-    private var storeEmptyState: some View {
-        VStack(spacing: 18) {
-            StoreMark(section: model.selection, size: 76)
-            VStack(spacing: 9) {
-                Text(L10n.string("ui.library.store_title", model.selection.title))
-                    .font(.system(size: 23, weight: .semibold))
-                    .tracking(-0.4)
-                Text(L10n.string("ui.library.store_unavailable", model.selection.title))
-                    .font(.system(size: 13))
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-            }
-            ComingSoonBadge()
-        }
-        .padding(32)
-        .frame(maxWidth: .infinity, minHeight: 320)
-        .background(
-            ObeliskPalette(colorScheme: colorScheme).surface,
-            in: RoundedRectangle(cornerRadius: 14)
-        )
-        .overlay {
-            RoundedRectangle(cornerRadius: 14)
-                .strokeBorder(ObeliskPalette(colorScheme: colorScheme).border)
-        }
-    }
-
     private var noResults: some View {
         VStack(spacing: 15) {
             Image(systemName: "magnifyingglass")
@@ -254,9 +207,6 @@ struct LibraryView: View {
                             HStack(spacing: 6) {
                                 StoreMark(section: section, size: 36)
                                 Spacer(minLength: 0)
-                                if section == .gog {
-                                    ComingSoonBadge()
-                                }
                             }
                             HStack {
                                 Text(section.title)
@@ -280,7 +230,7 @@ struct LibraryView: View {
                         .contentShape(RoundedRectangle(cornerRadius: 11))
                     }
                     .obeliskButtonStyle(.plain)
-                    .accessibilityLabel(section == .gog ? L10n.string("ui.library.gog_coming_soon") : L10n.string("ui.library.store_accessibility", section.title))
+                    .accessibilityLabel(L10n.string("ui.library.store_accessibility", section.title))
                 }
             }
         }

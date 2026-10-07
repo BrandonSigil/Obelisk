@@ -19,6 +19,7 @@ struct GameCloudSync<Game: Hashable>: Equatable {
 
 typealias SteamCloudModel = CloudModel<SteamGames>
 typealias EpicCloudModel = CloudModel<EpicGames>
+typealias GogCloudModel = CloudModel<GogGames>
 
 /// Presents one account's Cloud: indicators, and the Cloud sync and question
 /// Rust shows for it. Rust runs every sync, asks every question and routes

@@ -126,12 +126,13 @@ struct AppMenuBarLabel: View {
         Image(systemName: "sailboat.fill")
             .onAppear {
                 lifecycle.libraryCache = model.libraryCache
-                let (steam, epic) = (model.steam.gameSessions, model.epic.gameSessions)
+                let (steam, epic, gog) = (model.steam.gameSessions, model.epic.gameSessions, model.gog.gameSessions)
                 lifecycle.games = (
-                    running: { steam.active != nil || epic.active != nil },
+                    running: { steam.active != nil || epic.active != nil || gog.active != nil },
                     stop: {
                         await steam.stop()
                         await epic.stop()
+                        await gog.stop()
                     }
                 )
             }

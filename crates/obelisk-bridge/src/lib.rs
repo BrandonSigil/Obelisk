@@ -11,11 +11,13 @@ mod steam_native;
 pub use steam_native::*;
 mod epic;
 pub use epic::*;
+mod credentials;
 mod epic_cloud;
-mod epic_credentials;
-pub use epic_credentials::EpicCredentialSave;
+pub use credentials::CredentialSave;
 mod epic_friends;
 pub use epic_friends::*;
+mod gog;
+pub use gog::*;
 mod cloud;
 pub use cloud::*;
 mod game_session;
@@ -25,7 +27,7 @@ pub use locations::*;
 mod installations;
 pub use installations::*;
 mod library_cache;
-pub use library_cache::{CachedEpicGame, CachedSteamGame, GameLaunch, LibraryCache};
+pub use library_cache::{CachedEpicGame, CachedGogGame, CachedSteamGame, GameLaunch, LibraryCache};
 
 uniffi::setup_scaffolding!();
 
@@ -262,7 +264,7 @@ mod tests {
         assert_eq!(sources.len(), 4);
         assert!(sources[0].available);
         assert!(sources[1].available);
-        assert!(!sources[2].available);
+        assert!(sources[2].available);
         assert!(sources[3].available);
         assert!(!core_version().is_empty());
     }

@@ -17,6 +17,7 @@ final class AppModel {
     let libraryDirectory: String
     let steam: SteamModel
     let epic: EpicModel
+    let gog: GogModel
     private(set) var activeFriendsAccount: FriendsAccountIdentity?
     var appearance: AppAppearance {
         didSet { defaults.set(appearance.rawValue, forKey: "appearance") }
@@ -28,7 +29,8 @@ final class AppModel {
     @ObservationIgnored private let defaults: UserDefaults
     @ObservationIgnored private var revision = 0
 
-    init(directory: URL = AppIdentity.libraryDirectory, defaults: UserDefaults = .standard, steam: SteamModel? = nil, epic: EpicModel? = nil) {
+    init(directory: URL = AppIdentity.libraryDirectory, defaults: UserDefaults = .standard, steam: SteamModel? = nil,
+         epic: EpicModel? = nil, gog: GogModel? = nil) {
         libraryDirectory = directory.path
         self.defaults = defaults
         appearance = AppAppearance(rawValue: defaults.string(forKey: "appearance") ?? "system") ?? .system
@@ -38,12 +40,13 @@ final class AppModel {
         libraryCache = LibraryCache(directory: directory.path)
         self.steam = steam ?? SteamModel(directory: directory, preferences: defaults, libraryCache: libraryCache)
         self.epic = epic ?? EpicModel(directory: directory, libraryCache: libraryCache)
+        self.gog = gog ?? GogModel(directory: directory, libraryCache: libraryCache)
     }
 
     /// The Cloud or Rosetta question shown over the whole app, whichever tab is
     /// open. One sheet at a time, in a fixed order.
     enum StorefrontPrompt: Equatable {
-        case steamRosetta, steamCloud, epicRosetta, epicCloud
+        case steamRosetta, steamCloud, epicRosetta, epicCloud, gogRosetta
     }
 
     var presentedPrompt: StorefrontPrompt? {
@@ -51,6 +54,7 @@ final class AppModel {
         if steam.cloud.promptPresented { return .steamCloud }
         if epic.rosetta.prompt != nil { return .epicRosetta }
         if epic.cloud.promptPresented { return .epicCloud }
+        if gog.rosetta.prompt != nil { return .gogRosetta }
         return nil
     }
 
@@ -109,6 +113,8 @@ final class AppModel {
             steam.refresh()
         } else if selection == .epic {
             epic.refresh()
+        } else if selection == .gog {
+            gog.refresh()
         }
         isLoading = true
         Task { await reload(after: {}, failure: L10n.string("model.app.readLibrary")) }

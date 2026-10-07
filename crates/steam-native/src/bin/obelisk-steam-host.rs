@@ -16,6 +16,7 @@ fn run() -> i32 {
         Some("process-identity") => return process_identity(args.get(2)),
         Some("supervise") => return supervise(),
         Some("epic-supervise") => return epic_supervise(),
+        Some("gog-supervise") => return gog_supervise(),
         Some("game-exec") => {
             return i32::from(
                 game_runtime::supervisor::exec::game_exec(std::io::stdin().lock()).is_err(),
@@ -90,6 +91,13 @@ fn supervise() -> i32 {
 fn epic_supervise() -> i32 {
     let served = native::detach_supervisor().is_ok()
         && game_runtime::epic::serve(std::io::stdin().lock(), std::io::stderr().lock(), inspect)
+            .is_ok();
+    i32::from(!served)
+}
+
+fn gog_supervise() -> i32 {
+    let served = native::detach_supervisor().is_ok()
+        && game_runtime::gog::serve(std::io::stdin().lock(), std::io::stderr().lock(), inspect)
             .is_ok();
     i32::from(!served)
 }

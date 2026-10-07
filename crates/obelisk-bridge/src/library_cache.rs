@@ -3,9 +3,10 @@
 //! of an account while its session connects, records launches and forgets an
 //! account that signs out.
 use crate::{
-    EpicGame, GameAccount, GameIdentity, SteamGame, game_session::Bridged, installations::Named,
+    EpicGame, GameAccount, GameIdentity, GogGame, SteamGame, game_session::Bridged,
+    installations::Named,
 };
-use game_runtime::{epic, steam};
+use game_runtime::{epic, gog, steam};
 use obelisk_core::library_cache::{self, AccountLibrary, Entry};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -16,6 +17,7 @@ use std::{
 
 const STEAM: &str = "steam";
 const EPIC: &str = "epic";
+const GOG: &str = "gog";
 
 /// The last library of every storefront account, in the library directory.
 #[derive(uniffi::Object)]
@@ -35,6 +37,13 @@ pub struct CachedSteamGame {
 pub struct CachedEpicGame {
     pub game: EpicGame,
     pub playtime_seconds: Option<u64>,
+}
+
+/// A GOG game of the cache, with its playtime once GOG told it.
+#[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
+pub struct CachedGogGame {
+    pub game: GogGame,
+    pub playtime_minutes: Option<u64>,
 }
 
 /// When an account launched a game from Obelisk.
@@ -81,6 +90,17 @@ impl LibraryCache {
         })
     }
 
+    /// The account's last GOG library, empty when it has none.
+    pub fn gog_library(&self, user_id: String) -> Vec<CachedGogGame> {
+        // Read field by field: the entry's metadata stays in the cache.
+        self.inner.library(GOG, &user_id, |entry| {
+            Some(CachedGogGame {
+                game: GogGame::deserialize(entry).ok()?,
+                playtime_minutes: entry.get("playtimeMinutes").and_then(Value::as_u64),
+            })
+        })
+    }
+
     /// Every launch the cache keeps, for every storefront and account.
     pub fn launches(&self) -> Vec<GameLaunch> {
         self.inner
@@ -94,6 +114,10 @@ impl LibraryCache {
                     ),
                     EPIC => <epic::Epic as Bridged>::identity(
                         &<epic::Epic as Named>::named(&launch.game)?,
+                        &launch.account,
+                    ),
+                    GOG => <gog::Gog as Bridged>::identity(
+                        &<gog::Gog as Named>::named(&launch.game)?,
                         &launch.account,
                     ),
                     _ => return None,
@@ -127,6 +151,10 @@ impl LibraryCache {
                     app_name,
                 }),
             ),
+            GameIdentity::Gog {
+                account_id,
+                product_id,
+            } => (GOG, account_id, product_id),
         };
         self.inner
             .record_launch(storefront, &account, &game, launch.at);
@@ -138,6 +166,7 @@ impl LibraryCache {
         match account {
             GameAccount::Steam { steam_id } => self.inner.forget(STEAM, &steam_id.to_string()),
             GameAccount::Epic { account_id } => self.inner.forget(EPIC, &account_id),
+            GameAccount::Gog { user_id } => self.inner.forget(GOG, &user_id),
         }
     }
 
@@ -155,6 +184,13 @@ impl LibraryCache {
     pub(crate) fn epic(&self, account_id: &str) -> EpicLibrary {
         EpicLibrary {
             account: self.inner.account(EPIC, account_id),
+            playtimes: Default::default(),
+        }
+    }
+
+    pub(crate) fn gog(&self, user_id: &str) -> GogLibrary {
+        GogLibrary {
+            account: self.inner.account(GOG, user_id),
             playtimes: Default::default(),
         }
     }
@@ -263,6 +299,60 @@ impl EpicLibrary {
     }
 }
 
+/// The GOG library a session keeps for its account.
+pub(crate) struct GogLibrary {
+    account: AccountLibrary,
+    /// The playtimes the session last loaded, by product.
+    playtimes: Mutex<Option<BTreeMap<String, u64>>>,
+}
+
+impl GogLibrary {
+    /// Keeps the account's games with everything GOG returned. Until the
+    /// session loads the playtimes, each game keeps its earlier one.
+    pub(crate) fn games(&self, games: Vec<gog_kit::client::Game>) -> Vec<GogGame> {
+        let playtimes = self.playtimes.lock().unwrap();
+        let (entries, games) = games
+            .into_iter()
+            .map(|mut loaded| {
+                let metadata = std::mem::take(&mut loaded.metadata);
+                let game = GogGame::from(loaded);
+                let mut entry = entry_of(&GogEntry {
+                    id: game.product_id.clone(),
+                    playtime_minutes: playtimes
+                        .as_ref()
+                        .and_then(|playtimes| playtimes.get(&game.product_id).copied()),
+                    game: game.clone(),
+                });
+                entry.insert("metadata".into(), metadata);
+                (entry, game)
+            })
+            .unzip();
+        let kept: &[&str] = if playtimes.is_some() {
+            &[]
+        } else {
+            &["playtimeMinutes"]
+        };
+        self.account.replace(entries, kept);
+        games
+    }
+
+    /// Keeps every game's playtime. A game missing from `playtimes` was
+    /// never played.
+    pub(crate) fn playtimes(&self, playtimes: &BTreeMap<String, u64>) {
+        *self.playtimes.lock().unwrap() = Some(playtimes.clone());
+        self.account.update(|entry| {
+            let minutes = entry
+                .get("id")
+                .and_then(Value::as_str)
+                .and_then(|id| playtimes.get(id).copied());
+            match minutes {
+                Some(minutes) => set(entry, "playtimeMinutes", minutes.into()),
+                None => entry.remove("playtimeMinutes").is_some(),
+            }
+        });
+    }
+}
+
 fn entry_of(entry: &impl Serialize) -> Entry {
     match serde_json::to_value(entry) {
         Ok(Value::Object(entry)) => entry,
@@ -304,6 +394,20 @@ struct EpicEntry {
     /// Absent until Epic told it, or when the game was never played.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     playtime_seconds: Option<u64>,
+}
+
+/// A GOG game as the cache keeps it: as the library shows it, with its
+/// playtime. Its entry also keeps its library record and catalog data,
+/// `metadata`.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GogEntry {
+    id: String,
+    #[serde(flatten)]
+    game: GogGame,
+    /// Absent until GOG told it, or when the game was never played.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    playtime_minutes: Option<u64>,
 }
 
 #[cfg(test)]

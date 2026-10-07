@@ -1,7 +1,7 @@
 //! Bounded full-file verification shared by storefront installers.
 //!
 //! One call confines every manifest name under the installation root, reads the
-//! file through SHA-1 with at most four disk readers, serializes progress, and
+//! file through its digest with at most four disk readers, serializes progress, and
 //! joins every reader before returning to the caller's repair loop. Storefronts
 //! describe their manifest entries and map one error; they do not repeat the
 //! path checks or the hashing.
@@ -15,7 +15,7 @@ use std::{
 };
 
 use crate::{
-    install::{self, InstallError},
+    install::{self, FileDigest, InstallError},
     transfer::{CancelToken, Cancelled, Reporter},
 };
 
@@ -28,8 +28,8 @@ pub trait VerificationFile {
     /// The manifest name, confined under the installation root before any read.
     fn name(&self) -> &str;
     fn size(&self) -> u64;
-    /// The expected SHA-1 of the fully installed file.
-    fn sha1(&self) -> &[u8];
+    /// What the fully installed file hashes to.
+    fn digest(&self) -> FileDigest<'_>;
     fn is_directory(&self) -> bool {
         false
     }
@@ -127,10 +127,10 @@ where
                     status.current_file.replace_range(.., file.name());
                 });
             };
-            let valid = install::verify_sha1_file_with_progress(
+            let valid = install::verify_file_with_progress(
                 path,
                 file.size(),
-                file.sha1(),
+                file.digest(),
                 cancel,
                 &mut report,
             )?;
@@ -334,8 +334,8 @@ mod tests {
         fn size(&self) -> u64 {
             self.size
         }
-        fn sha1(&self) -> &[u8] {
-            &self.sha
+        fn digest(&self) -> FileDigest<'_> {
+            FileDigest::Sha1(&self.sha)
         }
         fn is_directory(&self) -> bool {
             self.directory
@@ -360,8 +360,8 @@ mod tests {
         fn size(&self) -> u64 {
             self.0
         }
-        fn sha1(&self) -> &[u8] {
-            &[]
+        fn digest(&self) -> FileDigest<'_> {
+            FileDigest::Sha1(&[])
         }
     }
 
@@ -547,7 +547,7 @@ mod tests {
                 let _reader = Reader(&active);
                 peak.fetch_max(running, Ordering::AcqRel);
                 overlap.wait();
-                install::verify_sha1_file(path, file.size(), file.sha1(), cancel)
+                install::verify_sha1_file(path, file.size(), &file.sha, cancel)
             },
             |_, _, _| {},
             count,
@@ -581,7 +581,7 @@ mod tests {
                 active.fetch_add(1, Ordering::AcqRel);
                 let _reader = Reader(&active);
                 started.fetch_add(1, Ordering::AcqRel);
-                let valid = install::verify_sha1_file(path, file.size(), file.sha1(), inner)?;
+                let valid = install::verify_sha1_file(path, file.size(), &file.sha, inner)?;
                 // Cancelled once this file is read: the scheduler must stop
                 // before handing the next one to a reader.
                 cancel.cancel();

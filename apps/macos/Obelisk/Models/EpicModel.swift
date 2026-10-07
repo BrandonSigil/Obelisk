@@ -95,8 +95,8 @@ final class EpicModel {
 
     init(
         directory: URL = AppIdentity.libraryDirectory,
-        keychain: any EpicCredentialStore = EpicKeychain(),
-        authorize: @escaping @MainActor () async throws -> String = { try await EpicWebAuthentication.authorize() },
+        keychain: any CredentialStore<EpicCredentials> = EpicKeychain(),
+        authorize: @escaping @MainActor () async throws -> String = { try await WebAuthentication.authorize(.epic) },
         signIn: (@Sendable (String) async throws -> any EpicSessionProtocol)? = nil,
         restore: (@Sendable (EpicCredentials) async throws -> any EpicSessionProtocol)? = nil,
         language: String = Locale.preferredLanguages.first ?? "en",
@@ -596,7 +596,7 @@ final class EpicModel {
         case EpicError.InvalidCode: L10n.string("model.epic.invalidCode")
         case EpicError.InvalidResponse: L10n.string("model.epic.invalidResponse")
         case let EpicError.Service(message): L10n.message(message)
-        case let browserError as EpicWebAuthenticationError: browserError.localizedDescription
+        case let browserError as WebAuthenticationError: browserError.localizedDescription
         case let failure as GameInstallationFailure: failure.localizedDescription
         default: L10n.string("model.epic.failure")
         }

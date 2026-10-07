@@ -105,8 +105,8 @@ final class EpicModelTests: XCTestCase {
                      "Signing out forgets the account's launches with its library")
     }
 
-    func testNoGameIsFeaturedBeforeOneWasPlayed() async throws {
-        let games = [game("a"), game("b")]
+    func testANeverPlayedLibraryFeaturesItsFirstGameByName() async throws {
+        let games = [game("b", title: "Beta"), game("a", title: "Alpha")]
         let directory = FileManager.default.temporaryDirectory.appending(path: "ObeliskEpicFeatured-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: directory) }
         let stored = credentials("current")
@@ -116,7 +116,7 @@ final class EpicModelTests: XCTestCase {
         await model.start()
         defer { model.signOut() }
         await eventually { !model.isLoadingPlaytimes }
-        XCTAssertNil(model.featuredGame)
+        XCTAssertEqual(model.featuredGame?.appName, "a", "Every game at zero hours: the first by name")
     }
 
     func testTheCachedLibraryShowsWhileEpicRestoresAndSigningOutForgetsIt() async throws {
@@ -406,7 +406,7 @@ final class EpicModelTests: XCTestCase {
         let login = EpicSignInCounter(session: session)
         let model = EpicModel(
             keychain: store,
-            authorize: { throw EpicWebAuthenticationError.network },
+            authorize: { throw WebAuthenticationError.network(.epic) },
             signIn: { await login.signIn(code: $0) }
         )
 
@@ -416,7 +416,7 @@ final class EpicModelTests: XCTestCase {
         let signIns = await login.calls
         XCTAssertEqual(signIns, 0)
         XCTAssertFalse(model.isConnected)
-        XCTAssertEqual(model.errorMessage, EpicWebAuthenticationError.network.localizedDescription)
+        XCTAssertEqual(model.errorMessage, WebAuthenticationError.network(.epic).localizedDescription)
     }
 
     func testCancelledAuthorizationCannotExchangeLateCodeOrReplaceNewLogin() async {
@@ -697,7 +697,7 @@ final class EpicModelTests: XCTestCase {
     }
 }
 
-actor EpicMemoryStore: EpicCredentialStore {
+actor EpicMemoryStore: CredentialStore {
     private(set) var value: EpicCredentials?
     private(set) var loads = 0
     private(set) var writes: [EpicCredentials?] = []

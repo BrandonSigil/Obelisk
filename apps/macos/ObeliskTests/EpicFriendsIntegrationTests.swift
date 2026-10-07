@@ -224,7 +224,7 @@ func epicFriendsModel(_ session: EpicFriendsTestSession, store: EpicFriendsTestS
     EpicModel(keychain: store, restore: { _ in session })
 }
 
-actor EpicFriendsTestStore: EpicCredentialStore {
+actor EpicFriendsTestStore: CredentialStore {
     private(set) var value: EpicCredentials? = EpicCredentials(accountId: "epic-account", displayName: "Epic fixture", refreshToken: "test-initial")
     func load() async throws -> EpicCredentials? { value }
     private var holdSave = false

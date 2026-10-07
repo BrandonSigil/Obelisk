@@ -1,13 +1,7 @@
 import Foundation
 
-protocol EpicCredentialStore: Sendable {
-    func load() async throws -> EpicCredentials?
-    func save(_ credentials: EpicCredentials) async throws
-    func remove() async throws
-}
-
 /// Only the refresh token is persisted. Access tokens remain in the Rust session.
-struct EpicKeychain: EpicCredentialStore {
+struct EpicKeychain: CredentialStore {
     private let store: KeychainStore<StoredEpicCredentials>
 
     init(service: String = AppIdentity.storageIdentifier + ".epic") {

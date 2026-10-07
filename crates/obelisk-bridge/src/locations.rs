@@ -12,6 +12,7 @@ pub struct ObeliskLocations {
     pub cloud_archive: String,
     pub steam_sessions: String,
     pub epic_sessions: String,
+    pub gog_sessions: String,
     /// The bundled native host every supervisor runs as.
     pub helper: String,
     pub helpers: String,
@@ -20,6 +21,8 @@ pub struct ObeliskLocations {
     pub steam_diagnostics: String,
     /// Where Wine logs the Windows builds of Epic games.
     pub epic_diagnostics: String,
+    /// Where Wine logs the Windows builds of GOG games.
+    pub gog_diagnostics: String,
     /// The Voile runtimes that run Windows games: the pinned release and a
     /// development runtime.
     pub voile: String,
@@ -38,12 +41,14 @@ pub fn obelisk_locations(library: String, bundle: String, home: String) -> Obeli
         cloud_archive: path(locations.cloud_archive),
         steam_sessions: path(locations.steam_sessions),
         epic_sessions: path(locations.epic_sessions),
+        gog_sessions: path(locations.gog_sessions),
         helper: path(locations.helper),
         helpers: path(locations.helpers),
         steam_runtime_package: path(locations.steam_runtime_package),
         steam_runtime_cache: path(locations.steam_runtime_cache),
         steam_diagnostics: path(locations.steam_diagnostics),
         epic_diagnostics: path(locations.epic_diagnostics),
+        gog_diagnostics: path(locations.gog_diagnostics),
         voile: path(locations.voile),
         wine_prefixes: path(locations.wine_prefixes),
     }
@@ -64,12 +69,14 @@ impl From<&ObeliskLocations> for game_runtime::Locations {
             cloud_archive: (&locations.cloud_archive).into(),
             steam_sessions: (&locations.steam_sessions).into(),
             epic_sessions: (&locations.epic_sessions).into(),
+            gog_sessions: (&locations.gog_sessions).into(),
             helper: (&locations.helper).into(),
             helpers: (&locations.helpers).into(),
             steam_runtime_package: (&locations.steam_runtime_package).into(),
             steam_runtime_cache: (&locations.steam_runtime_cache).into(),
             steam_diagnostics: (&locations.steam_diagnostics).into(),
             epic_diagnostics: (&locations.epic_diagnostics).into(),
+            gog_diagnostics: (&locations.gog_diagnostics).into(),
             voile: (&locations.voile).into(),
             wine_prefixes: (&locations.wine_prefixes).into(),
         }
@@ -86,6 +93,7 @@ mod tests {
         assert_eq!(locations.cloud_archive, "/library/SteamCloud");
         assert_eq!(locations.steam_sessions, "/library/SteamSessions");
         assert_eq!(locations.epic_sessions, "/library/EpicSessions");
+        assert_eq!(locations.gog_sessions, "/library/GOGSessions");
         assert_eq!(
             locations.helpers,
             "/Obelisk.app/Contents/Helpers/SteamNative"
@@ -110,6 +118,7 @@ mod tests {
             locations.epic_diagnostics,
             "/home/Library/Logs/Obelisk/Epic"
         );
+        assert_eq!(locations.gog_diagnostics, "/home/Library/Logs/Obelisk/GOG");
         assert_eq!(locations.voile, "/library/Voile");
         assert_eq!(locations.wine_prefixes, "/library/Prefixes");
         assert_eq!(
