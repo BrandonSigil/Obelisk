@@ -1,7 +1,7 @@
 //! Epic BuildPatch chunk delivery and atomic installation.
 //!
-//! The bounded network pump and blocking disk worker follow Steam's installer;
-//! path confinement, locking, hashing and progress reporting come from `obelisk_core`.
+//! The shared chunk engine and the blocking disk worker come from `obelisk_core`,
+//! as do path confinement, locking, hashing and progress reporting.
 //! Complete files and verified chunk caches survive cancellation and are reused.
 mod verification;
 
@@ -19,11 +19,13 @@ use obelisk_core::{
         self, PARTIAL_DIRECTORY, apply_permissions, checked_file_path, ensure_directory, hex,
         safe_relative_path,
     },
-    transfer::{self, CancelToken, DownloadPhase, DownloadProgress, DownloadSummary, Reporter},
+    transfer::{
+        self, BodyError, BodySize, CancelToken, Chunks, Delivery, DownloadPhase, DownloadProgress,
+        DownloadSummary, Interrupted, Pipeline, Reporter,
+    },
 };
 use reqwest::{Client, Url};
 use sha1::{Digest, Sha1};
-use tokio::sync::mpsc;
 
 use crate::{
     EpicError,
@@ -34,6 +36,11 @@ use crate::{
 const MAX_CHUNK_BYTES: usize = 64 * 1024 * 1024;
 const CHUNK_CONCURRENCY: usize = 16;
 const FILE_PREFETCH: usize = 8;
+const PIPELINE: Pipeline = Pipeline {
+    delivery: Delivery::InOrder,
+    fetches: CHUNK_CONCURRENCY,
+    queue: CHUNK_CONCURRENCY,
+};
 
 #[derive(Clone)]
 pub struct ContentClient {
@@ -41,6 +48,22 @@ pub struct ContentClient {
 }
 
 type ChunkResult = Result<Vec<u8>, EpicError>;
+
+impl From<Interrupted> for EpicError {
+    fn from(_: Interrupted) -> Self {
+        Self::Protocol
+    }
+}
+
+impl From<BodyError> for EpicError {
+    fn from(error: BodyError) -> Self {
+        match error {
+            BodyError::Network => Self::Network,
+            BodyError::Size => Self::Protocol,
+            BodyError::Cancelled => Self::Cancelled,
+        }
+    }
+}
 
 impl ContentClient {
     pub fn new(client: Client) -> Self {
@@ -83,26 +106,16 @@ impl ContentClient {
             progress,
         );
         let feature_level = manifest.feature_level;
-        let (requests, receiver) = mpsc::unbounded_channel();
-        let (deliveries, results) = mpsc::channel(CHUNK_CONCURRENCY);
-        let disk = DiskInstall {
-            destination: destination.to_owned(),
+        let disk = DiskInstall::engine_side(
+            destination.to_owned(),
             manifest,
-            cancel: cancel.clone(),
-            reporter: Arc::clone(&reporter),
-            requests,
-            results,
-            prefetch: FilePrefetch::default(),
-        };
-        let cancellation_guard = cancel.cancel_on_drop();
-        let (reused_bytes, ()) = tokio::join!(
-            cancel.spawn_blocking(move || disk.run()),
-            transfer::pump_chunks(receiver, deliveries, CHUNK_CONCURRENCY, cancel, |chunk| {
-                self.fetch_chunk(feature_level, base_urls, chunk, cancel, &reporter)
-            }),
+            cancel.clone(),
+            Arc::clone(&reporter),
         );
-        cancellation_guard.disarm();
-        let reused_bytes = reused_bytes.map_err(|_| EpicError::Protocol)??;
+        let reused_bytes = transfer::run_engine(PIPELINE, cancel, disk, |chunk| {
+            self.fetch_chunk(feature_level, base_urls, chunk, cancel, &reporter)
+        })
+        .await?;
         Ok(reporter.summary(reused_bytes))
     }
 
@@ -158,10 +171,11 @@ impl ContentClient {
                     Err(error) => failure = error,
                 }
                 if attempt < 2 {
-                    tokio::select! {
-                        () = tokio::time::sleep(Duration::from_millis(250 * (attempt + 1))) => {},
-                        () = cancel.cancelled() => return Err(EpicError::Cancelled),
-                    }
+                    cancel
+                        .race(tokio::time::sleep(Duration::from_millis(
+                            250 * (attempt + 1),
+                        )))
+                        .await?;
                 }
             }
         }
@@ -169,39 +183,33 @@ impl ContentClient {
     }
 
     async fn fetch(&self, url: &Url, cancel: &CancelToken, reporter: &Reporter) -> ChunkResult {
-        let operation = async {
-            let mut response = self
-                .client
-                .get(url.clone())
-                .timeout(Duration::from_secs(45))
-                .send()
-                .await
-                .map_err(|_| EpicError::Network)?;
-            if !response.status().is_success() {
-                return Err(EpicError::Http(response.status().as_u16()));
-            }
-            let advertised = response.content_length();
-            if advertised.is_some_and(|size| size > (MAX_CHUNK_BYTES + 98) as u64) {
-                return Err(EpicError::Protocol);
-            }
-            let mut bytes = Vec::with_capacity(advertised.unwrap_or(0) as usize);
-            while let Some(part) = response.chunk().await.map_err(|_| EpicError::Network)? {
-                reporter.update(|status| {
-                    status.network_bytes += part.len() as u64;
-                    status.content_bytes += part.len() as u64;
-                });
-                cancel.check()?;
-                if bytes.len().saturating_add(part.len()) > MAX_CHUNK_BYTES + 98 {
-                    return Err(EpicError::Protocol);
-                }
-                bytes.extend_from_slice(&part);
-            }
-            Ok(bytes)
-        };
-        tokio::select! {
-            result = operation => result,
-            () = cancel.cancelled() => Err(EpicError::Cancelled),
+        let response = cancel
+            .race(
+                self.client
+                    .get(url.clone())
+                    .timeout(Duration::from_secs(45))
+                    .send(),
+            )
+            .await?
+            .map_err(|_| EpicError::Network)?;
+        if !response.status().is_success() {
+            return Err(EpicError::Http(response.status().as_u16()));
         }
+        // At most, never exactly `chunk.file_size`: that size is only an
+        // estimate (see decode_chunk).
+        Ok(transfer::read_body(
+            response.content_length(),
+            response.bytes_stream(),
+            BodySize::AtMost((MAX_CHUNK_BYTES + 98) as u64),
+            cancel,
+            |count| {
+                reporter.update(|status| {
+                    status.network_bytes += count;
+                    status.content_bytes += count;
+                });
+            },
+        )
+        .await?)
     }
 }
 
@@ -210,8 +218,7 @@ struct DiskInstall {
     manifest: Arc<Manifest>,
     cancel: CancelToken,
     reporter: Arc<Reporter>,
-    requests: mpsc::UnboundedSender<Chunk>,
-    results: mpsc::Receiver<ChunkResult>,
+    chunks: Chunks<Chunk, Vec<u8>, EpicError>,
     prefetch: FilePrefetch,
 }
 
@@ -233,13 +240,33 @@ struct PlannedFile {
 #[derive(Default)]
 struct FilePrefetch {
     next_file: usize,
-    requests_closed: bool,
     files: VecDeque<PlannedFile>,
     chunks: HashMap<ChunkGuid, ChunkState>,
     pending: VecDeque<ChunkGuid>,
 }
 
 impl DiskInstall {
+    /// The disk side of one engine run, from its start state.
+    fn engine_side(
+        destination: PathBuf,
+        manifest: Arc<Manifest>,
+        cancel: CancelToken,
+        reporter: Arc<Reporter>,
+    ) -> impl FnOnce(Chunks<Chunk, Vec<u8>, EpicError>) -> Result<u64, EpicError> + Send + 'static
+    {
+        move |chunks| {
+            Self {
+                destination,
+                manifest,
+                cancel,
+                reporter,
+                chunks,
+                prefetch: FilePrefetch::default(),
+            }
+            .run()
+        }
+    }
+
     /// Returns the number of verified bytes reused from disk.
     fn run(mut self) -> Result<u64, EpicError> {
         self.cancel.check()?;
@@ -315,11 +342,11 @@ impl DiskInstall {
 
     /// Keep the next few repair files queued while the current file is written
     /// and published. Requests remain in first-consumer order, including chunks
-    /// shared across files, so the unchanged ordered pump needs no reordering.
+    /// shared across files, so InOrder delivery needs no reordering.
     fn prefetch_files(&mut self, valid: &[bool], chunk_root: &Path) -> Result<(), EpicError> {
         while self.prefetch.files.len() < FILE_PREFETCH
             && self.prefetch.next_file < self.manifest.files.len()
-            && !self.prefetch.requests_closed
+            && !self.chunks.refused()
         {
             self.cancel.check()?;
             let index = self.prefetch.next_file;
@@ -370,11 +397,10 @@ impl DiskInstall {
                         .or_insert(ChunkState::Cached);
                     plan.reused.insert(part.guid);
                 } else {
-                    if self.requests.send(chunk.clone()).is_err() {
-                        // The pump already queued an error for an earlier
-                        // request. Keep this partial plan so assembly reaches
-                        // that ordered error before any unsent chunk.
-                        self.prefetch.requests_closed = true;
+                    if !self.chunks.request(chunk.clone()) {
+                        // The network side stopped and its outcome is queued
+                        // ahead of this request. Keep this partial plan so
+                        // assembly reaches it before any unsent chunk.
                         break;
                     }
                     self.prefetch.pending.push_back(part.guid);
@@ -437,7 +463,7 @@ impl DiskInstall {
                 if self.prefetch.pending.front() != Some(&part.guid) {
                     return Err(EpicError::Protocol);
                 }
-                let bytes = self.results.blocking_recv().ok_or(EpicError::Protocol)??;
+                let bytes = self.chunks.receive()?;
                 self.cancel.check()?;
                 // A cached chunk is checked by size and SHA-1 before reuse, so a
                 // torn write after a crash only costs one more download.

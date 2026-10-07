@@ -306,11 +306,9 @@ impl Client {
                 directory: &directory,
             },
             |_, cancel| async move {
-                let prepared = tokio::select! {
-                    biased;
-                    () = cancel.cancelled() => return Err(GogError::Cancelled),
-                    result = self.prepare_download(product_id, content_platform, language) => result?,
-                };
+                let prepared = cancel
+                    .race(self.prepare_download(product_id, content_platform, language))
+                    .await??;
                 // A revoked account withdraws nothing: the receipt stays until
                 // the installation lock is taken.
                 if self.tokens.session.lock().await.is_none() {
@@ -319,8 +317,15 @@ impl Client {
                 Ok(prepared)
             },
             |prepared, destination, transfer| async move {
-                self.install_files(product_id, platform, language, prepared, &destination, &transfer)
-                    .await
+                self.install_files(
+                    product_id,
+                    platform,
+                    language,
+                    prepared,
+                    &destination,
+                    &transfer,
+                )
+                .await
             },
         )
         .await
@@ -445,19 +450,7 @@ impl Client {
             key,
             destination,
             cancel,
-            move |snapshot| {
-                progress.update(|progress| {
-                    progress.state = snapshot.phase.into();
-                    progress.completed_bytes = snapshot
-                        .verification_bytes
-                        .unwrap_or(snapshot.completed_bytes);
-                    progress.total_bytes = snapshot.total_bytes;
-                    progress.network_bytes = snapshot.network_bytes;
-                    progress.content_bytes = snapshot.content_bytes;
-                    progress.current_file = snapshot.current_file;
-                    progress.message.clear();
-                });
-            },
+            move |snapshot| progress.update(|progress| progress.show(snapshot)),
         )
         .await?;
         cancel.check()?;

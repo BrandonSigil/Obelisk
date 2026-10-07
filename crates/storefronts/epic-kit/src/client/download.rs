@@ -101,11 +101,15 @@ impl Client {
                 directory: &directory,
             },
             |destination, cancel| async move {
-                let prepared = tokio::select! {
-                    biased;
-                    () = cancel.cancelled() => return Err(EpicError::Cancelled),
-                    result = self.prepare_download(namespace, catalog_item_id, app_name, platform, &destination) => result?,
-                };
+                let prepared = cancel
+                    .race(self.prepare_download(
+                        namespace,
+                        catalog_item_id,
+                        app_name,
+                        platform,
+                        &destination,
+                    ))
+                    .await??;
                 // A revoked account withdraws nothing: the receipt stays until
                 // the installation lock is taken.
                 if self.session.lock().await.is_none() {
@@ -114,8 +118,16 @@ impl Client {
                 Ok(prepared)
             },
             |prepared, destination, transfer| async move {
-                self.install_files(namespace, catalog_item_id, app_name, platform, prepared, &destination, &transfer)
-                    .await
+                self.install_files(
+                    namespace,
+                    catalog_item_id,
+                    app_name,
+                    platform,
+                    prepared,
+                    &destination,
+                    &transfer,
+                )
+                .await
             },
         )
         .await
@@ -159,16 +171,9 @@ impl Client {
                 move |snapshot| {
                     debug_assert!(snapshot.completed_files <= snapshot.total_files);
                     progress.update(|progress| {
-                        progress.state = snapshot.phase.into();
-                        progress.completed_bytes = snapshot
-                            .verification_bytes
-                            .unwrap_or(snapshot.completed_bytes);
-                        progress.total_bytes = snapshot.total_bytes;
+                        progress.show(snapshot);
                         progress.network_bytes =
-                            network_bytes.saturating_add(snapshot.network_bytes);
-                        progress.content_bytes = snapshot.content_bytes;
-                        progress.current_file = snapshot.current_file;
-                        progress.message.clear();
+                            progress.network_bytes.saturating_add(network_bytes);
                     });
                 },
             )

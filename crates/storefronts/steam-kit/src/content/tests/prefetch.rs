@@ -1,13 +1,12 @@
 use super::*;
 
+/// The disk side of depot 42's engine, for `transfer::run_engine`.
 fn disk_install(
     destination: &Path,
     files: Vec<ManifestFile>,
     cancel: &CancelToken,
 ) -> (
-    DiskInstall,
-    mpsc::UnboundedReceiver<ChunkRequest>,
-    mpsc::Sender<ChunkResult>,
+    impl FnOnce(DepotChunks) -> Result<u64, ContentError> + Send + 'static,
     Arc<Reporter>,
 ) {
     let reporter = Reporter::new(
@@ -18,24 +17,21 @@ fn disk_install(
         },
         |_| {},
     );
-    let (requests, receiver) = mpsc::unbounded_channel();
-    let (deliveries, results) = mpsc::channel(WRITE_QUEUE);
-    let disk = DiskInstall {
-        destination: destination.into(),
+    let manifest = Arc::new(Manifest {
         depot_id: 42,
         manifest_id: 99,
-        archive: None,
-        manifest: Arc::new(Manifest {
-            depot_id: 42,
-            manifest_id: 99,
-            files,
-        }),
-        cancel: cancel.clone(),
-        reporter: Arc::clone(&reporter),
-        requests,
-        results,
-    };
-    (disk, receiver, deliveries, reporter)
+        files,
+    });
+    let disk = DiskInstall::engine_side(
+        destination.to_owned(),
+        42,
+        99,
+        None,
+        manifest,
+        cancel.clone(),
+        Arc::clone(&reporter),
+    );
+    (disk, reporter)
 }
 
 #[tokio::test]
@@ -72,42 +68,35 @@ async fn fetches_a_future_file_before_the_first_finishes_and_refills_the_window(
     );
     files.push(file("data/empty.bin", &[]));
     let cancel = CancelToken::new();
-    let (disk, requests, deliveries, reporter) = disk_install(directory.path(), files, &cancel);
+    let (disk, reporter) = disk_install(directory.path(), files, &cancel);
     let future_started = tokio::sync::Notify::new();
     let observed = AtomicBool::new(false);
     let fetched = Mutex::new(Vec::new());
-    let (installed, ()) = tokio::join!(
-        cancel.spawn_blocking(move || disk.run()),
-        transfer::pump_chunks_unordered(
-            requests,
-            deliveries,
-            CHUNK_REQUESTS,
-            &cancel,
-            |(place, chunk): ChunkRequest| {
-                let first = &first;
-                let second = &second;
-                let payloads = &payloads;
-                let future_started = &future_started;
-                let observed = &observed;
-                let fetched = &fetched;
-                async move {
-                    fetched.lock().unwrap().push(chunk.sha.clone());
-                    if &chunk.sha == first {
-                        // The old file-at-a-time scheduler cannot start file two
-                        // while this first chunk is held, and fails this deadline.
-                        tokio::time::timeout(Duration::from_secs(2), future_started.notified())
-                            .await
-                            .map_err(|_| ContentError::Network)?;
-                    } else if &chunk.sha == second {
-                        observed.store(true, Ordering::Release);
-                        future_started.notify_one();
-                    }
-                    Ok((place, payloads.get(&chunk.sha).unwrap().clone()))
+    let installed =
+        transfer::run_engine(PIPELINE, &cancel, disk, |(place, chunk): ChunkRequest| {
+            let first = &first;
+            let second = &second;
+            let payloads = &payloads;
+            let future_started = &future_started;
+            let observed = &observed;
+            let fetched = &fetched;
+            async move {
+                fetched.lock().unwrap().push(chunk.sha.clone());
+                if &chunk.sha == first {
+                    // The old file-at-a-time scheduler cannot start file two
+                    // while this first chunk is held, and fails this deadline.
+                    tokio::time::timeout(Duration::from_secs(2), future_started.notified())
+                        .await
+                        .map_err(|_| ContentError::Network)?;
+                } else if &chunk.sha == second {
+                    observed.store(true, Ordering::Release);
+                    future_started.notify_one();
                 }
+                Ok((place, payloads.get(&chunk.sha).unwrap().clone()))
             }
-        ),
-    );
-    assert_eq!(installed.unwrap().unwrap(), valid.len() as u64);
+        })
+        .await;
+    assert_eq!(installed.unwrap(), valid.len() as u64);
     assert!(observed.load(Ordering::Acquire));
     for (index, bytes) in contents.iter().enumerate() {
         assert_eq!(
@@ -210,20 +199,39 @@ async fn cancellation_bounds_prepared_files_and_resumes_each_verified_partial() 
 }
 
 #[tokio::test]
-async fn a_closed_prefetch_queue_preserves_the_ordered_cdn_error() {
+async fn a_refused_request_stops_preparing_and_returns_the_queued_cdn_error() {
     let directory = tempfile::tempdir().unwrap();
-    let files: Vec<_> = (0..10)
-        .map(|index| file(&format!("{index:02}.bin"), &[b"new file content"]))
-        .collect();
+    let (kept, lost): (&[u8], &[u8]) = (b"kept chunk of file 00", b"lost chunk of file 00");
+    let mut files = vec![file("00.bin", &[kept, lost])];
+    files.extend((1..10).map(|index| file(&format!("{index:02}.bin"), &[b"new file content"])));
+    // 00.bin's partial already holds its first chunk: only the second is requested.
+    let partial_root = directory.path().join(PARTIAL_DIRECTORY).join("42/99");
+    fs::create_dir_all(&partial_root).unwrap();
+    let partial = format!("{}.part", hex(&Sha1::digest(b"00.bin")));
+    fs::write(partial_root.join(&partial), kept).unwrap();
     let cancel = CancelToken::new();
-    let (disk, requests, deliveries, _) = disk_install(directory.path(), files, &cancel);
-    // A failed pump places its terminal result on the writer queue, then drops
-    // the request receiver. Preparing a future file must preserve that error.
+    let (disk, _) = disk_install(directory.path(), files, &cancel);
+    // The network side already stopped on a CDN error: its outcome is queued
+    // and every request is refused.
+    let (chunks, requests, deliveries) = DepotChunks::detached(WRITE_QUEUE);
     drop(requests);
     deliveries.send(Err(ContentError::Http(403))).await.unwrap();
-    drop(deliveries);
-    let result = cancel.spawn_blocking(move || disk.run()).await.unwrap();
-    assert!(matches!(result, Err(ContentError::Http(403))));
-    assert!(!directory.path().join("00.bin").exists());
+    let result = tokio::time::timeout(
+        Duration::from_secs(8),
+        tokio::task::spawn_blocking(move || disk(chunks)),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert!(matches!(result, Err(ContentError::Http(403))), "{result:?}");
+    assert!(
+        !directory.path().join("00.bin").exists(),
+        "a file missing a refused chunk is never published"
+    );
+    let prepared: Vec<_> = fs::read_dir(&partial_root)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name())
+        .collect();
+    assert_eq!(prepared, [partial.as_str()], "no file is prepared after it");
     assert!(install::lock_engine(directory.path()).unwrap().is_some());
 }

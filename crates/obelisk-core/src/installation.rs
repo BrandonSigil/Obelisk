@@ -21,8 +21,8 @@ use crate::{
         read_file_bounded, try_lock_file,
     },
     transfer::{
-        CancelToken, Cancelled, TransferBusy, TransferContext, TransferState, TransferStatus,
-        Transfers,
+        CancelToken, Cancelled, DownloadProgress, TransferBusy, TransferContext, TransferState,
+        TransferStatus, Transfers,
     },
 };
 
@@ -58,6 +58,22 @@ impl TransferProgress {
             current_file: String::new(),
             message: "backend.transfer.preparing".into(),
         }
+    }
+
+    /// Shows one engine snapshot as the Transfer's progress. While files are
+    /// inspected, inspection bytes stand in for completed bytes. Clears the
+    /// message: a storefront that labels the Transfer, or counts work done
+    /// before this engine run, adjusts the fields afterwards.
+    pub fn show(&mut self, snapshot: DownloadProgress) {
+        self.state = snapshot.phase.into();
+        self.completed_bytes = snapshot
+            .verification_bytes
+            .unwrap_or(snapshot.completed_bytes);
+        self.total_bytes = snapshot.total_bytes;
+        self.network_bytes = snapshot.network_bytes;
+        self.content_bytes = snapshot.content_bytes;
+        self.current_file = snapshot.current_file;
+        self.message.clear();
     }
 }
 

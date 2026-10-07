@@ -1,4 +1,5 @@
 use super::*;
+use crate::transfer::DownloadPhase;
 use std::sync::{Arc, Mutex};
 
 #[derive(Debug, thiserror::Error)]
@@ -349,6 +350,44 @@ async fn an_up_to_date_installation_reports_no_downloaded_content() {
         transfers.snapshot().unwrap().message,
         "backend.transfer.upToDate"
     );
+}
+
+#[test]
+fn show_uses_inspection_bytes_while_files_are_inspected_and_clears_the_message() {
+    let mut progress = TransferProgress::new("7");
+    let snapshot = DownloadProgress {
+        phase: DownloadPhase::Verifying,
+        completed_bytes: 10,
+        verification_bytes: Some(40),
+        total_bytes: 100,
+        network_bytes: 3,
+        content_bytes: 2,
+        current_file: "Game/data.pak".into(),
+        ..DownloadProgress::default()
+    };
+    progress.show(snapshot);
+    assert_eq!(progress.state, TransferState::Verifying);
+    assert_eq!((progress.completed_bytes, progress.total_bytes), (40, 100));
+    assert_eq!((progress.network_bytes, progress.content_bytes), (3, 2));
+    assert_eq!(progress.current_file, "Game/data.pak");
+    assert_eq!(
+        progress.message, "",
+        "a storefront labels the Transfer itself"
+    );
+
+    progress.show(DownloadProgress {
+        phase: DownloadPhase::Downloading,
+        completed_bytes: 25,
+        total_bytes: 100,
+        ..DownloadProgress::default()
+    });
+    assert_eq!(progress.state, TransferState::Downloading);
+    assert_eq!(
+        progress.completed_bytes, 25,
+        "repair reports completed bytes"
+    );
+    assert_eq!(progress.current_file, "");
+    assert_eq!(progress.game, "7");
 }
 
 fn installed(parent: &Path, name: &str) -> PathBuf {

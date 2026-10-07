@@ -1,8 +1,8 @@
 //! Galaxy chunk delivery and atomic installation.
 //!
-//! The bounded network pump and blocking disk worker follow Epic's installer;
-//! path confinement, locking, hashing and progress reporting come from
-//! `obelisk_core`. Each file is assembled from its chunks in order: a chunk
+//! The shared chunk engine and the blocking disk worker come from
+//! `obelisk_core`, as do path confinement, locking, hashing and progress
+//! reporting. Each file is assembled from its chunks in order: a chunk
 //! already on disk, in the file's partial copy or at the same place in its
 //! installed copy, is reused once its MD5 matches, so a cancelled Transfer
 //! resumes and an update downloads only the chunks that changed.
@@ -21,12 +21,15 @@ use obelisk_core::{
         self, FileDigest, Md5Part, PARTIAL_DIRECTORY, apply_permissions, checked_file_path,
         ensure_directory, hex, safe_relative_path, unhex,
     },
-    transfer::{self, CancelToken, DownloadPhase, DownloadProgress, DownloadSummary, Reporter},
+    transfer::{
+        self, BodyError, BodySize, CancelToken, Chunks, Delivery, DownloadPhase, DownloadProgress,
+        DownloadSummary, Interrupted, Pipeline, Reporter,
+    },
     verification::{VerificationError, VerificationFile},
 };
 use reqwest::Url;
 use serde::Deserialize;
-use tokio::sync::{Mutex, mpsc};
+use tokio::sync::Mutex;
 
 use crate::{
     GogError,
@@ -36,6 +39,11 @@ use crate::{
 const CHUNK_CONCURRENCY: usize = 12;
 /// Files whose chunks are requested ahead of the one being written.
 const FILE_PREFETCH: usize = 8;
+const PIPELINE: Pipeline = Pipeline {
+    delivery: Delivery::InOrder,
+    fetches: CHUNK_CONCURRENCY,
+    queue: CHUNK_CONCURRENCY,
+};
 
 /// One CDN a product's chunks come from, as its secure link describes it.
 #[derive(Clone, Debug, Deserialize)]
@@ -187,28 +195,17 @@ pub(crate) async fn download(
         },
         progress,
     );
-    let (requests, receiver) = mpsc::unbounded_channel();
-    let (deliveries, results) = mpsc::channel(CHUNK_CONCURRENCY);
-    let disk = DiskInstall {
-        destination: destination.to_owned(),
+    let disk = DiskInstall::engine_side(
+        destination.to_owned(),
         installed,
         key,
-        cancel: cancel.clone(),
-        reporter: Arc::clone(&reporter),
-        requests,
-        results,
-        planned: Default::default(),
-        next_file: 0,
-    };
-    let cancellation_guard = cancel.cancel_on_drop();
-    let (reused_bytes, ()) = tokio::join!(
-        cancel.spawn_blocking(move || disk.run()),
-        transfer::pump_chunks(receiver, deliveries, CHUNK_CONCURRENCY, cancel, |request| {
-            fetch_chunk(&http, &links, request, cancel, &reporter)
-        }),
+        cancel.clone(),
+        Arc::clone(&reporter),
     );
-    cancellation_guard.disarm();
-    let reused_bytes = reused_bytes.map_err(|_| GogError::Protocol)??;
+    let reused_bytes = transfer::run_engine(PIPELINE, cancel, disk, |request| {
+        fetch_chunk(&http, &links, request, cancel, &reporter)
+    })
+    .await?;
     Ok(reporter.summary(reused_bytes))
 }
 
@@ -252,10 +249,11 @@ async fn fetch_chunk(
             }
         }
         if attempt < 3 {
-            tokio::select! {
-                () = tokio::time::sleep(Duration::from_millis(250 * (attempt + 1))) => {},
-                () = cancel.cancelled() => return Err(GogError::Cancelled),
-            }
+            cancel
+                .race(tokio::time::sleep(Duration::from_millis(
+                    250 * (attempt + 1),
+                )))
+                .await?;
         }
     }
     Err(failure)
@@ -268,40 +266,26 @@ async fn fetch(
     cancel: &CancelToken,
     reporter: &Reporter,
 ) -> ChunkResult {
-    let operation = async {
-        let mut response = http
-            .get(url)
-            .timeout(Duration::from_secs(60))
-            .send()
-            .await
-            .map_err(|_| GogError::Network)?;
-        if !response.status().is_success() {
-            return Err(GogError::Http(response.status().as_u16()));
-        }
-        if response
-            .content_length()
-            .is_some_and(|size| size != expected)
-        {
-            return Err(GogError::Integrity);
-        }
-        let mut bytes = Vec::with_capacity(expected as usize);
-        while let Some(part) = response.chunk().await.map_err(|_| GogError::Network)? {
-            reporter.update(|status| {
-                status.network_bytes += part.len() as u64;
-                status.content_bytes += part.len() as u64;
-            });
-            cancel.check()?;
-            if bytes.len() as u64 + part.len() as u64 > expected {
-                return Err(GogError::Integrity);
-            }
-            bytes.extend_from_slice(&part);
-        }
-        Ok(bytes)
-    };
-    tokio::select! {
-        result = operation => result,
-        () = cancel.cancelled() => Err(GogError::Cancelled),
+    let response = cancel
+        .race(http.get(url).timeout(Duration::from_secs(60)).send())
+        .await?
+        .map_err(|_| GogError::Network)?;
+    if !response.status().is_success() {
+        return Err(GogError::Http(response.status().as_u16()));
     }
+    Ok(transfer::read_body(
+        response.content_length(),
+        response.bytes_stream(),
+        BodySize::Exactly(expected),
+        cancel,
+        |length| {
+            reporter.update(|status| {
+                status.network_bytes += length;
+                status.content_bytes += length;
+            });
+        },
+    )
+    .await?)
 }
 
 /// A chunk's zlib stream, checked before and after it inflates.
@@ -320,6 +304,23 @@ pub(crate) fn decode_chunk(bytes: &[u8], chunk: &Chunk) -> ChunkResult {
         return Err(GogError::Integrity);
     }
     Ok(output)
+}
+
+impl From<Interrupted> for GogError {
+    fn from(_: Interrupted) -> Self {
+        Self::Protocol
+    }
+}
+
+impl From<BodyError> for GogError {
+    fn from(error: BodyError) -> Self {
+        match error {
+            BodyError::Network => Self::Network,
+            // The manifest names each chunk's exact size.
+            BodyError::Size => Self::Integrity,
+            BodyError::Cancelled => Self::Cancelled,
+        }
+    }
 }
 
 /// An installation's file as the shared verification scheduler reads it.
@@ -386,13 +387,36 @@ struct DiskInstall {
     key: String,
     cancel: CancelToken,
     reporter: Arc<Reporter>,
-    requests: mpsc::UnboundedSender<Request>,
-    results: mpsc::Receiver<ChunkResult>,
+    chunks: Chunks<Request, Vec<u8>, GogError>,
     planned: std::collections::VecDeque<PlannedFile>,
     next_file: usize,
 }
 
 impl DiskInstall {
+    /// The disk side of one engine run, from its first file.
+    fn engine_side(
+        destination: PathBuf,
+        installed: Arc<Installed>,
+        key: String,
+        cancel: CancelToken,
+        reporter: Arc<Reporter>,
+    ) -> impl FnOnce(Chunks<Request, Vec<u8>, GogError>) -> Result<u64, GogError> + Send + 'static
+    {
+        move |chunks| {
+            Self {
+                destination,
+                installed,
+                key,
+                cancel,
+                reporter,
+                chunks,
+                planned: Default::default(),
+                next_file: 0,
+            }
+            .run()
+        }
+    }
+
     /// Returns the number of verified bytes reused from disk.
     fn run(mut self) -> Result<u64, GogError> {
         self.cancel.check()?;
@@ -465,7 +489,10 @@ impl DiskInstall {
         partial_root: &Path,
         root: &Path,
     ) -> Result<(), GogError> {
-        while self.planned.len() < FILE_PREFETCH && self.next_file < files.len() {
+        while self.planned.len() < FILE_PREFETCH
+            && self.next_file < files.len()
+            && !self.chunks.refused()
+        {
             self.cancel.check()?;
             let index = self.next_file;
             self.next_file += 1;
@@ -482,20 +509,21 @@ impl DiskInstall {
                 self.cancel.check()?;
                 let reused = copies
                     .iter()
-                    .find(|copy| copy_chunk(copy, offset, chunk, &mut io::sink()).unwrap_or(false))
-                    .cloned();
-                sources.push(match reused {
-                    Some(copy) => Source::Reused(copy),
-                    None => {
-                        self.requests
-                            .send(Request {
-                                source: file.source.clone(),
-                                chunk: chunk.clone(),
-                            })
-                            .map_err(|_| GogError::Protocol)?;
-                        Source::Download
-                    }
-                });
+                    .find(|copy| copy_chunk(copy, offset, chunk, &mut io::sink()).unwrap_or(false));
+                if let Some(copy) = reused {
+                    sources.push(Source::Reused(copy.clone()));
+                } else if self.chunks.request(Request {
+                    source: file.source.clone(),
+                    chunk: chunk.clone(),
+                }) {
+                    sources.push(Source::Download);
+                } else {
+                    // Every remaining place receives the outcome that stopped
+                    // the network side: the file stays fully planned, so it is
+                    // never published short.
+                    sources.resize(file.file.chunks.len(), Source::Download);
+                    break;
+                }
                 offset += chunk.size;
             }
             self.planned.push_back(PlannedFile { index, sources });
@@ -528,7 +556,7 @@ impl DiskInstall {
                 Source::Download => {
                     self.reporter
                         .update(|status| status.phase = DownloadPhase::Downloading);
-                    output.write_all(&self.results.blocking_recv().ok_or(GogError::Protocol)??)?;
+                    output.write_all(&self.chunks.receive()?)?;
                 }
                 Source::Reused(copy) => {
                     reused_bytes += chunk.size;

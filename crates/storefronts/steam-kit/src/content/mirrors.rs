@@ -258,10 +258,9 @@ impl<'a> Mirrors<'a> {
         loop {
             if running.is_empty() {
                 if failures > 0 {
-                    tokio::select! {
-                        () = tokio::time::sleep(RETRY_DELAY * 2_u32.pow(failures - 1)) => {}
-                        () = cancel.cancelled() => return Err(ContentError::Cancelled),
-                    }
+                    cancel
+                        .race(tokio::time::sleep(RETRY_DELAY * 2_u32.pow(failures - 1)))
+                        .await?;
                 }
                 let lease = loop {
                     match self.lease(path, &tried, expected, cancel).await? {
@@ -432,10 +431,9 @@ impl<'a> Mirrors<'a> {
                 }
             }
         };
-        let token = tokio::select! {
-            token = authorization.token(&self.addresses[server].host) => token,
-            () = cancel.cancelled() => return Err(ContentError::Cancelled),
-        };
+        let token = cancel
+            .race(authorization.token(&self.addresses[server].host))
+            .await?;
         let granted = token.is_some();
         {
             let mut state = self.lock();

@@ -26,14 +26,16 @@ use obelisk_core::{
         self, InstallError, PARTIAL_DIRECTORY, apply_permissions, checked_file_path,
         ensure_directory, reject_link_or_special_file, safe_relative_path,
     },
-    transfer::{self, Cancelled, DownloadPhase, DownloadProgress, DownloadSummary, Reporter},
+    transfer::{
+        self, BodyError, BodySize, Cancelled, Chunks, Delivery, DownloadPhase, DownloadProgress,
+        DownloadSummary, Interrupted, Pipeline, Reporter,
+    },
 };
 use reqwest::{Client, Url};
 use sha1::{Digest, Sha1};
 #[cfg(test)]
 use std::sync::atomic::{AtomicBool, Ordering};
 use thiserror::Error;
-use tokio::sync::mpsc;
 
 use crate::cm::ContentServer;
 use format::{Chunk, Manifest, ManifestFile, decode_chunk, parse_manifest, unpack_zip};
@@ -58,6 +60,12 @@ const WRITE_QUEUE: usize = 16;
 /// Files prepared ahead of the writer, each holding its partial file open:
 /// requests queue without opening partial files for the whole depot.
 const PREPARED_FILES: usize = 32;
+/// Chunks reach the writer as they arrive: it places each one itself.
+const PIPELINE: Pipeline = Pipeline {
+    delivery: Delivery::AsFetched,
+    fetches: CHUNK_REQUESTS,
+    queue: WRITE_QUEUE,
+};
 
 /// No Debug implementation: depot keys are credentials.
 pub struct DepotDownload<'a> {
@@ -104,6 +112,22 @@ pub enum ContentError {
 impl From<Cancelled> for ContentError {
     fn from(_: Cancelled) -> Self {
         Self::Cancelled
+    }
+}
+
+impl From<Interrupted> for ContentError {
+    fn from(_: Interrupted) -> Self {
+        invalid("backend.steam.content.diskInstallationInterrupted")
+    }
+}
+
+impl From<BodyError> for ContentError {
+    fn from(error: BodyError) -> Self {
+        match error {
+            BodyError::Network => Self::Network,
+            BodyError::Size => invalid("backend.steam.content.cdnResponseTooLarge"),
+            BodyError::Cancelled => Self::Cancelled,
+        }
     }
 }
 
@@ -317,37 +341,23 @@ impl ContentClient {
             status.current_file.clear();
         });
 
-        let (requests, request_queue) = mpsc::unbounded_channel();
-        let (deliveries, results) = mpsc::channel(WRITE_QUEUE);
-        let disk = DiskInstall {
-            destination: plan.destination.clone(),
-            depot_id: plan.depot_id,
-            manifest_id: plan.manifest_id,
+        let disk = DiskInstall::engine_side(
+            plan.destination.clone(),
+            plan.depot_id,
+            plan.manifest_id,
             archive,
             manifest,
-            cancel: cancel.clone(),
-            reporter: Arc::clone(&reporter),
-            requests,
-            results,
-        };
-        let (reused_bytes, ()) = tokio::join!(
-            cancel.spawn_blocking(move || disk.run()),
-            transfer::pump_chunks_unordered(
-                request_queue,
-                deliveries,
-                CHUNK_REQUESTS,
-                cancel,
-                |(place, chunk)| {
-                    // Requests are created in manifest order.
-                    let ticket = mirrors.ticket();
-                    let fetched =
-                        self.fetch_chunk(&mirrors, ticket, plan, chunk, cancel, &reporter);
-                    async move { fetched.await.map(|bytes| (place, bytes)) }
-                },
-            ),
+            cancel.clone(),
+            Arc::clone(&reporter),
         );
-        let reused_bytes = reused_bytes
-            .map_err(|_| invalid("backend.steam.content.diskInstallationInterrupted"))??;
+        let reused_bytes =
+            transfer::run_engine(PIPELINE, cancel, disk, |(place, chunk): ChunkRequest| {
+                // Requests are created in manifest order and taken up in that order.
+                let ticket = mirrors.ticket();
+                let fetched = self.fetch_chunk(&mirrors, ticket, plan, chunk, cancel, &reporter);
+                async move { fetched.await.map(|bytes| (place, bytes)) }
+            })
+            .await?;
         Ok(reporter.summary(reused_bytes))
     }
 
@@ -401,7 +411,7 @@ impl ContentClient {
         url: Url,
         limit: usize,
         cancel: &CancelToken,
-        mut on_bytes: impl FnMut(u64),
+        on_bytes: impl FnMut(u64),
     ) -> Result<(Vec<u8>, u64), ContentError> {
         #[cfg(test)]
         let url = if self.test_endpoints.is_empty() {
@@ -417,37 +427,23 @@ impl ContentClient {
             local.set_query(url.query());
             local
         };
-        let operation = async {
-            let mut response = self
-                .client
-                .get(url)
-                .timeout(Duration::from_secs(45))
-                .send()
-                .await
-                .map_err(|_| ContentError::Network)?;
-            if !response.status().is_success() {
-                return Err(ContentError::Http(response.status().as_u16()));
-            }
-            let advertised = response.content_length();
-            if advertised.is_some_and(|size| size > limit as u64) {
-                return Err(invalid("backend.steam.content.cdnResponseTooLarge"));
-            }
-            let mut bytes = Vec::with_capacity(advertised.map_or(0, |size| size as usize));
-            while let Some(chunk) = response.chunk().await.map_err(|_| ContentError::Network)? {
-                on_bytes(chunk.len() as u64);
-                cancel.check()?;
-                if bytes.len().saturating_add(chunk.len()) > limit {
-                    return Err(invalid("backend.steam.content.cdnResponseTooLarge"));
-                }
-                bytes.extend_from_slice(&chunk);
-            }
-            let size = bytes.len() as u64;
-            Ok((bytes, size))
-        };
-        tokio::select! {
-            result = operation => result,
-            () = cancel.cancelled() => Err(ContentError::Cancelled),
+        let response = cancel
+            .race(self.client.get(url).timeout(Duration::from_secs(45)).send())
+            .await?
+            .map_err(|_| ContentError::Network)?;
+        if !response.status().is_success() {
+            return Err(ContentError::Http(response.status().as_u16()));
         }
+        let bytes = transfer::read_body(
+            response.content_length(),
+            response.bytes_stream(),
+            BodySize::AtMost(limit as u64),
+            cancel,
+            on_bytes,
+        )
+        .await?;
+        let size = bytes.len() as u64;
+        Ok((bytes, size))
     }
 }
 
@@ -460,8 +456,8 @@ struct ChunkPlace {
 }
 
 type ChunkRequest = (ChunkPlace, Chunk);
-/// A requested chunk's decoded bytes, delivered as soon as they arrive.
-type ChunkResult = Result<(ChunkPlace, Vec<u8>), ContentError>;
+/// The writer's end of the depot's engine.
+type DepotChunks = Chunks<ChunkRequest, (ChunkPlace, Vec<u8>), ContentError>;
 
 /// Everything that touches the disk for one depot, on a blocking thread: the
 /// destination lock, manifest cache, verification, assembly and atomic publication.
@@ -473,8 +469,7 @@ struct DiskInstall {
     manifest: Arc<Manifest>,
     cancel: CancelToken,
     reporter: Arc<Reporter>,
-    requests: mpsc::UnboundedSender<ChunkRequest>,
-    results: mpsc::Receiver<ChunkResult>,
+    chunks: DepotChunks,
 }
 
 /// A file being assembled in its partial file. Its chunks arrive in any
@@ -534,6 +529,31 @@ impl PreparedFile<'_> {
 }
 
 impl DiskInstall {
+    /// The writer for one depot's engine, ready to run on its blocking thread.
+    fn engine_side(
+        destination: PathBuf,
+        depot_id: u32,
+        manifest_id: u64,
+        archive: Option<Vec<u8>>,
+        manifest: Arc<Manifest>,
+        cancel: CancelToken,
+        reporter: Arc<Reporter>,
+    ) -> impl FnOnce(DepotChunks) -> Result<u64, ContentError> + Send + 'static {
+        move |chunks| {
+            Self {
+                destination,
+                depot_id,
+                manifest_id,
+                archive,
+                manifest,
+                cancel,
+                reporter,
+                chunks,
+            }
+            .run()
+        }
+    }
+
     /// Returns the number of verified bytes reused from disk.
     fn run(mut self) -> Result<u64, ContentError> {
         self.cancel.check()?;
@@ -572,8 +592,12 @@ impl DiskInstall {
         loop {
             // Requests follow manifest order. Files are prepared until enough
             // of their chunks are queued; valid files and directories do not
-            // count.
-            while assembling.len() < PREPARED_FILES && queued < QUEUED_CHUNKS {
+            // count. After a refused request, the file that held it is
+            // assembling and receives the outcome: preparing more is wasted.
+            while assembling.len() < PREPARED_FILES
+                && queued < QUEUED_CHUNKS
+                && !self.chunks.refused()
+            {
                 let Some((index, file)) = remaining.next() else {
                     break;
                 };
@@ -606,10 +630,7 @@ impl DiskInstall {
                 break;
             }
             self.cancel.check()?;
-            let (place, bytes) = self
-                .results
-                .blocking_recv()
-                .ok_or_else(|| invalid("backend.steam.content.chunkDownloadInterrupted"))??;
+            let (place, bytes) = self.chunks.receive()?;
             let file: &mut PreparedFile<'_> = assembling
                 .get_mut(&place.file)
                 .ok_or_else(|| invalid("backend.steam.content.chunkDownloadInterrupted"))?;
@@ -633,7 +654,7 @@ impl DiskInstall {
     /// Inspect the partial file once and request only its missing chunks. Keep
     /// its open handle until its last chunk is written.
     fn prepare<'a>(
-        &self,
+        &mut self,
         partial_root: &Path,
         index: usize,
         file: &'a ManifestFile,
@@ -682,10 +703,8 @@ impl DiskInstall {
                 file: index,
                 chunk: chunk_index,
             };
-            if self.requests.send((place, chunk.clone())).is_err() {
-                // The pump may already have queued a terminal CDN error. Let
-                // the writer receive that result instead of hiding it behind an
-                // interrupted-prefetch error.
+            if !self.chunks.request((place, chunk.clone())) {
+                // The writer receives the outcome that stopped the network side.
                 break;
             }
         }

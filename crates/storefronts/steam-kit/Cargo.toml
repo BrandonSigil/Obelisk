@@ -8,7 +8,7 @@ publish.workspace = true
 [dependencies]
 obelisk-core.workspace = true
 tokio.workspace = true
-reqwest = { workspace = true, features = ["stream"] }
+reqwest.workspace = true
 prost.workspace = true
 bytes.workspace = true
 base64.workspace = true
@@ -30,6 +30,7 @@ zip = { version = "=8.2.0", default-features = false, features = ["deflate-flate
 
 [dev-dependencies]
 cloud-vault = { workspace = true, features = ["testing"] }
+obelisk-core = { workspace = true, features = ["testing"] }
 
 [lints]
 workspace = true

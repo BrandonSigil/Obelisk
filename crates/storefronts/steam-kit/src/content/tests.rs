@@ -916,19 +916,24 @@ async fn cancellation_keeps_original_and_resumes_verified_partial_chunks() {
         .download_depot(&plan(directory.path()), &CancelToken::new(), |_| {})
         .await
         .unwrap();
-    assert_eq!(resumed.reused_bytes, pieces[0].len() as u64);
+    // Chunks reach the writer as fetched, so whichever arrived first is the
+    // one kept in the partial; the pieces differ in length to tell them apart.
+    let kept = pieces
+        .iter()
+        .find(|piece| piece.len() as u64 == resumed.reused_bytes)
+        .expect("exactly one verified chunk is reused");
     assert_eq!(
         fs::read(directory.path().join("game.exe")).unwrap(),
         pieces.concat()
     );
-    let chunk_one = format!("/depot/42/chunk/{}", hex(&Sha1::digest(pieces[0])));
+    let kept = format!("/depot/42/chunk/{}", hex(&Sha1::digest(kept)));
     assert_eq!(
         fixture
             .requests
             .lock()
             .unwrap()
             .iter()
-            .filter(|path| **path == chunk_one)
+            .filter(|path| **path == kept)
             .count(),
         1
     );
@@ -1045,4 +1050,91 @@ async fn abandoned_account_transfer_keeps_disk_admission_until_worker_exits() {
         .await
         .unwrap();
     assert_eq!(transfers.snapshot().unwrap().state, TransferState::Complete);
+}
+
+#[tokio::test]
+async fn dropping_download_depot_cancels_its_disk_worker_and_releases_the_engine_lock() {
+    let directory = tempfile::tempdir().unwrap();
+    let pieces: [&[u8]; 2] = [b"first file to repair", b"second file to repair"];
+    let mut responses = HashMap::from([(
+        "/depot/42/manifest/99/5/123".into(),
+        zip(&manifest(
+            vec![file("a.bin", &[pieces[0]]), file("b.bin", &[pieces[1]])],
+            false,
+        )),
+    )]);
+    for bytes in pieces {
+        responses.insert(
+            format!("/depot/42/chunk/{}", hex(&Sha1::digest(bytes))),
+            encrypt(&zip(bytes)),
+        );
+    }
+    let fixture = CdnFixture::new(responses);
+    let client = fixture.client();
+    let target = plan(directory.path());
+    let cancel = CancelToken::new();
+    let token = cancel.clone();
+    let (reached, waiting) = tokio::sync::oneshot::channel();
+    let (release, blocked) = std::sync::mpsc::channel::<()>();
+    let gate = Mutex::new(Some((reached, blocked)));
+    let task = tokio::spawn(async move {
+        client
+            .download_depot(&target, &token, move |snapshot| {
+                // Verification starts on the disk worker inside the engine,
+                // after the engine lock was taken.
+                if snapshot.verification_bytes.is_some()
+                    && let Some((reached, blocked)) = gate.lock().unwrap().take()
+                {
+                    reached.send(()).unwrap();
+                    let _ = blocked.recv_timeout(Duration::from_secs(2));
+                }
+            })
+            .await
+    });
+    tokio::time::timeout(Duration::from_secs(2), waiting)
+        .await
+        .unwrap()
+        .unwrap();
+    task.abort();
+    assert!(task.await.unwrap_err().is_cancelled());
+    assert!(
+        cancel.is_cancelled(),
+        "dropping the engine cancels its token"
+    );
+    release.send(()).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while install::lock_engine(directory.path()).unwrap().is_none() {
+        assert!(Instant::now() < deadline, "the disk worker kept the lock");
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    // A worker left running would finish verification and prepare a partial
+    // file for each repair.
+    let partials = fs::read_dir(directory.path().join(PARTIAL_DIRECTORY).join("42/99"))
+        .unwrap()
+        .filter(|entry| {
+            entry
+                .as_ref()
+                .unwrap()
+                .path()
+                .extension()
+                .is_some_and(|extension| extension == "part")
+        })
+        .count();
+    assert_eq!(partials, 0);
+}
+
+#[test]
+fn body_errors_keep_their_content_messages() {
+    assert!(matches!(
+        ContentError::from(BodyError::Size),
+        ContentError::InvalidData(reason) if reason == "backend.steam.content.cdnResponseTooLarge"
+    ));
+    assert!(matches!(
+        ContentError::from(BodyError::Network),
+        ContentError::Network
+    ));
+    assert!(matches!(
+        ContentError::from(BodyError::Cancelled),
+        ContentError::Cancelled
+    ));
 }

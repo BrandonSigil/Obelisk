@@ -2,7 +2,6 @@
 //! independently; a rejected token never replays a complete upload transaction.
 use std::{
     collections::{BTreeMap, BTreeSet},
-    future::Future,
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -280,9 +279,8 @@ impl Cloud<'_> {
     async fn authorize(&self) -> Result<(), EpicError> {
         self.validate()?;
         self.fence().await?;
-        cancellable(
-            self.cancel,
-            self.client.with_access_token(|token| async move {
+        self.cancel
+            .race(self.client.with_access_token(|token| async move {
                 self.client
                     .ensure_owned(
                         &token,
@@ -291,9 +289,8 @@ impl Cloud<'_> {
                         self.game.app_name,
                     )
                     .await
-            }),
-        )
-        .await?;
+            }))
+            .await??;
         self.fence().await
     }
 
@@ -327,9 +324,9 @@ impl Cloud<'_> {
         names: Option<&[String]>,
     ) -> Result<BTreeMap<String, Entry>, EpicError> {
         self.fence().await?;
-        let listing = cancellable(
-            self.cancel,
-            self.client.with_access_token(|token| async move {
+        let listing = self
+            .cancel
+            .race(self.client.with_access_token(|token| async move {
                 let url = self.url(names.is_none())?;
                 let request = match names {
                     Some(names) => self
@@ -345,9 +342,8 @@ impl Cloud<'_> {
                 check_status(response.status())?;
                 let bytes = bounded_bytes(response, MAX_METADATA_BYTES).await?;
                 serde_json::from_slice::<Listing>(&bytes).map_err(|_| EpicError::Protocol)
-            }),
-        )
-        .await?;
+            }))
+            .await??;
         self.fence().await?;
         if listing.has_more
             || listing.next_cursor.is_some()
@@ -395,22 +391,24 @@ impl Cloud<'_> {
     async fn get(&self, link: &str, limit: usize) -> Result<Vec<u8>, EpicError> {
         self.fence().await?;
         let url = signed_url(link)?;
-        let bytes = cancellable(self.cancel, async {
-            // Api's client has no default Authorization and refuses redirects.
-            let response = self
-                .client
-                .api
-                .http
-                .get(url)
-                .send()
-                .await
-                .map_err(|_| EpicError::Network)?;
-            if !response.status().is_success() {
-                return Err(EpicError::Http(response.status().as_u16()));
-            }
-            bounded_bytes(response, limit).await
-        })
-        .await?;
+        let bytes = self
+            .cancel
+            .race(async {
+                // Api's client has no default Authorization and refuses redirects.
+                let response = self
+                    .client
+                    .api
+                    .http
+                    .get(url)
+                    .send()
+                    .await
+                    .map_err(|_| EpicError::Network)?;
+                if !response.status().is_success() {
+                    return Err(EpicError::Http(response.status().as_u16()));
+                }
+                bounded_bytes(response, limit).await
+            })
+            .await??;
         self.fence().await?;
         Ok(bytes)
     }
@@ -418,23 +416,24 @@ impl Cloud<'_> {
     async fn put(&self, link: &str, bytes: Vec<u8>) -> Result<(), EpicError> {
         self.fence().await?;
         let url = signed_url(link)?;
-        cancellable(self.cancel, async {
-            let response = self
-                .client
-                .api
-                .http
-                .put(url)
-                .header(reqwest::header::CONTENT_TYPE, "application/octet-stream")
-                .body(bytes)
-                .send()
-                .await
-                .map_err(|_| EpicError::Network)?;
-            if !response.status().is_success() {
-                return Err(EpicError::Http(response.status().as_u16()));
-            }
-            Ok(())
-        })
-        .await?;
+        self.cancel
+            .race(async {
+                let response = self
+                    .client
+                    .api
+                    .http
+                    .put(url)
+                    .header(reqwest::header::CONTENT_TYPE, "application/octet-stream")
+                    .body(bytes)
+                    .send()
+                    .await
+                    .map_err(|_| EpicError::Network)?;
+                if !response.status().is_success() {
+                    return Err(EpicError::Http(response.status().as_u16()));
+                }
+                Ok(())
+            })
+            .await??;
         self.fence().await
     }
 
@@ -544,13 +543,6 @@ fn signed_url(link: &str) -> Result<Url, EpicError> {
         return Err(EpicError::Protocol);
     }
     Ok(url)
-}
-
-async fn cancellable<T>(
-    cancel: &CancelToken,
-    future: impl Future<Output = Result<T, EpicError>>,
-) -> Result<T, EpicError> {
-    tokio::select! { biased; _ = cancel.cancelled() => Err(EpicError::Cancelled), result = future => result }
 }
 
 #[cfg(test)]

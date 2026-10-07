@@ -9,6 +9,7 @@ use std::{
 
 use futures_util::FutureExt;
 use serde_json::json;
+use tokio::sync::mpsc;
 
 use super::*;
 use crate::manifest::{DepotManifest, Installed};
@@ -96,6 +97,11 @@ struct Fixture {
 }
 
 fn fixture() -> Fixture {
+    fixture_serving(|_, _| {})
+}
+
+/// `fixture`, with `edit` changing the body the CDN serves for a named chunk.
+fn fixture_serving(edit: impl Fn(&str, &mut Vec<u8>)) -> Fixture {
     let parts: [(&str, &[u8]); 3] = [
         ("a", b"first part "),
         ("b", b"second"),
@@ -107,7 +113,9 @@ fn fixture() -> Fixture {
     for (name, bytes) in parts {
         let packed = compressed(bytes);
         let path = format!("/store/{}", galaxy_path(&md5_hex(&packed)).unwrap());
-        responses.insert(path.clone(), packed.clone());
+        let mut served = packed.clone();
+        edit(name, &mut served);
+        responses.insert(path.clone(), served);
         chunks.insert(name, (bytes.to_vec(), path));
         described.insert(
             name,
@@ -241,6 +249,213 @@ async fn a_corrupt_chunk_fails_the_transfer() {
     chunk.compressed_md5 = md5_hex(&packed);
     chunk.compressed_size = packed.len() as u64;
     assert_eq!(decode_chunk(&packed, &chunk).unwrap(), *bytes);
+}
+
+/// Each chunk's file and decoded bytes, by the chunk's MD5.
+type Decoded = HashMap<String, (usize, Vec<u8>)>;
+
+/// `FILE_PREFETCH + 2` files of one chunk each, and what their chunks decode to.
+fn one_chunk_files() -> (Arc<Installed>, Decoded) {
+    let mut decoded = HashMap::new();
+    let items: Vec<_> = (0..FILE_PREFETCH + 2)
+        .map(|index| {
+            let bytes = format!("file {index}").into_bytes();
+            let packed = compressed(&bytes);
+            let item = json!({"type": "DepotFile", "path": format!("file-{index:02}"), "chunks": [
+                {"md5": md5_hex(&bytes), "size": bytes.len(), "compressedMd5": md5_hex(&packed),
+                 "compressedSize": packed.len()},
+            ]});
+            decoded.insert(md5_hex(&bytes), (index, bytes));
+            item
+        })
+        .collect();
+    let manifest: DepotManifest =
+        serde_json::from_value(json!({"depot": {"items": items}})).unwrap();
+    let mut installed = Installed::default();
+    installed
+        .add("", "1207658924", manifest.depot.items)
+        .unwrap();
+    (Arc::new(installed), decoded)
+}
+
+/// How long a scripted install may wait on either side before the test fails.
+const WAIT: Duration = Duration::from_secs(5);
+
+/// A disk side installing `one_chunk_files` with no engine behind it. The test
+/// plays the network side: it takes `requests` and queues `outcomes`.
+struct ScriptedInstall {
+    disk: tokio::task::JoinHandle<Result<u64, GogError>>,
+    requests: mpsc::UnboundedReceiver<Request>,
+    outcomes: mpsc::Sender<ChunkResult>,
+    decoded: Decoded,
+}
+
+impl ScriptedInstall {
+    fn start(
+        root: &Path,
+        cancel: &CancelToken,
+        progress: impl Fn(DownloadProgress) + Send + Sync + 'static,
+    ) -> Self {
+        let (installed, decoded) = one_chunk_files();
+        let (chunks, requests, outcomes) = Chunks::detached(PIPELINE.queue);
+        let disk = DiskInstall::engine_side(
+            root.to_owned(),
+            installed,
+            "build".into(),
+            cancel.clone(),
+            Reporter::new(DownloadProgress::default(), progress),
+        );
+        Self {
+            disk: tokio::task::spawn_blocking(move || disk(chunks)),
+            requests,
+            outcomes,
+            decoded,
+        }
+    }
+
+    /// Takes the next `count` requests: each chunk's file and decoded bytes.
+    async fn take(&mut self, count: usize) -> Vec<(usize, Vec<u8>)> {
+        let mut taken = Vec::with_capacity(count);
+        for _ in 0..count {
+            let request = tokio::time::timeout(WAIT, self.requests.recv())
+                .await
+                .expect("the disk side requests its window")
+                .unwrap();
+            taken.push(self.decoded[&request.chunk.md5].clone());
+        }
+        taken
+    }
+
+    async fn outcome(self) -> Result<u64, GogError> {
+        tokio::time::timeout(WAIT, self.disk)
+            .await
+            .expect("the disk side ends")
+            .unwrap()
+    }
+}
+
+fn partial_root(root: &Path) -> PathBuf {
+    root.join(PARTIAL_DIRECTORY).join("gog").join("build")
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_failed_chunk_reports_its_own_error_not_protocol() {
+    // Red check: with `plan_ahead` returning `Protocol` when `request` is
+    // refused, as it did before the shared engine, this returned `Protocol`.
+    let folder = tempfile::tempdir().unwrap();
+    let root = folder.path().join("game");
+    let mut network = ScriptedInstall::start(&root, &CancelToken::new(), |_| {});
+
+    let window = network.take(FILE_PREFETCH).await;
+    assert!(
+        window.iter().map(|(index, _)| *index).eq(0..FILE_PREFETCH),
+        "the first files are planned in order"
+    );
+    // The network side stops here, as after a chunk that failed for good:
+    // the disk side blocks on file 0, so its refill always meets the refusal.
+    network.requests.close();
+    for outcome in [
+        Ok(window[0].1.clone()),
+        Ok(window[1].1.clone()),
+        Err(GogError::Http(404)),
+    ] {
+        network.outcomes.send(outcome).await.unwrap();
+    }
+    let result = network.outcome().await;
+
+    assert!(
+        matches!(result, Err(GogError::Http(404))),
+        "{:?}",
+        result.err()
+    );
+    assert_eq!(fs::read(root.join("file-00")).unwrap(), b"file 0");
+    assert_eq!(fs::read(root.join("file-01")).unwrap(), b"file 1");
+    assert!(!root.join("file-02").exists());
+    assert!(partial_root(&root).is_dir(), "kept for the next attempt");
+    assert!(install::lock_engine(&root).unwrap().is_some());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_cancelled_transfer_reports_cancelled_not_protocol() {
+    let folder = tempfile::tempdir().unwrap();
+    let root = folder.path().join("game");
+    let cancel = CancelToken::new();
+    let progress = {
+        let cancel = cancel.clone();
+        move |snapshot: DownloadProgress| {
+            if snapshot.completed_files == 1 {
+                cancel.cancel();
+            }
+        }
+    };
+    let mut network = ScriptedInstall::start(&root, &cancel, progress);
+
+    let window = network.take(FILE_PREFETCH).await;
+    network
+        .outcomes
+        .send(Ok(window[0].1.clone()))
+        .await
+        .unwrap();
+    // What the engine does on a cancellation. The disk side may already have
+    // seen it and gone, so the send may find nobody.
+    tokio::time::timeout(WAIT, cancel.cancelled())
+        .await
+        .expect("file 0's progress cancels");
+    let _ = network.outcomes.send(Err(GogError::Cancelled)).await;
+    network.requests.close();
+    let result = network.outcome().await;
+
+    assert!(
+        matches!(result, Err(GogError::Cancelled)),
+        "{:?}",
+        result.err()
+    );
+    assert_eq!(fs::read(root.join("file-00")).unwrap(), b"file 0");
+    assert!(partial_root(&root).is_dir(), "kept for the next attempt");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_chunk_with_a_wrong_length_fails_as_integrity() {
+    let fixture = fixture_serving(|name, body| {
+        if name == "a" {
+            body.push(0);
+        }
+    });
+    let folder = tempfile::tempdir().unwrap();
+    let root = folder.path().join("gog-1207658924-windows");
+
+    let result = fixture.install(&root).await;
+
+    assert!(
+        matches!(result, Err(GogError::Integrity)),
+        "{:?}",
+        result.err()
+    );
+    let path = &fixture.chunks["a"].1;
+    let asked = fixture
+        .cdn
+        .requests()
+        .iter()
+        .filter(|request| *request == path)
+        .count();
+    assert_eq!(asked, 4, "every round asks again before the chunk fails");
+    assert!(!root.join("Game/game.exe").exists());
+
+    // The decode's MD5 check would refuse this body too. Fetched alone, the
+    // exact bound refuses its advertised length before a byte is read.
+    let (bytes, path) = &fixture.chunks["a"];
+    let url = Url::parse(&fixture.cdn.base).unwrap().join(path).unwrap();
+    let reporter = Reporter::new(DownloadProgress::default(), |_| {});
+    let fetched = fetch(
+        &crate::http::client().unwrap(),
+        url,
+        compressed(bytes).len() as u64,
+        &CancelToken::new(),
+        &reporter,
+    )
+    .await;
+    assert!(matches!(fetched, Err(GogError::Integrity)));
+    assert_eq!(reporter.snapshot().network_bytes, 0);
 }
 
 #[test]

@@ -31,7 +31,7 @@ tempfile = "3"
 uuid = { version = "1", features = ["v4"] }
 uniffi = { version = "=0.32.1" }
 tokio = { version = "1", features = ["rt-multi-thread", "time", "sync", "macros", "net"] }
-reqwest = { version = "0.13", default-features = false, features = ["rustls", "json", "form", "query"] }
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "json", "form", "query", "stream"] }
 prost = "0.14"
 bytes = "1"
 base64 = "0.23"

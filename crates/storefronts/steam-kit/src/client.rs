@@ -505,11 +505,7 @@ impl Client {
         }
         let platform = match platform {
             Some(platform) => platform,
-            None => tokio::select! {
-                biased;
-                () = picking.cancelled() => return Err(Cancelled.into()),
-                picked = self.pick_platform(app_id, language) => picked?,
-            },
+            None => picking.race(self.pick_platform(app_id, language)).await??,
         };
         if !matches!(platform, "windows" | "macos") {
             return Err(unsupported());
@@ -777,16 +773,11 @@ impl Client {
         content
             .download_depot(&plan, cancel, move |progress: DownloadProgress| {
                 transfer.update(|status| {
-                    status.state = progress.phase.into();
-                    status.completed_bytes = base.completed
-                        + progress
-                            .verification_bytes
-                            .unwrap_or(progress.completed_bytes);
-                    status.total_bytes =
-                        base.total_estimate.saturating_sub(size) + progress.total_bytes;
-                    status.network_bytes = base.network + progress.network_bytes;
-                    status.content_bytes = base.content_bytes + progress.content_bytes;
-                    status.current_file = progress.current_file;
+                    status.show(progress);
+                    status.completed_bytes += base.completed;
+                    status.total_bytes += base.total_estimate.saturating_sub(size);
+                    status.network_bytes += base.network;
+                    status.content_bytes += base.content_bytes;
                     status.message.clone_from(&depot_label);
                 });
             })

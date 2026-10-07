@@ -175,43 +175,53 @@ async fn shared_chunks_cross_the_window_and_survive_cancellation_with_cached_rep
 
 #[tokio::test]
 async fn prefetch_window_is_bounded_and_closed_requests_preserve_the_ordered_error() {
-    let (manifest, _, _) = files_fixture(FILE_PREFETCH + 3);
+    let (manifest, _, outputs) = files_fixture(FILE_PREFETCH + 3);
+    let manifest = Arc::new(manifest);
     let temporary = tempfile::tempdir().unwrap();
-    let cache = temporary.path().join("chunks");
-    fs::create_dir(&cache).unwrap();
-    let (requests, mut receiver) = mpsc::unbounded_channel();
-    let (deliveries, results) = mpsc::channel(CHUNK_CONCURRENCY);
-    let mut disk = DiskInstall {
-        destination: temporary.path().to_owned(),
-        manifest: Arc::new(manifest.clone()),
-        cancel: CancelToken::new(),
-        reporter: Reporter::new(DownloadProgress::default(), |_| {}),
-        requests,
-        results,
-        prefetch: FilePrefetch::default(),
-    };
-    disk.prefetch_files(&vec![false; manifest.files.len()], &cache)
-        .unwrap();
+    // This test plays the network side.
+    let (chunks, mut requests, deliveries) = Chunks::detached(PIPELINE.queue);
+    let disk = DiskInstall::engine_side(
+        temporary.path().to_owned(),
+        Arc::clone(&manifest),
+        CancelToken::new(),
+        Reporter::new(DownloadProgress::default(), |_| {}),
+    );
+    let disk = tokio::task::spawn_blocking(move || disk(chunks));
     for file in &manifest.files[..FILE_PREFETCH] {
-        assert_eq!(receiver.try_recv().unwrap().guid, file.parts[0].guid);
+        let chunk = tokio::time::timeout(Duration::from_secs(2), requests.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(chunk.guid, file.parts[0].guid);
     }
+    // The disk side waits for file 0's chunk before it plans another file.
     assert!(matches!(
-        receiver.try_recv(),
-        Err(mpsc::error::TryRecvError::Empty)
+        requests.try_recv(),
+        Err(tokio::sync::mpsc::error::TryRecvError::Empty)
     ));
-    // A failed pump closes its request receiver after sending its ordered error.
-    // Refilling after a completed earlier file must not replace it with Protocol.
-    receiver.close();
+    // File 1's chunk fails for good: the network side stops after delivering
+    // file 0's chunk and that error, so the refill after file 0 is refused.
+    // It must not replace the ordered error with Protocol.
+    drop(requests);
+    deliveries.send(Ok(outputs[0].clone())).await.unwrap();
     deliveries.send(Err(EpicError::Http(404))).await.unwrap();
-    let plan = disk.prefetch.files.pop_front().unwrap();
-    disk.prefetch_files(&vec![false; manifest.files.len()], &cache)
+    drop(deliveries);
+    let result = tokio::time::timeout(Duration::from_secs(8), disk)
+        .await
+        .unwrap()
         .unwrap();
-    let file = manifest.files[plan.index].clone();
-    let root = temporary.path().to_owned();
-    let result = tokio::task::spawn_blocking(move || {
-        disk.assemble(&file, &plan, &root, &cache, &root, Path::new("output"))
-    })
-    .await
-    .unwrap();
     assert!(matches!(result, Err(EpicError::Http(404))));
+    let root = temporary.path();
+    assert_eq!(
+        fs::read(root.join(&manifest.files[0].filename)).unwrap(),
+        outputs[0]
+    );
+    assert!(!root.join(&manifest.files[1].filename).exists());
+    assert!(
+        root.join(PARTIAL_DIRECTORY)
+            .join("epic")
+            .join(manifest_key(&manifest))
+            .is_dir()
+    );
+    assert!(install::lock_engine(root).unwrap().is_some());
 }

@@ -1,5 +1,9 @@
 //! Cancellation and progress vocabulary shared by storefront download engines.
+mod body;
+mod engine;
 mod lifecycle;
+pub use body::{BodyError, BodySize, read_body};
+pub use engine::{Chunks, Delivery, Interrupted, Pipeline, run_engine};
 pub use lifecycle::{TransferBusy, TransferContext, TransferStatus, Transfers};
 
 use std::{
@@ -10,8 +14,7 @@ use std::{
     },
 };
 
-use futures_util::{Stream, StreamExt, stream};
-use tokio::sync::{Notify, mpsc};
+use tokio::sync::Notify;
 
 /// Cancels a download from any thread. Synchronous checks stay a cheap atomic
 /// load; pending CDN requests are woken immediately instead of polling.
@@ -63,6 +66,18 @@ impl CancelToken {
             return;
         }
         notified.await;
+    }
+
+    /// Runs `work` unless this token is cancelled first, including earlier.
+    /// A cancellation drops `work` at once, so a CDN request or a retry pause
+    /// stalled on the network ends without waiting for its timeout. When both
+    /// are ready, the cancellation wins.
+    pub async fn race<T>(&self, work: impl Future<Output = T>) -> Result<T, Cancelled> {
+        tokio::select! {
+            biased;
+            () = self.cancelled() => Err(Cancelled),
+            value = work => Ok(value),
+        }
     }
 
     /// Registers work before it reaches the blocking pool. A dropped async
@@ -239,74 +254,9 @@ impl Reporter {
     }
 }
 
-/// Fetches requested chunks with bounded concurrency and delivers them in
-/// request order, so a disk thread can write and hash sequentially. Stops as
-/// soon as the disk side goes away, a chunk fails for good, or cancellation is
-/// requested; the latter is delivered so a disk thread blocked on the queue wakes.
-pub async fn pump_chunks<C, T, E, F>(
-    requests: mpsc::UnboundedReceiver<C>,
-    deliveries: mpsc::Sender<Result<T, E>>,
-    concurrency: usize,
-    cancel: &CancelToken,
-    fetch: impl Fn(C) -> F,
-) where
-    F: Future<Output = Result<T, E>>,
-    E: From<Cancelled>,
-{
-    let fetched = queued(requests).map(fetch).buffered(concurrency);
-    deliver(fetched, deliveries, cancel).await;
-}
-
-/// Like [`pump_chunks`], but delivers each chunk as soon as it arrives, for a
-/// disk thread that places chunks itself: a slow chunk then holds up nothing
-/// fetched after it.
-pub async fn pump_chunks_unordered<C, T, E, F>(
-    requests: mpsc::UnboundedReceiver<C>,
-    deliveries: mpsc::Sender<Result<T, E>>,
-    concurrency: usize,
-    cancel: &CancelToken,
-    fetch: impl Fn(C) -> F,
-) where
-    F: Future<Output = Result<T, E>>,
-    E: From<Cancelled>,
-{
-    let fetched = queued(requests).map(fetch).buffer_unordered(concurrency);
-    deliver(fetched, deliveries, cancel).await;
-}
-
-fn queued<C>(requests: mpsc::UnboundedReceiver<C>) -> impl Stream<Item = C> {
-    stream::unfold(requests, |mut requests| async move {
-        requests.recv().await.map(|chunk| (chunk, requests))
-    })
-}
-
-async fn deliver<T, E: From<Cancelled>>(
-    fetched: impl Stream<Item = Result<T, E>>,
-    deliveries: mpsc::Sender<Result<T, E>>,
-    cancel: &CancelToken,
-) {
-    tokio::pin!(fetched);
-    loop {
-        let next = tokio::select! {
-            result = fetched.next() => result,
-            () = deliveries.closed() => return,
-            () = cancel.cancelled() => {
-                let _ = deliveries.send(Err(Cancelled.into())).await;
-                return;
-            }
-        };
-        let Some(result) = next else { return };
-        let failed = result.is_err();
-        if deliveries.send(result).await.is_err() || failed {
-            return;
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::atomic::AtomicUsize;
 
     #[test]
     fn check_reports_the_flag_and_cancellation_is_shared_by_every_clone() {
@@ -392,176 +342,24 @@ mod tests {
         assert_eq!(summary.total_bytes, 5_000);
     }
 
-    /// One gate per request, so a test decides exactly when each fetch finishes.
-    fn gates(count: usize) -> Vec<Arc<Notify>> {
-        (0..count).map(|_| Arc::new(Notify::new())).collect()
-    }
-
     #[tokio::test]
-    async fn chunks_are_delivered_in_request_order_however_they_finish() {
-        let (requests, request_rx) = mpsc::unbounded_channel();
-        let (deliveries, mut delivered) = mpsc::channel(8);
-        for index in 0..3_usize {
-            requests.send(index).unwrap();
-        }
-        drop(requests);
-        let open = gates(3);
-        let fetch_gates = open.clone();
+    async fn race_returns_cancelled_for_a_token_cancelled_earlier_or_while_work_is_pending() {
         let cancel = CancelToken::new();
-        let pump = pump_chunks(request_rx, deliveries, 3, &cancel, move |index: usize| {
-            let gate = Arc::clone(&fetch_gates[index]);
-            async move {
-                gate.notified().await;
-                Ok::<usize, Cancelled>(index)
-            }
-        });
-        let collect = async {
-            // Finish backwards. A stored permit means order does not race.
-            for index in [2_usize, 1, 0] {
-                open[index].notify_one();
-            }
-            let mut order = Vec::new();
-            while let Some(result) = delivered.recv().await {
-                order.push(result.unwrap());
-            }
-            order
-        };
-        let (_, order) = tokio::join!(pump, collect);
-        assert_eq!(order, [0, 1, 2], "the disk thread writes in manifest order");
-    }
-
-    #[tokio::test]
-    async fn no_more_than_the_requested_number_of_fetches_are_in_flight() {
-        let (requests, request_rx) = mpsc::unbounded_channel();
-        let (deliveries, mut delivered) = mpsc::channel(8);
-        for index in 0..6_usize {
-            requests.send(index).unwrap();
-        }
-        drop(requests);
-        let open = gates(6);
-        let fetch_gates = open.clone();
-        let active = Arc::new(AtomicUsize::new(0));
-        let peak = Arc::new(AtomicUsize::new(0));
-        let counters = (Arc::clone(&active), Arc::clone(&peak));
-        let cancel = CancelToken::new();
-        let pump = pump_chunks(request_rx, deliveries, 2, &cancel, move |index: usize| {
-            let gate = Arc::clone(&fetch_gates[index]);
-            let (active, peak) = (Arc::clone(&counters.0), Arc::clone(&counters.1));
-            async move {
-                let running = active.fetch_add(1, Ordering::AcqRel) + 1;
-                peak.fetch_max(running, Ordering::AcqRel);
-                gate.notified().await;
-                active.fetch_sub(1, Ordering::AcqRel);
-                Ok::<usize, Cancelled>(index)
-            }
-        });
-        let collect = async {
-            for gate in &open {
-                gate.notify_one();
-                tokio::task::yield_now().await;
-            }
-            let mut count = 0;
-            while delivered.recv().await.is_some() {
-                count += 1;
-            }
-            count
-        };
-        let (_, count) = tokio::join!(pump, collect);
-        assert_eq!(count, 6);
-        assert_eq!(peak.load(Ordering::Acquire), 2, "CDN requests stay bounded");
-        assert_eq!(active.load(Ordering::Acquire), 0);
-    }
-
-    #[tokio::test]
-    async fn cancellation_is_delivered_so_a_blocked_disk_thread_wakes() {
-        let (requests, request_rx) = mpsc::unbounded_channel();
-        let (deliveries, mut delivered) = mpsc::channel(4);
-        requests.send(0_usize).unwrap();
-        drop(requests);
-        // This fetch never finishes on its own: only the cancellation ends it.
-        let stuck = Arc::new(Notify::new());
-        let held = Arc::clone(&stuck);
-        let cancel = CancelToken::new();
-        let pump = pump_chunks(request_rx, deliveries, 1, &cancel, move |index: usize| {
-            let gate = Arc::clone(&held);
-            async move {
-                gate.notified().await;
-                Ok::<usize, Cancelled>(index)
-            }
-        });
-        let collect = async {
+        let pending = cancel.race(std::future::pending::<()>());
+        let cancelling = async {
+            tokio::task::yield_now().await;
             cancel.cancel();
-            delivered.recv().await
         };
-        let (_, result) = tokio::join!(pump, collect);
-        assert!(
-            matches!(result, Some(Err(Cancelled))),
-            "a disk thread blocked on the queue receives the cancellation"
-        );
-        let _ = stuck;
+        let (raced, ()) = tokio::join!(pending, cancelling);
+        assert_eq!(raced, Err(Cancelled));
+        // Cancelled earlier, the cancellation wins even over finished work.
+        assert_eq!(cancel.race(async { 1 }).await, Err(Cancelled));
     }
 
     #[tokio::test]
-    async fn the_pump_stops_when_the_disk_side_goes_away() {
-        let (requests, request_rx) = mpsc::unbounded_channel();
-        let (deliveries, delivered) = mpsc::channel::<Result<usize, Cancelled>>(1);
-        for index in 0..8_usize {
-            requests.send(index).unwrap();
-        }
-        drop(requests);
-        drop(delivered);
-        let started = Arc::new(AtomicUsize::new(0));
-        let counter = Arc::clone(&started);
+    async fn race_returns_the_work_when_it_finishes_first() {
         let cancel = CancelToken::new();
-        // Returns instead of hanging, and never fetches the whole queue.
-        pump_chunks(request_rx, deliveries, 2, &cancel, move |index: usize| {
-            let counter = Arc::clone(&counter);
-            async move {
-                counter.fetch_add(1, Ordering::AcqRel);
-                Ok::<usize, Cancelled>(index)
-            }
-        })
-        .await;
-        assert!(
-            started.load(Ordering::Acquire) <= 2,
-            "no chunk is fetched for a receiver that is already gone"
-        );
-    }
-
-    #[tokio::test]
-    async fn a_failed_chunk_ends_the_pump_after_delivering_the_error() {
-        let (requests, request_rx) = mpsc::unbounded_channel();
-        let (deliveries, mut delivered) = mpsc::channel(8);
-        for index in 0..4_usize {
-            requests.send(index).unwrap();
-        }
-        drop(requests);
-        let started = Arc::new(AtomicUsize::new(0));
-        let counter = Arc::clone(&started);
-        let cancel = CancelToken::new();
-        let pump = pump_chunks(request_rx, deliveries, 1, &cancel, move |index: usize| {
-            let counter = Arc::clone(&counter);
-            async move {
-                counter.fetch_add(1, Ordering::AcqRel);
-                if index == 1 {
-                    return Err(Cancelled);
-                }
-                Ok::<usize, Cancelled>(index)
-            }
-        });
-        let collect = async {
-            let mut results = Vec::new();
-            while let Some(result) = delivered.recv().await {
-                results.push(result);
-            }
-            results
-        };
-        let (_, results) = tokio::join!(pump, collect);
-        assert!(matches!(results.as_slice(), [Ok(0), Err(Cancelled)]));
-        assert_eq!(
-            started.load(Ordering::Acquire),
-            2,
-            "a chunk that fails for good stops the queue"
-        );
+        assert_eq!(cancel.race(async { 7 }).await, Ok(7));
+        assert!(!cancel.is_cancelled());
     }
 }

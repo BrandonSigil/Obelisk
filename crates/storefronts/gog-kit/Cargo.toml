@@ -20,5 +20,6 @@ md-5.workspace = true
 workspace = true
 
 [dev-dependencies]
+obelisk-core = { workspace = true, features = ["testing"] }
 tokio = { workspace = true, features = ["test-util"] }
 tempfile.workspace = true
