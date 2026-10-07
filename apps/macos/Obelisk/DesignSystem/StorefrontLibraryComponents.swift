@@ -73,6 +73,8 @@ final class LibraryOrdering<Game: Identifiable> where Game.ID: Comparable {
     private var filterRevision: Int?
     private var orders: [StorefrontLibrarySort: [Game]] = [:]
     private var narrowed: (criteria: Criteria, games: [Game])?
+    /// The library's hero, once read: it may have none.
+    private var featured: Game??
 
     /// The games the model's search and filter keep, in its order.
     func games<Model: LibraryStorefront>(of model: Model) -> [Game] where Model.Game == Game {
@@ -86,11 +88,7 @@ final class LibraryOrdering<Game: Identifiable> where Game.ID: Comparable {
             query: model.searchText.trimmingCharacters(in: .whitespacesAndNewlines), sort: model.sort, filter: filter,
             installed: filter == .installed ? Set(model.installations.receipts.map(\.gameID)) : []
         )
-        if revision != self.revision {
-            self.revision = revision
-            orders.removeAll()
-            narrowed = nil
-        }
+        keep(revision)
         // What only a filter reads, such as platforms, never changes an order.
         if filterRevision != self.filterRevision {
             self.filterRevision = filterRevision
@@ -112,6 +110,29 @@ final class LibraryOrdering<Game: Identifiable> where Game.ID: Comparable {
         }
         narrowed = (criteria, kept)
         return kept
+    }
+
+    /// The game the model's whole library shows first: the last one played,
+    /// else the first by playtime.
+    func featuredGame<Model: LibraryStorefront>(of model: Model) -> Game? where Model.Game == Game {
+        keep(model.libraryRevision)
+        if let featured { return featured }
+        let games = model.games
+        let sort: StorefrontLibrarySort = games.contains { model.lastPlayed(of: $0) != nil } ? .lastPlayed : .playtime
+        let game = orders[sort].map(\.first) ?? Self.first(
+            games, by: sort, title: model.title(of:), playtime: model.playtime(of:), lastPlayed: model.lastPlayed(of:)
+        )
+        featured = .some(game)
+        return game
+    }
+
+    /// Forgets every kept result once the library's revision changed.
+    private func keep(_ revision: Int) {
+        guard revision != self.revision else { return }
+        self.revision = revision
+        orders.removeAll()
+        narrowed = nil
+        featured = nil
     }
 
     /// `games` in `sort` order: the most played or the last played first,

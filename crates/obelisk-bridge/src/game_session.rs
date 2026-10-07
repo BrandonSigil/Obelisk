@@ -162,7 +162,7 @@ impl Bridged for steam::Steam {
     fn account(account: GameAccount) -> Option<u64> {
         match account {
             GameAccount::Steam { steam_id } => Some(steam_id),
-            GameAccount::Epic { .. } | GameAccount::Gog { .. } => None,
+            _ => None,
         }
     }
     fn game_account(account: &u64) -> GameAccount {
@@ -183,7 +183,7 @@ impl Bridged for epic::Epic {
     fn account(account: GameAccount) -> Option<String> {
         match account {
             GameAccount::Epic { account_id } => Some(account_id),
-            GameAccount::Steam { .. } | GameAccount::Gog { .. } => None,
+            _ => None,
         }
     }
     fn game_account(account: &String) -> GameAccount {
@@ -207,7 +207,7 @@ impl Bridged for gog::Gog {
     fn account(account: GameAccount) -> Option<String> {
         match account {
             GameAccount::Gog { user_id } => Some(user_id),
-            GameAccount::Steam { .. } | GameAccount::Epic { .. } => None,
+            _ => None,
         }
     }
     fn game_account(account: &String) -> GameAccount {
@@ -345,14 +345,56 @@ pub(crate) enum Storefronts {
     Epic(Arc<Sessions<epic::Epic>>),
     Gog(Arc<Sessions<gog::Gog>>),
 }
+
+/// Runs `$body` with the Game sessions as `$sessions`, whichever storefront
+/// they serve.
+macro_rules! each {
+    ($storefronts:expr, $sessions:ident => $body:expr) => {
+        match $storefronts {
+            Storefronts::Steam($sessions) => $body,
+            Storefronts::Epic($sessions) => $body,
+            Storefronts::Gog($sessions) => $body,
+        }
+    };
+}
+
 impl Storefronts {
     /// A session call that failed without a reason of its own.
     fn failed(&self) -> &'static str {
-        match self {
-            Self::Steam(_) => steam::Steam::SESSION_FAILED,
-            Self::Epic(_) => epic::Epic::SESSION_FAILED,
-            Self::Gog(_) => gog::Gog::SESSION_FAILED,
+        fn failed<P: Storefront>(_: &Sessions<P>) -> &'static str {
+            P::SESSION_FAILED
         }
+        each!(self, sessions => failed(sessions))
+    }
+}
+
+/// Account revocation, for an account of the sessions' storefront.
+fn revoke<P: Bridged>(sessions: &Sessions<P>, account: GameAccount) {
+    if let Some(account) = P::account(account) {
+        sessions.revoke(account);
+    }
+}
+
+fn resume_after_rosetta<P: Bridged>(
+    sessions: &Sessions<P>,
+    session_id: &str,
+    account: GameAccount,
+    decision_id: u64,
+) -> Result<(), Failure> {
+    match P::account(account) {
+        Some(account) => sessions.resume_after_rosetta(session_id, &account, decision_id),
+        None => Err(Failure::Failed(P::INVALID_SESSION.into())),
+    }
+}
+
+fn decline_rosetta<P: Bridged>(
+    sessions: &Sessions<P>,
+    session_id: &str,
+    account: GameAccount,
+    decision_id: u64,
+) {
+    if let Some(account) = P::account(account) {
+        sessions.decline_rosetta(session_id, &account, decision_id);
     }
 }
 
@@ -390,41 +432,17 @@ impl StorefrontSessions {
     }
 
     pub fn state(&self) -> GameSessionsState {
-        match &*self.sessions {
-            Storefronts::Steam(sessions) => state(sessions.state()),
-            Storefronts::Epic(sessions) => state(sessions.state()),
-            Storefronts::Gog(sessions) => state(sessions.state()),
-        }
+        each!(&*self.sessions, sessions => state(sessions.state()))
     }
 
     /// Waits for a revision newer than `after`, or returns at once.
     pub async fn changed(&self, after: u64) -> GameSessionsState {
-        match &*self.sessions {
-            Storefronts::Steam(sessions) => state(sessions.changed(after).await),
-            Storefronts::Epic(sessions) => state(sessions.changed(after).await),
-            Storefronts::Gog(sessions) => state(sessions.changed(after).await),
-        }
+        each!(&*self.sessions, sessions => state(sessions.changed(after).await))
     }
 
     /// Account revocation. The game keeps running.
     pub fn revoke(&self, account: GameAccount) {
-        match &*self.sessions {
-            Storefronts::Steam(sessions) => {
-                if let Some(account) = steam::Steam::account(account) {
-                    sessions.revoke(account);
-                }
-            }
-            Storefronts::Epic(sessions) => {
-                if let Some(account) = epic::Epic::account(account) {
-                    sessions.revoke(account);
-                }
-            }
-            Storefronts::Gog(sessions) => {
-                if let Some(account) = gog::Gog::account(account) {
-                    sessions.revoke(account);
-                }
-            }
-        }
+        each!(&*self.sessions, sessions => revoke(sessions, account))
     }
 
     pub async fn resume_after_rosetta(
@@ -434,19 +452,8 @@ impl StorefrontSessions {
         decision_id: u64,
     ) -> Result<(), GameSessionError> {
         let sessions = self.sessions.clone();
-        blocking(self.sessions.failed(), move || match &*sessions {
-            Storefronts::Steam(sessions) => match steam::Steam::account(account) {
-                Some(account) => sessions.resume_after_rosetta(&session_id, &account, decision_id),
-                None => Err(Failure::Failed(steam::Steam::INVALID_SESSION.into())),
-            },
-            Storefronts::Epic(sessions) => match epic::Epic::account(account) {
-                Some(account) => sessions.resume_after_rosetta(&session_id, &account, decision_id),
-                None => Err(Failure::Failed(epic::Epic::INVALID_SESSION.into())),
-            },
-            Storefronts::Gog(sessions) => match gog::Gog::account(account) {
-                Some(account) => sessions.resume_after_rosetta(&session_id, &account, decision_id),
-                None => Err(Failure::Failed(gog::Gog::INVALID_SESSION.into())),
-            },
+        blocking(self.sessions.failed(), move || {
+            each!(&*sessions, sessions => resume_after_rosetta(sessions, &session_id, account, decision_id))
         })
         .await
     }
@@ -455,33 +462,16 @@ impl StorefrontSessions {
     /// settles its Cloud saves. A launch still preparing is cancelled.
     pub async fn stop(&self) -> Result<(), GameSessionError> {
         let sessions = self.sessions.clone();
-        blocking(self.sessions.failed(), move || match &*sessions {
-            Storefronts::Steam(sessions) => sessions.stop(),
-            Storefronts::Epic(sessions) => sessions.stop(),
-            Storefronts::Gog(sessions) => sessions.stop(),
-        })
+        blocking(
+            self.sessions.failed(),
+            move || each!(&*sessions, sessions => sessions.stop()),
+        )
         .await
     }
 
     /// The player declined to install Rosetta: the waiting launch stops.
     pub fn decline_rosetta(&self, session_id: String, account: GameAccount, decision_id: u64) {
-        match &*self.sessions {
-            Storefronts::Steam(sessions) => {
-                if let Some(account) = steam::Steam::account(account) {
-                    sessions.decline_rosetta(&session_id, &account, decision_id);
-                }
-            }
-            Storefronts::Epic(sessions) => {
-                if let Some(account) = epic::Epic::account(account) {
-                    sessions.decline_rosetta(&session_id, &account, decision_id);
-                }
-            }
-            Storefronts::Gog(sessions) => {
-                if let Some(account) = gog::Gog::account(account) {
-                    sessions.decline_rosetta(&session_id, &account, decision_id);
-                }
-            }
-        }
+        each!(&*self.sessions, sessions => decline_rosetta(sessions, &session_id, account, decision_id))
     }
 }
 

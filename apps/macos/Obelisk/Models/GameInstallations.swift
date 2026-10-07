@@ -303,7 +303,7 @@ final class GameInstallations<Store: InstallationStorefront> {
 
     /// Whether the player may sync `game`'s Cloud saves.
     func canMaintainCloud(_ game: Store.GameID) -> Bool {
-        account != nil && gate.maintain.allows(game)
+        Store.syncsCloud && account != nil && gate.maintain.allows(game)
     }
 
     /// Identifies the operation before its first progress snapshot arrives.
@@ -491,7 +491,9 @@ extension EpicGames: InstallationStorefront {
 extension GogGames: InstallationStorefront {
     static let nativePlatform = "macos"
     /// GOG product ids are decimal numbers.
-    static func game(_ id: String) -> String? { gogProductID(id) }
+    static func game(_ id: String) -> String? {
+        !id.isEmpty && id.utf8.count <= 20 && id.utf8.allSatisfy { (48...57).contains($0) } ? id : nil
+    }
     static func name(_ game: String) -> String { game }
     static let otherGameOperation = "ui.gog.other_game_operation"
     /// GOG Cloud saves need each game's own Galaxy credentials: not yet.
@@ -530,6 +532,13 @@ final class NoInstallations<Store: InstallationStorefront>: InstallationsBackend
         throw Store.failure(Store.invalidSession)
     }
     func cloudIndicators(_ games: [Store.GameID]) async throws -> [(Store.GameID, CloudIndicator)] { [] }
+}
+
+/// The file that keeps `account`'s Installation receipts in `directory`.
+func receiptsFile(in directory: URL, storefront: String, account: String) -> URL {
+    // Account identifiers are opaque. Encode them before using them in a file name.
+    let component = account.utf8.map { String(format: "%02x", $0) }.joined()
+    return directory.appending(path: "\(storefront)-installations-\(component).json")
 }
 
 /// One account's installations in Rust, of either storefront: games cross

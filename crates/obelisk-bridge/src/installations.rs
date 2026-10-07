@@ -203,7 +203,7 @@ impl Named for steam::Steam {
                 platform,
                 language,
             }),
-            GameOffer::Epic { .. } | GameOffer::Gog { .. } => None,
+            _ => None,
         }
     }
     fn installation(receipt: steam::Receipt) -> Installation {
@@ -246,7 +246,7 @@ impl Named for epic::Epic {
                 title,
                 platform,
             }),
-            GameOffer::Steam { .. } | GameOffer::Gog { .. } => None,
+            _ => None,
         }
     }
     fn installation(receipt: epic::Receipt) -> Installation {
@@ -280,7 +280,7 @@ impl Named for gog::Gog {
                 title,
                 platform,
             }),
-            GameOffer::Steam { .. } | GameOffer::Epic { .. } => None,
+            _ => None,
         }
     }
     fn installation(receipt: gog::Receipt) -> Installation {
@@ -371,6 +371,22 @@ async fn call<T: Send + 'static>(
         .await
         .map_err(|_| GameSessionError::new("backend.steam.runtime.startFailed"))?
         .map_err(Into::into)
+}
+
+fn install<S: Named>(installations: &Installations<S>, offer: GameOffer) {
+    if let Some(offer) = S::offer(offer) {
+        installations.install(offer);
+    }
+}
+
+fn maintain_cloud<S: Named>(
+    installations: &Installations<S>,
+    game: &str,
+    installation: Option<&str>,
+) {
+    if let Some(game) = S::named(game) {
+        installations.maintain_cloud(game, installation);
+    }
 }
 
 async fn answer<S: Named>(
@@ -488,11 +504,9 @@ impl AccountInstallations {
         };
         let locations: Locations = (&locations).into();
         // Every account call waits until the credentials it rotated are saved.
-        let (persistence, client) = (session.persistence.clone(), session.client.clone());
-        let saved = Arc::new(move || persistence.wait(|| client.credentials_revision()));
         let content = epic::content::Content::new(
             session.client.clone(),
-            saved,
+            session.persistence.waiter(session.client.clone()),
             account_id.clone(),
             language,
             locations.clone(),
@@ -520,10 +534,12 @@ impl AccountInstallations {
             return Err(GameSessionError::new(gog::Gog::INVALID_SESSION));
         };
         let locations: Locations = (&locations).into();
-        let (persistence, client) = (session.persistence.clone(), session.client.clone());
-        let saved = Arc::new(move || persistence.wait(|| client.credentials_revision()));
-        let content =
-            gog::content::Content::new(session.client.clone(), saved, language, locations.clone());
+        let content = gog::content::Content::new(
+            session.client.clone(),
+            session.persistence.waiter(session.client.clone()),
+            language,
+            locations.clone(),
+        );
         let installations = account(content, sessions.clone(), user_id, receipts, &locations);
         Ok(Arc::new(Self {
             account: Account::Gog(installations),
@@ -548,23 +564,7 @@ impl AccountInstallations {
     /// platform; a Transfer of the game that stopped resumes instead. An
     /// offer of the other storefront does nothing.
     pub fn install(&self, offer: GameOffer) {
-        match &self.account {
-            Account::Steam(installations) => {
-                if let Some(offer) = <steam::Steam as Named>::offer(offer) {
-                    installations.install(offer);
-                }
-            }
-            Account::Epic(installations) => {
-                if let Some(offer) = <epic::Epic as Named>::offer(offer) {
-                    installations.install(offer);
-                }
-            }
-            Account::Gog(installations) => {
-                if let Some(offer) = <gog::Gog as Named>::offer(offer) {
-                    installations.install(offer);
-                }
-            }
-        }
+        each!(self, installations => install(installations, offer))
     }
 
     /// Updates `installation` in place; a Transfer of the game that stopped
@@ -597,23 +597,7 @@ impl AccountInstallations {
     /// Syncs the game's Cloud saves: those of `installation`, or, when
     /// `None`, those the uninstalled game's saved context names.
     pub fn maintain_cloud(&self, game: String, installation: Option<String>) {
-        match &self.account {
-            Account::Steam(installations) => {
-                if let Some(game) = <steam::Steam as Named>::named(&game) {
-                    installations.maintain_cloud(game, installation.as_deref());
-                }
-            }
-            Account::Epic(installations) => {
-                if let Some(game) = <epic::Epic as Named>::named(&game) {
-                    installations.maintain_cloud(game, installation.as_deref());
-                }
-            }
-            Account::Gog(installations) => {
-                if let Some(game) = <gog::Gog as Named>::named(&game) {
-                    installations.maintain_cloud(game, installation.as_deref());
-                }
-            }
-        }
+        each!(self, installations => maintain_cloud(installations, &game, installation.as_deref()))
     }
 
     /// Answers the Cloud question the game shows with `decision_id`, its

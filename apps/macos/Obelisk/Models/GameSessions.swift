@@ -234,6 +234,16 @@ final class GameSessions<Store: GameStorefront> {
 
     func revoked(_ account: Store.AccountID) -> Bool { revokedAccounts.contains(account) }
 
+    /// What the page of `game` tells of the Game sessions while `account` is
+    /// signed in: one recovering, its recovery's failure, or that
+    /// `otherGameRunning`.
+    func message(for game: Store.GameID?, of account: Store.AccountID?, otherGameRunning: String) -> String? {
+        if isRecovering || active?.reconnecting == true { return L10n.string(Store.recoveringSession) }
+        if let recoveryError { return recoveryError }
+        if let active, active.account != account || active.game != game { return otherGameRunning }
+        return nil
+    }
+
     typealias RosettaPrompt = RosettaLaunchPrompt<String, Store.AccountID>
 
     func rosettaPrompt(accountId: Store.AccountID) -> RosettaPrompt? {
@@ -245,6 +255,9 @@ final class GameSessions<Store: GameStorefront> {
         do {
             try await core.resumeAfterRosetta(sessionId: prompt.id, account: Store.account(prompt.accountId),
                                               decisionId: prompt.decisionId)
+        }
+        catch let GameSessionError.Failure(reason) where reason == Self.rosettaUnavailableKey {
+            throw RosettaStillUnavailable()
         }
         catch { throw Self.translated(error) }
     }
@@ -280,13 +293,9 @@ final class GameSessions<Store: GameStorefront> {
     }
 }
 
+/// The supervisor's "Rosetta still unavailable" reply to a resumed launch.
+struct RosettaStillUnavailable: Error {}
+
 extension GameSessions: RosettaSessions {
-    static func rosettaUnavailable(_ error: Error) -> Bool {
-        switch error {
-        case let SteamError.Failure(reason): reason == rosettaUnavailableKey
-        case let EpicError.Service(message): message == rosettaUnavailableKey
-        case let GogError.Service(message): message == rosettaUnavailableKey
-        default: false
-        }
-    }
+    static func rosettaUnavailable(_ error: Error) -> Bool { error is RosettaStillUnavailable }
 }

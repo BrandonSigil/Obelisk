@@ -66,11 +66,9 @@ pub fn installed_launch(
     platform: &str,
     directory: &Path,
 ) -> Result<InstalledLaunch, GogError> {
-    let native_platform = match platform {
-        MACOS => "macos",
-        WINDOWS => "windows",
-        _ => return Err(launch_error("unsupportedPlatform")),
-    };
+    if !matches!(platform, MACOS | WINDOWS) {
+        return Err(launch_error("unsupportedPlatform"));
+    }
     if !valid_product_id(product_id) {
         return Err(GogError::Protocol);
     }
@@ -101,14 +99,8 @@ pub fn installed_launch(
             .unwrap_or("")
             .to_owned(),
     };
-    let target = launch::resolve(
-        native_platform,
-        &root,
-        &path,
-        &task.arguments,
-        &working_directory,
-    )
-    .map_err(|error| launch_error(error.key_suffix()))?;
+    let target = launch::resolve(platform, &root, &path, &task.arguments, &working_directory)
+        .map_err(|error| launch_error(error.key_suffix()))?;
     Ok(InstalledLaunch {
         target,
         installation,
@@ -196,9 +188,6 @@ impl InstalledLaunch {
 
 /// `relative` inside `root`, unless it is empty or leaves it.
 fn inside(root: &Path, relative: &str) -> Option<PathBuf> {
-    if relative.is_empty() {
-        return None;
-    }
     obelisk_core::install::safe_relative_path(relative)
         .ok()
         .map(|relative| root.join(relative))

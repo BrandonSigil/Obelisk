@@ -1,7 +1,7 @@
 //! Bounded reads and the status mapping every GOG request shares.
-use std::io::Read;
+use std::{io::Read, time::Duration};
 
-use reqwest::{StatusCode, Url};
+use reqwest::{RequestBuilder, Response, StatusCode, Url};
 
 use crate::GogError;
 
@@ -64,24 +64,65 @@ pub(crate) fn inflate_json<T: serde::de::DeserializeOwned>(
     serde_json::from_slice(json).map_err(|_| GogError::Protocol)
 }
 
+/// Sends `request` and refuses any answer but a success.
+pub(crate) async fn send(request: RequestBuilder) -> Result<Response, GogError> {
+    let response = request.send().await.map_err(|_| GogError::Network)?;
+    check_status(response.status())?;
+    Ok(response)
+}
+
+/// Sends the request `request` builds, again after a lost connection, a
+/// server error or a rate limit, up to `attempts` times, each `backoff`
+/// longer apart; `None` when what it asks for does not exist.
+pub(crate) async fn send_retrying(
+    request: impl Fn() -> RequestBuilder,
+    attempts: u32,
+    backoff: Duration,
+) -> Result<Option<Response>, GogError> {
+    let mut failure = GogError::Network;
+    for attempt in 0..attempts {
+        if attempt > 0 {
+            tokio::time::sleep(backoff * attempt).await;
+        }
+        let Ok(response) = request().send().await else {
+            continue;
+        };
+        match response.status() {
+            StatusCode::NOT_FOUND => return Ok(None),
+            status if status.is_server_error() || status == StatusCode::TOO_MANY_REQUESTS => {
+                failure = status_error(status);
+            }
+            status => {
+                check_status(status)?;
+                return Ok(Some(response));
+            }
+        }
+    }
+    Err(failure)
+}
+
 pub(crate) fn check_status(status: StatusCode) -> Result<(), GogError> {
-    if status.is_success() {
-        Ok(())
-    } else if status == StatusCode::UNAUTHORIZED {
-        Err(GogError::Unauthorized)
-    } else {
-        // Response bodies never reach the player: they may echo a token.
-        Err(GogError::Service {
-            message: match status {
-                StatusCode::TOO_MANY_REQUESTS => "backend.gog.rate_limited".into(),
-                StatusCode::FORBIDDEN => "backend.gog.forbidden".into(),
-                _ => serde_json::json!({
-                    "key": "backend.gog.http",
-                    "args": [status.as_u16().to_string()]
-                })
-                .to_string(),
-            },
-        })
+    match status.is_success() {
+        true => Ok(()),
+        false => Err(status_error(status)),
+    }
+}
+
+fn status_error(status: StatusCode) -> GogError {
+    if status == StatusCode::UNAUTHORIZED {
+        return GogError::Unauthorized;
+    }
+    // Response bodies never reach the player: they may echo a token.
+    GogError::Service {
+        message: match status {
+            StatusCode::TOO_MANY_REQUESTS => "backend.gog.rate_limited".into(),
+            StatusCode::FORBIDDEN => "backend.gog.forbidden".into(),
+            _ => serde_json::json!({
+                "key": "backend.gog.http",
+                "args": [status.as_u16().to_string()]
+            })
+            .to_string(),
+        },
     }
 }
 

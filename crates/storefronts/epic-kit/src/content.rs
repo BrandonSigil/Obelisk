@@ -42,17 +42,6 @@ pub struct ContentClient {
 
 type ChunkResult = Result<Vec<u8>, EpicError>;
 
-// Dropping an async task does not stop spawn_blocking. Wake its network wait
-// and let its next disk check stop before a new attempt can acquire the lock.
-struct CancellationGuard(Option<CancelToken>);
-impl Drop for CancellationGuard {
-    fn drop(&mut self) {
-        if let Some(cancel) = &self.0 {
-            cancel.cancel();
-        }
-    }
-}
-
 impl ContentClient {
     pub fn new(client: Client) -> Self {
         Self { client }
@@ -105,14 +94,14 @@ impl ContentClient {
             results,
             prefetch: FilePrefetch::default(),
         };
-        let mut cancellation_guard = CancellationGuard(Some(cancel.clone()));
+        let cancellation_guard = cancel.cancel_on_drop();
         let (reused_bytes, ()) = tokio::join!(
             cancel.spawn_blocking(move || disk.run()),
             transfer::pump_chunks(receiver, deliveries, CHUNK_CONCURRENCY, cancel, |chunk| {
                 self.fetch_chunk(feature_level, base_urls, chunk, cancel, &reporter)
             }),
         );
-        cancellation_guard.0.take();
+        cancellation_guard.disarm();
         let reused_bytes = reused_bytes.map_err(|_| EpicError::Protocol)??;
         Ok(reporter.summary(reused_bytes))
     }
@@ -506,23 +495,7 @@ impl DiskInstall {
 /// Paradox bootstrap runs an unflagged installer beside it. Programs are then
 /// recognised by their header, a Mach-O binary or a script.
 fn is_executable(file: &ManifestFile, path: &Path) -> std::io::Result<bool> {
-    if file.flags & 4 != 0 {
-        return Ok(true);
-    }
-    let mut header = Vec::with_capacity(4);
-    File::open(path)?.take(4).read_to_end(&mut header)?;
-    Ok(is_program_header(&header))
-}
-
-fn is_program_header(header: &[u8]) -> bool {
-    const PROGRAMS: [&[u8]; 5] = [
-        &[0xcf, 0xfa, 0xed, 0xfe], // 64-bit Mach-O
-        &[0xce, 0xfa, 0xed, 0xfe], // 32-bit Mach-O
-        &[0xca, 0xfe, 0xba, 0xbe], // universal binary
-        &[0xca, 0xfe, 0xba, 0xbf], // 64-bit universal binary
-        b"#!",
-    ];
-    PROGRAMS.iter().any(|magic| header.starts_with(magic))
+    Ok(file.flags & 4 != 0 || install::starts_as_program(path)?)
 }
 
 fn manifest_key(manifest: &Manifest) -> String {

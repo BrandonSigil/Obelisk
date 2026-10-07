@@ -807,15 +807,7 @@ fn blob_u32(value: &str) -> Result<u32, EpicError> {
 }
 
 fn hex_bytes<const N: usize>(value: &str) -> Result<[u8; N], EpicError> {
-    if value.len() != N * 2 || !value.bytes().all(|byte| byte.is_ascii_hexdigit()) {
-        return Err(EpicError::Protocol);
-    }
-    let mut result = [0; N];
-    for (index, output) in result.iter_mut().enumerate() {
-        *output = u8::from_str_radix(&value[index * 2..index * 2 + 2], 16)
-            .map_err(|_| EpicError::Protocol)?;
-    }
-    Ok(result)
+    obelisk_core::install::unhex(value).ok_or(EpicError::Protocol)
 }
 
 fn hex_guid(value: &str) -> Result<ChunkGuid, EpicError> {

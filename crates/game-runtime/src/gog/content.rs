@@ -41,7 +41,7 @@ fn failed(error: impl std::fmt::Display) -> Failure {
 
 impl Network for GogClient {
     fn prepare(&self) -> BoxFuture<'_, Result<(), Failure>> {
-        Box::pin(async move { GogClient::prepare(self).await.map(|_| ()).map_err(failed) })
+        Box::pin(async move { GogClient::prepare(self).await.map_err(failed) })
     }
     fn account_id(&self) -> BoxFuture<'_, Result<String, Failure>> {
         Box::pin(async move {
@@ -133,7 +133,6 @@ impl<N: Network> Content<N> {
             helper: self.locations.helper.clone(),
             product_id: receipt.product_id.clone(),
             platform: receipt.platform.clone(),
-            title: receipt.name.clone(),
             prefix: self
                 .windows(receipt)
                 .map(|windows| windows.prefix().to_owned()),
@@ -142,7 +141,7 @@ impl<N: Network> Content<N> {
 
     /// The build's Wine prefix, when it is a Windows one.
     fn windows(&self, receipt: &Receipt) -> Option<crate::wine::Installation> {
-        super::windows::installation(
+        crate::wine::Installation::of(
             &self.locations,
             &receipt.platform,
             Path::new(&receipt.directory),

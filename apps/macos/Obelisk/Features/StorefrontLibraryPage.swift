@@ -53,11 +53,7 @@ extension LibraryStorefront {
     /// The game the whole library shows first, as its hero, so a library
     /// always has one: the last one played, else the first of the library
     /// ordered by playtime, the most played first and equal ones by name.
-    var featuredGame: Game? {
-        let sort: StorefrontLibrarySort = games.contains { lastPlayed(of: $0) != nil } ? .lastPlayed : .playtime
-        return LibraryOrdering<Game>.first(games, by: sort, title: title(of:), playtime: playtime(of:),
-                                           lastPlayed: lastPlayed(of:))
-    }
+    var featuredGame: Game? { libraryOrdering.featuredGame(of: self) }
 
     /// Launches the game's native installation first.
     func launchFromLibrary(_ game: Game) {

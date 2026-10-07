@@ -11,7 +11,16 @@ struct EpicView: View {
             } else if model.isConnected {
                 StorefrontPage { titleBar } content: { content }
             } else {
-                EpicLoginView(model: model)
+                WebSignInView(
+                    model: model,
+                    section: .epic,
+                    title: L10n.string("ui.epic.sign_in_title"),
+                    subtitle: L10n.string("ui.epic.sign_in_subtitle"),
+                    connecting: L10n.string("ui.epic.connecting"),
+                    accountSignIn: L10n.string("ui.epic.account_sign_in"),
+                    instructions: L10n.string("ui.epic.sign_in_instructions"),
+                    signInLabel: L10n.string("ui.epic.sign_in")
+                )
             }
         }
         .task { await model.start() }

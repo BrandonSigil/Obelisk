@@ -72,9 +72,6 @@ pub struct Configuration {
     pub helper: PathBuf,
     pub product_id: String,
     pub platform: String,
-    /// The game's name in the store.
-    #[serde(default)]
-    pub title: String,
     /// Set for a Windows build, which runs in Wine.
     #[serde(default)]
     pub prefix: Option<PathBuf>,
@@ -105,17 +102,12 @@ impl Configuration {
                 || p.components()
                     .any(|c| matches!(c, std::path::Component::ParentDir))
         }) || !gog_kit::client::valid_product_id(&self.product_id)
-            || !valid_account(account)
+            || !gog_kit::auth::valid_user_id(account)
         {
             return Err(Error::Unsupported);
         }
         Ok(())
     }
-}
-
-/// Galaxy user ids are decimal numbers.
-fn valid_account(account: &str) -> bool {
-    !account.is_empty() && account.len() <= 32 && account.bytes().all(|b| b.is_ascii_digit())
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -138,7 +130,7 @@ impl supervisor::Provider for Gog {
     const CANCELLED: &'static [&'static str] = &["backend.gog.cancelled"];
 
     fn valid(record: &Record<Self>) -> bool {
-        valid_account(&record.account_id)
+        gog_kit::auth::valid_user_id(&record.account_id)
             && gog_kit::client::valid_product_id(&record.store.product_id)
             && record.socket.is_absolute()
     }

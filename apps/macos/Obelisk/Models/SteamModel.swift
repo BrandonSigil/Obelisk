@@ -177,8 +177,6 @@ final class SteamModel {
     /// saved session restores.
     var showsLibrary: Bool { isConnected || (cachedAccount != nil && isRestoring) }
 
-    func syncCloud() { installations.syncCloud() }
-
     func refreshCloudIndicator() {
         guard let game = selectedGame else { return }
         cloud.refreshIndicators(for: [game.appId])

@@ -2,16 +2,6 @@
 //! prefix ran the redistributables its build manifest names.
 use super::{Configuration, Error, Result};
 use crate::wine;
-use std::path::Path;
-
-/// The Wine installation of a GOG build, when it is a Windows one.
-pub(crate) fn installation(
-    locations: &crate::Locations,
-    platform: &str,
-    install: &Path,
-) -> std::result::Result<Option<wine::Installation>, crate::Error> {
-    wine::Installation::of(locations, platform, install)
-}
 
 /// Readies a Windows build for its Game session: its prefix, the
 /// redistributables its installation names, and the folder of Wine's log.
@@ -21,7 +11,7 @@ pub fn prepare_windows(
 ) -> Result<wine::Config> {
     // The configuration may come from a saved journal: its prefix must be the
     // one of the installation it names.
-    let windows = installation(locations, &config.platform, &config.install)?
+    let windows = wine::Installation::of(locations, &config.platform, &config.install)?
         .filter(|windows| config.prefix.as_deref() == Some(windows.prefix()))
         .ok_or(Error::Unsupported)?;
     let wine = windows.runtime(

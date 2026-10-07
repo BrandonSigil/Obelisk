@@ -168,8 +168,6 @@ final class EpicModel {
         return InstallationSelection(game: game.libraryID, platform: game.preferredPlatform, offer: game.offer)
     }
 
-    func syncCloud() { installations.syncCloud() }
-
     func refreshCloudIndicator() {
         guard let game = selectedGame else { return }
         cloud.refreshIndicators(for: [game.libraryID])
@@ -185,21 +183,9 @@ final class EpicModel {
         return "\(title) · \(name)"
     }
 
-    private var selectedGameSession: EpicGameSessions.Session? {
-        guard let active = gameSessions.active, active.account == accountID,
-              active.game == selectedGame?.libraryID else { return nil }
-        return active
-    }
-
     var gameSessionMessage: String? {
-        if gameSessions.isRecovering || gameSessions.active?.reconnecting == true {
-            return L10n.string("model.epic.recoveringSession")
-        }
-        if let error = gameSessions.recoveryError { return error }
-        if gameSessions.active != nil && selectedGameSession == nil {
-            return L10n.string("model.epic.otherGameRunning")
-        }
-        return nil
+        gameSessions.message(for: selectedGame?.libraryID, of: accountID,
+                             otherGameRunning: L10n.string("model.epic.otherGameRunning"))
     }
 
     func title(of game: EpicGame) -> String { game.title }
@@ -352,7 +338,8 @@ final class EpicModel {
             guard current == generation else { return }
             rosetta.connect(accountId: credentials.accountId)
             let backend = makeInstallations(connected, credentials.accountId, launchLanguage,
-                                            gameSessions.core, receiptsFile(for: credentials.accountId))
+                                            gameSessions.core,
+                                            receiptsFile(in: directory, storefront: "epic", account: credentials.accountId))
             installations.connect(account: credentials.accountId, backend: backend, port: installationPort())
 
             await reloadGames(connected, generation: current)
@@ -567,12 +554,6 @@ final class EpicModel {
         } catch {
             // Secondary metadata must not prevent browsing the library.
         }
-    }
-
-    private func receiptsFile(for account: String) -> URL {
-        // Account identifiers are opaque. Encode them before using them in a file name.
-        let component = account.utf8.map { String(format: "%02x", $0) }.joined()
-        return directory.appending(path: "epic-installations-\(component).json")
     }
 
     /// Epic's part of the installation actions.

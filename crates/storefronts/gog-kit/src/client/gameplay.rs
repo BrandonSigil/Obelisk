@@ -11,7 +11,7 @@ use super::{Client, valid_product_id};
 use crate::{
     GogError,
     auth::Api,
-    http::{bounded_json, check_status, safe_https_url, unix_seconds},
+    http::{bounded_json, check_status, safe_https_url, send_retrying, unix_seconds},
     library::endpoint,
 };
 
@@ -98,13 +98,14 @@ impl Client {
         }
         let user_id = self.credentials().await?.user_id;
         let url = endpoint(
-            &self.api.gameplay,
+            &self.tokens.api.gameplay,
             &["clients", product_id, "users", &user_id, "achievements"],
         )?;
         self.with_access_token(|token| {
             let url = url.clone();
             async move {
                 let response = self
+                    .tokens
                     .api
                     .http
                     .get(url)
@@ -136,7 +137,7 @@ impl Client {
             let requests: Vec<_> = product_ids
                 .iter()
                 .filter(|id| valid_product_id(id))
-                .map(|id| playtime(&self.api, &token, user_id, id))
+                .map(|id| playtime(&self.tokens.api, &token, user_id, id))
                 .collect();
             let played: Vec<Option<(String, u64)>> = stream::iter(requests)
                 .buffer_unordered(PLAYTIMES)
@@ -165,35 +166,12 @@ async fn playtime(
         &api.gameplay,
         &["games", product_id, "users", user_id, "sessions"],
     )?;
-    let mut failure = GogError::Network;
-    for attempt in 0..2 {
-        if attempt > 0 {
-            tokio::time::sleep(Duration::from_millis(500)).await;
-        }
-        let Ok(response) = api
-            .http
-            .get(url.clone())
-            .bearer_auth(access_token)
-            .send()
-            .await
-        else {
-            continue;
-        };
-        match response.status() {
-            StatusCode::NOT_FOUND => return Ok(None),
-            status if status.is_server_error() || status == StatusCode::TOO_MANY_REQUESTS => {
-                failure = check_status(status).unwrap_err();
-            }
-            status => {
-                check_status(status)?;
-                let sessions: Sessions = bounded_json(response, 64 * 1024).await?;
-                return Ok(
-                    (sessions.time_sum > 0).then(|| (product_id.to_owned(), sessions.time_sum))
-                );
-            }
-        }
-    }
-    Err(failure)
+    let request = || api.http.get(url.clone()).bearer_auth(access_token);
+    let Some(response) = send_retrying(request, 2, Duration::from_millis(500)).await? else {
+        return Ok(None);
+    };
+    let sessions: Sessions = bounded_json(response, 64 * 1024).await?;
+    Ok((sessions.time_sum > 0).then(|| (product_id.to_owned(), sessions.time_sum)))
 }
 
 #[cfg(test)]

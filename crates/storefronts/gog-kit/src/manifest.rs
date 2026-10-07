@@ -2,7 +2,7 @@
 //! its depots and redistributables, the redistributables' repository, and each
 //! depot's manifest, which names its files and their chunks. They arrive
 //! zlib-compressed from the CDN.
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet, hash_map::Entry};
 
 use obelisk_core::install::safe_relative_path;
 use serde::{Deserialize, Serialize};
@@ -293,6 +293,8 @@ pub(crate) struct Installed {
     pub files: Vec<InstalledFile>,
     pub directories: Vec<String>,
     pub links: Vec<Link>,
+    /// Each file's place in `files`, by its lowercased path.
+    positions: HashMap<String, usize>,
 }
 
 #[derive(Clone, Debug)]
@@ -326,13 +328,18 @@ impl Installed {
                         true => format!("{SUPPORT_DIRECTORY}/{source}/{}", normalized(&file.path)?),
                         false => place(&file.path)?,
                     };
-                    let key = path.to_lowercase();
-                    self.files.retain(|kept| kept.path.to_lowercase() != key);
-                    self.files.push(InstalledFile {
+                    let installed = InstalledFile {
                         path,
                         file,
                         source: source.to_owned(),
-                    });
+                    };
+                    match self.positions.entry(installed.path.to_lowercase()) {
+                        Entry::Occupied(kept) => self.files[*kept.get()] = installed,
+                        Entry::Vacant(place) => {
+                            place.insert(self.files.len());
+                            self.files.push(installed);
+                        }
+                    }
                 }
                 Item::DepotDirectory(directory) => self.directories.push(place(&directory.path)?),
                 Item::DepotLink(link) => self.links.push(Link {

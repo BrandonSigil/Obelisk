@@ -56,6 +56,19 @@ pub fn hex(bytes: &[u8]) -> String {
     output
 }
 
+/// The `N` bytes `value` spells in hex, either case; `None` for any other
+/// length or a character that is not a hex digit.
+pub fn unhex<const N: usize>(value: &str) -> Option<[u8; N]> {
+    if value.len() != N * 2 || !value.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return None;
+    }
+    let mut bytes = [0; N];
+    for (index, byte) in bytes.iter_mut().enumerate() {
+        *byte = u8::from_str_radix(&value[index * 2..index * 2 + 2], 16).ok()?;
+    }
+    Some(bytes)
+}
+
 /// Normalizes a manifest file name into a relative path made only of plain
 /// components. Absolute paths, drive letters, `.`/`..`, empty segments, NUL and
 /// Obelisk's own reserved names are rejected before touching the filesystem.
@@ -255,7 +268,9 @@ pub struct Md5Part {
 }
 
 /// Reads a file through its digest in 64 KiB reads, reporting bytes read in
-/// bounded batches. A missing file or a size mismatch is simply `false`.
+/// bounded batches without treating them as validated content. A missing file
+/// or a size mismatch is simply `false`; cancellation is checked before every
+/// read.
 pub(crate) fn verify_file_with_progress(
     path: &Path,
     size: u64,
@@ -265,29 +280,32 @@ pub(crate) fn verify_file_with_progress(
 ) -> Result<bool, InstallError> {
     match digest {
         FileDigest::Sha1(expected) => {
-            verify_sha1_file_with_progress(path, size, expected, cancel, progress)
+            verify_parts::<Sha1>(path, size, [(size, expected)], cancel, progress)
         }
         FileDigest::Md5Parts(parts) => {
-            verify_md5_parts_with_progress(path, size, parts, cancel, progress)
+            let parts = parts.iter().map(|part| (part.size, &part.md5[..]));
+            verify_parts::<Md5>(path, size, parts, cancel, progress)
         }
     }
 }
 
-/// Checks a file part by part through MD5, stopping at the first part that
-/// differs.
-pub fn verify_md5_parts(
+/// Streams a file through SHA-1 in 64 KiB reads. A missing file or a size
+/// mismatch is simply `false`; cancellation is checked between reads.
+pub fn verify_sha1_file(
     path: &Path,
     size: u64,
-    parts: &[Md5Part],
+    expected: &[u8],
     cancel: &CancelToken,
 ) -> Result<bool, InstallError> {
-    verify_md5_parts_with_progress(path, size, parts, cancel, |_| {})
+    verify_file_with_progress(path, size, FileDigest::Sha1(expected), cancel, |_| {})
 }
 
-fn verify_md5_parts_with_progress(
+/// Hashes each consecutive part of the file on its own, stopping at the first
+/// part that differs.
+fn verify_parts<'a, D: Digest>(
     path: &Path,
     size: u64,
-    parts: &[Md5Part],
+    parts: impl IntoIterator<Item = (u64, &'a [u8])> + Clone,
     cancel: &CancelToken,
     mut progress: impl FnMut(u64),
 ) -> Result<bool, InstallError> {
@@ -296,14 +314,16 @@ fn verify_md5_parts_with_progress(
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(false),
         Err(error) => return Err(error.into()),
     };
-    if file.metadata()?.len() != size || parts.iter().map(|part| part.size).sum::<u64>() != size {
+    let parts_size: u64 = parts.clone().into_iter().map(|(size, _)| size).sum();
+    if file.metadata()?.len() != size || parts_size != size {
         return Ok(false);
     }
     let mut buffer = [0_u8; 64 * 1024];
     let mut pending = 0_u64;
-    for part in parts {
-        let mut hasher = Md5::new();
-        let mut remaining = part.size;
+    let mut matches = true;
+    for (part_size, expected) in parts {
+        let mut hasher = D::new();
+        let mut remaining = part_size;
         while remaining > 0 {
             cancel.check()?;
             let count = buffer
@@ -318,67 +338,31 @@ fn verify_md5_parts_with_progress(
                 pending = 0;
             }
         }
-        if hasher.finalize()[..] != part.md5 {
-            if pending != 0 {
-                progress(pending);
-            }
-            return Ok(false);
-        }
-    }
-    if pending != 0 {
-        progress(pending);
-    }
-    Ok(true)
-}
-
-/// Streams a file through SHA-1 in 64 KiB reads. A missing file or a size
-/// mismatch is simply `false`; cancellation is checked between reads.
-pub fn verify_sha1_file(
-    path: &Path,
-    size: u64,
-    expected: &[u8],
-    cancel: &CancelToken,
-) -> Result<bool, InstallError> {
-    verify_sha1_file_with_progress(path, size, expected, cancel, |_| {})
-}
-
-/// Reports bytes read in bounded batches, without treating them as validated
-/// content. Cancellation is still checked before every 64 KiB read.
-pub(crate) fn verify_sha1_file_with_progress(
-    path: &Path,
-    size: u64,
-    expected: &[u8],
-    cancel: &CancelToken,
-    mut progress: impl FnMut(u64),
-) -> Result<bool, InstallError> {
-    let mut file = match File::open(path) {
-        Ok(file) => file,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(false),
-        Err(error) => return Err(error.into()),
-    };
-    if file.metadata()?.len() != size {
-        return Ok(false);
-    }
-    let mut hasher = Sha1::new();
-    let mut buffer = [0_u8; 64 * 1024];
-    let mut pending = 0_u64;
-    loop {
-        cancel.check()?;
-        let count = file.read(&mut buffer)?;
-        if count == 0 {
+        if hasher.finalize()[..] != *expected {
+            matches = false;
             break;
         }
-        hasher.update(&buffer[..count]);
-        pending += count as u64;
-        if pending >= 1024 * 1024 {
-            progress(pending);
-            pending = 0;
-        }
     }
     if pending != 0 {
         progress(pending);
     }
-    Ok(hasher.finalize()[..] == *expected)
+    Ok(matches)
+}
+
+/// Whether the file starts as a program does: a Mach-O binary or a script.
+/// Some manifests flag only a build's launch executable, not the helpers it
+/// starts.
+pub fn starts_as_program(path: &Path) -> io::Result<bool> {
+    const PROGRAMS: [&[u8]; 5] = [
+        &[0xcf, 0xfa, 0xed, 0xfe], // 64-bit Mach-O
+        &[0xce, 0xfa, 0xed, 0xfe], // 32-bit Mach-O
+        &[0xca, 0xfe, 0xba, 0xbe], // universal binary
+        &[0xca, 0xfe, 0xba, 0xbf], // 64-bit universal binary
+        b"#!",
+    ];
+    let mut header = Vec::with_capacity(4);
+    File::open(path)?.take(4).read_to_end(&mut header)?;
+    Ok(PROGRAMS.iter().any(|magic| header.starts_with(magic)))
 }
 
 /// Installed files are user-readable; only manifest-declared executables get

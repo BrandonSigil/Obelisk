@@ -37,9 +37,7 @@ pub(crate) fn content_platform(platform: &str) -> Result<&'static str, GogError>
 
 pub struct Client {
     downloads: download::Downloads,
-    api: Api,
-    session: Arc<Mutex<Option<Session>>>,
-    credential_events: watch::Sender<CredentialRevision>,
+    tokens: TokenSource,
     avatar_url: Option<String>,
 }
 
@@ -66,13 +64,15 @@ impl Client {
         }
         Ok(Self {
             downloads: download::Downloads::default(),
-            api,
-            session: Arc::new(Mutex::new(Some(session))),
-            credential_events: watch::channel(CredentialRevision {
-                revision: 1,
-                stopped: false,
-            })
-            .0,
+            tokens: TokenSource {
+                api: Arc::new(api),
+                session: Arc::new(Mutex::new(Some(session))),
+                credential_events: watch::channel(CredentialRevision {
+                    revision: 1,
+                    stopped: false,
+                })
+                .0,
+            },
             avatar_url: profile.avatar_url,
         })
     }
@@ -83,7 +83,8 @@ impl Client {
     }
 
     pub async fn credentials(&self) -> Result<Credentials, GogError> {
-        self.session
+        self.tokens
+            .session
             .lock()
             .await
             .as_ref()
@@ -93,9 +94,8 @@ impl Client {
 
     /// Refresh before a long read so the caller can persist a rotated token
     /// before the read starts.
-    pub async fn prepare(&self) -> Result<Credentials, GogError> {
-        self.access_token(None).await?;
-        self.credentials().await
+    pub async fn prepare(&self) -> Result<(), GogError> {
+        self.tokens.access_token(None).await.map(drop)
     }
 
     /// Every game the account owns, with its artwork and platforms.
@@ -103,7 +103,7 @@ impl Client {
         let user_id = self.credentials().await?.user_id;
         let user_id = user_id.as_str();
         self.with_access_token(|token| async move {
-            crate::library::games(&self.api, &token, user_id).await
+            crate::library::games(&self.tokens.api, &token, user_id).await
         })
         .await
     }
@@ -139,11 +139,11 @@ impl Client {
 
     /// The revision of the credentials now, which grows with each rotation.
     pub fn credentials_revision(&self) -> u64 {
-        self.credential_events.borrow().revision
+        self.tokens.credential_events.borrow().revision
     }
 
     pub async fn next_credentials_revision(&self, after_revision: u64) -> Option<u64> {
-        obelisk_core::watch::next_matching(self.credential_events.subscribe(), |state| {
+        obelisk_core::watch::next_matching(self.tokens.credential_events.subscribe(), |state| {
             state.stopped || state.revision != after_revision
         })
         .await
@@ -155,7 +155,8 @@ impl Client {
     /// Synchronous cancellation crosses UniFFI even when a Swift task is
     /// suspended. This affects no running content transfer.
     pub fn shutdown_observers(&self) {
-        self.credential_events
+        self.tokens
+            .credential_events
             .send_modify(|state| state.stopped = true);
     }
 
@@ -164,26 +165,12 @@ impl Client {
     pub async fn disconnect(&self) -> Result<(), GogError> {
         self.shutdown_observers();
         self.cancel_download();
-        self.session.lock().await.take();
+        self.tokens.session.lock().await.take();
         Ok(())
     }
 
-    async fn access_token(&self, rejected: Option<&str>) -> Result<String, GogError> {
-        self.tokens().access_token(rejected).await
-    }
-
-    fn tokens(&self) -> TokenSource {
-        TokenSource {
-            api: self.api.clone(),
-            session: self.session.clone(),
-            credential_events: self.credential_events.clone(),
-        }
-    }
-
-    /// Runs `operation` with a current access token. When GOG rejects that
-    /// token, it is refreshed once and the operation runs again. A result
-    /// computed for a session the account discarded meanwhile is never
-    /// returned.
+    /// As [`TokenSource::with_access_token`], but a result computed for a
+    /// session the account discarded meanwhile is never returned.
     pub(crate) async fn with_access_token<T, Fut>(
         &self,
         operation: impl Fn(String) -> Fut,
@@ -191,15 +178,8 @@ impl Client {
     where
         Fut: Future<Output = Result<T, GogError>>,
     {
-        let token = self.access_token(None).await?;
-        let result = match operation(token.clone()).await {
-            Err(GogError::Unauthorized) => {
-                let token = self.access_token(Some(&token)).await?;
-                operation(token).await
-            }
-            result => result,
-        };
-        if self.session.lock().await.is_none() {
+        let result = self.tokens.with_access_token(operation).await;
+        if self.tokens.session.lock().await.is_none() {
             return Err(GogError::Unauthorized);
         }
         result
@@ -216,12 +196,28 @@ struct CredentialRevision {
 /// one call, such as a Transfer's secure links.
 #[derive(Clone)]
 pub(crate) struct TokenSource {
-    api: Api,
+    api: Arc<Api>,
     session: Arc<Mutex<Option<Session>>>,
     credential_events: watch::Sender<CredentialRevision>,
 }
 
 impl TokenSource {
+    /// Runs `operation` with a current access token. When GOG rejects that
+    /// token, it is refreshed once and the operation runs again.
+    pub(crate) async fn with_access_token<T, Fut>(
+        &self,
+        operation: impl Fn(String) -> Fut,
+    ) -> Result<T, GogError>
+    where
+        Fut: Future<Output = Result<T, GogError>>,
+    {
+        let token = self.access_token(None).await?;
+        match operation(token.clone()).await {
+            Err(GogError::Unauthorized) => operation(self.access_token(Some(&token)).await?).await,
+            result => result,
+        }
+    }
+
     /// A current access token, renewed when it lapsed or GOG `rejected` it.
     pub(crate) async fn access_token(&self, rejected: Option<&str>) -> Result<String, GogError> {
         // The renewing task owns the refresh, not the caller awaiting it: a

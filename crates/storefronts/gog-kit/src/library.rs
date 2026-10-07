@@ -4,7 +4,7 @@
 use std::{collections::HashSet, time::Duration};
 
 use futures_util::{StreamExt, TryStreamExt, stream};
-use reqwest::{StatusCode, Url};
+use reqwest::Url;
 use serde::Deserialize;
 use serde_json::Value;
 
@@ -12,7 +12,7 @@ use crate::{
     GogError,
     auth::Api,
     client::valid_product_id,
-    http::{bounded_json, check_status, safe_https_url},
+    http::{bounded_json, safe_https_url, send_retrying},
 };
 
 const MAX_LIBRARY_PAGES: usize = 1000;
@@ -135,15 +135,20 @@ pub(crate) async fn games(
     user_id: &str,
 ) -> Result<Vec<Game>, GogError> {
     let releases = releases(api, access_token, user_id).await?;
-    let descriptions: Vec<_> = releases
-        .into_iter()
-        .map(|(release, record)| describe(api, access_token, release, record))
-        .collect();
-    let described: Vec<Option<Game>> = stream::iter(descriptions)
-        .buffered(DESCRIPTIONS)
+    let descriptions =
+        releases
+            .into_iter()
+            .enumerate()
+            .map(|(index, (release, record))| async move {
+                Ok::<_, GogError>((index, describe(api, access_token, release, record).await?))
+            });
+    // A slow product never holds back the others' requests.
+    let mut described: Vec<(usize, Option<Game>)> = stream::iter(descriptions)
+        .buffer_unordered(DESCRIPTIONS)
         .try_collect()
         .await?;
-    Ok(described.into_iter().flatten().collect())
+    described.sort_unstable_by_key(|(index, _)| *index);
+    Ok(described.into_iter().filter_map(|(_, game)| game).collect())
 }
 
 /// Every GOG product of the account's Galaxy library, once each, with its
@@ -194,7 +199,6 @@ async fn describe(
     record: Value,
 ) -> Result<Option<Game>, GogError> {
     let id = &release.external_id;
-    let metadata = |catalog: &Value| serde_json::json!({ "release": record, "catalog": catalog });
     if let Some(catalog) = gamesdb(api, access_token, &release).await? {
         let kind = catalog["type"].as_str().unwrap_or_default();
         let visible = catalog["game"]["visible_in_library"].as_bool() != Some(false);
@@ -218,7 +222,7 @@ async fn describe(
             windows: systems.contains(&"windows"),
             macos: systems.contains(&"osx"),
             info: GameInfo::of_release(&catalog),
-            metadata: metadata(&catalog),
+            metadata: metadata(record, catalog),
         }));
     }
     // gamesdb does not know this product: the store tells what it is.
@@ -242,8 +246,17 @@ async fn describe(
                 .and_then(crate::http::unix_seconds),
             ..GameInfo::default()
         },
-        metadata: metadata(&product),
+        metadata: metadata(record, product),
     }))
+}
+
+/// What the library cache keeps of a game beyond what it shows: its Galaxy
+/// record and its catalog data.
+fn metadata(record: Value, catalog: Value) -> Value {
+    Value::Object(serde_json::Map::from_iter([
+        ("release".into(), record),
+        ("catalog".into(), catalog),
+    ]))
 }
 
 /// The product's gamesdb release, `None` when gamesdb does not know it. A
@@ -262,31 +275,17 @@ async fn gamesdb(
             &release.external_id,
         ],
     )?;
-    let mut failure = GogError::Network;
-    for attempt in 0..3 {
-        if attempt > 0 {
-            tokio::time::sleep(Duration::from_millis(500 * attempt)).await;
+    let request = || {
+        let request = api.http.get(url.clone()).bearer_auth(access_token);
+        match &release.certificate {
+            Some(certificate) => request.header("X-GOG-Library-Cert", certificate),
+            None => request,
         }
-        let mut request = api.http.get(url.clone()).bearer_auth(access_token);
-        if let Some(certificate) = &release.certificate {
-            request = request.header("X-GOG-Library-Cert", certificate);
-        }
-        let response = match request.send().await {
-            Ok(response) => response,
-            Err(_) => continue,
-        };
-        match response.status() {
-            StatusCode::NOT_FOUND => return Ok(None),
-            status if status.is_server_error() || status == StatusCode::TOO_MANY_REQUESTS => {
-                failure = check_status(status).unwrap_err();
-            }
-            status => {
-                check_status(status)?;
-                return bounded_json(response, 4 * 1024 * 1024).await.map(Some);
-            }
-        }
+    };
+    match send_retrying(request, 3, Duration::from_millis(500)).await? {
+        Some(response) => bounded_json(response, 4 * 1024 * 1024).await.map(Some),
+        None => Ok(None),
     }
-    Err(failure)
 }
 
 /// The store's product, which describes every product, DLC included.

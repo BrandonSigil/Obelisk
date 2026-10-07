@@ -1,13 +1,40 @@
 import SwiftUI
 
-struct EpicLoginView: View {
-    @Bindable var model: EpicModel
+/// What a storefront that signs in through its own web page gives its
+/// sign-in page.
+@MainActor protocol WebSignInModel: AnyObject, Observable {
+    var isRestoring: Bool { get }
+    var isConnecting: Bool { get }
+    var isSigningOut: Bool { get }
+    var canRetryRestore: Bool { get }
+    var storageWarning: String? { get set }
+    var rememberSession: Bool { get set }
+    func signIn()
+    func cancelSignIn()
+    func retryRestore()
+}
+
+extension EpicModel: WebSignInModel {}
+extension GogModel: WebSignInModel {}
+
+/// The sign-in page of a storefront that signs in through its own web page,
+/// in that storefront's words.
+struct WebSignInView<Model: WebSignInModel>: View {
+    @Bindable var model: Model
+    let section: LibrarySection
+    let title: String
+    let subtitle: String
+    /// Shown while the signed-in account connects.
+    let connecting: String
+    let accountSignIn: String
+    let instructions: String
+    let signInLabel: String
 
     var body: some View {
         StorefrontSignInPage(
-            section: .epic,
-            title: L10n.string("ui.epic.sign_in_title"),
-            subtitle: L10n.string("ui.epic.sign_in_subtitle"),
+            section: section,
+            title: title,
+            subtitle: subtitle,
             warning: $model.storageWarning
         ) {
             if model.isRestoring || model.isConnecting || model.isSigningOut {
@@ -21,22 +48,22 @@ struct EpicLoginView: View {
     private var progress: some View {
         let title = model.isSigningOut ? L10n.string("ui.account.signing_out")
             : model.isRestoring ? L10n.string("ui.account.restoring_session")
-            : L10n.string("ui.epic.connecting")
+            : connecting
         return SignInProgress(title: title, cancel: model.isSigningOut ? nil : { model.cancelSignIn() })
     }
 
     private var signIn: some View {
         VStack(alignment: .leading, spacing: 18) {
-            Text(L10n.string("ui.epic.account_sign_in"))
+            Text(accountSignIn)
                 .font(.system(size: 16, weight: .semibold))
-            Text(L10n.string("ui.epic.sign_in_instructions"))
+            Text(instructions)
                 .font(.system(size: 13))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             SignInRememberToggle(isOn: $model.rememberSession)
             VStack(spacing: 10) {
                 Button { model.signIn() } label: {
-                    Label(L10n.string("ui.epic.sign_in"), systemImage: "arrow.up.forward.app")
+                    Label(signInLabel, systemImage: "arrow.up.forward.app")
                         .font(.system(size: 13, weight: .semibold))
                         .frame(maxWidth: .infinity)
                 }

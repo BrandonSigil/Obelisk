@@ -300,8 +300,8 @@ async fn endpoints_put_fallbacks_last_and_renew_once_stale() {
         .endpoints("1", false)
         .await
         .unwrap()
-        .into_iter()
-        .map(|endpoint| endpoint.url)
+        .iter()
+        .map(|endpoint| endpoint.url.clone())
         .collect();
     assert_eq!(order, ["https://high", "https://low", "https://fallback"]);
     links.endpoints("1", false).await.unwrap();

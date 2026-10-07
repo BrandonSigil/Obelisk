@@ -81,6 +81,14 @@ impl CancelToken {
         })
     }
 
+    /// Cancels the token when the guard drops before it is disarmed. Dropping
+    /// an async task does not stop its `spawn_blocking` work: the guard wakes
+    /// its network wait and lets its next disk check stop before a new
+    /// attempt can acquire the lock.
+    pub fn cancel_on_drop(&self) -> CancelOnDrop {
+        CancelOnDrop(Some(self.clone()))
+    }
+
     fn workers_finished(&self) -> bool {
         self.0.workers.load(Ordering::Acquire) == 0
     }
@@ -104,6 +112,24 @@ impl Drop for BlockingWorker {
     fn drop(&mut self) {
         if self.0.workers.fetch_sub(1, Ordering::AcqRel) == 1 {
             self.0.workers_finished.notify_waiters();
+        }
+    }
+}
+
+/// Returned by [`CancelToken::cancel_on_drop`].
+pub struct CancelOnDrop(Option<CancelToken>);
+
+impl CancelOnDrop {
+    /// The work finished: dropping the guard cancels nothing.
+    pub fn disarm(mut self) {
+        self.0 = None;
+    }
+}
+
+impl Drop for CancelOnDrop {
+    fn drop(&mut self) {
+        if let Some(cancel) = &self.0 {
+            cancel.cancel();
         }
     }
 }

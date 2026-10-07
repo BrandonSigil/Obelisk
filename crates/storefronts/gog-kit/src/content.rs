@@ -9,7 +9,7 @@
 use std::{
     collections::{HashMap, HashSet},
     fs::{self, File, OpenOptions},
-    io::{Read, Seek, SeekFrom, Write},
+    io::{self, Read, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
     sync::Arc,
     time::{Duration, SystemTime, UNIX_EPOCH},
@@ -19,7 +19,7 @@ use md5::{Digest, Md5};
 use obelisk_core::{
     install::{
         self, FileDigest, Md5Part, PARTIAL_DIRECTORY, apply_permissions, checked_file_path,
-        ensure_directory, hex, safe_relative_path,
+        ensure_directory, hex, safe_relative_path, unhex,
     },
     transfer::{self, CancelToken, DownloadPhase, DownloadProgress, DownloadSummary, Reporter},
     verification::{VerificationError, VerificationFile},
@@ -30,7 +30,7 @@ use tokio::sync::{Mutex, mpsc};
 
 use crate::{
     GogError,
-    manifest::{Chunk, Installed, InstalledFile, MAX_CHUNK_BYTES, galaxy_path, relative_target},
+    manifest::{Chunk, Installed, InstalledFile, galaxy_path, relative_target},
 };
 
 const CHUNK_CONCURRENCY: usize = 12;
@@ -122,7 +122,7 @@ pub(crate) type Renew = Arc<
 
 /// Each product's CDN endpoints, renewed once they lapse.
 pub(crate) struct SecureLinks {
-    links: Mutex<HashMap<String, Vec<Endpoint>>>,
+    links: Mutex<HashMap<String, Arc<[Endpoint]>>>,
     renew: Renew,
 }
 
@@ -135,11 +135,11 @@ impl SecureLinks {
     }
 
     /// The product's endpoints, fetched again when they lapsed or `stale`.
-    async fn endpoints(&self, product_id: &str, stale: bool) -> Result<Vec<Endpoint>, GogError> {
+    async fn endpoints(&self, product_id: &str, stale: bool) -> Result<Arc<[Endpoint]>, GogError> {
         let mut links = self.links.lock().await;
         match links.get(product_id) {
             Some(endpoints) if !stale && !endpoints.iter().any(Endpoint::expired) => {
-                Ok(endpoints.clone())
+                Ok(Arc::clone(endpoints))
             }
             _ => {
                 let mut endpoints = (self.renew)(product_id.to_owned()).await?;
@@ -148,7 +148,8 @@ impl SecureLinks {
                 }
                 // Fallbacks last, then the highest priority first.
                 endpoints.sort_by_key(|endpoint| (endpoint.fallback_only, -endpoint.priority));
-                links.insert(product_id.to_owned(), endpoints.clone());
+                let endpoints: Arc<[Endpoint]> = endpoints.into();
+                links.insert(product_id.to_owned(), Arc::clone(&endpoints));
                 Ok(endpoints)
             }
         }
@@ -165,18 +166,8 @@ struct Request {
 
 type ChunkResult = Result<Vec<u8>, GogError>;
 
-// Dropping an async task does not stop spawn_blocking. Wake its network wait
-// and let its next disk check stop before a new attempt can acquire the lock.
-struct CancellationGuard(Option<CancelToken>);
-impl Drop for CancellationGuard {
-    fn drop(&mut self) {
-        if let Some(cancel) = &self.0 {
-            cancel.cancel();
-        }
-    }
-}
-
-/// Installs `installed` into `destination` and returns what the Transfer did.
+/// Installs `installed`, already validated, into `destination` and returns
+/// what the Transfer did.
 pub(crate) async fn download(
     http: reqwest::Client,
     links: Arc<SecureLinks>,
@@ -187,7 +178,6 @@ pub(crate) async fn download(
     progress: impl Fn(DownloadProgress) + Send + Sync + 'static,
 ) -> Result<DownloadSummary, GogError> {
     cancel.check()?;
-    installed.validate()?;
     let reporter = Reporter::new(
         DownloadProgress {
             phase: DownloadPhase::Verifying,
@@ -210,14 +200,14 @@ pub(crate) async fn download(
         planned: Default::default(),
         next_file: 0,
     };
-    let mut cancellation_guard = CancellationGuard(Some(cancel.clone()));
+    let cancellation_guard = cancel.cancel_on_drop();
     let (reused_bytes, ()) = tokio::join!(
         cancel.spawn_blocking(move || disk.run()),
         transfer::pump_chunks(receiver, deliveries, CHUNK_CONCURRENCY, cancel, |request| {
             fetch_chunk(&http, &links, request, cancel, &reporter)
         }),
     );
-    cancellation_guard.0.take();
+    cancellation_guard.disarm();
     let reused_bytes = reused_bytes.map_err(|_| GogError::Protocol)??;
     Ok(reporter.summary(reused_bytes))
 }
@@ -236,7 +226,7 @@ async fn fetch_chunk(
         cancel.check()?;
         let endpoints = links.endpoints(&request.source, stale).await?;
         stale = false;
-        for endpoint in &endpoints {
+        for endpoint in endpoints.iter() {
             let url = endpoint.chunk_url(&path)?;
             reporter.update(|status| status.phase = DownloadPhase::Downloading);
             match fetch(http, url, request.chunk.compressed_size, cancel, reporter).await {
@@ -316,9 +306,7 @@ async fn fetch(
 
 /// A chunk's zlib stream, checked before and after it inflates.
 pub(crate) fn decode_chunk(bytes: &[u8], chunk: &Chunk) -> ChunkResult {
-    if bytes.len() as u64 != chunk.compressed_size
-        || hex(&Md5::digest(bytes)) != chunk.compressed_md5.to_ascii_lowercase()
-    {
+    if bytes.len() as u64 != chunk.compressed_size || !md5_is(bytes, &chunk.compressed_md5) {
         return Err(GogError::Integrity);
     }
     let mut decoder = flate2::read::ZlibDecoder::new(bytes);
@@ -328,9 +316,7 @@ pub(crate) fn decode_chunk(bytes: &[u8], chunk: &Chunk) -> ChunkResult {
         .take(chunk.size + 1)
         .read_to_end(&mut output)
         .map_err(|_| GogError::Integrity)?;
-    if output.len() as u64 != chunk.size
-        || hex(&Md5::digest(&output)) != chunk.md5.to_ascii_lowercase()
-    {
+    if output.len() as u64 != chunk.size || !md5_is(&output, &chunk.md5) {
         return Err(GogError::Integrity);
     }
     Ok(output)
@@ -364,18 +350,8 @@ impl From<VerificationError> for GogError {
     }
 }
 
-fn md5_bytes(value: &str) -> Result<[u8; 16], GogError> {
-    let mut bytes = [0; 16];
-    for (index, byte) in bytes.iter_mut().enumerate() {
-        *byte = u8::from_str_radix(
-            value
-                .get(index * 2..index * 2 + 2)
-                .ok_or(GogError::Protocol)?,
-            16,
-        )
-        .map_err(|_| GogError::Protocol)?;
-    }
-    Ok(bytes)
+fn md5_is(bytes: &[u8], expected: &str) -> bool {
+    unhex::<16>(expected).is_some_and(|expected| Md5::digest(bytes)[..] == expected)
 }
 
 fn parts(chunks: &[Chunk]) -> Result<Vec<Md5Part>, GogError> {
@@ -384,7 +360,7 @@ fn parts(chunks: &[Chunk]) -> Result<Vec<Md5Part>, GogError> {
         .map(|chunk| {
             Ok(Md5Part {
                 size: chunk.size,
-                md5: md5_bytes(&chunk.md5)?,
+                md5: unhex(&chunk.md5).ok_or(GogError::Protocol)?,
             })
         })
         .collect()
@@ -506,7 +482,7 @@ impl DiskInstall {
                 self.cancel.check()?;
                 let reused = copies
                     .iter()
-                    .find(|copy| holds(copy, offset, chunk).unwrap_or(false))
+                    .find(|copy| copy_chunk(copy, offset, chunk, &mut io::sink()).unwrap_or(false))
                     .cloned();
                 sources.push(match reused {
                     Some(copy) => Source::Reused(copy),
@@ -548,18 +524,19 @@ impl DiskInstall {
         let mut offset = 0;
         for (chunk, source) in file.installed.file.chunks.iter().zip(&plan.sources) {
             self.cancel.check()?;
-            let bytes = match source {
+            match source {
                 Source::Download => {
                     self.reporter
                         .update(|status| status.phase = DownloadPhase::Downloading);
-                    self.results.blocking_recv().ok_or(GogError::Protocol)??
+                    output.write_all(&self.results.blocking_recv().ok_or(GogError::Protocol)??)?;
                 }
                 Source::Reused(copy) => {
                     reused_bytes += chunk.size;
-                    read_checked(copy, offset, chunk)?.ok_or(GogError::Integrity)?
+                    if !copy_chunk(copy, offset, chunk, &mut output)? {
+                        return Err(GogError::Integrity);
+                    }
                 }
-            };
-            output.write_all(&bytes)?;
+            }
             offset += chunk.size;
             // A partial copy that lasts across a cancellation keeps what was
             // written: the next attempt reuses it.
@@ -583,28 +560,37 @@ fn partial_name(path: &str) -> String {
     format!("{}.part", hex(&Md5::digest(path.to_lowercase().as_bytes())))
 }
 
-/// Whether `copy` holds `chunk` at `offset`.
-fn holds(copy: &Path, offset: u64, chunk: &Chunk) -> Result<bool, GogError> {
-    Ok(read_checked(copy, offset, chunk)?.is_some())
-}
-
-/// The chunk at `offset` in `copy`, when its MD5 matches.
-fn read_checked(copy: &Path, offset: u64, chunk: &Chunk) -> Result<Option<Vec<u8>>, GogError> {
-    if chunk.size > MAX_CHUNK_BYTES {
-        return Err(GogError::Protocol);
-    }
+/// Streams the chunk at `offset` in `copy` into `output` in 64 KiB reads;
+/// `false` when `copy` is too short to hold it or its MD5 differs.
+fn copy_chunk(
+    copy: &Path,
+    offset: u64,
+    chunk: &Chunk,
+    output: &mut impl Write,
+) -> Result<bool, GogError> {
+    let expected: [u8; 16] = unhex(&chunk.md5).ok_or(GogError::Protocol)?;
     let mut file = match File::open(copy) {
         Ok(file) => file,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(false),
         Err(error) => return Err(error.into()),
     };
     if file.metadata()?.len() < offset + chunk.size {
-        return Ok(None);
+        return Ok(false);
     }
     file.seek(SeekFrom::Start(offset))?;
-    let mut bytes = vec![0; chunk.size as usize];
-    file.read_exact(&mut bytes)?;
-    Ok((hex(&Md5::digest(&bytes)) == chunk.md5.to_ascii_lowercase()).then_some(bytes))
+    let mut hasher = Md5::new();
+    let mut buffer = [0_u8; 64 * 1024];
+    let mut remaining = chunk.size;
+    while remaining > 0 {
+        let count = buffer
+            .len()
+            .min(usize::try_from(remaining).unwrap_or(usize::MAX));
+        file.read_exact(&mut buffer[..count])?;
+        hasher.update(&buffer[..count]);
+        output.write_all(&buffer[..count])?;
+        remaining -= count as u64;
+    }
+    Ok(hasher.finalize()[..] == expected)
 }
 
 /// Places the link at `path` to `target`, both from the installation's root,
@@ -635,19 +621,7 @@ fn place_link(root: &Path, path: &str, target: &str) -> Result<(), GogError> {
 /// Galaxy flags executables, but some builds miss the flag on helpers their
 /// game starts: programs are also recognised by their header.
 fn is_executable(file: &crate::manifest::File, path: &Path) -> std::io::Result<bool> {
-    if file.executable() {
-        return Ok(true);
-    }
-    let mut header = Vec::with_capacity(4);
-    File::open(path)?.take(4).read_to_end(&mut header)?;
-    const PROGRAMS: [&[u8]; 5] = [
-        &[0xcf, 0xfa, 0xed, 0xfe],
-        &[0xce, 0xfa, 0xed, 0xfe],
-        &[0xca, 0xfe, 0xba, 0xbe],
-        &[0xca, 0xfe, 0xba, 0xbf],
-        b"#!",
-    ];
-    Ok(PROGRAMS.iter().any(|magic| header.starts_with(magic)))
+    Ok(file.executable() || install::starts_as_program(path)?)
 }
 
 #[cfg(test)]

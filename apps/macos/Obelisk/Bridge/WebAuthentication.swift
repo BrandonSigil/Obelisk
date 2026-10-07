@@ -75,10 +75,7 @@ struct WebSignIn: Sendable {
         loginURL: { URL(string: gogLoginUrl())! },
         code: { url in
             guard gogIsLoginRedirect(url: url.absoluteString) else { return nil }
-            guard let code = try? gogAuthorizationCode(input: url.absoluteString) else {
-                throw WebAuthenticationError.invalidResponse(.gog)
-            }
-            return code
+            return try gogAuthorizationCode(input: url.absoluteString)
         }
     )
 }

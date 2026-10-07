@@ -11,7 +11,16 @@ struct GogView: View {
             } else if model.isConnected {
                 StorefrontPage { titleBar } content: { content }
             } else {
-                GogLoginView(model: model)
+                WebSignInView(
+                    model: model,
+                    section: .gog,
+                    title: L10n.string("ui.gog.sign_in_title"),
+                    subtitle: L10n.string("ui.gog.sign_in_subtitle"),
+                    connecting: L10n.string("ui.gog.connecting"),
+                    accountSignIn: L10n.string("ui.gog.account_sign_in"),
+                    instructions: L10n.string("ui.gog.sign_in_instructions"),
+                    signInLabel: L10n.string("ui.gog.sign_in")
+                )
             }
         }
         .task { await model.start() }

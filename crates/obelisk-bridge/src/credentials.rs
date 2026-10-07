@@ -42,6 +42,16 @@ impl Persistence {
         self.changed.notify_all();
     }
 
+    /// Waits, blocking, until the credentials `account`'s calls rotated are
+    /// saved.
+    pub(crate) fn waiter<A: Rotating>(
+        self: &Arc<Self>,
+        account: Arc<A>,
+    ) -> Arc<dyn Fn() + Send + Sync> {
+        let persistence = Arc::clone(self);
+        Arc::new(move || persistence.wait(|| account.revision()))
+    }
+
     /// Waits until the rotation `current` names was saved. Returns at once
     /// without persistence, once it stopped, or after `SAVE_TIMEOUT`.
     pub(crate) fn wait(&self, current: impl Fn() -> u64) {

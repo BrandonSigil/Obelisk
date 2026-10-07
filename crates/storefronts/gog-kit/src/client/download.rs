@@ -17,10 +17,10 @@ use crate::{
     GogError,
     auth::Api,
     content::{self, Endpoint, SecureLinks},
-    http::{bounded_bytes, check_status, inflate_json},
+    http::{bounded_bytes, inflate_json, send},
     library::endpoint,
     manifest::{
-        self, BuildManifest, Builds, DEPENDENCIES, DependencyDepot, DependencyRepository,
+        self, BuildManifest, Builds, DEPENDENCIES, DependencyDepot, DependencyRepository, Depot,
         DepotManifest, Installed, Product, galaxy_path,
     },
 };
@@ -139,32 +139,47 @@ async fn document<T: serde::de::DeserializeOwned>(
     api: &Api,
     url: reqwest::Url,
 ) -> Result<T, GogError> {
-    let response = api
-        .http
-        .get(url)
-        .send()
-        .await
-        .map_err(|_| GogError::Network)?;
-    check_status(response.status())?;
-    let bytes = bounded_bytes(response, MAX_MANIFEST_BYTES).await?;
+    let bytes = bounded_bytes(send(api.http.get(url)).await?, MAX_MANIFEST_BYTES).await?;
     inflate_json(&bytes, MAX_MANIFEST_BYTES as u64 * 4)
 }
 
-/// A depot's items, from its manifest under the CDN's `folder`, with the
-/// secure link `source` names.
+/// A depot's items, from its manifest under the CDN's `folder`.
 async fn depot_items(
     api: &Api,
     folder: &str,
     manifest: &str,
-    source: &str,
-) -> Result<(String, Vec<manifest::Item>), GogError> {
+) -> Result<Vec<manifest::Item>, GogError> {
     let url = content::checked_url(&format!(
         "{}/content-system/v2/{folder}/{}",
         api.cdn,
         galaxy_path(manifest)?
     ))?;
     let manifest: DepotManifest = document(api, url).await?;
-    Ok((source.to_owned(), manifest.depot.items))
+    Ok(manifest.depot.items)
+}
+
+/// Adds the items of `depots`, each a manifest under the CDN's `folder` and
+/// the secure link that serves its chunks, under `content_root`, in order.
+async fn add_depots<'a>(
+    api: &Api,
+    installed: &mut Installed,
+    content_root: &str,
+    folder: &str,
+    depots: impl IntoIterator<Item = (&'a str, &'a str)>,
+) -> Result<(), GogError> {
+    let (manifests, sources): (Vec<_>, Vec<_>) = depots.into_iter().unzip();
+    let fetches: Vec<_> = manifests
+        .into_iter()
+        .map(|manifest| depot_items(api, folder, manifest))
+        .collect();
+    let items: Vec<Vec<manifest::Item>> = stream::iter(fetches)
+        .buffered(MANIFEST_CONCURRENCY)
+        .try_collect()
+        .await?;
+    for (source, items) in sources.into_iter().zip(items) {
+        installed.add(content_root, source, items)?;
+    }
+    Ok(())
 }
 
 /// Every product the account owns, DLCs included.
@@ -226,6 +241,22 @@ fn owned_products(
     Ok(products)
 }
 
+/// The products of the build the account owns, and their depots an
+/// installation in `language` holds.
+fn owned_depots<'a>(
+    manifest: &'a BuildManifest,
+    owned: &HashSet<String>,
+    language: &str,
+) -> Result<(Vec<Product>, Vec<&'a Depot>), GogError> {
+    let products = owned_products(manifest, owned)?;
+    let ids: HashSet<&str> = products
+        .iter()
+        .map(|product| product.product_id.as_str())
+        .collect();
+    let depots = manifest::depots(manifest, &ids, language);
+    Ok((products, depots))
+}
+
 impl Client {
     pub fn progress(&self) -> Option<TransferProgress> {
         self.downloads.snapshot()
@@ -243,16 +274,13 @@ impl Client {
         platform: &str,
         language: &str,
     ) -> Result<u64, GogError> {
-        let (manifest, _) = current_build(&self.api, product_id, platform).await?;
-        let products = owned_products(&manifest, &owned(&self.api, access_token).await?)?;
-        let ids: HashSet<&str> = products
-            .iter()
-            .map(|product| product.product_id.as_str())
-            .collect();
-        Ok(manifest::depots(&manifest, &ids, language)
-            .iter()
-            .map(|depot| depot.size)
-            .sum())
+        let api = &self.tokens.api;
+        let ((manifest, _), owned) = tokio::try_join!(
+            current_build(api, product_id, platform),
+            owned(api, access_token),
+        )?;
+        let (_, depots) = owned_depots(&manifest, &owned, language)?;
+        Ok(depots.iter().map(|depot| depot.size).sum())
     }
 
     /// Installs `product_id`'s current build for `platform`, with the depots
@@ -285,7 +313,7 @@ impl Client {
                 };
                 // A revoked account withdraws nothing: the receipt stays until
                 // the installation lock is taken.
-                if self.session.lock().await.is_none() {
+                if self.tokens.session.lock().await.is_none() {
                     return Err(GogError::Unauthorized);
                 }
                 Ok(prepared)
@@ -305,35 +333,23 @@ impl Client {
         language: &str,
     ) -> Result<Prepared, GogError> {
         let user_id = self.credentials().await?.user_id;
-        let (manifest, version_name) = current_build(&self.api, product_id, platform).await?;
-        let owned = self
-            .with_access_token(|token| async move { owned(&self.api, &token).await })
-            .await?;
-        let products = owned_products(&manifest, &owned)?;
-        let ids: HashSet<&str> = products
-            .iter()
-            .map(|product| product.product_id.as_str())
-            .collect();
+        let api = &self.tokens.api;
+        let ((manifest, version_name), owned) = tokio::try_join!(
+            current_build(api, product_id, platform),
+            self.with_access_token(|token| async move { owned(api, &token).await }),
+        )?;
+        let (products, depots) = owned_depots(&manifest, &owned, language)?;
         let content_root = manifest.content_root()?;
         let mut installed = Installed::default();
-        let depots = manifest::depots(&manifest, &ids, language);
-        let fetches: Vec<_> = depots
-            .into_iter()
-            .map(|depot| depot_items(&self.api, "meta", &depot.manifest, &depot.product_id))
-            .collect();
-        let items: Vec<(String, Vec<manifest::Item>)> = stream::iter(fetches)
-            .buffered(MANIFEST_CONCURRENCY)
-            .try_collect()
-            .await?;
-        for (product, items) in items {
-            installed.add(&content_root, &product, items)?;
-        }
-        let dependencies = match (platform, manifest.dependencies.is_empty()) {
-            ("windows", false) => {
-                self.add_dependencies(&manifest, &content_root, &mut installed)
-                    .await?
-            }
-            _ => Vec::new(),
+        let depots = depots
+            .iter()
+            .map(|depot| (depot.manifest.as_str(), depot.product_id.as_str()));
+        add_depots(api, &mut installed, &content_root, "meta", depots).await?;
+        let dependencies = if platform == "windows" && !manifest.dependencies.is_empty() {
+            self.add_dependencies(&manifest, &content_root, &mut installed)
+                .await?
+        } else {
+            Vec::new()
         };
         installed.validate()?;
         Ok(Prepared {
@@ -358,11 +374,11 @@ impl Client {
         struct Repository {
             repository_manifest: String,
         }
-        let mut url = endpoint(&self.api.content, &["dependencies", "repository"])?;
+        let mut url = endpoint(&self.tokens.api.content, &["dependencies", "repository"])?;
         url.query_pairs_mut().append_pair("generation", "2");
-        let repository: Repository = self.api.get_public(url).await?;
+        let repository: Repository = self.tokens.api.get_public(url).await?;
         let repository: DependencyRepository = document(
-            &self.api,
+            &self.tokens.api,
             content::checked_url(&repository.repository_manifest)?,
         )
         .await?;
@@ -377,24 +393,17 @@ impl Client {
             })
             .filter(|depot| depot.installs_in_wine())
             .collect();
-        let fetches: Vec<_> = wanted
+        let depots = wanted
             .iter()
-            .map(|depot| {
-                depot_items(
-                    &self.api,
-                    "dependencies/meta",
-                    &depot.manifest,
-                    DEPENDENCIES,
-                )
-            })
-            .collect();
-        let items: Vec<(String, Vec<manifest::Item>)> = stream::iter(fetches)
-            .buffered(MANIFEST_CONCURRENCY)
-            .try_collect()
-            .await?;
-        for (source, items) in items {
-            installed.add(content_root, &source, items)?;
-        }
+            .map(|depot| (depot.manifest.as_str(), DEPENDENCIES));
+        add_depots(
+            &self.tokens.api,
+            installed,
+            content_root,
+            "dependencies/meta",
+            depots,
+        )
+        .await?;
         Ok(wanted
             .into_iter()
             .filter(|depot| !depot.executable.path.is_empty())
@@ -430,7 +439,7 @@ impl Client {
         let links = Arc::new(SecureLinks::new(self.secure_links()));
         let progress = transfer.clone();
         let summary = content::download(
-            self.api.http.clone(),
+            self.tokens.api.http.clone(),
             links,
             Arc::new(installed),
             key,
@@ -452,7 +461,7 @@ impl Client {
         )
         .await?;
         cancel.check()?;
-        if self.session.lock().await.is_none() {
+        if self.tokens.session.lock().await.is_none() {
             return Err(GogError::Unauthorized);
         }
         Ok(InstalledFiles {
@@ -479,10 +488,11 @@ impl Client {
     /// Renews a product's secure link with the account's credentials, or the
     /// redistributables' open link.
     fn secure_links(&self) -> content::Renew {
-        let (api, tokens) = (self.api.clone(), self.tokens());
+        let tokens = self.tokens.clone();
         Arc::new(move |source: String| {
-            let (api, tokens) = (api.clone(), tokens.clone());
+            let tokens = tokens.clone();
             async move {
+                let api = &tokens.api;
                 #[derive(Deserialize)]
                 struct Links {
                     #[serde(default)]
@@ -505,14 +515,12 @@ impl Client {
                     .append_pair("generation", "2")
                     .append_pair("_version", "2")
                     .append_pair("path", "/");
-                let token = tokens.access_token(None).await?;
-                let links: Links = match api.get(url.clone(), &token).await {
-                    Err(GogError::Unauthorized) => {
-                        let token = tokens.access_token(Some(&token)).await?;
-                        api.get(url, &token).await?
-                    }
-                    links => links?,
-                };
+                let links: Links = tokens
+                    .with_access_token(|token| {
+                        let url = url.clone();
+                        async move { api.get(url, &token).await }
+                    })
+                    .await?;
                 Ok(links.urls)
             }
             .boxed()

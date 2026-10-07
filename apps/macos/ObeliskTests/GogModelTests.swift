@@ -5,7 +5,7 @@ import XCTest
 
 @MainActor
 final class GogModelTests: XCTestCase {
-    func testAutomaticLoginExchangesBrowserCodeAndLoadsLibrary() async {
+    func testAutomaticLoginExchangesBrowserCodeAndLoadsLibrary() async throws {
         let store = GogMemoryStore(nil)
         let session = GogTestSession(credentials: credentials("current"), games: [game("1", title: "Alpha")])
         var codes: [String] = []
@@ -16,12 +16,12 @@ final class GogModelTests: XCTestCase {
                 await MainActor.run { codes.append(code) }
                 return session
             },
-            gameSessions: GogGameSessions(FakeSessions(), history: LaunchHistory(cache: Self.emptyCache()))
+            gameSessions: GogGameSessions(FakeSessions(), history: LaunchHistory.temporary())
         )
 
         model.signIn()
         XCTAssertTrue(model.isConnecting)
-        await eventually { model.isConnected && !model.isLoadingGames }
+        try await eventually { model.isConnected && !model.isLoadingGames }
 
         XCTAssertEqual(codes, ["browser-authorization-code"])
         let saved = await store.value
@@ -49,7 +49,7 @@ final class GogModelTests: XCTestCase {
                              gameSessions: GogGameSessions(FakeSessions(), history: history), libraryCache: cache)
         let start = Task { await model.start() }
 
-        await eventually { model.showsLibrary }
+        try await eventually { model.showsLibrary }
         XCTAssertFalse(model.isConnected, "The cached library shows before GOG answers")
         XCTAssertEqual(model.games, [cached])
         XCTAssertEqual(model.lastPlayed(of: cached), launched)
@@ -57,20 +57,20 @@ final class GogModelTests: XCTestCase {
         XCTAssertEqual(model.featuredGame, cached, "The last game launched from Obelisk leads the library")
         await restoration.resolve(session)
         await start.value
-        await eventually { model.games.map(\.productId) == ["1"] }
+        try await eventually { model.games.map(\.productId) == ["1"] }
 
         model.signOut()
         XCTAssertTrue(cache.gogLibrary(userId: "48628349957132247").isEmpty, "Signing out forgets the account's library")
     }
 
-    func testExpiredRestoreRemovesSavedSession() async {
+    func testExpiredRestoreRemovesSavedSession() async throws {
         let store = GogMemoryStore(credentials("expired"))
         let model = GogModel(keychain: store, restore: { _ in throw GogError.Unauthorized },
-                             gameSessions: GogGameSessions(FakeSessions(), history: LaunchHistory(cache: Self.emptyCache())))
+                             gameSessions: GogGameSessions(FakeSessions(), history: LaunchHistory.temporary()))
         await model.start()
         XCTAssertFalse(model.isConnected)
         XCTAssertEqual(model.errorMessage, L10n.string("model.gog.unauthorized"))
-        await eventually { await store.value == nil }
+        try await eventually { await store.value == nil }
     }
 
     func testTheLibraryInstallsTheNativeBuildFirst() {
@@ -84,15 +84,15 @@ final class GogModelTests: XCTestCase {
         XCTAssertNil(neither.offer)
     }
 
-    func testPlaytimesLoadOnceTheGamesAreKnownAndOrderTheLibrary() async {
+    func testPlaytimesLoadOnceTheGamesAreKnownAndOrderTheLibrary() async throws {
         let session = GogTestSession(credentials: credentials("current"),
                                      games: [game("1", title: "Alpha"), game("2", title: "Beta"), game("3", title: "Gamma")],
                                      playtimes: [GogPlaytime(productId: "2", minutes: 600),
                                                  GogPlaytime(productId: "3", minutes: 5)])
         let model = GogModel(keychain: GogMemoryStore(nil), authorize: { "code" }, signIn: { _ in session },
-                             gameSessions: GogGameSessions(FakeSessions(), history: LaunchHistory(cache: Self.emptyCache())))
+                             gameSessions: GogGameSessions(FakeSessions(), history: LaunchHistory.temporary()))
         model.signIn()
-        await eventually { model.isConnected && !model.isLoadingGames && !model.isLoadingPlaytimes }
+        try await eventually { model.isConnected && !model.isLoadingGames && !model.isLoadingPlaytimes }
         let asked = await session.playtimeRequests
         XCTAssertEqual(asked, [["1", "2", "3"]])
         XCTAssertEqual(model.availableSorts, StorefrontLibrarySort.allCases)
@@ -103,37 +103,37 @@ final class GogModelTests: XCTestCase {
         XCTAssertEqual(model.featuredGame?.productId, "2", "The most played game leads before any launch")
     }
 
-    func testEqualPlaytimesFeatureTheFirstGameByName() async {
+    func testEqualPlaytimesFeatureTheFirstGameByName() async throws {
         let session = GogTestSession(credentials: credentials("current"),
                                      games: [game("1", title: "Zeta"), game("2", title: "beta"), game("3", title: "Alpha")],
                                      playtimes: [GogPlaytime(productId: "1", minutes: 30),
                                                  GogPlaytime(productId: "2", minutes: 30)])
         let model = GogModel(keychain: GogMemoryStore(nil), authorize: { "code" }, signIn: { _ in session },
-                             gameSessions: GogGameSessions(FakeSessions(), history: LaunchHistory(cache: Self.emptyCache())))
+                             gameSessions: GogGameSessions(FakeSessions(), history: LaunchHistory.temporary()))
         model.signIn()
-        await eventually { model.isConnected && !model.isLoadingGames && !model.isLoadingPlaytimes }
+        try await eventually { model.isConnected && !model.isLoadingGames && !model.isLoadingPlaytimes }
         XCTAssertEqual(model.featuredGame?.productId, "2", "Equal playtimes: the first by name, whatever its case")
     }
 
-    func testANeverPlayedLibraryStillHasAHero() async {
+    func testANeverPlayedLibraryStillHasAHero() async throws {
         let session = GogTestSession(credentials: credentials("current"),
                                      games: [game("1", title: "The Evil Within"), game("2", title: "Celeste")])
         let model = GogModel(keychain: GogMemoryStore(nil), authorize: { "code" }, signIn: { _ in session },
-                             gameSessions: GogGameSessions(FakeSessions(), history: LaunchHistory(cache: Self.emptyCache())))
+                             gameSessions: GogGameSessions(FakeSessions(), history: LaunchHistory.temporary()))
         model.signIn()
-        await eventually { model.isConnected && !model.isLoadingGames && !model.isLoadingPlaytimes }
+        try await eventually { model.isConnected && !model.isLoadingGames && !model.isLoadingPlaytimes }
         XCTAssertEqual(model.featuredGame?.productId, "2")
     }
 
-    func testOpeningAGameLoadsItsAchievementsInThePlayersLanguage() async {
+    func testOpeningAGameLoadsItsAchievementsInThePlayersLanguage() async throws {
         let session = GogTestSession(credentials: credentials("current"), games: [game("1", title: "Alpha")])
         let model = GogModel(keychain: GogMemoryStore(nil), authorize: { "code" }, signIn: { _ in session },
                              language: "fr-FR",
-                             gameSessions: GogGameSessions(FakeSessions(), history: LaunchHistory(cache: Self.emptyCache())))
+                             gameSessions: GogGameSessions(FakeSessions(), history: LaunchHistory.temporary()))
         model.signIn()
-        await eventually { model.isConnected && !model.isLoadingGames }
+        try await eventually { model.isConnected && !model.isLoadingGames }
         model.open(model.games[0])
-        await eventually { model.achievements.items != nil }
+        try await eventually { model.achievements.items != nil }
         let asked = await session.achievementRequests
         XCTAssertEqual(asked, ["1 fr-FR"])
         XCTAssertEqual(model.achievements.countText, "1/2")
@@ -169,11 +169,6 @@ final class GogModelTests: XCTestCase {
         XCTAssertEqual(loginWindow?.isVisible, false)
     }
 
-    private static func emptyCache() -> LibraryCache {
-        LibraryCache(directory: FileManager.default.temporaryDirectory
-            .appending(path: "ObeliskGogEmpty-\(UUID().uuidString)").path)
-    }
-
     private func credentials(_ token: String) -> GogCredentials {
         GogCredentials(userId: "48628349957132247", username: "Geralt", refreshToken: token)
     }
@@ -181,18 +176,6 @@ final class GogModelTests: XCTestCase {
     private func game(_ id: String, title: String) -> GogGame {
         GogGame(productId: id, title: title, imageUrl: nil, headerImageUrl: nil, windows: true, macos: false,
                 summary: "", developers: [], publishers: [], releaseDate: nil, genres: [], rating: nil, languages: [])
-    }
-
-    private func eventually(
-        file: StaticString = #filePath,
-        line: UInt = #line,
-        _ predicate: @MainActor () async -> Bool
-    ) async {
-        for _ in 0..<200 {
-            if await predicate() { return }
-            try? await Task.sleep(for: .milliseconds(5))
-        }
-        XCTFail("Timed out waiting for the expected GOG state", file: file, line: line)
     }
 }
 
@@ -242,17 +225,6 @@ actor GogTestSession: GogSessionProtocol {
     func games() async throws -> [GogGame] { owned }
     func nextCredentialsRevision(afterRevision: UInt64) async -> UInt64? {
         await credentialRevisions.next(after: afterRevision)
-    }
-    nonisolated func persist(credentials: any CredentialSave) async {
-        let feed = credentialRevisions
-        Task.detached {
-            credentials.save()
-            var after: UInt64 = 0
-            while let next = await feed.next(after: after) {
-                after = next
-                credentials.save()
-            }
-        }
     }
     nonisolated func shutdownObservers() { credentialRevisions.stop() }
 }

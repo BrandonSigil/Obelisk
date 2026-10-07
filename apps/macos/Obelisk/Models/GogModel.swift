@@ -1,11 +1,6 @@
 import Foundation
 import Observation
 
-/// The GOG product a library ID names: product ids are decimal numbers.
-func gogProductID(_ id: String) -> String? {
-    !id.isEmpty && id.utf8.count <= 20 && id.utf8.allSatisfy { (48...57).contains($0) } ? id : nil
-}
-
 @MainActor
 @Observable
 final class GogModel {
@@ -154,26 +149,11 @@ final class GogModel {
         return InstallationSelection(game: game.productId, platform: game.preferredPlatform, offer: game.offer)
     }
 
-    /// GOG keeps no Cloud saves for Obelisk.
-    func syncCloud() {}
-
     func cloudTitle(for productID: String?) -> String { L10n.string("ui.store.gog") }
 
-    private var selectedGameSession: GogGameSessions.Session? {
-        guard let active = gameSessions.active, active.account == accountID,
-              active.game == selectedGame?.productId else { return nil }
-        return active
-    }
-
     var gameSessionMessage: String? {
-        if gameSessions.isRecovering || gameSessions.active?.reconnecting == true {
-            return L10n.string("model.gog.recoveringSession")
-        }
-        if let error = gameSessions.recoveryError { return error }
-        if gameSessions.active != nil && selectedGameSession == nil {
-            return L10n.string("model.gog.otherGameRunning")
-        }
-        return nil
+        gameSessions.message(for: selectedGame?.productId, of: accountID,
+                             otherGameRunning: L10n.string("model.gog.otherGameRunning"))
     }
 
     func title(of game: GogGame) -> String { game.title }
@@ -317,7 +297,8 @@ final class GogModel {
             guard current == generation else { return }
             rosetta.connect(accountId: credentials.userId)
             let backend = makeInstallations(connected, credentials.userId, language,
-                                            gameSessions.core, receiptsFile(for: credentials.userId))
+                                            gameSessions.core,
+                                            receiptsFile(in: directory, storefront: "gog", account: credentials.userId))
             installations.connect(account: credentials.userId, backend: backend, port: installationPort())
 
             await reloadGames(connected, generation: current)
@@ -481,12 +462,6 @@ final class GogModel {
         } catch {
             // Secondary metadata must not prevent browsing the library.
         }
-    }
-
-    private func receiptsFile(for account: String) -> URL {
-        // Account identifiers are opaque. Encode them before using them in a file name.
-        let component = account.utf8.map { String(format: "%02x", $0) }.joined()
-        return directory.appending(path: "gog-installations-\(component).json")
     }
 
     /// GOG's part of the installation actions. Every launch verifies its

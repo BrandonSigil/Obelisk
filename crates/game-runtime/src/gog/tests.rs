@@ -9,7 +9,6 @@ fn configuration(platform: &str, prefix: Option<&str>) -> Configuration {
         helper: "/Obelisk.app/Contents/Helpers/SteamNative/obelisk-steam-host".into(),
         product_id: "1207658924".into(),
         platform: platform.into(),
-        title: "The Witcher".into(),
         prefix: prefix.map(Into::into),
     }
 }

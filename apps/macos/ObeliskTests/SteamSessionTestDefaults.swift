@@ -40,20 +40,31 @@ extension SteamSessionProtocol {
     func shutdown() {}
 }
 
+/// Saves as Rust does: now, then after every rotation, in order.
+private func saveEveryRotation(_ credentials: any CredentialSave, rotations: @escaping @Sendable (UInt64) async -> UInt64?) {
+    Task.detached {
+        credentials.save()
+        var after: UInt64 = 0
+        while let next = await rotations(after) {
+            after = next
+            credentials.save()
+        }
+    }
+}
+
+extension GogSessionProtocol {
+    func persist(credentials: any CredentialSave) async {
+        let session = self
+        saveEveryRotation(credentials) { await session.nextCredentialsRevision(afterRevision: $0) }
+    }
+}
+
 // Models take launches as injected closures, so a fake
 // session never has to build a Rust-backed object.
 extension EpicSessionProtocol {
-    /// Saves as Rust does: now, then after every rotation, in order.
     func persist(credentials: any CredentialSave) async {
         let session = self
-        Task.detached {
-            credentials.save()
-            var after: UInt64 = 0
-            while let next = await session.nextCredentialsRevision(afterRevision: after) {
-                after = next
-                credentials.save()
-            }
-        }
+        saveEveryRotation(credentials) { await session.nextCredentialsRevision(afterRevision: $0) }
     }
 
     func achievements(namespace: String, locale: String) async throws -> [EpicAchievement] {

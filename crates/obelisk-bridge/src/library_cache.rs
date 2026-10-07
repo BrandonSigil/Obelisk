@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{
     collections::BTreeMap,
+    marker::PhantomData,
     sync::{Arc, Mutex},
 };
 
@@ -182,17 +183,11 @@ impl LibraryCache {
     }
 
     pub(crate) fn epic(&self, account_id: &str) -> EpicLibrary {
-        EpicLibrary {
-            account: self.inner.account(EPIC, account_id),
-            playtimes: Default::default(),
-        }
+        PlaytimeLibrary::new(self.inner.account(EPIC, account_id))
     }
 
     pub(crate) fn gog(&self, user_id: &str) -> GogLibrary {
-        GogLibrary {
-            account: self.inner.account(GOG, user_id),
-            playtimes: Default::default(),
-        }
+        PlaytimeLibrary::new(self.inner.account(GOG, user_id))
     }
 }
 
@@ -241,96 +236,98 @@ impl SteamLibrary {
     }
 }
 
-/// The Epic library a session keeps for its account.
-pub(crate) struct EpicLibrary {
-    account: AccountLibrary,
-    /// The playtimes the session last loaded, by app name: they may answer
-    /// before the games.
-    playtimes: Mutex<Option<BTreeMap<String, u64>>>,
+/// A game a storefront loads apart from its playtime, as Epic and GOG do.
+pub(crate) trait PlayedGame {
+    /// The game as the library shows it.
+    type Shown;
+    /// The entry field the loaded playtimes name the game by.
+    const PLAYTIME_ID: &'static str;
+    /// The entry field that keeps its playtime.
+    const PLAYTIME: &'static str;
+    /// The game's entry, with everything its storefront returned but its
+    /// playtime, and the game as the library shows it.
+    fn entry(self) -> (Entry, Self::Shown);
 }
 
-impl EpicLibrary {
-    /// Keeps the account's games with everything Epic returned. Until the
-    /// session loads the playtimes, each game keeps its earlier one.
-    pub(crate) fn games(&self, games: Vec<epic_kit::client::Game>) -> Vec<EpicGame> {
-        let playtimes = self.playtimes.lock().unwrap();
-        let (entries, games) = games
-            .into_iter()
-            .map(|mut loaded| {
-                let metadata = std::mem::take(&mut loaded.metadata);
-                let game = EpicGame::from(loaded);
-                let mut entry = entry_of(&EpicEntry {
-                    id: <epic::Epic as Named>::name(&epic::Store {
-                        namespace: game.namespace.clone(),
-                        app_name: game.app_name.clone(),
-                    }),
-                    playtime_seconds: playtimes
-                        .as_ref()
-                        .and_then(|playtimes| playtimes.get(&game.app_name).copied()),
-                    game: game.clone(),
-                });
-                entry.insert("metadata".into(), metadata);
-                (entry, game)
-            })
-            .unzip();
-        let kept: &[&str] = if playtimes.is_some() {
-            &[]
-        } else {
-            &["playtimeSeconds"]
-        };
-        self.account.replace(entries, kept);
-        games
-    }
-
-    /// Keeps every game's playtime. A game missing from `playtimes` was
-    /// never played.
-    pub(crate) fn playtimes(&self, playtimes: &BTreeMap<String, u64>) {
-        *self.playtimes.lock().unwrap() = Some(playtimes.clone());
-        self.account.update(|entry| {
-            let seconds = entry
-                .get("appName")
-                .and_then(Value::as_str)
-                .and_then(|app_name| playtimes.get(app_name).copied());
-            match seconds {
-                Some(seconds) => set(entry, "playtimeSeconds", seconds.into()),
-                None => entry.remove("playtimeSeconds").is_some(),
-            }
+impl PlayedGame for epic_kit::client::Game {
+    type Shown = EpicGame;
+    const PLAYTIME_ID: &'static str = "appName";
+    const PLAYTIME: &'static str = "playtimeSeconds";
+    fn entry(mut self) -> (Entry, EpicGame) {
+        let metadata = std::mem::take(&mut self.metadata);
+        let game = EpicGame::from(self);
+        let mut entry = entry_of(&CachedEntry {
+            id: <epic::Epic as Named>::name(&epic::Store {
+                namespace: game.namespace.clone(),
+                app_name: game.app_name.clone(),
+            }),
+            game: &game,
         });
+        entry.insert("metadata".into(), metadata);
+        (entry, game)
     }
 }
 
-/// The GOG library a session keeps for its account.
-pub(crate) struct GogLibrary {
-    account: AccountLibrary,
-    /// The playtimes the session last loaded, by product.
-    playtimes: Mutex<Option<BTreeMap<String, u64>>>,
+impl PlayedGame for gog_kit::client::Game {
+    type Shown = GogGame;
+    const PLAYTIME_ID: &'static str = "id";
+    const PLAYTIME: &'static str = "playtimeMinutes";
+    fn entry(mut self) -> (Entry, GogGame) {
+        let metadata = std::mem::take(&mut self.metadata);
+        let game = GogGame::from(self);
+        let mut entry = entry_of(&CachedEntry {
+            id: game.product_id.clone(),
+            game: &game,
+        });
+        entry.insert("metadata".into(), metadata);
+        (entry, game)
+    }
 }
 
-impl GogLibrary {
-    /// Keeps the account's games with everything GOG returned. Until the
-    /// session loads the playtimes, each game keeps its earlier one.
-    pub(crate) fn games(&self, games: Vec<gog_kit::client::Game>) -> Vec<GogGame> {
+/// The library a session keeps for its account, whose playtimes load apart
+/// from its games: Epic's or GOG's.
+pub(crate) struct PlaytimeLibrary<G> {
+    account: AccountLibrary,
+    /// The playtimes the session last loaded: they may answer before the
+    /// games.
+    playtimes: Mutex<Option<BTreeMap<String, u64>>>,
+    game: PhantomData<fn(G)>,
+}
+
+pub(crate) type EpicLibrary = PlaytimeLibrary<epic_kit::client::Game>;
+pub(crate) type GogLibrary = PlaytimeLibrary<gog_kit::client::Game>;
+
+impl<G: PlayedGame> PlaytimeLibrary<G> {
+    fn new(account: AccountLibrary) -> Self {
+        Self {
+            account,
+            playtimes: Mutex::default(),
+            game: PhantomData,
+        }
+    }
+
+    /// Keeps the account's games with everything their storefront returned.
+    /// Until the session loads the playtimes, each game keeps its earlier
+    /// one.
+    pub(crate) fn games(&self, games: Vec<G>) -> Vec<G::Shown> {
         let playtimes = self.playtimes.lock().unwrap();
         let (entries, games) = games
             .into_iter()
-            .map(|mut loaded| {
-                let metadata = std::mem::take(&mut loaded.metadata);
-                let game = GogGame::from(loaded);
-                let mut entry = entry_of(&GogEntry {
-                    id: game.product_id.clone(),
-                    playtime_minutes: playtimes
-                        .as_ref()
-                        .and_then(|playtimes| playtimes.get(&game.product_id).copied()),
-                    game: game.clone(),
+            .map(|loaded| {
+                let (mut entry, game) = loaded.entry();
+                let playtime = playtimes.as_ref().and_then(|playtimes| {
+                    playtimes.get(entry.get(G::PLAYTIME_ID)?.as_str()?).copied()
                 });
-                entry.insert("metadata".into(), metadata);
+                if let Some(playtime) = playtime {
+                    entry.insert(G::PLAYTIME.into(), playtime.into());
+                }
                 (entry, game)
             })
             .unzip();
         let kept: &[&str] = if playtimes.is_some() {
             &[]
         } else {
-            &["playtimeMinutes"]
+            &[G::PLAYTIME]
         };
         self.account.replace(entries, kept);
         games
@@ -341,13 +338,13 @@ impl GogLibrary {
     pub(crate) fn playtimes(&self, playtimes: &BTreeMap<String, u64>) {
         *self.playtimes.lock().unwrap() = Some(playtimes.clone());
         self.account.update(|entry| {
-            let minutes = entry
-                .get("id")
+            let playtime = entry
+                .get(G::PLAYTIME_ID)
                 .and_then(Value::as_str)
                 .and_then(|id| playtimes.get(id).copied());
-            match minutes {
-                Some(minutes) => set(entry, "playtimeMinutes", minutes.into()),
-                None => entry.remove("playtimeMinutes").is_some(),
+            match playtime {
+                Some(playtime) => set(entry, G::PLAYTIME, playtime.into()),
+                None => entry.remove(G::PLAYTIME).is_some(),
             }
         });
     }
@@ -382,32 +379,16 @@ struct SteamEntry {
     platforms: Option<Vec<String>>,
 }
 
-/// An Epic game as the cache keeps it: as the library shows it, with its
-/// playtime. Its entry also keeps its catalog items, library records and
-/// assets, `metadata`.
+/// An Epic or GOG game as the cache keeps it: as the library shows it. Its
+/// entry also keeps its playtime, absent until the storefront told it or
+/// when the game was never played, and everything else the storefront
+/// returned, `metadata`: Epic's catalog items, library records and assets,
+/// GOG's library record and catalog data.
 #[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct EpicEntry {
+struct CachedEntry<'a, G> {
     id: String,
     #[serde(flatten)]
-    game: EpicGame,
-    /// Absent until Epic told it, or when the game was never played.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    playtime_seconds: Option<u64>,
-}
-
-/// A GOG game as the cache keeps it: as the library shows it, with its
-/// playtime. Its entry also keeps its library record and catalog data,
-/// `metadata`.
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct GogEntry {
-    id: String,
-    #[serde(flatten)]
-    game: GogGame,
-    /// Absent until GOG told it, or when the game was never played.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    playtime_minutes: Option<u64>,
+    game: &'a G,
 }
 
 #[cfg(test)]

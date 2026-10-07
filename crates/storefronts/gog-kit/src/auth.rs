@@ -8,7 +8,7 @@ use serde::Deserialize;
 
 use crate::{
     GogError,
-    http::{bounded_json, check_status},
+    http::{bounded_json, check_status, send},
 };
 
 /// The Galaxy client's public credentials, not an account secret.
@@ -161,11 +161,14 @@ impl Api {
         if !valid_code(code) {
             return Err(GogError::InvalidCode);
         }
-        self.token(&[
-            ("grant_type", "authorization_code"),
-            ("code", code),
-            ("redirect_uri", REDIRECT_URI),
-        ])
+        self.token(
+            &[
+                ("grant_type", "authorization_code"),
+                ("code", code),
+                ("redirect_uri", REDIRECT_URI),
+            ],
+            GogError::InvalidCode,
+        )
         .await
     }
 
@@ -174,10 +177,13 @@ impl Api {
             return Err(GogError::Unauthorized);
         }
         let mut session = self
-            .token(&[
-                ("grant_type", "refresh_token"),
-                ("refresh_token", &credentials.refresh_token),
-            ])
+            .token(
+                &[
+                    ("grant_type", "refresh_token"),
+                    ("refresh_token", &credentials.refresh_token),
+                ],
+                GogError::Unauthorized,
+            )
             .await?;
         if session.credentials.user_id != credentials.user_id {
             return Err(GogError::Unauthorized);
@@ -189,7 +195,8 @@ impl Api {
         Ok(session)
     }
 
-    async fn token(&self, grant: &[(&str, &str)]) -> Result<Session, GogError> {
+    /// The session `grant` opens, or `refused` when GOG refuses the grant.
+    async fn token(&self, grant: &[(&str, &str)], refused: GogError) -> Result<Session, GogError> {
         let response = self
             .http
             .get(format!("{}/token", self.auth))
@@ -200,11 +207,7 @@ impl Api {
             .map_err(|_| GogError::Network)?;
         let status = response.status();
         if matches!(status, StatusCode::BAD_REQUEST | StatusCode::UNAUTHORIZED) {
-            return Err(if grant[0].1 == "authorization_code" {
-                GogError::InvalidCode
-            } else {
-                GogError::Unauthorized
-            });
+            return Err(refused);
         }
         check_status(status)?;
         let response: TokenResponse = bounded_json(response, 1024 * 1024).await?;
@@ -252,14 +255,7 @@ impl Api {
         url: Url,
         access_token: &str,
     ) -> Result<T, GogError> {
-        let response = self
-            .http
-            .get(url)
-            .bearer_auth(access_token)
-            .send()
-            .await
-            .map_err(|_| GogError::Network)?;
-        check_status(response.status())?;
+        let response = send(self.http.get(url).bearer_auth(access_token)).await?;
         bounded_json(response, 16 * 1024 * 1024).await
     }
 
@@ -268,14 +264,7 @@ impl Api {
         &self,
         url: Url,
     ) -> Result<T, GogError> {
-        let response = self
-            .http
-            .get(url)
-            .send()
-            .await
-            .map_err(|_| GogError::Network)?;
-        check_status(response.status())?;
-        bounded_json(response, 16 * 1024 * 1024).await
+        bounded_json(send(self.http.get(url)).await?, 16 * 1024 * 1024).await
     }
 }
 
@@ -284,7 +273,7 @@ fn valid_secret(value: &str) -> bool {
 }
 
 /// Galaxy user ids are decimal numbers.
-pub(crate) fn valid_user_id(value: &str) -> bool {
+pub fn valid_user_id(value: &str) -> bool {
     !value.is_empty() && value.len() <= 32 && value.bytes().all(|byte| byte.is_ascii_digit())
 }
 

@@ -10,6 +10,10 @@ import SwiftUI
     func reloadAchievements()
 }
 
+extension GameDetailModel {
+    func syncCloud() { installations.syncCloud() }
+}
+
 extension SteamModel: GameDetailModel {}
 extension EpicModel: GameDetailModel {}
 extension GogModel: GameDetailModel {}
