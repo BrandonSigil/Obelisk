@@ -139,43 +139,6 @@ final class RememberedSession<Credentials: Sendable> {
     }
 }
 
-typealias EpicRememberedSession = RememberedSession<EpicCredentials>
-typealias GogRememberedSession = RememberedSession<GogCredentials>
-
-extension RememberedSession where Credentials == EpicCredentials {
-    convenience init(store: any CredentialStore<EpicCredentials>) {
-        self.init(keychain: store, accountID: { $0.accountId },
-                  notSaved: L10n.string("model.epic.sessionNotSaved"))
-    }
-
-    func activate(_ session: any EpicSessionProtocol, accountID: String) async {
-        let rotating = RotatingSession<EpicCredentials>(
-            identity: ObjectIdentifier(session),
-            credentials: { try await session.credentials() },
-            persist: { (saver: any CredentialSave) in await session.persist(credentials: saver) },
-            shutdownObservers: { session.shutdownObservers() }
-        )
-        await activate(rotating: rotating, accountID: accountID)
-    }
-}
-
-extension RememberedSession where Credentials == GogCredentials {
-    convenience init(store: any CredentialStore<GogCredentials>) {
-        self.init(keychain: store, accountID: { $0.userId },
-                  notSaved: L10n.string("model.gog.sessionNotSaved"))
-    }
-
-    func activate(_ session: any GogSessionProtocol, accountID: String) async {
-        let rotating = RotatingSession<GogCredentials>(
-            identity: ObjectIdentifier(session),
-            credentials: { try await session.credentials() },
-            persist: { (saver: any CredentialSave) in await session.persist(credentials: saver) },
-            shutdownObservers: { session.shutdownObservers() }
-        )
-        await activate(rotating: rotating, accountID: accountID)
-    }
-}
-
 /// Saves the credentials account calls rotate, such as a launch's exchange
 /// before its game starts. Rust waits on its own thread while the save runs
 /// on the main actor. Rust holds it, so it leaves the remembered session free

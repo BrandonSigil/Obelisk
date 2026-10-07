@@ -25,11 +25,11 @@ struct EpicView: View {
         }
         .task { await model.start() }
         .onChange(of: model.gameSessions.isBusy) { _, isBusy in
-            if !isBusy { model.refreshCloudIndicator() }
+            if !isBusy { model.installations.refreshCloudIndicator() }
         }
         // The game's guard and launch sync are on disk once it runs.
         .onChange(of: model.gameSessions.active?.phase == .running) { _, running in
-            if running { model.refreshCloudIndicator() }
+            if running { model.installations.refreshCloudIndicator() }
         }
         .errorAlert(L10n.string("ui.store.epic"), message: $model.errorMessage)
     }

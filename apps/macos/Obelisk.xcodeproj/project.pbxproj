@@ -49,6 +49,7 @@
 		67E410310ED5E3C09C281EC5 /* AppIdentity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 392C8304CA5920C60F184A09 /* AppIdentity.swift */; };
 		6CE6736098CB8CA628FED895 /* FriendsPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1D5405CB088EA19AD505B1A0 /* FriendsPanel.swift */; };
 		6E37BA2FD0E1FEA85AE67073 /* SignInControls.swift in Sources */ = {isa = PBXBuildFile; fileRef = 72D237960BFC8153E4DEA065 /* SignInControls.swift */; };
+		74FE68E3927FE6F0656FDE5B /* WebAccountModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AF05267D89848A7C52EAEA8E /* WebAccountModelTests.swift */; };
 		7A65A948ACCB6685A0BA00A4 /* LocalizationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 04A9D5D2D4BBF0AD6BA1087F /* LocalizationTests.swift */; };
 		7C56540EDA60C3EF55F18584 /* StorefrontTitleBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = B32BF034543E2C2800342D4F /* StorefrontTitleBar.swift */; };
 		81DEAE05B8FACB4F2B505356 /* SteamLibraryPlatformsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C55F8629E8ABF0D476AA6834 /* SteamLibraryPlatformsTests.swift */; };
@@ -71,6 +72,7 @@
 		A825F027C9D69C539AF0EC57 /* SidebarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 69A52CBDF11147EF8F197B50 /* SidebarView.swift */; };
 		A89CEDB9D81E67E0B302B247 /* FriendsPresentationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BAD9C2A5BE6895E16311595E /* FriendsPresentationTests.swift */; };
 		AB4A0762F59B39FA0776E9A8 /* EpicAuthorizationCallback.swift in Sources */ = {isa = PBXBuildFile; fileRef = 14359EAB3A6D5E361D38FE59 /* EpicAuthorizationCallback.swift */; };
+		AF4E34D44AB88A0C909571C5 /* WebAccountModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5448960DE75EF416844F946E /* WebAccountModel.swift */; };
 		B151A7F54ABB00ACFE73EA6D /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 07228AE3E2D76B31781B0323 /* AppModel.swift */; };
 		B3B05906FF7E3CA901417773 /* CachedArtwork.swift in Sources */ = {isa = PBXBuildFile; fileRef = BBB7F9CA7F940C0DBF11C4EA /* CachedArtwork.swift */; };
 		B4C715751969443720315596 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F0CE8B761A14CEF0AE08EF9 /* SettingsView.swift */; };
@@ -101,6 +103,7 @@
 		E9D1DED038F88E505748CD9E /* FakeSessions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2814FFCECA443BD312EBE9ED /* FakeSessions.swift */; };
 		EB4B025E91606E11CB1F016C /* WebAuthentication.swift in Sources */ = {isa = PBXBuildFile; fileRef = A78DB72BD2F22CF34D9C04AB /* WebAuthentication.swift */; };
 		ECDA6F722F01D81CE80637FF /* GameAboutSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9C9DC6CA30F14C8BB08C1729 /* GameAboutSection.swift */; };
+		ED5C42CC49F790737B495BD0 /* WebAccountFixtures.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9345789C463FC7413F7CCB38 /* WebAccountFixtures.swift */; };
 		F0B80A354929BEDE91D26699 /* StorefrontPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 29B05CCAE221089F97F4897F /* StorefrontPage.swift */; };
 		F12D0B49F991628BF4980C5E /* GameInstallationsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C4F256D4AB075E6393270C55 /* GameInstallationsTests.swift */; };
 		F1B60E611D6C3B696BAA5B2B /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 335270F46EDAB725B750C311 /* Assets.xcassets */; };
@@ -156,6 +159,7 @@
 		47939AD0E720E95F3632E442 /* SteamArtwork.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SteamArtwork.swift; sourceTree = "<group>"; };
 		4BFED8E9D46E4887DDA7EC6C /* Obelisk.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Obelisk.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		513D153BB2AFAAD3B75C6107 /* StorefrontScrollView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StorefrontScrollView.swift; sourceTree = "<group>"; };
+		5448960DE75EF416844F946E /* WebAccountModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebAccountModel.swift; sourceTree = "<group>"; };
 		5D959CDD795E6B0BF162B9CF /* LibrarySection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibrarySection.swift; sourceTree = "<group>"; };
 		6065CF30EEBD01C8C123E72B /* EpicFriendsIntegrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EpicFriendsIntegrationTests.swift; sourceTree = "<group>"; };
 		671E6DBCB5F68AC4C9553B75 /* GameDetailPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GameDetailPage.swift; sourceTree = "<group>"; };
@@ -175,6 +179,7 @@
 		7F0CE8B761A14CEF0AE08EF9 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		823595F73643BECD79DA124E /* GameAchievementsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GameAchievementsView.swift; sourceTree = "<group>"; };
 		859EE14F261D8FD0DEFBCC1C /* GameInstallationManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GameInstallationManager.swift; sourceTree = "<group>"; };
+		9345789C463FC7413F7CCB38 /* WebAccountFixtures.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebAccountFixtures.swift; sourceTree = "<group>"; };
 		94FC6A066FC924074EF9F63F /* SteamLoginView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SteamLoginView.swift; sourceTree = "<group>"; };
 		98E6B6F7A1EB2399E00EE9BC /* GameDetailHeader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GameDetailHeader.swift; sourceTree = "<group>"; };
 		993A5347C27CC3B06EEAA1AF /* FriendsModal.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FriendsModal.swift; sourceTree = "<group>"; };
@@ -190,6 +195,7 @@
 		A8B31EA27EBFCBF55111A574 /* EpicAuthorizationCallbackTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EpicAuthorizationCallbackTests.swift; sourceTree = "<group>"; };
 		A8E23534750CA786AF313200 /* LibraryTransferPill.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryTransferPill.swift; sourceTree = "<group>"; };
 		A930A24645EC4CBF46A76D86 /* EpicFriendsPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EpicFriendsPresentation.swift; sourceTree = "<group>"; };
+		AF05267D89848A7C52EAEA8E /* WebAccountModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebAccountModelTests.swift; sourceTree = "<group>"; };
 		B32BF034543E2C2800342D4F /* StorefrontTitleBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StorefrontTitleBar.swift; sourceTree = "<group>"; };
 		B7891305D845C14B9B2B30F2 /* GogView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GogView.swift; sourceTree = "<group>"; };
 		BAD5AF6789B146C00B82131E /* ObeliskBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ObeliskBridge.swift; sourceTree = "<group>"; };
@@ -342,6 +348,7 @@
 				FA8AA40F77D5B08D2F79B1B1 /* RosettaModel.swift */,
 				C98CF76C31018F3CCF9193EF /* SteamLibraryPlatforms.swift */,
 				6DDA40BCB74AB6466C8480A8 /* SteamModel.swift */,
+				5448960DE75EF416844F946E /* WebAccountModel.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -439,6 +446,8 @@
 				DE55B619F17FA3BB9C6E2104 /* SteamSortingPerformanceTests.swift */,
 				3C3B2AB2EE55B5D748B66466 /* StorefrontLibraryFilterTests.swift */,
 				2C51BBFA5B0466D8EBD4376B /* StorefrontSortPopoverTests.swift */,
+				9345789C463FC7413F7CCB38 /* WebAccountFixtures.swift */,
+				AF05267D89848A7C52EAEA8E /* WebAccountModelTests.swift */,
 			);
 			path = ObeliskTests;
 			sourceTree = "<group>";
@@ -655,6 +664,8 @@
 				DD0F8BAF57A82FF7F7E37D35 /* SteamSortingPerformanceTests.swift in Sources */,
 				C72B0DDDC13B209DCFB4DC95 /* StorefrontLibraryFilterTests.swift in Sources */,
 				A2489C873151BD8B8D8B1746 /* StorefrontSortPopoverTests.swift in Sources */,
+				ED5C42CC49F790737B495BD0 /* WebAccountFixtures.swift in Sources */,
+				74FE68E3927FE6F0656FDE5B /* WebAccountModelTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -729,6 +740,7 @@
 				BADFE6E3A6B017264F469F48 /* StorefrontScrollView.swift in Sources */,
 				D79952394F300AACEEB217CD /* StorefrontSignInPage.swift in Sources */,
 				7C56540EDA60C3EF55F18584 /* StorefrontTitleBar.swift in Sources */,
+				AF4E34D44AB88A0C909571C5 /* WebAccountModel.swift in Sources */,
 				EB4B025E91606E11CB1F016C /* WebAuthentication.swift in Sources */,
 				CAD48EA12B965CC997C4CCF6 /* WebSignInView.swift in Sources */,
 			);

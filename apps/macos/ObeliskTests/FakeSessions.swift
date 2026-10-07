@@ -203,6 +203,13 @@ func eventually(_ predicate: @MainActor () async -> Bool, file: StaticString = #
     }
 }
 
+/// Lets the main queue run `times` turns, such as a continuation the code
+/// under test scheduled there.
+@MainActor
+func drainMainQueue(times: Int = 1) async {
+    for _ in 0..<times { await withCheckedContinuation { c in DispatchQueue.main.async { c.resume() } } }
+}
+
 extension LaunchHistory {
     /// A history no other test reads, never the live library's.
     static func temporary() -> LaunchHistory {

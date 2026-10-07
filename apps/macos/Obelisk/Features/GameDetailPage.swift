@@ -15,8 +15,7 @@ extension GameDetailModel {
 }
 
 extension SteamModel: GameDetailModel {}
-extension EpicModel: GameDetailModel {}
-extension GogModel: GameDetailModel {}
+extension WebAccountModel: GameDetailModel {}
 
 /// A storefront's game page: the header and its launch bar, the Game session's
 /// message, then what only the storefront shows.

@@ -6,12 +6,11 @@ import XCTest
 final class EpicRememberedSessionTests: XCTestCase {
     func testEveryRotationIsSavedWithoutAnyCallAskingForIt() async throws {
         let store = EpicMemoryStore(nil)
-        let session = EpicTestSession(credentials: credentials("initial"), games: [])
-        let remembered = EpicRememberedSession(store: store)
-        await remembered.activate(session, accountID: "account")
+        let session = EpicTestSession(credentials: EpicGames.credentials("initial"), games: [])
+        let remembered = await activated(store, session)
         let initial = await store.value
         XCTAssertEqual(initial?.refreshToken, "initial", "the account is saved before it is used")
-        await session.rotate(credentials("background-rotation"))
+        await session.rotate(EpicGames.credentials("background-rotation"))
         try await eventually { await store.value?.refreshToken == "background-rotation" }
         XCTAssertFalse(session.credentialRevisions.isStopped)
         await remembered.forget().value
@@ -19,15 +18,14 @@ final class EpicRememberedSessionTests: XCTestCase {
 
     func testARotationDuringAHeldWriteResolvesTheLatestToken() async throws {
         let store = EpicMemoryStore(nil)
-        let session = EpicTestSession(credentials: credentials("initial"), games: [])
-        let remembered = EpicRememberedSession(store: store)
-        await remembered.activate(session, accountID: "account")
+        let session = EpicTestSession(credentials: EpicGames.credentials("initial"), games: [])
+        let remembered = await activated(store, session)
         try await eventually { session.credentialRevisions.isWaiting }
 
         await store.holdNextSave()
-        await session.rotate(credentials("held"))
+        await session.rotate(EpicGames.credentials("held"))
         try await eventually { await store.waitingForSave }
-        await session.rotate(credentials("latest"))
+        await session.rotate(EpicGames.credentials("latest"))
         await store.completeSave()
         try await eventually { await store.value?.refreshToken == "latest" }
         try await eventually { session.credentialRevisions.isWaiting }
@@ -41,13 +39,12 @@ final class EpicRememberedSessionTests: XCTestCase {
     func testAForgottenSessionsLateRotationCannotOverwriteTheReplacementAccount() async throws {
         // Reuse the same account ID to prove isolation follows the session lifetime.
         let store = EpicMemoryStore(nil)
-        let old = EpicTestSession(credentials: credentials("old"), games: [])
-        let replacement = EpicTestSession(credentials: credentials("replacement"), games: [])
-        let remembered = EpicRememberedSession(store: store)
-        await remembered.activate(old, accountID: "account")
+        let old = EpicTestSession(credentials: EpicGames.credentials("old"), games: [])
+        let replacement = EpicTestSession(credentials: EpicGames.credentials("replacement"), games: [])
+        let remembered = await activated(store, old)
         try await eventually { old.credentialRevisions.isWaiting }
         await store.holdNextSave()
-        await old.rotate(credentials("old-held"))
+        await old.rotate(EpicGames.credentials("old-held"))
         try await eventually { await store.waitingForSave }
         let removal = remembered.forget()
         XCTAssertTrue(old.credentialRevisions.isStopped)
@@ -55,8 +52,8 @@ final class EpicRememberedSessionTests: XCTestCase {
         await removal.value
         let removed = await store.value
         XCTAssertNil(removed)
-        await remembered.activate(replacement, accountID: "account")
-        await old.rotate(credentials("old-late"))
+        await remembered.activate(rotating: EpicGames.rotating(replacement), accountID: EpicGames.fixtureAccount)
+        await old.rotate(EpicGames.credentials("old-late"))
         try await eventually { replacement.credentialRevisions.isWaiting }
         let saved = await store.value
         let writes = await store.writes
@@ -70,15 +67,14 @@ final class EpicRememberedSessionTests: XCTestCase {
 
     func testRememberChangesWhileWriteIsHeldApplyToLatestRevision() async throws {
         let store = EpicMemoryStore(nil)
-        let session = EpicTestSession(credentials: credentials("initial"), games: [])
-        let remembered = EpicRememberedSession(store: store)
-        await remembered.activate(session, accountID: "account")
+        let session = EpicTestSession(credentials: EpicGames.credentials("initial"), games: [])
+        let remembered = await activated(store, session)
         try await eventually { session.credentialRevisions.isWaiting }
         await store.holdNextSave()
-        await session.rotate(credentials("held"))
+        await session.rotate(EpicGames.credentials("held"))
         try await eventually { await store.waitingForSave }
         remembered.rememberSession = false
-        await session.rotate(credentials("unremembered"))
+        await session.rotate(EpicGames.credentials("unremembered"))
         await store.completeSave()
         try await eventually { await store.value == nil }
         try await eventually { session.credentialRevisions.isWaiting }
@@ -93,13 +89,12 @@ final class EpicRememberedSessionTests: XCTestCase {
     func testAStorageFailureWarnsUntilTheNextRotationIsSaved() async throws {
         let store = EpicMemoryStore(nil)
         await store.rejectSaves()
-        let session = EpicTestSession(credentials: credentials("initial"), games: [])
-        let remembered = EpicRememberedSession(store: store)
-        await remembered.activate(session, accountID: "account")
+        let session = EpicTestSession(credentials: EpicGames.credentials("initial"), games: [])
+        let remembered = await activated(store, session)
         XCTAssertNotNil(remembered.storageWarning)
         try await eventually { session.credentialRevisions.isWaiting }
         await store.rejectSaves(false)
-        await session.rotate(credentials("recovered"))
+        await session.rotate(EpicGames.credentials("recovered"))
         try await eventually { session.credentialRevisions.isWaiting && remembered.storageWarning == nil }
         let saved = await store.value
         XCTAssertEqual(saved?.refreshToken, "recovered")
@@ -108,11 +103,10 @@ final class EpicRememberedSessionTests: XCTestCase {
 
     func testMismatchedAccountCredentialsAreNeverWritten() async throws {
         let store = EpicMemoryStore(nil)
-        let session = EpicTestSession(credentials: credentials("initial"), games: [])
-        let remembered = EpicRememberedSession(store: store)
-        await remembered.activate(session, accountID: "account")
+        let session = EpicTestSession(credentials: EpicGames.credentials("initial"), games: [])
+        let remembered = await activated(store, session)
         try await eventually { session.credentialRevisions.isWaiting }
-        await session.rotate(credentials("wrong-account", account: "other"))
+        await session.rotate(EpicGames.credentials("wrong-account", account: "other"))
         try await eventually { remembered.storageWarning != nil }
         let saved = await store.value
         XCTAssertEqual(saved?.refreshToken, "initial")
@@ -121,9 +115,8 @@ final class EpicRememberedSessionTests: XCTestCase {
 
     func testReleasingModuleStopsObservationWithoutRevokingSessionOrRemovingCredentials() async throws {
         let store = EpicMemoryStore(nil)
-        let session = EpicTestSession(credentials: credentials("initial"), games: [])
-        var remembered: EpicRememberedSession? = EpicRememberedSession(store: store)
-        await remembered?.activate(session, accountID: "account")
+        let session = EpicTestSession(credentials: EpicGames.credentials("initial"), games: [])
+        var remembered: RememberedSession<EpicCredentials>? = await activated(store, session)
         try await eventually { session.credentialRevisions.isWaiting }
         weak var released = remembered
         remembered = nil
@@ -134,20 +127,14 @@ final class EpicRememberedSessionTests: XCTestCase {
         XCTAssertEqual(disconnections, 0)
     }
 
-    private func credentials(_ token: String, account: String = "account") -> EpicCredentials {
-        EpicCredentials(accountId: account, displayName: "Fixture", refreshToken: token)
-    }
-
-    private func eventually(_ predicate: @MainActor () async -> Bool) async throws {
-        for _ in 0..<200 {
-            if await predicate() { return }
-            try await Task.sleep(for: .milliseconds(5))
-        }
-        throw EpicRememberedTestError.timeout
+    /// The store's remembered session, once it saves `session`'s fixture account.
+    private func activated(_ store: EpicMemoryStore, _ session: EpicTestSession) async -> RememberedSession<EpicCredentials> {
+        let remembered = RememberedSession(keychain: store, accountID: EpicGames.accountID,
+                                           notSaved: EpicGames.sessionNotSaved)
+        await remembered.activate(rotating: EpicGames.rotating(session), accountID: EpicGames.fixtureAccount)
+        return remembered
     }
 }
-
-private enum EpicRememberedTestError: Error { case timeout }
 
 /// Scripted watch shared by model, download and presentation sessions.
 final class EpicCredentialRevisionFeed: @unchecked Sendable {

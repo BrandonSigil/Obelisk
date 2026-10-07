@@ -25,6 +25,8 @@ final class FakeInstallations<Store: InstallationStorefront>: InstallationsBacke
     var answering: (Store.GameID, UInt64, CloudChoice) async throws -> Void = { _, _, _ in }
     /// The indicators the account's journals hold.
     var indicators: [(Store.GameID, CloudIndicator)] = []
+    /// How many times Swift asked for indicators.
+    private(set) var indicatorRequests = 0
     /// Runs as each action reaches Rust, before the call returns.
     var onCall: (Call) -> Void = { _ in }
 
@@ -73,7 +75,10 @@ final class FakeInstallations<Store: InstallationStorefront>: InstallationsBacke
         record(.answer(game, decision: decisionId, choice))
         try await answering(game, decisionId, choice)
     }
-    func cloudIndicators(_ games: [Store.GameID]) async throws -> [(Store.GameID, CloudIndicator)] { indicators }
+    func cloudIndicators(_ games: [Store.GameID]) async throws -> [(Store.GameID, CloudIndicator)] {
+        indicatorRequests += 1
+        return indicators
+    }
 
     /// The actions Swift forwarded, without diagnostics.
     var actions: [Call] {
@@ -169,9 +174,9 @@ extension SteamModel {
     }
 }
 
-extension EpicModel {
+extension WebAccountModel {
     /// Installations the test drives, whatever session signs in.
-    static func installations(_ fake: FakeInstallations<EpicGames>) -> MakeInstallations {
+    static func installations(_ fake: FakeInstallations<Store>) -> MakeInstallations {
         { _, _, _, _, _ in fake }
     }
 }

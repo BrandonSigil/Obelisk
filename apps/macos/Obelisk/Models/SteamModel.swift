@@ -177,21 +177,6 @@ final class SteamModel {
     /// saved session restores.
     var showsLibrary: Bool { isConnected || (cachedAccount != nil && isRestoring) }
 
-    func refreshCloudIndicator() {
-        guard let game = selectedGame else { return }
-        cloud.refreshIndicators(for: [game.appId])
-    }
-
-    /// Names the game a Cloud question or banner is about.
-    func cloudTitle(for appId: UInt32?) -> String {
-        let title = L10n.string("ui.steam.cloud.title")
-        guard let appId else { return title }
-        let name = games.first { $0.appId == appId }?.name
-            ?? installations.receipts.first { $0.gameID == appId }?.name
-            ?? String(appId)
-        return "\(title) · \(name)"
-    }
-
     /// The game on screen, for its installation actions. Only remote details
     /// tell which builds the account can install.
     private var installationSelection: InstallationSelection<SteamGames>? {
@@ -781,7 +766,7 @@ final class SteamModel {
         let current = generation
         reloadDetails()
         reloadAchievements()
-        refreshCloudIndicator()
+        installations.refreshCloudIndicator()
         Task {
             do {
                 let loaded = try await loadNews(game.appId)

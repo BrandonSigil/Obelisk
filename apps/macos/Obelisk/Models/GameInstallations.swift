@@ -15,6 +15,8 @@ protocol InstallationStorefront: GameStorefront {
     static var nativePlatform: String { get }
     /// Whether Obelisk syncs the storefront's Cloud saves.
     static var syncsCloud: Bool { get }
+    /// Names a Cloud question or banner; the game's name follows it.
+    static var cloudTitle: String { get }
 }
 
 extension InstallationStorefront {
@@ -365,6 +367,12 @@ final class GameInstallations<Store: InstallationStorefront> {
         act { $0.maintainCloud(selection.game, installed: installed) }
     }
 
+    /// Asks Rust again for the Cloud indicator of the game on screen.
+    func refreshCloudIndicator() {
+        guard Store.syncsCloud, let game = selection()?.game else { return }
+        cloud.refreshIndicators(for: [game])
+    }
+
     /// The game on screen's Cloud indicator, or nil when it is hidden.
     var cloudIndicator: CloudIndicatorPresentation? {
         guard Store.syncsCloud, let game = selection()?.game, account != nil else { return nil }
@@ -477,6 +485,7 @@ extension SteamGames: InstallationStorefront {
     static func name(_ game: UInt32) -> String { String(game) }
     static let otherGameOperation = "ui.steam.other_game_operation"
     @MainActor static func describe(_ error: Error) -> String { SteamModel.message(error) }
+    static var cloudTitle: String { L10n.string("ui.steam.cloud.title") }
 }
 
 extension EpicGames: InstallationStorefront {
@@ -485,7 +494,6 @@ extension EpicGames: InstallationStorefront {
     static func game(_ id: String) -> String? { epicGameID(id) == nil ? nil : id }
     static func name(_ game: String) -> String { game }
     static let otherGameOperation = "ui.epic.other_game_operation"
-    @MainActor static func describe(_ error: Error) -> String { EpicModel.message(error) }
 }
 
 extension GogGames: InstallationStorefront {
@@ -498,7 +506,6 @@ extension GogGames: InstallationStorefront {
     static let otherGameOperation = "ui.gog.other_game_operation"
     /// GOG Cloud saves need each game's own Galaxy credentials: not yet.
     static let syncsCloud = false
-    @MainActor static func describe(_ error: Error) -> String { GogModel.message(error) }
 }
 
 typealias SteamInstallations = GameInstallations<SteamGames>

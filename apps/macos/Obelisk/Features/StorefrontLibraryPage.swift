@@ -37,7 +37,6 @@ import SwiftUI
     var missingMetadata: String? { get }
     func refresh()
     func open(_ game: Game)
-    func cloudTitle(for game: Store.GameID?) -> String
     func downloadFromLibrary(_ game: Game)
     /// Whether the storefront may have a build of `game` to install.
     func canInstallFromLibrary(_ game: Game) -> Bool
@@ -54,6 +53,15 @@ extension LibraryStorefront {
     /// always has one: the last one played, else the first of the library
     /// ordered by playtime, the most played first and equal ones by name.
     var featuredGame: Game? { libraryOrdering.featuredGame(of: self) }
+
+    /// Names the game a Cloud question or banner is about.
+    func cloudTitle(for game: Store.GameID?) -> String {
+        guard let game else { return Store.cloudTitle }
+        let name = games.first { $0.id == game }.map(title(of:))
+            ?? installations.receipts.first { $0.gameID == game }?.name
+            ?? Store.name(game)
+        return "\(Store.cloudTitle) · \(name)"
+    }
 
     /// Launches the game's native installation first.
     func launchFromLibrary(_ game: Game) {
@@ -349,5 +357,4 @@ private struct LibraryTransferBar<Store: InstallationStorefront>: View {
 }
 
 extension SteamModel: LibraryStorefront {}
-extension EpicModel: LibraryStorefront {}
-extension GogModel: LibraryStorefront {}
+extension WebAccountModel: LibraryStorefront {}

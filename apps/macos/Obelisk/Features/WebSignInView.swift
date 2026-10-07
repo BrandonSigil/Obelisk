@@ -1,26 +1,9 @@
 import SwiftUI
 
-/// What a storefront that signs in through its own web page gives its
-/// sign-in page.
-@MainActor protocol WebSignInModel: AnyObject, Observable {
-    var isRestoring: Bool { get }
-    var isConnecting: Bool { get }
-    var isSigningOut: Bool { get }
-    var canRetryRestore: Bool { get }
-    var storageWarning: String? { get set }
-    var rememberSession: Bool { get set }
-    func signIn()
-    func cancelSignIn()
-    func retryRestore()
-}
-
-extension EpicModel: WebSignInModel {}
-extension GogModel: WebSignInModel {}
-
 /// The sign-in page of a storefront that signs in through its own web page,
 /// in that storefront's words.
-struct WebSignInView<Model: WebSignInModel>: View {
-    @Bindable var model: Model
+struct WebSignInView<Store: WebStorefront>: View {
+    @Bindable var model: WebAccountModel<Store>
     let section: LibrarySection
     let title: String
     let subtitle: String

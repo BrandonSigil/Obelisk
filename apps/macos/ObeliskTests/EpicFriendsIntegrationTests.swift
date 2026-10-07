@@ -128,7 +128,8 @@ final class EpicFriendsIntegrationTests: XCTestCase {
         let old = EpicFriendsTestSession()
         let replacement = EpicFriendsTestSession(accountID: "replacement-account")
         let store = EpicFriendsTestStore()
-        let model = EpicModel(keychain: store, signIn: { _ in replacement }, restore: { _ in old })
+        let model = EpicModel(keychain: store, authorize: { "test-code" }, signIn: { _ in replacement },
+                              restore: { _ in old })
         await model.start()
         await old.credentialsSettled()
         await store.holdNextSave()
@@ -136,13 +137,13 @@ final class EpicFriendsIntegrationTests: XCTestCase {
         await store.waitForHeldSave()
         model.signOut()
         old.publish(presence: .online, game: "Obsolete game")
-        model.signIn(input: "test-code")
+        model.signIn()
         XCTAssertFalse(model.isConnecting, "A new account must wait for the previous Keychain removal")
         XCTAssertNil(model.friends)
         await store.releaseSaveAndWaitForRemoval()
         // Removal wakes the storage task; allow its MainActor completion to clear sign-out.
-        await withCheckedContinuation { c in DispatchQueue.main.async { c.resume() } }
-        model.signIn(input: "test-code")
+        await drainMainQueue()
+        model.signIn()
         await replacement.credentialsSettled()
         await replacement.settled()
         XCTAssertEqual(model.friends?.account.accountID, "replacement-account")
@@ -217,6 +218,46 @@ final class EpicFriendsIntegrationTests: XCTestCase {
         XCTAssertFalse(model.isFriendsPresented)
         XCTAssertFalse(model.isConnected)
     }
+
+    @MainActor
+    func testWakeAfterAnExpiredSessionDoesNotReconnectFriends() async throws {
+        let session = EpicFriendsTestSession()
+        let model = epicFriendsModel(session)
+        await model.start()
+        await session.settled()
+        // As the wake observer does: a connected account reconnects.
+        model.presence.retry()
+        await session.waitForReconnect()
+        await session.settled()
+        let waiters = session.maximumWaiters
+        session.expireNextGames()
+        model.refresh()
+        try await eventually { !model.isConnected }
+
+        model.presence.retry()
+        try await letAWakeReconnectRun()
+        XCTAssertEqual(session.reconnections, 1)
+        XCTAssertEqual(session.maximumWaiters, waiters)
+        XCTAssertNil(model.friends)
+    }
+
+    @MainActor
+    func testWakeBeforeSignInStartsNothing() async throws {
+        let session = EpicFriendsTestSession()
+        let model = epicFriendsModel(session)
+        model.presence.retry()
+        try await letAWakeReconnectRun()
+        XCTAssertEqual(session.starts, 0)
+        XCTAssertEqual(session.reconnections, 0)
+    }
+
+    /// A wake's friends task starts on the main actor, then reaches the session
+    /// off it: a test that expects nothing gives it the time to do something.
+    @MainActor
+    private func letAWakeReconnectRun() async throws {
+        await drainMainQueue(times: 3)
+        try await Task.sleep(for: .milliseconds(50))
+    }
 }
 
 @MainActor
@@ -274,6 +315,7 @@ final class EpicFriendsTestSession: EpicSessionProtocol, @unchecked Sendable {
     private var friendAfter: UInt64 = 0
     private var credentialAfter: UInt64 = 0
     private var startCount = 0, reconnectCount = 0, disconnectCount = 0, maximum = 0
+    private var expireNext = false
     init(accountID: String = "epic-account") {
         snapshot.accountId = accountID
         saved.accountId = accountID
@@ -283,7 +325,17 @@ final class EpicFriendsTestSession: EpicSessionProtocol, @unchecked Sendable {
     var disconnects: Int { lock.withLock { disconnectCount } }
     var maximumWaiters: Int { lock.withLock { maximum } }
     func credentials() async throws -> EpicCredentials { lock.withLock { saved } }
-    func games() async throws -> [EpicGame] { [] }
+    func games() async throws -> [EpicGame] {
+        let expired = lock.withLock {
+            let expired = expireNext
+            expireNext = false
+            return expired
+        }
+        if expired { throw EpicError.Unauthorized }
+        return []
+    }
+    /// The next library request finds the account signed out.
+    func expireNextGames() { lock.withLock { expireNext = true } }
     func playtimes() async throws -> [EpicPlaytime] { [] }
     func startFriends() async { lock.withLock { startCount += 1 } }
     func reconnectFriends() async {

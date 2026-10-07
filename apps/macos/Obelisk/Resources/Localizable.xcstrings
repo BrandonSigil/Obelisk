@@ -10200,6 +10200,23 @@
         }
       }
     },
+    "model.gog.revocationUnconfirmed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "GOG did not confirm that this session was closed."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "GOG n’a pas confirmé la fermeture de cette session."
+          }
+        }
+      }
+    },
     "model.gog.recoveringSession": {
       "extractionState": "manual",
       "localizations": {

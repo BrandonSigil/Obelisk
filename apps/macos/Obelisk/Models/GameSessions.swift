@@ -115,12 +115,6 @@ typealias GogGameSessions = GameSessions<GogGames>
 extension GameSessions where Store == SteamGames {
     static var shared: SteamGameSessions { SteamGames.sessions }
 }
-extension GameSessions where Store == EpicGames {
-    static var shared: EpicGameSessions { EpicGames.sessions }
-}
-extension GameSessions where Store == GogGames {
-    static var shared: GogGameSessions { GogGames.sessions }
-}
 
 /// A storefront's Game sessions as Rust keeps them: the Reservation, recovery,
 /// Account revocation and the checks on every answer. This presents their
