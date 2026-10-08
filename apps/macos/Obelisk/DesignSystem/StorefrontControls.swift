@@ -8,88 +8,6 @@ struct StorefrontSortOption: Identifiable {
     let action: @MainActor () -> Void
 }
 
-/// The title bar of a storefront's game pages and of a store still to come:
-/// the account and the storefront's name.
-struct StorefrontTitleBar<AccountMenu: View>: View {
-    let title: String
-
-    let accountName: String?
-    let avatarURL: URL?
-    let isConnected: Bool
-    private let accountMenu: AccountMenu
-
-    @Environment(\.colorScheme) private var colorScheme
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
-
-    init(
-        title: String,
-        accountName: String?,
-        avatarURL: URL? = nil,
-        isConnected: Bool,
-        @ViewBuilder accountMenu: () -> AccountMenu
-    ) {
-        self.title = title
-        self.accountName = accountName
-        self.avatarURL = avatarURL
-        self.isConnected = isConnected
-        self.accountMenu = accountMenu()
-    }
-
-    var body: some View {
-        HStack(spacing: 12) {
-            if isConnected {
-                Menu { accountMenu } label: { avatar }
-                    .menuStyle(.button)
-                    .obeliskButtonStyle(.plain)
-                    .menuIndicator(.hidden)
-                    .fixedSize()
-                    .accessibilityLabel(accountLabel)
-                    .accessibilityIdentifier("storefront-account-menu")
-                    .help(accountLabel)
-            } else {
-                avatar.accessibilityLabel(accountLabel)
-            }
-
-            Text(title)
-                .font(.system(size: 13, weight: .semibold))
-                .lineLimit(1)
-
-            Spacer(minLength: 12)
-                .overlay { StorefrontWindowDragRegion() }
-        }
-        .padding(.horizontal, 20)
-        .frame(height: ObeliskStyle.titleBarHeight)
-        .background {
-            if reduceTransparency {
-                ObeliskPalette(colorScheme: colorScheme).background
-            } else {
-                StorefrontTitleBarMaterial()
-            }
-        }
-        .overlay(alignment: .bottom) {
-            Rectangle()
-                .fill(ObeliskPalette(colorScheme: colorScheme).border)
-                .frame(height: 1)
-                .allowsHitTesting(false)
-        }
-    }
-
-    private var accountLabel: String {
-        let name = accountName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        return name.isEmpty ? L10n.string("ui.account.store", title) : name
-    }
-
-    /// The library's account picture, glass as the title bar's control.
-    private var avatar: some View {
-        AccountAvatar(name: accountName, url: avatarURL)
-            .frame(width: 28, height: 28)
-            .modifier(StorefrontControlGlass())
-            .contentShape(Circle())
-            // The picture hides itself from accessibility; the bar names the account.
-            .accessibilityElement(children: .ignore)
-    }
-}
-
 struct StorefrontSortPopover: View {
     let options: [StorefrontSortOption]
     let dismiss: @MainActor () -> Void
@@ -184,18 +102,6 @@ struct StorefrontControlGlass: ViewModifier {
             lineWidth: 0.75
         )
     }
-}
-
-private struct StorefrontTitleBarMaterial: NSViewRepresentable {
-    func makeNSView(context: Context) -> NSVisualEffectView {
-        let view = NSVisualEffectView()
-        view.material = .headerView
-        view.blendingMode = .withinWindow
-        view.state = .followsWindowActiveState
-        return view
-    }
-
-    func updateNSView(_ nsView: NSVisualEffectView, context: Context) {}
 }
 
 struct StorefrontWindowDragRegion: NSViewRepresentable {

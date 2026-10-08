@@ -9,16 +9,16 @@ struct GogGameDetailView: View {
     var body: some View {
         GameDetailPage(
             model: model,
-            game: game.productId,
-            name: game.title,
-            libraryTitle: L10n.string("ui.gog.library"),
+            game: game,
+            storeID: "gog",
             size: (installations.selectedReceipt?.totalBytes ?? model.selectedGameDetails?.installationBytes)
                 .map(GameFormatting.bytes),
             lastPlayed: model.lastPlayed(of: game).map(GameFormatting.lastPlayed),
-            playtime: model.playtime(of: game).map(GameFormatting.playtime),
-            back: model.closeGame
+            playtime: model.playtime(of: game).map(GameFormatting.playtime)
         ) {
             StorefrontArtwork(imageURL: game.headerImageUrl ?? game.imageUrl, maxPixelSize: 2048)
+        } cover: {
+            StorefrontArtwork(imageURL: game.imageUrl ?? game.headerImageUrl)
         } content: {
             GameOperationStatus(installations: installations, game: game.productId)
             GameAboutSection(summary: game.summary, facts: facts)

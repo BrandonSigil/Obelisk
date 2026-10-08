@@ -6,10 +6,8 @@ struct SteamView: View {
 
     var body: some View {
         Group {
-            if model.showsLibrary && model.selectedGame == nil {
-                library
-            } else if model.isConnected {
-                StorefrontPage { titleBar } content: { content }
+            if model.showsLibrary {
+                browser
             } else {
                 SteamLoginView(model: model)
             }
@@ -25,8 +23,8 @@ struct SteamView: View {
         .errorAlert(L10n.string("ui.store.steam"), message: $model.errorMessage)
     }
 
-    private var library: some View {
-        StorefrontLibraryPage(
+    private var browser: some View {
+        StorefrontBrowser(
             model: model,
             storeID: "steam",
             storeTitle: L10n.string("ui.store.steam"),
@@ -42,34 +40,8 @@ struct SteamView: View {
             SteamArtwork(appId: game.appId, iconHash: game.iconHash)
         } accountMenu: {
             accountMenu
-        }
-    }
-
-    /// A game's page.
-    private var content: some View {
-        VStack(alignment: .leading, spacing: 25) {
-            StorefrontWarningBanner(message: $model.storageWarning)
-
-            if model.cloud.failurePresented {
-                SteamCloudFailureView(model: model, storefront: "steam")
-            }
-            if let game = model.selectedGame {
-                SteamGameDetailView(model: model, game: game)
-            }
-        }
-        .padding(ObeliskStyle.contentPadding)
-        .padding(.top, 6)
-        .frame(maxWidth: 1400, alignment: .leading)
-    }
-
-    private var titleBar: some View {
-        StorefrontTitleBar(
-            title: L10n.string("ui.store.steam"),
-            accountName: model.displayName,
-            avatarURL: model.avatarURL,
-            isConnected: model.isConnected
-        ) {
-            accountMenu
+        } gamePage: { game in
+            SteamGameDetailView(model: model, game: game)
         }
     }
 

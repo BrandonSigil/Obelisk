@@ -822,7 +822,7 @@ final class SteamModel {
         installations.install(.steam(appId: game.appId, name: game.name, platform: nil, language: language), of: game.appId)
     }
 
-    func backToLibrary() {
+    func closeGame() {
         detailGeneration += 1
         selectedGame = nil
         details = nil

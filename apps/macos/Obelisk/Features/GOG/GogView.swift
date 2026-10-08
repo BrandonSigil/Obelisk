@@ -6,10 +6,8 @@ struct GogView: View {
 
     var body: some View {
         Group {
-            if model.showsLibrary && model.selectedGame == nil {
-                library
-            } else if model.isConnected {
-                StorefrontPage { titleBar } content: { content }
+            if model.showsLibrary {
+                browser
             } else {
                 WebSignInView(
                     model: model,
@@ -27,8 +25,8 @@ struct GogView: View {
         .errorAlert(L10n.string("ui.store.gog"), message: $model.errorMessage)
     }
 
-    private var library: some View {
-        StorefrontLibraryPage(
+    private var browser: some View {
+        StorefrontBrowser(
             model: model,
             storeID: "gog",
             storeTitle: L10n.string("ui.store.gog"),
@@ -45,30 +43,8 @@ struct GogView: View {
             StorefrontArtwork(imageURL: game.imageUrl ?? game.headerImageUrl)
         } accountMenu: {
             accountMenu
-        }
-    }
-
-    /// A game's page.
-    private var content: some View {
-        VStack(alignment: .leading, spacing: 25) {
-            StorefrontWarningBanner(message: $model.storageWarning)
-            if let game = model.selectedGame {
-                GogGameDetailView(model: model, game: game)
-            }
-        }
-        .padding(ObeliskStyle.contentPadding)
-        .padding(.top, 6)
-        .frame(maxWidth: 1400, alignment: .leading)
-    }
-
-    private var titleBar: some View {
-        StorefrontTitleBar(
-            title: L10n.string("ui.store.gog"),
-            accountName: model.accountName,
-            avatarURL: model.avatarURL,
-            isConnected: model.isConnected
-        ) {
-            accountMenu
+        } gamePage: { game in
+            GogGameDetailView(model: model, game: game)
         }
     }
 

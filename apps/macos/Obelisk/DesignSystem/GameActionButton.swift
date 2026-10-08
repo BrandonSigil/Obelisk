@@ -62,8 +62,8 @@ struct GameActionButton: View {
                 if showsProgress {
                     GameButtonProgress(fraction: mode == .step ? stepFraction : transfer?.progressFraction)
                         .frame(height: 3)
-                        .padding(.horizontal, 12)
-                        .padding(.bottom, 5)
+                        .padding(.horizontal, 24)
+                        .padding(.bottom, 6)
                         .allowsHitTesting(false)
                         .accessibilityHidden(true)
                 }
@@ -75,23 +75,24 @@ struct GameActionButton: View {
             if isTransferring || isCancellable {
                 Button(action: cancel) {
                     Image(systemName: "xmark")
-                        .font(.system(size: 11, weight: .semibold))
-                        .frame(width: 28, height: 28)
-                        .background(.primary.opacity(0.1), in: Circle())
-                        .contentShape(Circle())
+                        .font(.system(size: 12, weight: .semibold))
+                        .frame(width: 36, height: 36)
+                        .modifier(StorefrontControlGlass())
+                        .contentShape(.circle)
                 }
                 .obeliskButtonStyle(.plain)
                 .foregroundStyle(.secondary)
                 .accessibilityLabel(L10n.string("ui.transfer.cancel"))
                 .help(L10n.string("ui.transfer.cancel"))
+                .transition(.scale(scale: 0.5).combined(with: .opacity))
             }
         }
         .fixedSize()
     }
 }
 
-/// Steam's launch bar button: an uppercase title on a gradient, green to
-/// launch and blue to install.
+/// The game's launch button: an uppercase title on a gradient capsule seen
+/// through glass, green to launch and blue to install, as the library's cards.
 private struct GameActionButtonStyle: ButtonStyle {
     let launches: Bool
     /// A button showing progress keeps its color while it cannot be pressed.
@@ -107,28 +108,37 @@ private struct GameActionButtonStyle: ButtonStyle {
         let colors: [Color]
         let isBusy: Bool
         @Environment(\.isEnabled) private var isEnabled
+        @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
         @State private var isHovered = false
 
         private var isDimmed: Bool { !isEnabled && !isBusy }
 
         var body: some View {
-            configuration.label
-                .font(.system(size: 15, weight: .semibold))
+            let label = configuration.label
+                .font(.system(size: 14, weight: .bold))
                 .textCase(.uppercase)
-                .tracking(0.4)
+                .tracking(0.5)
                 .foregroundStyle(.white.opacity(isDimmed ? 0.6 : 1))
-                .padding(.horizontal, 14)
+                .shadow(color: .black.opacity(0.2), radius: 1.5, y: 0.5)
+                .padding(.horizontal, 18)
                 .frame(height: 44)
                 .background {
-                    RoundedRectangle(cornerRadius: 6)
+                    Capsule()
                         .fill(LinearGradient(colors: colors, startPoint: .leading, endPoint: .trailing))
                         .saturation(isDimmed ? 0.35 : 1)
-                        .opacity(isDimmed ? 0.55 : 1)
-                        .brightness(configuration.isPressed ? -0.08 : isHovered && isEnabled ? 0.05 : 0)
+                        .opacity(isDimmed ? 0.5 : reduceTransparency ? 1 : 0.85)
+                        .brightness(configuration.isPressed ? -0.08 : isHovered && isEnabled ? 0.06 : 0)
                 }
-                .contentShape(RoundedRectangle(cornerRadius: 6))
-                .onHover { isHovered = $0 }
-                .pointerCursor()
+            Group {
+                if reduceTransparency {
+                    label
+                } else {
+                    label.glassEffect(.regular.interactive(isEnabled), in: .capsule)
+                }
+            }
+            .contentShape(.capsule)
+            .onHover { isHovered = $0 }
+            .pointerCursor()
         }
     }
 }

@@ -6,7 +6,7 @@ enum ObeliskStyle {
     static let accent = Color(red: 1.0, green: 0.22, blue: 0.38)
     static let sidebarWidth: CGFloat = 216
     static let contentPadding: CGFloat = 32
-    /// Fixed storefront title bar height; `StorefrontPage` reserves the same space.
+    /// The floating glass bar's height; a storefront's pages reserve the same space.
     static let titleBarHeight: CGFloat = 58
     /// A library hero's height below the bar it reaches under.
     static let libraryHeroHeight: CGFloat = 330

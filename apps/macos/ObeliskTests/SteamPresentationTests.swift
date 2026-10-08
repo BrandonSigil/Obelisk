@@ -175,7 +175,7 @@ final class SteamPresentationTests: XCTestCase {
         XCTAssertFalse(model.isLoadingDetails)
         XCTAssertFalse(model.isLoadingNews)
 
-        model.backToLibrary()
+        model.closeGame()
         XCTAssertNil(model.selectedGame)
         XCTAssertNil(model.details)
         XCTAssertTrue(model.news.isEmpty)
@@ -255,9 +255,8 @@ final class SteamPresentationTests: XCTestCase {
             guard let scroll = firstScrollView(in: host), let document = scroll.documentView else { return false }
             return document.frame.height > scroll.contentView.bounds.height
         }
-        // The library and a game's page each keep their own scroll view. The
-        // library's scrollbar floats over its artwork; a game's page reserves a
-        // persistent one. Neither changes the content width.
+        // The library and a game's page each keep their own scroll view, whose
+        // scrollbar floats over the artwork. Neither changes the content width.
         var scrolling = try StableScroller(in: host, style: .overlay)
         let librarySearchFrame = try XCTUnwrap(accessibilityFrame(in: host, label: L10n.string("ui.search.store_library", L10n.string("ui.store.steam"))), "The search field must be accessible for the layout regression")
         try scrolling.assertKept(in: host, during: "the library")
@@ -281,20 +280,19 @@ final class SteamPresentationTests: XCTestCase {
             return document.frame.height > scrolling.scroll.contentView.bounds.height
         }
 
-        // Keep both responses pending so the detail is temporarily shorter than
-        // the viewport. This is when the existing scrollbar used to disappear.
+        // Keep both responses pending: the page must keep its scroll view
+        // and width while details, then news, arrive.
         model.open(fixtureGames[0])
         try await eventually { await details.wasRequested(DetailsRequest(appId: 620, language: "french")) }
         try await eventually { await news.wasRequested(620) }
         try await eventually {
             host.layoutSubtreeIfNeeded()
             window.displayIfNeeded()
-            guard let scroll = firstScrollView(in: host), let document = scroll.documentView else { return false }
-            return scroll !== scrolling.scroll && document.frame.height <= scroll.contentView.bounds.height
+            guard let scroll = firstScrollView(in: host) else { return false }
+            return scroll !== scrolling.scroll
         }
-        scrolling = try StableScroller(in: host, style: .legacy)
+        scrolling = try StableScroller(in: host, style: .overlay, width: size.width)
         XCTAssertTrue(model.isLoadingNews)
-        XCTAssertFalse(scrolling.scroller.isEnabled, "A page that fits must remain non-scrollable")
         try scrolling.assertKept(in: host, during: "detail loading")
         // This hosting fixture exposes the native search field, but not the
         // detail's virtual SwiftUI buttons, even in an onscreen window. The
@@ -327,7 +325,7 @@ final class SteamPresentationTests: XCTestCase {
         scroll.reflectScrolledClipView(scroll.contentView)
         XCTAssertEqual(scroller.doubleValue, 0.5, accuracy: 0.02, "The same scrollbar must follow the document's position")
 
-        model.backToLibrary()
+        model.closeGame()
         try await eventually {
             host.layoutSubtreeIfNeeded()
             window.displayIfNeeded()
@@ -369,7 +367,7 @@ final class SteamPresentationTests: XCTestCase {
         XCTAssertEqual(backend.actions, [.install(GameOffer.steam(appId: 620, name: "Portal 2", platform: "macos", language: "tchinese"))])
         XCTAssertEqual(model.installations.transfer?.state, .preparing, "Progress shows before its first snapshot")
         XCTAssertEqual(model.installations.activeTransferGame, 620)
-        model.backToLibrary()
+        model.closeGame()
         XCTAssertNil(model.selectedGame)
         XCTAssertEqual(model.installations.activeTransferGame, 620)
         model.open(fixtureGames[1])
@@ -402,7 +400,7 @@ final class SteamPresentationTests: XCTestCase {
     func testLibraryLaunchesAnInstalledGameWithoutOpeningIt() async throws {
         let fixture = try await launchFixture()
         defer { fixture.cleanUp() }
-        fixture.model.backToLibrary()
+        fixture.model.closeGame()
 
         fixture.model.launchFromLibrary(fixtureGames[0])
 
@@ -703,7 +701,7 @@ final class SteamPresentationTests: XCTestCase {
         let prompt = model.rosetta.prompt
         XCTAssertFalse(model.installations.primaryActionAvailable)
         XCTAssertFalse(model.installations.canUninstallSelectedGame)
-        model.backToLibrary()
+        model.closeGame()
         XCTAssertEqual(model.rosetta.prompt, prompt)
         model.open(fixtureGames[1])
         XCTAssertEqual(model.rosetta.prompt, prompt)

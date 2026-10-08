@@ -36,7 +36,11 @@ import SwiftUI
     /// What the filter or the order could not load, offered a retry.
     var missingMetadata: String? { get }
     func refresh()
+    /// The game whose page shows instead of the library.
+    var selectedGame: Game? { get }
     func open(_ game: Game)
+    /// Returns from the game's page to the library.
+    func closeGame()
     func downloadFromLibrary(_ game: Game)
     /// Whether the storefront may have a build of `game` to install.
     func canInstallFromLibrary(_ game: Game) -> Bool
@@ -78,28 +82,24 @@ final class LibraryScrollMemory {
 }
 
 /// A storefront's signed-in library: the featured game as its hero, then every
-/// game of the account under a floating glass bar, and the storefront's
-/// Transfer floating at the bottom.
-struct StorefrontLibraryPage<Model: LibraryStorefront, HeroArtwork: View, HeroLogo: View, Artwork: View,
-                             AccountMenu: View>: View {
+/// game of the account under the browser's floating glass bar, and the
+/// storefront's Transfer floating at the bottom.
+struct StorefrontLibraryPage<Model: LibraryStorefront, HeroArtwork: View, HeroLogo: View, Artwork: View>: View {
     @Bindable var model: Model
     /// Names the storefront in accessibility identifiers.
     let storeID: String
     let storeTitle: String
     let libraryTitle: String
-    let accountName: String?
-    let avatarURL: URL?
     let scrollMemory: LibraryScrollMemory
+    /// Opens a game's page, from its cover or from the hero.
+    let open: (Model.Game, GameOpeningSource) -> Void
     /// The featured game's wide artwork, reaching under the bar.
     @ViewBuilder let heroArtwork: (Model.Game) -> HeroArtwork
     @ViewBuilder let heroLogo: (Model.Game) -> HeroLogo
     /// A game's cover.
     @ViewBuilder let artwork: (Model.Game) -> Artwork
-    @ViewBuilder let accountMenu: AccountMenu
     @State private var position: ScrollPosition
-    /// Whether games or the library's header are under the bar, rather than
-    /// the hero's artwork or nothing at all.
-    @State private var contentUnderBar = false
+    @Environment(\.storefrontBar) private var bar
 
     private static var columns: [GridItem] {
         [GridItem(.adaptive(minimum: 160, maximum: 220), spacing: 16, alignment: .top)]
@@ -110,25 +110,21 @@ struct StorefrontLibraryPage<Model: LibraryStorefront, HeroArtwork: View, HeroLo
         storeID: String,
         storeTitle: String,
         libraryTitle: String,
-        accountName: String?,
-        avatarURL: URL? = nil,
         scrollMemory: LibraryScrollMemory,
+        open: @escaping (Model.Game, GameOpeningSource) -> Void,
         @ViewBuilder heroArtwork: @escaping (Model.Game) -> HeroArtwork,
         @ViewBuilder heroLogo: @escaping (Model.Game) -> HeroLogo,
-        @ViewBuilder artwork: @escaping (Model.Game) -> Artwork,
-        @ViewBuilder accountMenu: () -> AccountMenu
+        @ViewBuilder artwork: @escaping (Model.Game) -> Artwork
     ) {
         self.model = model
         self.storeID = storeID
         self.storeTitle = storeTitle
         self.libraryTitle = libraryTitle
-        self.accountName = accountName
-        self.avatarURL = avatarURL
         self.scrollMemory = scrollMemory
+        self.open = open
         self.heroArtwork = heroArtwork
         self.heroLogo = heroLogo
         self.artwork = artwork
-        self.accountMenu = accountMenu()
         // A library opened at its top stays free to grow above, as its hero
         // does once the games arrive.
         let offset = scrollMemory.offset
@@ -146,7 +142,7 @@ struct StorefrontLibraryPage<Model: LibraryStorefront, HeroArtwork: View, HeroLo
     var body: some View {
         let heroGame = heroGame
         let backdropOffset = heroGame == nil ? 0 : ObeliskStyle.libraryHeroHeight
-        return StorefrontScrollView(topOverlayHeight: ObeliskStyle.titleBarHeight, scrollerOverContent: true) {
+        return StorefrontScrollView(topOverlayHeight: ObeliskStyle.titleBarHeight) {
             VStack(alignment: .leading, spacing: 0) {
                 if let heroGame {
                     hero(heroGame)
@@ -161,28 +157,18 @@ struct StorefrontLibraryPage<Model: LibraryStorefront, HeroArtwork: View, HeroLo
                 .padding(.horizontal, ObeliskStyle.contentPadding)
                 .padding(.top, heroGame == nil ? 12 : 30)
                 .padding(.bottom, 36)
-                .frame(maxWidth: 1400, alignment: .leading)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
         .scrollPosition($position)
         .onScrollGeometryChange(for: CGFloat.self, of: { $0.contentOffset.y + $0.contentInsets.top }) { _, offset in
             scrollMemory.offset = offset
         }
+        // Whether games or the library's header are under the bar, rather
+        // than the hero's artwork or nothing at all.
         .onScrollGeometryChange(for: Bool.self, of: { $0.contentOffset.y + $0.contentInsets.top > backdropOffset }) { _, under in
-            contentUnderBar = under
-        }
-        // An overlay rather than a safe area bar: on macOS the bar's scroll
-        // edge effect cannot be turned off, and it veils the hero's artwork.
-        .overlay(alignment: .top) {
-            LibraryGlassBar(
-                storeTitle: storeTitle,
-                accountName: accountName,
-                avatarURL: avatarURL,
-                searchText: $model.searchText,
-                showsBackdrop: contentUnderBar
-            ) {
-                accountMenu
-            }
+            bar?.showsBackdrop = under
+            bar?.showsGameTitle = false
         }
         .safeAreaBar(edge: .bottom, spacing: 0) {
             LibraryTransferBar(installations: model.installations, name: name)
@@ -197,7 +183,7 @@ struct StorefrontLibraryPage<Model: LibraryStorefront, HeroArtwork: View, HeroLo
                 model.lastPlayed(of: game).map { .init(symbol: "calendar", text: GameFormatting.lastPlayed($0)) },
                 model.playtime(of: game).map { .init(symbol: "clock", text: GameFormatting.playtime($0)) },
             ].compactMap { $0 },
-            open: { model.open(game) }
+            open: { open(game, .hero) }
         ) {
             heroArtwork(game)
         } logo: {
@@ -318,7 +304,8 @@ struct StorefrontLibraryPage<Model: LibraryStorefront, HeroArtwork: View, HeroLo
                     platform: model.platform(of: game),
                     action: action,
                     progress: { installations.transfer(for: game.id)?.progressFraction },
-                    open: { model.open(game) },
+                    matchID: game.id,
+                    open: { open(game, .cover) },
                     perform: {
                         if case .launch = action { model.launchFromLibrary(game) }
                         else { model.downloadFromLibrary(game) }

@@ -242,21 +242,11 @@ final class EpicPresentationTests: XCTestCase {
                 guard let scroll = firstScrollView(in: fixture.host), let document = scroll.documentView else { return false }
                 return document.frame.height > scroll.contentView.bounds.height
             }
-            // The library and a game's page each keep their own scroll view. The
-            // library's scrollbar floats over its covers; a game's page reserves
-            // the same persistent one as Steam's. Neither changes its width.
+            // The library and a game's page each keep their own scroll view,
+            // whose scrollbar floats over the artwork. Neither changes its width.
             let library = try StableScroller(in: fixture.host, style: .overlay)
             XCTAssertEqual(library.width, size.width, accuracy: 0.5, "The library's covers reach under its scrollbar")
             let searchFrameBefore = try XCTUnwrap(searchFrame(in: fixture.host))
-
-            let reference = EpicPresentationWindow(StorefrontScrollView { Color.clear.frame(height: 1) }, size: size)
-            defer { reference.close() }
-            try await eventually {
-                reference.layout()
-                return firstScrollView(in: reference.host)?.verticalScroller != nil
-            }
-            let referenceScroll = try XCTUnwrap(firstScrollView(in: reference.host))
-            let referenceScroller = try XCTUnwrap(referenceScroll.verticalScroller)
 
             try library.assertKept(in: fixture.host, during: "the full library")
 
@@ -274,13 +264,12 @@ final class EpicPresentationTests: XCTestCase {
             model.open(epicPresentationLibrary[0])
             try await eventually {
                 fixture.layout()
-                guard let current = firstScrollView(in: fixture.host), let document = current.documentView else { return false }
-                return current !== library.scroll && document.frame.height <= current.contentView.bounds.height
+                guard let current = firstScrollView(in: fixture.host) else { return false }
+                return current !== library.scroll
             }
-            let detail = try StableScroller(in: fixture.host, style: .legacy, width: referenceScroll.contentView.bounds.width)
-            XCTAssertEqual(ObjectIdentifier(type(of: detail.scroller)), ObjectIdentifier(type(of: referenceScroller)))
-            try detail.assertKept(in: fixture.host, during: "the short game detail")
-            XCTAssertFalse(detail.scroller.isEnabled, "A visible scrollbar must not make a short page scrollable")
+            let detail = try StableScroller(in: fixture.host, style: .overlay, width: size.width)
+            try detail.assertKept(in: fixture.host, during: "the game detail")
+            XCTAssertNil(searchFrame(in: fixture.host), "A game's page has no search")
 
             model.closeGame()
             model.searchText = ""

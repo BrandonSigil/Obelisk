@@ -12,14 +12,10 @@ struct GameAboutSection: View {
 
     let summary: String
     let facts: [Fact]
-    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         if !summary.isEmpty || !facts.isEmpty {
-            VStack(alignment: .leading, spacing: 16) {
-                Text(L10n.string("ui.game.about"))
-                    .font(.system(size: 20, weight: .semibold))
-                    .accessibilityAddTraits(.isHeader)
+            GamePageSection(title: L10n.string("ui.game.about")) {
                 VStack(alignment: .leading, spacing: 18) {
                     if !summary.isEmpty {
                         Text(summary)
@@ -45,11 +41,8 @@ struct GameAboutSection: View {
                         .font(.system(size: 12))
                     }
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(17)
-                .background(ObeliskPalette(colorScheme: colorScheme).surface, in: RoundedRectangle(cornerRadius: 10))
+                .modifier(GamePageCard())
             }
-            .padding(.top, 5)
         }
     }
 }

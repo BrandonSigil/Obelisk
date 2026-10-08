@@ -12,6 +12,8 @@ struct LibraryCoverCard<Artwork: View>: View {
     /// The Transfer's progress, read by the button alone so a progress tick
     /// redraws only the button.
     var progress: @MainActor () -> Double? = { nil }
+    /// The game, matching this cover with the one on its page as it opens.
+    var matchID: AnyHashable?
     let open: () -> Void
     let perform: () -> Void
     @ViewBuilder let artwork: Artwork
@@ -69,6 +71,7 @@ struct LibraryCoverCard<Artwork: View>: View {
             shape.strokeBorder(.white.opacity(hovered ? 0.3 : colorScheme == .dark ? 0.08 : 0.2), lineWidth: 1)
                 .allowsHitTesting(false)
         }
+        .modifier(GameCoverMatch(game: matchID ?? AnyHashable(title), isPage: false))
         .shadow(
             color: .black.opacity(colorScheme == .dark ? (hovered ? 0.5 : 0.3) : (hovered ? 0.25 : 0.12)),
             radius: hovered ? 18 : 7,

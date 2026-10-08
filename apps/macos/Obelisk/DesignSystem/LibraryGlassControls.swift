@@ -1,30 +1,69 @@
 import SwiftUI
 
-/// The floating bar of a storefront library: the account on the leading edge,
-/// the search on the trailing one. Its backdrop only shows while content
-/// scrolls beneath it, never over a hero's artwork.
+/// The floating bar of a signed-in storefront: the account on the leading
+/// edge, the library's search on the trailing one. On a game's page, a back
+/// button comes before the account and the search leaves; the game's title
+/// takes the middle once its page scrolled under the bar. Its backdrop only
+/// shows while content scrolls beneath it, never over a hero's artwork.
 struct LibraryGlassBar<AccountMenu: View>: View {
     let storeTitle: String
     let accountName: String?
     let avatarURL: URL?
     @Binding var searchText: String
     var showsBackdrop = true
+    /// The game whose page shows, if any.
+    var game: GameBar?
     @ViewBuilder let accountMenu: AccountMenu
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
+    /// What the bar shows of a game's page.
+    struct GameBar {
+        let title: String
+        /// Names the library the back button returns to.
+        let libraryTitle: String
+        /// Whether the page's own title scrolled under the bar.
+        var showsTitle: Bool
+        let back: () -> Void
+    }
+
     var body: some View {
-        HStack(spacing: 12) {
-            LibraryAccountPill(storeTitle: storeTitle, accountName: accountName, avatarURL: avatarURL) {
-                accountMenu
+        GlassEffectContainer(spacing: 6) {
+            HStack(spacing: 10) {
+                if let game {
+                    LibraryBackButton(libraryTitle: game.libraryTitle, action: game.back)
+                        .transition(.scale(scale: 0.4).combined(with: .opacity))
+                }
+
+                LibraryAccountPill(storeTitle: storeTitle, accountName: accountName, avatarURL: avatarURL) {
+                    accountMenu
+                }
+
+                Spacer(minLength: 12)
+                    .overlay { StorefrontWindowDragRegion() }
+
+                if game == nil {
+                    LibrarySearchField(storeTitle: storeTitle, text: $searchText)
+                        .transition(.scale(scale: 0.85, anchor: .trailing).combined(with: .opacity))
+                }
             }
-
-            Spacer(minLength: 12)
-                .overlay { StorefrontWindowDragRegion() }
-
-            LibrarySearchField(storeTitle: storeTitle, text: $searchText)
         }
         .padding(.horizontal, 20)
         .frame(height: ObeliskStyle.titleBarHeight)
+        .overlay {
+            ZStack {
+                if let game, game.showsTitle {
+                    Text(game.title)
+                        .font(.system(size: 13, weight: .semibold))
+                        .lineLimit(1)
+                        // Clear of the controls on both edges.
+                        .padding(.horizontal, 250)
+                        .transition(.opacity.combined(with: .offset(y: 6)))
+                }
+            }
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: game?.showsTitle == true)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+        }
         .background {
             Rectangle()
                 .fill(.bar)
@@ -32,6 +71,28 @@ struct LibraryGlassBar<AccountMenu: View>: View {
                 .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: showsBackdrop)
                 .allowsHitTesting(false)
         }
+    }
+}
+
+/// Returns from a game's page to its library, also with Command-[.
+struct LibraryBackButton: View {
+    let libraryTitle: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: "chevron.left")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(.primary)
+                .frame(width: 36, height: 36)
+                .modifier(StorefrontControlGlass())
+                .contentShape(.circle)
+        }
+        .obeliskButtonStyle(.plain)
+        .keyboardShortcut("[", modifiers: .command)
+        .accessibilityLabel(libraryTitle)
+        .accessibilityIdentifier("storefront-back")
+        .help(libraryTitle)
     }
 }
 

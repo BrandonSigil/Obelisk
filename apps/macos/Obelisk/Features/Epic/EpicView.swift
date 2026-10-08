@@ -6,10 +6,8 @@ struct EpicView: View {
 
     var body: some View {
         Group {
-            if model.showsLibrary && model.selectedGame == nil {
-                library
-            } else if model.isConnected {
-                StorefrontPage { titleBar } content: { content }
+            if model.showsLibrary {
+                browser
             } else {
                 WebSignInView(
                     model: model,
@@ -34,8 +32,8 @@ struct EpicView: View {
         .errorAlert(L10n.string("ui.store.epic"), message: $model.errorMessage)
     }
 
-    private var library: some View {
-        StorefrontLibraryPage(
+    private var browser: some View {
+        StorefrontBrowser(
             model: model,
             storeID: "epic",
             storeTitle: L10n.string("ui.store.epic"),
@@ -52,32 +50,8 @@ struct EpicView: View {
             StorefrontArtwork(imageURL: game.imageUrl)
         } accountMenu: {
             accountMenu
-        }
-    }
-
-    /// A game's page.
-    private var content: some View {
-        VStack(alignment: .leading, spacing: 25) {
-            StorefrontWarningBanner(message: $model.storageWarning)
-            if model.cloud.failurePresented {
-                SteamCloudFailureView(model: model, storefront: "epic")
-            }
-            if let game = model.selectedGame {
-                EpicGameDetailView(model: model, game: game)
-            }
-        }
-        .padding(ObeliskStyle.contentPadding)
-        .padding(.top, 6)
-        .frame(maxWidth: 1400, alignment: .leading)
-    }
-
-    private var titleBar: some View {
-        StorefrontTitleBar(
-            title: L10n.string("ui.store.epic"),
-            accountName: model.accountName,
-            isConnected: model.isConnected
-        ) {
-            accountMenu
+        } gamePage: { game in
+            EpicGameDetailView(model: model, game: game)
         }
     }
 

@@ -80,19 +80,18 @@ final class SteamAchievementsTests: XCTestCase {
             for width in [CGFloat(1100), CGFloat(860), CGFloat(740), CGFloat(620)] {
                 for (name, metrics) in [("installed", installed), ("uninstalled", uninstalled)] {
                     let launches = metrics.isInstalled
-                    let view = GameDetailHeader(title: "Thronefall", libraryTitle: "Bibliothèque Steam", metrics: metrics,
-                        back: {},
-                        artwork: { LinearGradient(colors: [.orange.opacity(0.6), .brown], startPoint: .topLeading, endPoint: .bottomTrailing) },
-                        action: {
+                    // The game page's launch row and metrics, at the widths its header gets.
+                    let view = VStack(alignment: .leading, spacing: 14) {
+                        HStack(spacing: 10) {
                             GameActionButton(title: L10n.string(launches ? "model.game.launch" : "model.game.download"),
                                              launches: launches, transfer: nil, isTransferring: false, isAvailable: true,
                                              action: {}, cancel: {})
-                        },
-                        tools: {
                             if launches {
                                 GameManagementButton(gameName: "Thronefall", isAvailable: true, uninstall: {}, directory: "/Applications")
                             }
-                        })
+                        }
+                        GameMetricsRow(metrics: metrics)
+                    }
                         .padding(24).frame(width: width).environment(\.colorScheme, scheme)
                         .tint(ObeliskStyle.accent).background(ObeliskPalette(colorScheme: scheme).background)
                     try await render(view, to: output.appending(path: "header-\(name)-\(scheme)-\(Int(width)).png"))

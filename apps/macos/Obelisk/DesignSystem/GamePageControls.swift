@@ -8,7 +8,6 @@ struct GameManagementButton: View {
     /// The installed game's directory, revealed in Finder from the menu.
     let directory: String
     @State private var confirmsUninstall = false
-    @State private var isHovered = false
 
     var body: some View {
         Menu {
@@ -25,15 +24,14 @@ struct GameManagementButton: View {
                 .font(.system(size: 15, weight: .semibold))
                 .foregroundStyle(.primary)
                 .frame(width: 36, height: 36)
-                .background(.primary.opacity(isHovered ? 0.16 : 0.1), in: RoundedRectangle(cornerRadius: 6))
-                .contentShape(RoundedRectangle(cornerRadius: 6))
+                .modifier(StorefrontControlGlass())
+                .contentShape(.circle)
         }
         .menuStyle(.button)
         .obeliskButtonStyle(.plain)
         .menuIndicator(.hidden)
         .fixedSize()
         .disabled(!isAvailable)
-        .onHover { isHovered = $0 }
         .accessibilityLabel(L10n.string("ui.game.manage_named", gameName))
         .accessibilityIdentifier("game-management-menu")
         .help(L10n.string("ui.game.manage"))
@@ -47,8 +45,8 @@ struct GameManagementButton: View {
     }
 }
 
-/// What a game page's launch bar reports. The bar orders it as Steam does and,
-/// when it runs out of width, drops the least useful metrics first.
+/// What a game page's metrics report. The row orders them as Steam does and,
+/// when it runs out of width, drops the least useful ones first.
 struct GameMetrics {
     var isInstalled: Bool
     var size: String?
@@ -58,85 +56,17 @@ struct GameMetrics {
     var achievements: GameAchievementsModel
 }
 
-struct GameDetailHeader<Artwork: View, Action: View, Tools: View>: View {
-    let title: String
-    let libraryTitle: String
+/// A game page's metrics, under its launch button.
+struct GameMetricsRow: View {
     let metrics: GameMetrics
-    let back: () -> Void
-    private let artwork: Artwork
-    private let action: Action
-    private let tools: Tools
-
-    init(
-        title: String,
-        libraryTitle: String,
-        metrics: GameMetrics,
-        back: @escaping () -> Void,
-        @ViewBuilder artwork: () -> Artwork,
-        @ViewBuilder action: () -> Action,
-        @ViewBuilder tools: () -> Tools = { EmptyView() }
-    ) {
-        self.title = title
-        self.libraryTitle = libraryTitle
-        self.metrics = metrics
-        self.back = back
-        self.artwork = artwork()
-        self.action = action()
-        self.tools = tools()
-    }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 23) {
-            Button(action: back) {
-                Label(libraryTitle, systemImage: "chevron.left")
-                    .font(.system(size: 12, weight: .medium))
-            }
-            .obeliskButtonStyle(.borderless)
-
-            VStack(alignment: .leading, spacing: 0) {
-                Text(title)
-                    .font(.system(size: 30, weight: .bold)).tracking(-0.7)
-                    .foregroundStyle(.white).shadow(radius: 3)
-                    .padding(.horizontal, 24).padding(.bottom, 18)
-                    .frame(maxWidth: .infinity, minHeight: 280, alignment: .bottomLeading)
-                launchBar
-            }
-            .background {
-                Color.clear
-                    .overlay { artwork }
-                    .overlay {
-                        LinearGradient(colors: [.clear, .black.opacity(0.85)], startPoint: .top, endPoint: .bottom)
-                    }
-                    // The scaled artwork can extend past its visual clip and cover nearby controls.
-                    .allowsHitTesting(false)
-            }
-            .clipShape(RoundedRectangle(cornerRadius: 13))
+        // The last level keeps only the controls. When even they do not fit,
+        // the Cloud value truncates.
+        ViewThatFits(in: .horizontal) {
+            ForEach(0...4, id: \.self) { metricRow(dropping: $0) }
         }
-    }
-
-    /// The bar always sits on the darkened artwork, so it reads light on dark
-    /// in both appearances.
-    private var launchBar: some View {
-        HStack(spacing: 0) {
-            action
-            // The last level keeps only the controls. When even they do not fit,
-            // the Cloud value truncates.
-            ViewThatFits(in: .horizontal) {
-                ForEach(0...4, id: \.self) { metricRow(dropping: $0) }
-            }
-            .padding(.leading, 14)
-            // Offered all the width the spacer does not need.
-            .layoutPriority(1)
-            Spacer(minLength: 12)
-            tools
-        }
-        .foregroundStyle(.white)
-        .padding(.horizontal, 14).padding(.vertical, 12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.black.opacity(0.35))
-        .overlay(alignment: .top) {
-            Rectangle().fill(.white.opacity(0.08)).frame(height: 1)
-        }
     }
 
     /// Each level drops one more metric: an installed game's size, then the
@@ -144,13 +74,21 @@ struct GameDetailHeader<Artwork: View, Action: View, Tools: View>: View {
     /// most before it is installed. The Cloud and achievement metrics are
     /// controls and never leave.
     private func metricRow(dropping level: Int) -> some View {
-        HStack(spacing: 4) {
+        HStack(spacing: 2) {
             if let cloud = metrics.cloud { cloud }
             if !metrics.isInstalled, level < 4, let size = metrics.size {
-                GameMetricLabel(caption: L10n.string("ui.game.metric.space_required")) { Text(size) }
+                GameMetricLabel(caption: L10n.string("ui.game.metric.space_required")) {
+                    GameMetricSymbol(name: "internaldrive")
+                } value: {
+                    Text(size)
+                }
             }
             if level < 2, let lastPlayed = metrics.lastPlayed {
-                GameMetricLabel(caption: L10n.string("ui.game.metric.last_played")) { Text(lastPlayed) }
+                GameMetricLabel(caption: L10n.string("ui.game.metric.last_played")) {
+                    GameMetricSymbol(name: "calendar")
+                } value: {
+                    Text(lastPlayed)
+                }
             }
             if level < 3, let playtime = metrics.playtime {
                 GameMetricLabel(caption: L10n.string("ui.game.metric.playtime")) {
@@ -162,13 +100,19 @@ struct GameDetailHeader<Artwork: View, Action: View, Tools: View>: View {
             GameAchievementsButton(model: metrics.achievements)
             // An installed game's size moves last, where it leaves first.
             if metrics.isInstalled, level < 1, let size = metrics.size {
-                GameMetricLabel(caption: L10n.string("ui.game.metric.size")) { Text(size) }
+                GameMetricLabel(caption: L10n.string("ui.game.metric.size")) {
+                    GameMetricSymbol(name: "internaldrive")
+                } value: {
+                    Text(size)
+                }
             }
         }
+        // Aligns the first metric's symbol with the launch button's edge.
+        .padding(.leading, -10)
     }
 }
 
-/// A launch bar metric: an uppercase caption over its value, after an optional
+/// A game page metric: an uppercase caption over its value, after an optional
 /// large symbol. A metric that is a control highlights under the pointer.
 struct GameMetricLabel<Icon: View, Value: View>: View {
     let caption: String
@@ -189,22 +133,20 @@ struct GameMetricLabel<Icon: View, Value: View>: View {
             icon
             VStack(alignment: .leading, spacing: 4) {
                 Text(caption)
-                    .font(.system(size: 11, weight: .semibold))
-                    .tracking(0.3)
+                    .font(.system(size: 10, weight: .semibold))
+                    .tracking(0.4)
                     .textCase(.uppercase)
-                    .foregroundStyle(.primary.opacity(0.88))
-                value
-                    .font(.system(size: 12))
                     .foregroundStyle(.secondary)
+                value
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(.primary)
             }
             .lineLimit(1)
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
-        // The bar is always dark, so its spinners must be too.
-        .environment(\.colorScheme, .dark)
-        .background(.primary.opacity(isHighlighted ? 0.1 : 0), in: RoundedRectangle(cornerRadius: 6))
-        .contentShape(RoundedRectangle(cornerRadius: 6))
+        .background(.primary.opacity(isHighlighted ? 0.08 : 0), in: .capsule)
+        .contentShape(.capsule)
     }
 }
 
@@ -214,14 +156,14 @@ extension GameMetricLabel where Icon == EmptyView {
     }
 }
 
-/// The large symbol before a launch bar metric.
+/// The symbol before a game page metric.
 struct GameMetricSymbol: View {
     let name: String
     var isWarning = false
 
     var body: some View {
         Image(systemName: name)
-            .font(.system(size: 22, weight: .light))
+            .font(.system(size: 18, weight: .regular))
             .foregroundStyle(isWarning ? AnyShapeStyle(.orange) : AnyShapeStyle(.secondary))
             .frame(width: 26, height: 26)
     }

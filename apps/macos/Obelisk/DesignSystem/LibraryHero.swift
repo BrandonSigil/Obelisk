@@ -11,7 +11,6 @@ struct LibraryHero<Artwork: View, Logo: View>: View {
     @ViewBuilder let artwork: Artwork
     /// What shows the game's name over its artwork, if the artwork does not.
     @ViewBuilder let logo: Logo
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     struct Detail: Identifiable {
         let symbol: String
@@ -20,25 +19,9 @@ struct LibraryHero<Artwork: View, Logo: View>: View {
     }
 
     var body: some View {
-        // How much of the scrolling the artwork follows less than the page.
-        let parallax = reduceMotion ? 0 : 0.7
         // How far the artwork reaches up under the library's bar.
         let reach = ObeliskStyle.titleBarHeight
-        return Color.clear
-            .overlay {
-                artwork
-                    .visualEffect { content, geometry in
-                        let top = geometry.frame(in: .scrollView).minY
-                        let height = max(geometry.size.height, 1)
-                        // Scrolled down, the artwork lags behind the page; pulled
-                        // past the top, it stretches over the gap above it.
-                        return content
-                            .offset(y: top < 0 ? -top * parallax : 0)
-                            .scaleEffect(top > 0 ? 1 + top / height : 1, anchor: .bottom)
-                    }
-            }
-            .clipShape(OpenTopRectangle())
-            .backgroundExtensionEffect()
+        return HeroBackdrop { artwork }
             .overlay(alignment: .bottomLeading) {
                 VStack(alignment: .leading, spacing: 14) {
                     logo
@@ -81,6 +64,33 @@ struct LibraryHero<Artwork: View, Logo: View>: View {
     }
 }
 
+/// A page's wide artwork at the top of its scroll view: it lags behind the page
+/// as it scrolls, stretches over an overscroll and reaches beyond the sidebar.
+struct HeroBackdrop<Artwork: View>: View {
+    @ViewBuilder let artwork: Artwork
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        // How much of the scrolling the artwork follows less than the page.
+        let parallax = reduceMotion ? 0 : 0.7
+        return Color.clear
+            .overlay {
+                artwork
+                    .visualEffect { content, geometry in
+                        let top = geometry.frame(in: .scrollView).minY
+                        let height = max(geometry.size.height, 1)
+                        // Scrolled down, the artwork lags behind the page; pulled
+                        // past the top, it stretches over the gap above it.
+                        return content
+                            .offset(y: top < 0 ? -top * parallax : 0)
+                            .scaleEffect(top > 0 ? 1 + top / height : 1, anchor: .bottom)
+                    }
+            }
+            .clipShape(OpenTopRectangle())
+            .backgroundExtensionEffect()
+    }
+}
+
 /// The hero's frame, open above so the stretched artwork can fill an overscroll.
 private struct OpenTopRectangle: Shape {
     func path(in rect: CGRect) -> Path {
@@ -106,14 +116,13 @@ struct LibraryHeroLogo: View {
     var body: some View {
         Group {
             if let url {
-                AsyncImage(url: url) { phase in
-                    if let image = phase.image {
-                        image.resizable().scaledToFit()
-                    } else if phase.error != nil {
-                        titleText
-                    } else {
-                        Color.clear
-                    }
+                // Cached, so a game's page shows the logo its library hero loaded.
+                CachedArtwork(urls: [url], maxPixelSize: 960) { image in
+                    image.resizable().scaledToFit()
+                } placeholder: {
+                    Color.clear
+                } failure: {
+                    titleText
                 }
             } else {
                 titleText

@@ -25,13 +25,6 @@ struct StableScroller {
         XCTAssertTrue(current.verticalScroller === scroller, "The scrollbar changed during \(phase)", file: file, line: line)
         XCTAssertTrue(current.hasVerticalScroller, file: file, line: line)
         XCTAssertEqual(current.scrollerStyle, style, "Unexpected scroller style during \(phase)", file: file, line: line)
-        // An overlay scroller fades out even with autohiding disabled, and
-        // AppKit may hide it while the whole document fits.
-        if style == .legacy {
-            XCTAssertFalse(current.autohidesScrollers, file: file, line: line)
-            XCTAssertFalse(scroller.isHidden, "The scrollbar disappeared during \(phase)", file: file, line: line)
-            XCTAssertGreaterThan(scroller.alphaValue, 0, "The scrollbar is transparent during \(phase)", file: file, line: line)
-        }
         XCTAssertEqual(current.contentView.bounds.width, width, accuracy: 0.5,
                        "The content width changed during \(phase)", file: file, line: line)
     }
