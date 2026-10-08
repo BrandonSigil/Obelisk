@@ -58,8 +58,16 @@ struct LibraryHero<Artwork: View, Logo: View>: View {
                     return content.opacity(min(max((top - reach + 40) / 80, 0), 1))
                 }
             }
-            .frame(height: ObeliskStyle.libraryHeroHeight + reach)
-            .padding(.top, -reach)
+            .heroFrame()
+    }
+}
+
+extension View {
+    /// Frames a page's hero: a library hero's height below the floating bar,
+    /// reaching up under it, light on its dark artwork in both appearances.
+    func heroFrame() -> some View {
+        frame(height: ObeliskStyle.libraryHeroHeight + ObeliskStyle.titleBarHeight)
+            .padding(.top, -ObeliskStyle.titleBarHeight)
             .environment(\.colorScheme, .dark)
     }
 }

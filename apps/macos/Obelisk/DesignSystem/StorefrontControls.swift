@@ -72,6 +72,20 @@ struct StorefrontSortPopover: View {
     }
 }
 
+/// A round storefront control's face: its symbol in a glass circle.
+struct StorefrontGlassIcon: View {
+    let systemName: String
+    let size: CGFloat
+
+    var body: some View {
+        Image(systemName: systemName)
+            .font(.system(size: size, weight: .semibold))
+            .frame(width: 36, height: 36)
+            .modifier(StorefrontControlGlass())
+            .contentShape(.circle)
+    }
+}
+
 /// A storefront control's glass capsule, solid while transparency is reduced.
 struct StorefrontControlGlass: ViewModifier {
     /// Whether the glass reacts to the pointer, as a button's does.

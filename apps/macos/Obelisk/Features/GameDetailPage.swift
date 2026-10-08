@@ -1,22 +1,5 @@
 import SwiftUI
 
-/// What a storefront model gives its game page.
-@MainActor protocol GameDetailModel: AnyObject {
-    associatedtype Store: InstallationStorefront
-    var installations: GameInstallations<Store> { get }
-    var achievements: GameAchievementsModel { get }
-    var gameSessionMessage: String? { get }
-    func syncCloud()
-    func reloadAchievements()
-}
-
-extension GameDetailModel {
-    func syncCloud() { installations.syncCloud() }
-}
-
-extension SteamModel: GameDetailModel {}
-extension WebAccountModel: GameDetailModel {}
-
 /// A storefront's game page: the game's wide artwork reaching under the
 /// browser's glass bar, its cover overlapping the artwork's lower edge, its
 /// launch row and metrics beside the cover, then what only the storefront shows.
@@ -25,13 +8,11 @@ extension WebAccountModel: GameDetailModel {}
 struct GameDetailPage<Model: LibraryStorefront, HeroArtwork: View, Cover: View, Content: View>: View {
     @Bindable var model: Model
     let game: Model.Game
-    /// Names the storefront in accessibility identifiers.
-    let storeID: String
     let size: String?
-    let lastPlayed: String?
-    let playtime: String?
-    private let heroArtwork: HeroArtwork
-    private let cover: Cover
+    /// Whether a game never played says so, rather than showing no last
+    /// played date and no playtime.
+    let showsUnplayed: Bool
+    private let context: GamePageContext<HeroArtwork, Cover>
     private let content: Content
     @State private var appeared = false
     @State private var isCompact = false
@@ -44,27 +25,20 @@ struct GameDetailPage<Model: LibraryStorefront, HeroArtwork: View, Cover: View, 
     private static var heroHeight: CGFloat { ObeliskStyle.libraryHeroHeight }
     /// How much of the cover rises over the artwork.
     private static var coverOverlap: CGFloat { 150 }
-    private static var coverRadius: CGFloat { 20 }
 
     init(
         model: Model,
         game: Model.Game,
-        storeID: String,
+        context: GamePageContext<HeroArtwork, Cover>,
         size: String?,
-        lastPlayed: String? = nil,
-        playtime: String?,
-        @ViewBuilder heroArtwork: () -> HeroArtwork,
-        @ViewBuilder cover: () -> Cover,
+        showsUnplayed: Bool = false,
         @ViewBuilder content: () -> Content
     ) {
         self.model = model
         self.game = game
-        self.storeID = storeID
+        self.context = context
         self.size = size
-        self.lastPlayed = lastPlayed
-        self.playtime = playtime
-        self.heroArtwork = heroArtwork()
-        self.cover = cover()
+        self.showsUnplayed = showsUnplayed
         self.content = content()
     }
 
@@ -77,22 +51,19 @@ struct GameDetailPage<Model: LibraryStorefront, HeroArtwork: View, Cover: View, 
     /// One step of the page's reveal, `delay` seconds after the cover leaves.
     private func reveal(_ delay: Double) -> Animation? {
         guard transition?.source != nil else { return nil }
-        return reduceMotion
-            ? .easeOut(duration: 0.2)
-            : .spring(response: 0.38, dampingFraction: 0.86).delay(delay)
+        return reduceMotion ? .easeOut(duration: 0.2) : ObeliskStyle.pageAnimation(reduceMotion: false).delay(delay)
     }
 
     var body: some View {
         @Bindable var achievements = model.achievements
-        let revealed = isRevealed
-        return StorefrontScrollView(topOverlayHeight: ObeliskStyle.titleBarHeight) {
+        return StorefrontScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                hero(revealed: revealed)
-                header(revealed: revealed)
+                hero
+                header
                 details
-                    .opacity(revealed ? 1 : 0)
-                    .offset(y: revealed || reduceMotion ? 0 : 36)
-                    .animation(reveal(0.1), value: revealed)
+                    .opacity(isRevealed ? 1 : 0)
+                    .offset(y: isRevealed || reduceMotion ? 0 : 36)
+                    .animation(reveal(0.1), value: isRevealed)
             }
         }
         // The bar's backdrop shows once the artwork scrolled under it, and the
@@ -110,8 +81,8 @@ struct GameDetailPage<Model: LibraryStorefront, HeroArtwork: View, Cover: View, 
         // Hides the library beneath while the page is revealed, and leaving.
         .background {
             ObeliskPalette(colorScheme: colorScheme).background
-                .opacity(revealed ? 1 : 0)
-                .animation(reveal(0), value: revealed)
+                .opacity(isRevealed ? 1 : 0)
+                .animation(reveal(0), value: isRevealed)
                 .ignoresSafeArea()
         }
         .ignoresSafeArea(.container, edges: .top)
@@ -121,49 +92,42 @@ struct GameDetailPage<Model: LibraryStorefront, HeroArtwork: View, Cover: View, 
         }
     }
 
-    private func hero(revealed: Bool) -> some View {
-        // How far the artwork reaches up under the browser's bar.
-        let reach = ObeliskStyle.titleBarHeight
-        return HeroBackdrop {
-            heroArtwork
+    private var hero: some View {
+        HeroBackdrop {
+            context.heroArtwork
                 // The artwork settles from a little closer as it sharpens.
-                .scaleEffect(revealed || reduceMotion ? 1 : 1.08)
-                .blur(radius: revealed || reduceMotion ? 0 : 16)
-                .opacity(revealed ? 1 : 0)
-                .animation(reveal(0), value: revealed)
+                .scaleEffect(isRevealed || reduceMotion ? 1 : 1.08)
+                .blur(radius: isRevealed || reduceMotion ? 0 : 16)
+                .opacity(isRevealed ? 1 : 0)
+                .animation(reveal(0), value: isRevealed)
         }
-        .frame(height: Self.heroHeight + reach)
-        .padding(.top, -reach)
-        .environment(\.colorScheme, .dark)
+        .heroFrame()
     }
 
     /// The cover overlapping the artwork, then its launch row and metrics
     /// beside it, below the artwork.
-    private func header(revealed: Bool) -> some View {
+    private var header: some View {
         HStack(alignment: .top, spacing: isCompact ? 20 : 28) {
-            coverView(revealed: revealed)
+            coverView
             VStack(alignment: .leading, spacing: 0) {
                 // The part of the cover over the artwork.
                 Color.clear.frame(height: Self.coverOverlap)
-                VStack(alignment: .leading, spacing: 14) {
-                    HStack(spacing: 10) {
-                        GamePrimaryAction(installations: installations, game: game.id)
-                        if let receipt = installations.selectedReceipt {
-                            GameManagementButton(
-                                gameName: name,
-                                isAvailable: installations.canUninstallSelectedGame,
-                                uninstall: { installations.uninstall(receipt) },
-                                directory: receipt.directory
-                            )
-                            .id(receipt.id + receipt.directory)
-                        }
+                GameLaunchRow(metrics: metrics) {
+                    GamePrimaryAction(installations: installations, game: game.id)
+                    if let receipt = installations.selectedReceipt {
+                        GameManagementButton(
+                            gameName: name,
+                            isAvailable: installations.canUninstallSelectedGame,
+                            uninstall: { installations.uninstall(receipt) },
+                            directory: receipt.directory
+                        )
+                        .id(receipt.id + receipt.directory)
                     }
-                    GameMetricsRow(metrics: metrics)
                 }
                 .padding(.top, 18)
-                .opacity(revealed ? 1 : 0)
-                .offset(y: revealed || reduceMotion ? 0 : 24)
-                .animation(reveal(0.07), value: revealed)
+                .opacity(isRevealed ? 1 : 0)
+                .offset(y: isRevealed || reduceMotion ? 0 : 24)
+                .animation(reveal(0.07), value: isRevealed)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
@@ -172,15 +136,15 @@ struct GameDetailPage<Model: LibraryStorefront, HeroArtwork: View, Cover: View, 
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private func coverView(revealed: Bool) -> some View {
-        let shape = RoundedRectangle(cornerRadius: Self.coverRadius, style: .continuous)
+    private var coverView: some View {
+        let shape = RoundedRectangle(cornerRadius: ObeliskStyle.coverCornerRadius, style: .continuous)
         // A cover flown from the library shows whole all along; one opened
         // from the hero rises into place with the header.
-        let flies = transition?.fliesCover == true
-        let shown = revealed || flies
+        let flies = transition?.source == .cover && !reduceMotion
+        let shown = isRevealed || flies
         return Color.clear
-            .aspectRatio(2.0 / 3.0, contentMode: .fit)
-            .overlay { cover }
+            .aspectRatio(ObeliskStyle.coverAspectRatio, contentMode: .fit)
+            .overlay { context.cover }
             .clipShape(shape)
             .overlay {
                 shape.strokeBorder(.white.opacity(colorScheme == .dark ? 0.12 : 0.3), lineWidth: 1)
@@ -199,6 +163,15 @@ struct GameDetailPage<Model: LibraryStorefront, HeroArtwork: View, Cover: View, 
             .accessibilityAddTraits(.isHeader)
     }
 
+    private var lastPlayed: String? {
+        let date = model.lastPlayed(of: game)
+        return showsUnplayed ? GameFormatting.lastPlayed(date) : date.map(GameFormatting.lastPlayed)
+    }
+
+    private var playtime: String? {
+        let playtime = model.playtime(of: game)
+        return showsUnplayed ? GameFormatting.playtime(playtime ?? .zero) : playtime.map(GameFormatting.playtime)
+    }
     private var metrics: GameMetrics {
         GameMetrics(
             isInstalled: installations.selectedReceipt != nil,
@@ -217,7 +190,7 @@ struct GameDetailPage<Model: LibraryStorefront, HeroArtwork: View, Cover: View, 
         VStack(alignment: .leading, spacing: 26) {
             StorefrontWarningBanner(message: $model.storageWarning)
             if model.cloud.failurePresented {
-                SteamCloudFailureView(model: model, storefront: storeID)
+                SteamCloudFailureView(model: model, storefront: context.storeID)
             }
             if let message = model.gameSessionMessage {
                 Text(message).font(.system(size: 12)).foregroundStyle(.secondary)

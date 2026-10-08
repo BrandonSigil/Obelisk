@@ -13,8 +13,16 @@ enum ObeliskStyle {
     /// Steam's colors to launch and to install a game, leading to trailing.
     static let launchGradient = [Color(red: 0.46, green: 0.77, blue: 0.27), Color(red: 0.32, green: 0.63, blue: 0.20)]
     static let installGradient = [Color(red: 0.28, green: 0.55, blue: 0.98), Color(red: 0.40, green: 0.38, blue: 0.88)]
+    /// A game's portrait cover, on its library card and on its page.
+    static let coverCornerRadius: CGFloat = 20
+    static let coverAspectRatio: CGFloat = 2.0 / 3.0
     /// How a library moves to a new filter or sort order.
     static var selectionAnimation: Animation { .spring(response: 0.32, dampingFraction: 0.82) }
+
+    /// How a game's page replaces its library and back, and reveals itself.
+    static func pageAnimation(reduceMotion: Bool) -> Animation {
+        reduceMotion ? .easeInOut(duration: 0.2) : .spring(response: 0.38, dampingFraction: 0.86)
+    }
 }
 
 struct ObeliskPalette {

@@ -244,7 +244,7 @@ final class EpicPresentationTests: XCTestCase {
             }
             // The library and a game's page each keep their own scroll view,
             // whose scrollbar floats over the artwork. Neither changes its width.
-            let library = try StableScroller(in: fixture.host, style: .overlay)
+            let library = try StableScroller(in: fixture.host)
             XCTAssertEqual(library.width, size.width, accuracy: 0.5, "The library's covers reach under its scrollbar")
             let searchFrameBefore = try XCTUnwrap(searchFrame(in: fixture.host))
 
@@ -267,7 +267,7 @@ final class EpicPresentationTests: XCTestCase {
                 guard let current = firstScrollView(in: fixture.host) else { return false }
                 return current !== library.scroll
             }
-            let detail = try StableScroller(in: fixture.host, style: .overlay, width: size.width)
+            let detail = try StableScroller(in: fixture.host, width: size.width)
             try detail.assertKept(in: fixture.host, during: "the game detail")
             XCTAssertNil(searchFrame(in: fixture.host), "A game's page has no search")
 
@@ -279,7 +279,7 @@ final class EpicPresentationTests: XCTestCase {
                 return model.selectedGame == nil && current !== detail.scroll
                     && document.frame.height > current.contentView.bounds.height
             }
-            let returned = try StableScroller(in: fixture.host, style: .overlay, width: library.width)
+            let returned = try StableScroller(in: fixture.host, width: library.width)
             try returned.assertKept(in: fixture.host, during: "returning to the full library")
             let returnedSearch = try XCTUnwrap(searchFrame(in: fixture.host))
             XCTAssertEqual(returnedSearch.maxX, searchFrameBefore.maxX, accuracy: 0.5)

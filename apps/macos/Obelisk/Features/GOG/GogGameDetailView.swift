@@ -3,6 +3,7 @@ import SwiftUI
 struct GogGameDetailView: View {
     @Bindable var model: GogModel
     let game: GogGame
+    let context: GamePageContext<StorefrontArtwork, StorefrontArtwork>
 
     private var installations: GogInstallations { model.installations }
 
@@ -10,16 +11,10 @@ struct GogGameDetailView: View {
         GameDetailPage(
             model: model,
             game: game,
-            storeID: "gog",
+            context: context,
             size: (installations.selectedReceipt?.totalBytes ?? model.selectedGameDetails?.installationBytes)
-                .map(GameFormatting.bytes),
-            lastPlayed: model.lastPlayed(of: game).map(GameFormatting.lastPlayed),
-            playtime: model.playtime(of: game).map(GameFormatting.playtime)
+                .map(GameFormatting.bytes)
         ) {
-            StorefrontArtwork(imageURL: game.headerImageUrl ?? game.imageUrl, maxPixelSize: 2048)
-        } cover: {
-            StorefrontArtwork(imageURL: game.imageUrl ?? game.headerImageUrl)
-        } content: {
             GameOperationStatus(installations: installations, game: game.productId)
             GameAboutSection(summary: game.summary, facts: facts)
         }

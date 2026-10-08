@@ -20,12 +20,8 @@ struct GameManagementButton: View {
             }
             .disabled(!isAvailable)
         } label: {
-            Image(systemName: "gearshape.fill")
-                .font(.system(size: 15, weight: .semibold))
+            StorefrontGlassIcon(systemName: "gearshape.fill", size: 15)
                 .foregroundStyle(.primary)
-                .frame(width: 36, height: 36)
-                .modifier(StorefrontControlGlass())
-                .contentShape(.circle)
         }
         .menuStyle(.button)
         .obeliskButtonStyle(.plain)
@@ -41,6 +37,19 @@ struct GameManagementButton: View {
                 .disabled(!isAvailable)
         } message: {
             Text(L10n.string("ui.game.uninstall_message"))
+        }
+    }
+}
+
+/// A game page's launch row: its launch and management buttons, then its metrics.
+struct GameLaunchRow<Buttons: View>: View {
+    let metrics: GameMetrics
+    @ViewBuilder let buttons: Buttons
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 10) { buttons }
+            GameMetricsRow(metrics: metrics)
         }
     }
 }

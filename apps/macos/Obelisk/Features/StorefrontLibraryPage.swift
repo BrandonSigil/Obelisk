@@ -1,8 +1,14 @@
 import SwiftUI
 
-/// What a storefront model gives its library page.
-@MainActor protocol LibraryStorefront: GameDetailModel, Observable {
+/// What a storefront model gives its library and its game page.
+@MainActor protocol LibraryStorefront: AnyObject, Observable {
+    associatedtype Store: InstallationStorefront
     associatedtype Game: Identifiable where Game.ID == Store.GameID, Game.ID: Comparable
+    var installations: GameInstallations<Store> { get }
+    var achievements: GameAchievementsModel { get }
+    var gameSessionMessage: String? { get }
+    func syncCloud()
+    func reloadAchievements()
     var games: [Game] { get }
     func title(of game: Game) -> String
     /// How long the account played the game; nil until the storefront told
@@ -47,6 +53,7 @@ import SwiftUI
 }
 
 extension LibraryStorefront {
+    func syncCloud() { installations.syncCloud() }
     func canInstallFromLibrary(_ game: Game) -> Bool { true }
     var filterRevision: Int { 0 }
 
@@ -142,7 +149,7 @@ struct StorefrontLibraryPage<Model: LibraryStorefront, HeroArtwork: View, HeroLo
     var body: some View {
         let heroGame = heroGame
         let backdropOffset = heroGame == nil ? 0 : ObeliskStyle.libraryHeroHeight
-        return StorefrontScrollView(topOverlayHeight: ObeliskStyle.titleBarHeight) {
+        return StorefrontScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 if let heroGame {
                     hero(heroGame)

@@ -13,7 +13,7 @@ struct LibraryCoverCard<Artwork: View>: View {
     /// redraws only the button.
     var progress: @MainActor () -> Double? = { nil }
     /// The game, matching this cover with the one on its page as it opens.
-    var matchID: AnyHashable?
+    let matchID: AnyHashable
     let open: () -> Void
     let perform: () -> Void
     @ViewBuilder let artwork: Artwork
@@ -21,14 +21,14 @@ struct LibraryCoverCard<Artwork: View>: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    private static var cornerRadius: CGFloat { 20 }
+    private static var cornerRadius: CGFloat { ObeliskStyle.coverCornerRadius }
     private static var barInset: CGFloat { 8 }
 
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous)
         return Button(action: open) {
             Color.clear
-                .aspectRatio(2.0 / 3.0, contentMode: .fit)
+                .aspectRatio(ObeliskStyle.coverAspectRatio, contentMode: .fit)
                 .overlay { artwork }
                 .contentShape(shape)
         }
@@ -71,7 +71,7 @@ struct LibraryCoverCard<Artwork: View>: View {
             shape.strokeBorder(.white.opacity(hovered ? 0.3 : colorScheme == .dark ? 0.08 : 0.2), lineWidth: 1)
                 .allowsHitTesting(false)
         }
-        .modifier(GameCoverMatch(game: matchID ?? AnyHashable(title), isPage: false))
+        .modifier(GameCoverMatch(game: matchID, isPage: false))
         .shadow(
             color: .black.opacity(colorScheme == .dark ? (hovered ? 0.5 : 0.3) : (hovered ? 0.25 : 0.12)),
             radius: hovered ? 18 : 7,

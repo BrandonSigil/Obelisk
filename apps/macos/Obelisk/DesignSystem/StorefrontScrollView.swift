@@ -3,23 +3,18 @@ import SwiftUI
 
 /// A storefront page's scroll view. Its scrollbar floats over the content as
 /// an overlay scroller, whatever the system setting, so artwork reaches the
-/// window's edge and the content width never changes with the scrollbar.
+/// window's edge and the content width never changes with the scrollbar. Its
+/// content starts below the storefront's floating bar.
 struct StorefrontScrollView<Content: View>: View {
-    private let content: Content
-    private let topOverlayHeight: CGFloat
-
-    init(topOverlayHeight: CGFloat = 0, @ViewBuilder content: () -> Content) {
-        self.topOverlayHeight = topOverlayHeight
-        self.content = content()
-    }
+    @ViewBuilder let content: Content
 
     var body: some View {
         ScrollView {
             content
-                .padding(.top, topOverlayHeight)
+                .padding(.top, ObeliskStyle.titleBarHeight)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background {
-                    StorefrontOverlayScroller(topInset: topOverlayHeight)
+                    StorefrontOverlayScroller()
                         .frame(width: 0, height: 0)
                 }
         }
@@ -27,22 +22,15 @@ struct StorefrontScrollView<Content: View>: View {
 }
 
 private struct StorefrontOverlayScroller: NSViewRepresentable {
-    let topInset: CGFloat
-
     func makeNSView(context: Context) -> ScrollerConfigurationView {
-        let view = ScrollerConfigurationView()
-        view.topInset = topInset
-        return view
+        ScrollerConfigurationView()
     }
 
     func updateNSView(_ nsView: ScrollerConfigurationView, context: Context) {
-        nsView.topInset = topInset
         nsView.configureScroller()
     }
 
     final class ScrollerConfigurationView: NSView {
-        var topInset: CGFloat = 0
-
         override func viewDidMoveToSuperview() {
             super.viewDidMoveToSuperview()
             configureScroller()
@@ -63,8 +51,8 @@ private struct StorefrontOverlayScroller: NSViewRepresentable {
             if scrollView.scrollerStyle != .overlay { scrollView.scrollerStyle = .overlay }
             if !scrollView.hasVerticalScroller { scrollView.hasVerticalScroller = true }
             // The scrollbar starts below the floating bar.
-            if scrollView.scrollerInsets.top != topInset {
-                scrollView.scrollerInsets.top = topInset
+            if scrollView.scrollerInsets.top != ObeliskStyle.titleBarHeight {
+                scrollView.scrollerInsets.top = ObeliskStyle.titleBarHeight
             }
         }
     }

@@ -50,8 +50,8 @@ struct EpicView: View {
             StorefrontArtwork(imageURL: game.imageUrl)
         } accountMenu: {
             accountMenu
-        } gamePage: { game in
-            EpicGameDetailView(model: model, game: game)
+        } gamePage: { game, context in
+            EpicGameDetailView(model: model, game: game, context: context)
         }
     }
 

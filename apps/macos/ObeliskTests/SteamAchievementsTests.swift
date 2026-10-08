@@ -81,16 +81,13 @@ final class SteamAchievementsTests: XCTestCase {
                 for (name, metrics) in [("installed", installed), ("uninstalled", uninstalled)] {
                     let launches = metrics.isInstalled
                     // The game page's launch row and metrics, at the widths its header gets.
-                    let view = VStack(alignment: .leading, spacing: 14) {
-                        HStack(spacing: 10) {
-                            GameActionButton(title: L10n.string(launches ? "model.game.launch" : "model.game.download"),
-                                             launches: launches, transfer: nil, isTransferring: false, isAvailable: true,
-                                             action: {}, cancel: {})
-                            if launches {
-                                GameManagementButton(gameName: "Thronefall", isAvailable: true, uninstall: {}, directory: "/Applications")
-                            }
+                    let view = GameLaunchRow(metrics: metrics) {
+                        GameActionButton(title: L10n.string(launches ? "model.game.launch" : "model.game.download"),
+                                         launches: launches, transfer: nil, isTransferring: false, isAvailable: true,
+                                         action: {}, cancel: {})
+                        if launches {
+                            GameManagementButton(gameName: "Thronefall", isAvailable: true, uninstall: {}, directory: "/Applications")
                         }
-                        GameMetricsRow(metrics: metrics)
                     }
                         .padding(24).frame(width: width).environment(\.colorScheme, scheme)
                         .tint(ObeliskStyle.accent).background(ObeliskPalette(colorScheme: scheme).background)

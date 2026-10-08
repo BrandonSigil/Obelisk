@@ -81,12 +81,8 @@ struct LibraryBackButton: View {
 
     var body: some View {
         Button(action: action) {
-            Image(systemName: "chevron.left")
-                .font(.system(size: 14, weight: .semibold))
+            StorefrontGlassIcon(systemName: "chevron.left", size: 14)
                 .foregroundStyle(.primary)
-                .frame(width: 36, height: 36)
-                .modifier(StorefrontControlGlass())
-                .contentShape(.circle)
         }
         .obeliskButtonStyle(.plain)
         .keyboardShortcut("[", modifiers: .command)

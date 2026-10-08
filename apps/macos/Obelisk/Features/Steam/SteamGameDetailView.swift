@@ -3,6 +3,7 @@ import SwiftUI
 struct SteamGameDetailView: View {
     @Bindable var model: SteamModel
     let game: SteamGame
+    let context: GamePageContext<SteamArtwork, SteamArtwork>
 
     private var installations: SteamInstallations { model.installations }
 
@@ -18,15 +19,10 @@ struct SteamGameDetailView: View {
         GameDetailPage(
             model: model,
             game: game,
-            storeID: "steam",
+            context: context,
             size: sizeText,
-            lastPlayed: GameFormatting.lastPlayed(model.lastPlayed(of: game)),
-            playtime: GameFormatting.playtime(model.playtime(of: game) ?? .zero)
+            showsUnplayed: true
         ) {
-            SteamArtwork(appId: game.appId, portrait: false, iconHash: game.iconHash)
-        } cover: {
-            SteamArtwork(appId: game.appId, iconHash: game.iconHash)
-        } content: {
             if model.isLoadingDetails {
                 ProgressView(L10n.string("ui.steam.finding_files")).controlSize(.small)
             } else if let error = model.detailsError {

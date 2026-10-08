@@ -75,7 +75,7 @@ enum CloudSyncDate {
     }
 }
 
-/// The launch bar's Cloud metric. Its menu starts Cloud maintenance of the
+/// A game page's Cloud metric. Its menu starts Cloud maintenance of the
 /// game, which is also how the player retries a failed one.
 struct CloudIndicatorButton: View {
     let presentation: CloudIndicatorPresentation
@@ -101,7 +101,7 @@ struct CloudIndicatorButton: View {
         .menuStyle(.button)
         .obeliskButtonStyle(.plain)
         .menuIndicator(.hidden)
-        // Horizontally flexible so a narrow launch bar truncates the value.
+        // Horizontally flexible so a narrow metrics row truncates the value.
         .fixedSize(horizontal: false, vertical: true)
         .disabled(!canSync)
         .onHover { isHovered = $0 }

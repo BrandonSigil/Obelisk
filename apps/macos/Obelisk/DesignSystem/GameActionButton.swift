@@ -74,11 +74,7 @@ struct GameActionButton: View {
 
             if isTransferring || isCancellable {
                 Button(action: cancel) {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 12, weight: .semibold))
-                        .frame(width: 36, height: 36)
-                        .modifier(StorefrontControlGlass())
-                        .contentShape(.circle)
+                    StorefrontGlassIcon(systemName: "xmark", size: 12)
                 }
                 .obeliskButtonStyle(.plain)
                 .foregroundStyle(.secondary)

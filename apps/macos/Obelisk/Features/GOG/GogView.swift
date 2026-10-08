@@ -43,8 +43,8 @@ struct GogView: View {
             StorefrontArtwork(imageURL: game.imageUrl ?? game.headerImageUrl)
         } accountMenu: {
             accountMenu
-        } gamePage: { game in
-            GogGameDetailView(model: model, game: game)
+        } gamePage: { game, context in
+            GogGameDetailView(model: model, game: game, context: context)
         }
     }
 

@@ -17,7 +17,7 @@ struct StorefrontBrowser<Model: LibraryStorefront, HeroArtwork: View, HeroLogo: 
     @ViewBuilder let heroLogo: (Model.Game) -> HeroLogo
     @ViewBuilder let artwork: (Model.Game) -> Artwork
     @ViewBuilder let accountMenu: AccountMenu
-    @ViewBuilder let gamePage: (Model.Game) -> GamePage
+    @ViewBuilder let gamePage: (Model.Game, GamePageContext<HeroArtwork, Artwork>) -> GamePage
     @Namespace private var namespace
     @State private var bar = StorefrontBarState()
     /// Where the open game came from, once a game opened with motion.
@@ -36,7 +36,7 @@ struct StorefrontBrowser<Model: LibraryStorefront, HeroArtwork: View, HeroLogo: 
         @ViewBuilder heroLogo: @escaping (Model.Game) -> HeroLogo,
         @ViewBuilder artwork: @escaping (Model.Game) -> Artwork,
         @ViewBuilder accountMenu: () -> AccountMenu,
-        @ViewBuilder gamePage: @escaping (Model.Game) -> GamePage
+        @ViewBuilder gamePage: @escaping (Model.Game, GamePageContext<HeroArtwork, Artwork>) -> GamePage
     ) {
         self.model = model
         self.storeID = storeID
@@ -52,15 +52,10 @@ struct StorefrontBrowser<Model: LibraryStorefront, HeroArtwork: View, HeroLogo: 
         self.gamePage = gamePage
     }
 
-    /// How a game's page replaces its library and back.
-    private var motion: Animation {
-        reduceMotion ? .easeInOut(duration: 0.2) : .spring(response: 0.38, dampingFraction: 0.86)
-    }
-
     var body: some View {
         ZStack {
             if let game = model.selectedGame {
-                gamePage(game)
+                gamePage(game, GamePageContext(storeID: storeID, heroArtwork: heroArtwork(game), cover: artwork(game)))
                     .id(game.id)
                     // Above the library it replaces, which falls back beneath it.
                     .zIndex(1)
@@ -74,14 +69,11 @@ struct StorefrontBrowser<Model: LibraryStorefront, HeroArtwork: View, HeroLogo: 
                     storeTitle: storeTitle,
                     libraryTitle: libraryTitle,
                     scrollMemory: scrollMemory,
-                    open: open
-                ) { game in
-                    heroArtwork(game)
-                } heroLogo: { game in
-                    heroLogo(game)
-                } artwork: { game in
-                    artwork(game)
-                }
+                    open: open,
+                    heroArtwork: heroArtwork,
+                    heroLogo: heroLogo,
+                    artwork: artwork
+                )
                 .transition(.asymmetric(insertion: .identity,
                                         removal: .opacity.combined(with: .scale(scale: reduceMotion ? 1 : 0.94))))
             }
@@ -102,17 +94,17 @@ struct StorefrontBrowser<Model: LibraryStorefront, HeroArtwork: View, HeroLogo: 
             }
         }
         .environment(\.storefrontBar, bar)
-        .environment(\.gameTransition, GameTransition(namespace: namespace, source: source, flies: !reduceMotion))
+        .environment(\.gameTransition, GameTransition(namespace: namespace, source: source))
         .ignoresSafeArea(.container, edges: .top)
     }
 
     private func open(_ game: Model.Game, from source: GameOpeningSource) {
         self.source = source
-        withAnimation(motion) { model.open(game) }
+        withAnimation(ObeliskStyle.pageAnimation(reduceMotion: reduceMotion)) { model.open(game) }
     }
 
     private func back() {
-        withAnimation(motion) { model.closeGame() }
+        withAnimation(ObeliskStyle.pageAnimation(reduceMotion: reduceMotion)) { model.closeGame() }
     }
 }
 
@@ -162,18 +154,21 @@ enum GameOpeningSource {
     case hero
 }
 
+/// What a storefront's browser hands the page of the game it opened. The
+/// artwork is the library's own, so the cover flies between the same image.
+struct GamePageContext<HeroArtwork: View, Cover: View> {
+    /// Names the storefront in accessibility identifiers.
+    let storeID: String
+    let heroArtwork: HeroArtwork
+    let cover: Cover
+}
+
 /// How a library and a game's page hand the game's cover to each other.
 struct GameTransition {
     let namespace: Namespace.ID
     /// Where the open game came from; nil when it opened without motion, as
     /// when a test or a refresh opens it.
     let source: GameOpeningSource?
-    /// Whether covers fly between the library and the page; while motion is
-    /// reduced, the page only fades in and out.
-    let flies: Bool
-
-    /// Whether the open game's cover flies between its card and its page.
-    var fliesCover: Bool { flies && source == .cover }
 }
 
 extension EnvironmentValues {
@@ -188,6 +183,7 @@ struct GameCoverMatch: ViewModifier {
     let game: AnyHashable
     let isPage: Bool
     @Environment(\.gameTransition) private var transition
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private struct ID: Hashable {
         let game: AnyHashable
@@ -197,7 +193,8 @@ struct GameCoverMatch: ViewModifier {
     func body(content: Content) -> some View {
         if let transition {
             content.matchedGeometryEffect(
-                id: ID(game: game, matched: !isPage || transition.fliesCover),
+                // While motion is reduced, the page only fades in and out.
+                id: ID(game: game, matched: !isPage || (transition.source == .cover && !reduceMotion)),
                 in: transition.namespace
             )
         } else {

@@ -3,6 +3,7 @@ import SwiftUI
 struct EpicGameDetailView: View {
     @Bindable var model: EpicModel
     let game: EpicGame
+    let context: GamePageContext<StorefrontArtwork, StorefrontArtwork>
 
     private var installations: EpicInstallations { model.installations }
 
@@ -10,16 +11,10 @@ struct EpicGameDetailView: View {
         GameDetailPage(
             model: model,
             game: game,
-            storeID: "epic",
+            context: context,
             size: (installations.selectedReceipt?.totalBytes ?? model.selectedGameDetails?.installationBytes)
-                .map(GameFormatting.bytes),
-            lastPlayed: model.lastPlayed(of: game).map(GameFormatting.lastPlayed),
-            playtime: model.playtime(of: game).map(GameFormatting.playtime)
+                .map(GameFormatting.bytes)
         ) {
-            StorefrontArtwork(imageURL: game.headerImageUrl ?? game.imageUrl, maxPixelSize: 2048)
-        } cover: {
-            StorefrontArtwork(imageURL: game.imageUrl)
-        } content: {
             GameOperationStatus(installations: installations, game: game.libraryID)
             GameAboutSection(
                 summary: game.description,

@@ -257,7 +257,7 @@ final class SteamPresentationTests: XCTestCase {
         }
         // The library and a game's page each keep their own scroll view, whose
         // scrollbar floats over the artwork. Neither changes the content width.
-        var scrolling = try StableScroller(in: host, style: .overlay)
+        var scrolling = try StableScroller(in: host)
         let librarySearchFrame = try XCTUnwrap(accessibilityFrame(in: host, label: L10n.string("ui.search.store_library", L10n.string("ui.store.steam"))), "The search field must be accessible for the layout regression")
         try scrolling.assertKept(in: host, during: "the library")
 
@@ -291,7 +291,7 @@ final class SteamPresentationTests: XCTestCase {
             guard let scroll = firstScrollView(in: host) else { return false }
             return scroll !== scrolling.scroll
         }
-        scrolling = try StableScroller(in: host, style: .overlay, width: size.width)
+        scrolling = try StableScroller(in: host, width: size.width)
         XCTAssertTrue(model.isLoadingNews)
         try scrolling.assertKept(in: host, during: "detail loading")
         // This hosting fixture exposes the native search field, but not the
@@ -332,7 +332,7 @@ final class SteamPresentationTests: XCTestCase {
             guard let scroll = firstScrollView(in: host), let document = scroll.documentView else { return false }
             return scroll !== scrolling.scroll && document.frame.height > scroll.contentView.bounds.height
         }
-        try StableScroller(in: host, style: .overlay).assertKept(in: host, during: "returning to the library")
+        try StableScroller(in: host).assertKept(in: host, during: "returning to the library")
     }
 
     @MainActor

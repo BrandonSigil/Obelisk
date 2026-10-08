@@ -40,8 +40,8 @@ struct SteamView: View {
             SteamArtwork(appId: game.appId, iconHash: game.iconHash)
         } accountMenu: {
             accountMenu
-        } gamePage: { game in
-            SteamGameDetailView(model: model, game: game)
+        } gamePage: { game, context in
+            SteamGameDetailView(model: model, game: game, context: context)
         }
     }
 
