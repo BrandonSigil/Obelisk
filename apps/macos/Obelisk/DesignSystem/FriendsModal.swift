@@ -6,6 +6,7 @@ import SwiftUI
 struct FriendsModal: NSViewRepresentable {
     let state: FriendsPresentationState
     let avatars: FriendsAvatarCache
+    var chat: SteamChatModel?
     let dismiss: @MainActor () -> Void
     let retry: @MainActor () -> Void
     let signIn: @MainActor () -> Void
@@ -20,7 +21,7 @@ struct FriendsModal: NSViewRepresentable {
     func updateNSView(_ container: FriendsModalContainer, context: Context) {
         container.dismiss = dismiss
         container.layer?.backgroundColor = NSColor.black.withAlphaComponent(reduceTransparency ? 0.45 : 0.28).cgColor
-        container.host.rootView = AnyView(FriendsPanel(state: state, avatars: avatars, focus: container.focus,
+        container.host.rootView = AnyView(FriendsPanel(state: state, avatars: avatars, chat: chat, focus: container.focus,
                                                       dismiss: dismiss, retry: retry, signIn: signIn)
             .environment(\.self, context.environment)
             .tint(ObeliskStyle.accent))
@@ -76,12 +77,7 @@ final class FriendsModalContainer: NSView {
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             let consumed = MainActor.assumeIsolated {
                 guard let self, event.window === self.modalWindow else { return false }
-                if event.keyCode == 53 { self.dismiss?(); return true }
-                if event.keyCode == 48 {
-                    self.focus.advance(backward: event.modifierFlags.contains(.shift))
-                    return true
-                }
-                return false
+                return self.focus.handle(event) { self.dismiss?() }
             }
             return consumed ? nil : event
         }

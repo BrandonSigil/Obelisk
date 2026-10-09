@@ -31,6 +31,7 @@ struct SteamView: View {
             libraryTitle: L10n.string("ui.steam.library"),
             accountName: model.displayName,
             avatarURL: model.avatarURL,
+            unreadCount: model.chat.totalUnread,
             scrollMemory: libraryScroll
         ) { game in
             SteamArtwork(appId: game.appId, portrait: false, iconHash: game.iconHash)
@@ -49,12 +50,18 @@ struct SteamView: View {
         Text(model.displayName ?? L10n.string("ui.steam.account"))
         Text(L10n.string("ui.library.account_game_count", Int64(model.games.count)))
         Divider()
-        Button(model.friends?.menuTitle ?? L10n.string("ui.friends.menuLoading"), systemImage: "person.2", action: model.openFriends)
+        Button(friendsMenuTitle, systemImage: "person.2", action: model.openFriends)
             .accessibilityIdentifier("steam-friends-menu")
         Divider()
         Button(L10n.string("ui.library.refresh"), systemImage: "arrow.clockwise", action: model.refresh)
         Divider()
         Button(L10n.string("ui.account.sign_out"), systemImage: "rectangle.portrait.and.arrow.right", action: model.signOut)
+    }
+
+    private var friendsMenuTitle: String {
+        let title = model.friends?.menuTitle ?? L10n.string("ui.friends.menuLoading")
+        let unread = model.chat.totalUnread
+        return unread > 0 ? [title, L10n.string("ui.chat.unreadCount", Int64(unread))].joined(separator: " · ") : title
     }
 }
 

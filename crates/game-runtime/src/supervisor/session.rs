@@ -26,6 +26,9 @@ use std::{
 pub type Inspect = fn(u32) -> Result<Option<Identity>, Error>;
 
 type Failure<L> = <<L as Launch>::P as Provider>::Error;
+/// How the player's controls reach a running game.
+pub(crate) type Control<P> =
+    Box<dyn Fn(<P as Provider>::Control) -> Result<(), Error> + Send + Sync>;
 /// A storefront's own async step, boxed so its traits stay object safe.
 pub(crate) type Operation<'a, T> = std::pin::Pin<Box<dyn std::future::Future<Output = T> + 'a>>;
 
@@ -39,6 +42,9 @@ pub(crate) const BEGIN_DEADLINE: Duration = Duration::from_secs(120);
 const WORKERS: usize = 16;
 /// How long a game asked to stop gets to quit before it is killed.
 const STOP_GRACE: Duration = Duration::from_secs(5);
+/// How long the Linux engine's launcher gets to stop its own servers on a
+/// Force Quit; it gives them a second.
+const LAUNCHER_GRACE: Duration = Duration::from_secs(2);
 
 /// What the client handed over, as the core needs it.
 pub(crate) struct Opening<P: Provider> {
@@ -161,6 +167,11 @@ pub(crate) trait Launch: Sized + 'static {
     ) -> Result<Prepared<Self::Host>, Failure<Self>>;
     /// The game runs. Returns how its presence is published.
     fn running(&self, host: &Arc<Self::Host>, pid: u32) -> Box<dyn Fn(bool) + Send + Sync>;
+    /// The game runs: how the player's controls reach it, if the storefront
+    /// offers any. They stop once the game exits.
+    fn control(&self, _host: &Arc<Self::Host>) -> Option<Control<Self::P>> {
+        None
+    }
     /// Reports host changes while the game runs, until the host stops.
     fn watch(
         &self,
@@ -270,6 +281,17 @@ pub(crate) struct Session<P: Provider> {
     cloud: Arc<crate::cloud::Control>,
     interrupt: OnceLock<Box<dyn Fn() + Send + Sync>>,
     wine: OnceLock<Option<crate::wine::Config>>,
+    /// Set before spawn, for the player's Quit and Force Quit.
+    launched: OnceLock<super::quit::Game>,
+    /// A Quit, or a Force Quit, is underway: the same request again adds
+    /// nothing to it.
+    quitting: AtomicBool,
+    forcing: AtomicBool,
+    /// The running game's controls, from its start until its exit.
+    control: Mutex<Option<Control<P>>>,
+    /// The Force Quit underway, which the session waits for before it ends:
+    /// it kills what outlives the game, after the game.
+    forced: Mutex<Option<std::thread::JoinHandle<()>>>,
 }
 impl<P: Provider> Session<P> {
     /// Obelisk is ending: macOS asks every process it started to quit, the
@@ -296,19 +318,7 @@ impl<P: Provider> Session<P> {
             return;
         };
         let wine = self.wine.get().cloned().flatten();
-        let signal = |signal: &str| {
-            // The helper stays unreaped until the supervisor waits for it, so
-            // its pid cannot name another process meanwhile.
-            if self.state.lock().unwrap().game == Some(pid) {
-                let _ = std::process::Command::new("/bin/kill")
-                    .args([signal, &pid.to_string()])
-                    .stdin(Stdio::null())
-                    .stdout(Stdio::null())
-                    .stderr(Stdio::null())
-                    .status();
-            }
-        };
-        signal("-TERM");
+        self.signal(pid, "-TERM");
         if let Some(wine) = &wine {
             crate::wine::stop(wine);
         }
@@ -316,7 +326,91 @@ impl<P: Provider> Session<P> {
         while self.state.lock().unwrap().game == Some(pid) && Instant::now() < deadline {
             std::thread::sleep(Duration::from_millis(100));
         }
-        signal("-KILL");
+        self.signal(pid, "-KILL");
+    }
+
+    /// The player's Quit: the game is asked to close as its player closing
+    /// its windows would, and nothing is killed. A Windows game is asked
+    /// through Wine; a Mac game gets SIGTERM, which it may handle to quit
+    /// cleanly, the closest the supervisor has to the app's own Quit.
+    fn quit_game(&self) {
+        let Some(pid) = self.state.lock().unwrap().game else {
+            return;
+        };
+        match (self.wine.get().cloned().flatten(), self.launched.get()) {
+            (Some(wine), Some(game)) => {
+                crate::wine::quit(&wine, &game.environment, game.program.as_deref(), pid)
+            }
+            _ => self.signal(pid, "-TERM"),
+        }
+    }
+
+    /// The player's Force Quit: the game and what it started are killed at
+    /// once, then whatever still runs for its installation or its prefix.
+    /// The session then ends as after any exit, Cloud saves included.
+    fn force_quit_game(&self) {
+        let wine = self.wine.get().cloned().flatten();
+        let pid = self.state.lock().unwrap().game;
+        if let Some(pid) = pid {
+            // The Linux engine's launcher stops its window, render and input
+            // servers itself: they are not frozen with the game, and SIGTERM
+            // lets the input server give each gamepad back its own behaviour.
+            if wine
+                .as_ref()
+                .is_some_and(|wine| wine.engine == crate::wine::Engine::Linux)
+            {
+                self.signal(pid, "-TERM");
+                self.wait_reaped(pid, LAUNCHER_GRACE);
+            }
+            let started = super::quit::started_by(pid);
+            self.signal(pid, "-KILL");
+            super::quit::kill(&started);
+        }
+        if let Some(wine) = &wine {
+            crate::wine::kill(wine);
+        }
+        if let (Some(game), Ok(own)) = (self.launched.get(), std::env::current_exe()) {
+            super::quit::sweep(&super::quit::Scope::of(game, wine.as_ref(), pid, &own));
+        }
+    }
+
+    /// Waits at most `grace` for the game's helper `pid` to be reaped.
+    fn wait_reaped(&self, pid: u32, grace: Duration) {
+        let deadline = Instant::now() + grace;
+        while self.state.lock().unwrap().game == Some(pid) && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    }
+
+    /// Waits for the Force Quit underway, if any: the supervisor would
+    /// otherwise exit before it killed what the game left running.
+    async fn forced(&self) {
+        let Some(forcing) = self.forced.lock().unwrap().take() else {
+            return;
+        };
+        while !forcing.is_finished() {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        let _ = forcing.join();
+    }
+
+    /// Whether a Force Quit, or else a Quit, is underway.
+    fn underway(&self, force: bool) -> &AtomicBool {
+        if force { &self.forcing } else { &self.quitting }
+    }
+
+    /// Signals the game's helper while the supervisor has not reaped it.
+    fn signal(&self, pid: u32, signal: &str) {
+        // The helper stays unreaped until the supervisor waits for it, so its
+        // pid cannot name another process meanwhile.
+        if self.state.lock().unwrap().game == Some(pid) {
+            let _ = std::process::Command::new("/bin/kill")
+                .args([signal, &pid.to_string()])
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status();
+        }
     }
     pub(crate) fn record(&self) -> Record<P> {
         self.state.lock().unwrap().record.clone()
@@ -477,6 +571,11 @@ pub(crate) fn serve<L: Launch>(
         })),
         interrupt: OnceLock::new(),
         wine: OnceLock::new(),
+        launched: OnceLock::new(),
+        quitting: AtomicBool::new(false),
+        forcing: AtomicBool::new(false),
+        control: Mutex::new(None),
+        forced: Mutex::new(None),
     });
     let _ = session.interrupt.set(launch.interrupt());
     let _ = session.wine.set(launch.wine());
@@ -517,6 +616,9 @@ pub(crate) fn serve<L: Launch>(
         {
             cloud.aborted();
         }
+        // A Force Quit asked once the game was gone still ends what it
+        // left running.
+        session.forced().await;
         launch.close().await;
         outcome
     });
@@ -608,6 +710,11 @@ async fn run<L: Launch>(
             );
             service
         });
+    let _ = session.launched.set(super::quit::Game {
+        environment: target.environment.clone(),
+        installation: target.installation.clone(),
+        program: target.program.clone(),
+    });
     let host = Arc::new(prepared.host);
     let mut command = Process::new(&prepared.helper);
     let (mut pipe, child_pipe) = UnixStream::pair().map_err(Error::from)?;
@@ -694,6 +801,7 @@ async fn run<L: Launch>(
         // Revocation takes this same lock: its permanent stop fences a late exec.
         let _admission = session.admission.lock().unwrap();
         session.presence.start(launch.running(&host, pid));
+        *session.control.lock().unwrap() = launch.control(&host);
         let _ = session.update(|r| {
             // A path the helper could not confirm keeps its starting identity,
             // which the birth-time rule still owns.
@@ -708,12 +816,16 @@ async fn run<L: Launch>(
     let watching = launch.watch(&host, session);
     let exit = wait_for_exit(&mut game).await;
     drop(input);
+    session.control.lock().unwrap().take();
     session.state.lock().unwrap().game = None;
     session.presence.stop();
     launch.stopped(&host, Some(exit));
     if let Some(watching) = watching {
         let _ = watching.join();
     }
+    // What a Force Quit kills after the game is gone before its saves are
+    // read.
+    session.forced().await;
     // After exit every write is best effort: finalization always runs, and a
     // success never turns into a failure.
     let _ = session.update(|r| {
@@ -834,6 +946,19 @@ fn respond<L: Launch>(mut stream: UnixStream, session: &Arc<Session<L::P>>) -> R
                 session.notify();
             }
         }
+        Command::Quit { id } => end(session, &id, false)?,
+        Command::ForceQuit { id } => end(session, &id, true)?,
+        Command::Control {
+            id,
+            account_id,
+            control,
+        } => {
+            if !same(&session.state.lock().unwrap(), &id, Some(&account_id)) {
+                return Err(Error::InvalidSession);
+            }
+            let controls = session.control.lock().unwrap();
+            controls.as_ref().ok_or(Error::InvalidSession)?(control)?;
+        }
         Command::CloudChoice {
             id,
             account_id,
@@ -899,6 +1024,43 @@ fn respond<L: Launch>(mut stream: UnixStream, session: &Arc<Session<L::P>>) -> R
     }
     let record = session.record();
     storage::send(&mut stream, &record)
+}
+
+/// The player's Quit, or Force Quit. Before spawn either one cancels
+/// preparation. After it, the work runs apart: the reply never waits for the
+/// game, and a repeated request joins the one underway.
+fn end<P: Provider>(session: &Arc<Session<P>>, id: &str, force: bool) -> Result<(), Error> {
+    let _admission = session.admission.lock().unwrap();
+    let state = session.state.lock().unwrap();
+    if state.record.id != id {
+        return Err(Error::InvalidSession);
+    }
+    let spawned = state.spawned;
+    drop(state);
+    if !spawned {
+        session.stop_preparation();
+        session.notify();
+        return Ok(());
+    }
+    if !session.underway(force).swap(true, Ordering::AcqRel) {
+        // Held from spawn on: the session waits for a Force Quit only once
+        // it can find it.
+        let mut forced = session.forced.lock().unwrap();
+        let ending = session.clone();
+        let thread = std::thread::spawn(move || {
+            if force {
+                ending.force_quit_game();
+            } else {
+                ending.quit_game();
+            }
+            ending.underway(force).store(false, Ordering::Release);
+        });
+        if force && let Some(previous) = forced.replace(thread) {
+            // A previous Force Quit is over, or about to be.
+            let _ = previous.join();
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]

@@ -13,6 +13,8 @@ struct LibraryGlassBar<AccountMenu: View>: View {
     var showsBackdrop = true
     /// The game whose page shows, if any.
     var game: GameBar?
+    /// Unread messages of the account, badged on its avatar.
+    var unreadCount = 0
     @ViewBuilder let accountMenu: AccountMenu
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -34,7 +36,8 @@ struct LibraryGlassBar<AccountMenu: View>: View {
                         .transition(.scale(scale: 0.4).combined(with: .opacity))
                 }
 
-                LibraryAccountPill(storeTitle: storeTitle, accountName: accountName, avatarURL: avatarURL) {
+                LibraryAccountPill(storeTitle: storeTitle, accountName: accountName, avatarURL: avatarURL,
+                                   unreadCount: unreadCount) {
                     accountMenu
                 }
 
@@ -97,6 +100,7 @@ struct LibraryAccountPill<MenuContent: View>: View {
     let storeTitle: String
     let accountName: String?
     let avatarURL: URL?
+    var unreadCount = 0
     @ViewBuilder let menu: MenuContent
 
     private var name: String? {
@@ -111,6 +115,13 @@ struct LibraryAccountPill<MenuContent: View>: View {
             HStack(spacing: 9) {
                 AccountAvatar(name: name, url: avatarURL)
                     .frame(width: 28, height: 28)
+                    .overlay(alignment: .topTrailing) {
+                        if unreadCount > 0 {
+                            UnreadBadge(count: unreadCount, compact: true)
+                                .offset(x: 6, y: -5)
+                                .accessibilityHidden(true)
+                        }
+                    }
                 VStack(alignment: .leading, spacing: 0) {
                     Text(storeTitle)
                         .font(.system(size: 13, weight: .semibold))
@@ -138,6 +149,7 @@ struct LibraryAccountPill<MenuContent: View>: View {
         .menuIndicator(.hidden)
         .fixedSize()
         .accessibilityLabel(accountLabel)
+        .accessibilityValue(unreadCount > 0 ? L10n.string("ui.chat.unreadCount", Int64(unreadCount)) : "")
         .accessibilityIdentifier("storefront-account-menu")
         .help(accountLabel)
     }

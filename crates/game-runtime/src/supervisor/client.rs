@@ -273,6 +273,45 @@ impl<P: Provider> Client<P> {
         Ok(())
     }
 
+    /// The player's Quit: the game is asked to close its windows, and nothing
+    /// is killed. Before spawn it cancels preparation.
+    pub fn quit(&self) -> Result<(), P::Error> {
+        self.command(
+            None,
+            Command::<P>::Quit {
+                id: self.id.clone(),
+            },
+            false,
+        )?;
+        Ok(())
+    }
+
+    /// The player's Force Quit: the game ends now, with whatever still runs
+    /// for its installation; its exit Cloud sync still runs. Before spawn it
+    /// cancels preparation.
+    pub fn force_quit(&self) -> Result<(), P::Error> {
+        self.command(
+            None,
+            Command::<P>::ForceQuit {
+                id: self.id.clone(),
+            },
+            false,
+        )?;
+        Ok(())
+    }
+
+    /// The player's `control` of the running game. Refused before the game
+    /// runs, once it exited, and for another account.
+    pub fn control(&self, account_id: &P::Account, control: P::Control) -> Result<(), P::Error> {
+        let command = Command::<P>::Control {
+            id: self.id.clone(),
+            account_id: account_id.clone(),
+            control,
+        };
+        self.command(Some(account_id), command, true)?;
+        Ok(())
+    }
+
     /// Opens a supervisor's start gate. Begin is idempotent, so a lost request
     /// is retried while the supervisor lives, instead of silently expiring.
     pub fn begin(&self) -> Result<(), P::Error> {

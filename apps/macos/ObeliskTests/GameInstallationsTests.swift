@@ -96,12 +96,139 @@ final class GameInstallationsTests: XCTestCase {
         installations.downloadSelected()
         XCTAssertEqual(fixture.backend.actions, [], "Swift forwards nothing the gate refuses")
     }
+
+    // MARK: Quitting the running game
+
+    func testARunningGameIsAskedToQuitThenMayBeForcedOnceItHadTimeToClose() async throws {
+        let quitting = FakeQuitting()
+        let fixture = Fixture(game: game, quitting: quitting)
+        let installations = fixture.connect()
+        let running = GameSessionState.steam(appID: 620)
+        fixture.sessions.fake.show(running)
+        fixture.backend.publish { $0.gate = .session(620) }
+        try await eventually { installations.primaryQuitStage == .quit }
+        XCTAssertEqual(installations.primaryActionTitle, L10n.string("model.game.quit"))
+        XCTAssertTrue(installations.primaryActionAvailable)
+
+        installations.primaryAction()
+        try await eventually { fixture.sessions.fake.quits == [running.id] && quitting.waiting == 1 }
+        XCTAssertEqual(quitting.delays, [.seconds(10)], "The game gets ten seconds to close")
+        XCTAssertEqual(quitting.macApps, [[fixture.receipt.directory]], "Its Mac build is asked first")
+        XCTAssertEqual(installations.primaryQuitStage, .closing)
+        XCTAssertEqual(installations.primaryActionTitle, L10n.string("model.game.closing"))
+        XCTAssertFalse(installations.primaryActionAvailable)
+        installations.primaryAction()
+
+        quitting.wake()
+        try await eventually { installations.primaryQuitStage == .forceQuit }
+        XCTAssertEqual(installations.primaryActionTitle, L10n.string("model.game.forceQuit"))
+        XCTAssertTrue(installations.primaryActionAvailable)
+        // The page asked its player to confirm.
+        installations.primaryAction()
+        try await eventually { fixture.sessions.fake.forceQuits == [running.id] }
+        XCTAssertEqual(fixture.sessions.fake.quits, [running.id], "Quit is asked once")
+        XCTAssertEqual(fixture.backend.actions, [], "Ending the game is no installation action")
+
+        // The game exits: its session settles its Cloud saves, then ends.
+        fixture.sessions.fake.show(.steam(appID: 620, id: running.id, phase: .finalizing))
+        try await eventually { fixture.sessions.quitRequest == nil }
+        XCTAssertNil(installations.primaryQuitStage)
+    }
+
+    func testAMacGameIsAskedToQuitAsItsOwnQuitMenuWould() async throws {
+        let quitting = FakeQuitting()
+        quitting.macAppRuns = true
+        let fixture = Fixture(game: game, quitting: quitting)
+        let installations = fixture.connect()
+        fixture.sessions.fake.show(.steam(appID: 620))
+        fixture.backend.publish { $0.gate = .session(620) }
+        try await eventually { installations.primaryQuitStage == .quit }
+
+        installations.primaryAction()
+        try await eventually { quitting.macApps == [[fixture.receipt.directory]] && quitting.waiting == 1 }
+        XCTAssertEqual(installations.primaryQuitStage, .closing)
+        XCTAssertEqual(fixture.sessions.fake.quits, [], "No signal ends it before it could save")
+    }
+
+    func testForceQuitIsOfferedForAWhileThenTheGameMayBeAskedToQuitAgain() async throws {
+        let quitting = FakeQuitting()
+        let sessions = SteamGameSessions(quitting: quitting.quitting)
+        let running = GameSessionState.steam(appID: 620)
+        sessions.fake.show(running)
+        try await eventually { sessions.quitStage == .quit }
+        await sessions.quit()
+        try await eventually { quitting.waiting == 1 }
+        quitting.wake()
+        try await eventually { sessions.quitStage == .forceQuit && quitting.waiting == 1 }
+        XCTAssertEqual(quitting.delays, [.seconds(10), .seconds(60)])
+
+        // The game asked its player to save first, and plays on.
+        quitting.wake()
+        try await eventually { sessions.quitStage == .quit }
+        XCTAssertNil(sessions.quitRequest)
+        await sessions.quit()
+        XCTAssertEqual(sessions.quitStage, .closing)
+        XCTAssertEqual(sessions.fake.quits, [running.id, running.id])
+        XCTAssertEqual(sessions.fake.forceQuits, [])
+    }
+
+    func testTheQuitRequestLivesInTheModelForItsSessionOnly() async throws {
+        let sessions = SteamGameSessions(quitting: GameQuitting(delay: .seconds(60), quitMacApps: { _ in false }))
+        let first = GameSessionState.steam(appID: 620)
+        sessions.fake.show(first)
+        try await eventually { sessions.quitStage == .quit }
+        await sessions.forceQuit()
+        XCTAssertEqual(sessions.fake.forceQuits, [], "A game is asked to quit first")
+
+        await sessions.quit()
+        // Any page shown later reads the same stage, whatever it showed before.
+        XCTAssertEqual(sessions.quitStage, .closing)
+        XCTAssertEqual(sessions.quitRequest?.session, first.id)
+        await sessions.quit()
+        await sessions.forceQuit()
+        XCTAssertEqual(sessions.fake.quits, [first.id])
+        XCTAssertEqual(sessions.fake.forceQuits, [], "Not before the game had its time")
+
+        let second = GameSessionState.steam(appID: 620)
+        sessions.fake.show(second)
+        try await eventually { sessions.active?.id == second.id }
+        XCTAssertNil(sessions.quitRequest)
+        XCTAssertEqual(sessions.quitStage, .quit)
+        var reconnecting = second
+        reconnecting.reconnecting = true
+        sessions.fake.show(reconnecting)
+        try await eventually { sessions.active?.reconnecting == true }
+        XCTAssertNil(sessions.quitStage, "A session reconnecting to its supervisor is asked nothing")
+    }
+
+    func testAGameGetsTenSecondsToCloseThenAMinuteToBeForced() {
+        XCTAssertEqual(GameQuitting().delay, .seconds(10))
+        XCTAssertEqual(GameQuitting().window, .seconds(60))
+    }
+
+    func testOnlyAMacAppRunningFromTheGameIsAskedToQuit() {
+        XCTAssertFalse(GameQuitting.quitApps(in: []))
+        XCTAssertFalse(GameQuitting.quitApps(in: ["/nonexistent/obelisk-test-installation"]))
+    }
+
+    func testTheLibraryCardEndsTheRunningGameAsThePageDoes() {
+        XCTAssertEqual(LibraryCardAction.running(.quit).label(title: "Portal 2"),
+                       L10n.string("ui.game.quit_named", "Portal 2"))
+        XCTAssertEqual(LibraryCardAction.running(.forceQuit).label(title: "Portal 2"),
+                       L10n.string("ui.game.force_quit_named", "Portal 2"))
+        XCTAssertTrue(LibraryCardAction.running(.quit).isEnabled)
+        XCTAssertFalse(LibraryCardAction.running(.closing).isEnabled)
+        XCTAssertTrue(LibraryCardAction.running(.forceQuit).isEnabled)
+        // A session reconnecting still shows its game running, and asks nothing.
+        XCTAssertNil(LibraryCardAction.running(nil).label(title: "Portal 2"))
+        XCTAssertFalse(LibraryCardAction.running(nil).isEnabled)
+    }
 }
 
 /// One signed-in Steam account with Portal 2 on screen, installed for macOS.
 @MainActor
 private final class Fixture {
-    let sessions = SteamGameSessions()
+    let sessions: SteamGameSessions
     let receipt: InstallationReceipt<UInt32>
     private(set) var backend = FakeInstallations<SteamGames>()
     var verifies = false
@@ -110,9 +237,10 @@ private final class Fixture {
     private let installed: Bool
     private let installations: SteamInstallations
 
-    init(game: SteamGame, installed: Bool = true) {
+    init(game: SteamGame, installed: Bool = true, quitting: FakeQuitting = FakeQuitting()) {
         self.game = game
         self.installed = installed
+        sessions = SteamGameSessions(quitting: quitting.quitting)
         receipt = .steam(appId: 620, name: game.name, directory: "/fixture/Games/Steam/steam-620-macos",
                          platform: "macos", totalBytes: 100)
         installations = SteamInstallations(sessions: sessions, cloud: SteamCloudModel(sessions: sessions))

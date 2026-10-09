@@ -132,6 +132,8 @@ fn native_target(
             working_directory: launched.working_directory.clone().into(),
             environment: environment.clone(),
             log: None,
+            installation: Some(config.install.clone()),
+            program: None,
         },
         architecture,
     ))

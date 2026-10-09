@@ -177,6 +177,33 @@ impl Engine {
             Some(metadata)
         }
     }
+    /// The next callback's id, freed at once. Only a payload `wanted` names,
+    /// by id and exact size, is copied out first.
+    pub fn callback_payload(
+        &self,
+        pipe: i32,
+        wanted: &[(i32, usize)],
+    ) -> Option<(i32, Option<Vec<u8>>)> {
+        let mut event = Callback::default();
+        // SAFETY: verified CallbackMsg_t layout. The engine's payload stays
+        // valid until Steam_FreeLastCallback; it is read only when its id and
+        // size match a requested layout, within the size the engine gave,
+        // and every retrieved callback is freed exactly once.
+        unsafe {
+            if !(self.next)(pipe, &mut event) {
+                return None;
+            }
+            let payload = match usize::try_from(event.size) {
+                Ok(size) if !event.data.is_null() && wanted.contains(&(event.id, size)) => {
+                    Some(std::slice::from_raw_parts(event.data, size).to_vec())
+                }
+                _ => None,
+            };
+            let id = event.id;
+            (self.free)(pipe);
+            Some((id, payload))
+        }
+    }
     pub fn user(&self, user: i32, pipe: i32) -> Result<ClientUser> {
         let address = self.interface.method(8, 0xa02be8)?;
         // SAFETY: pinned GetIClientUser slot, verified to take this,user,pipe.
@@ -204,6 +231,65 @@ impl Engine {
             object: NonNull::new(object).ok_or("Client friends interface unavailable")?,
             image_base: self.interface.image_base,
         }))
+    }
+    /// `GetIClientUtils(pipe)`: the per-pipe Utils proxy that
+    /// `Steam_CreateSteamPipe` registered for `pipe`.
+    fn utils(&self, pipe: i32) -> Result<ClientUtils> {
+        let address = self.interface.method(14, 0xa04d74)?;
+        // SAFETY: pinned Engine005 accessor takes this,pipe and returns the
+        // Utils proxy its CreateSteamPipe (0xa01e00, insert at 0xa01f94)
+        // stored for that pipe. Only a pipe this engine just created reaches it.
+        let object = unsafe {
+            let get: unsafe extern "C" fn(Object, i32) -> Object = std::mem::transmute(address);
+            get(self.interface.object.as_ptr(), pipe)
+        };
+        Ok(ClientUtils(Interface {
+            object: NonNull::new(object).ok_or("Client utils interface unavailable")?,
+            image_base: self.interface.image_base,
+        }))
+    }
+    /// `GetIClientMatchmaking(user, pipe)`.
+    fn matchmaking(&self, user: i32, pipe: i32) -> Result<ClientMatchmaking> {
+        let address = self.interface.method(16, 0xa02d80)?;
+        // SAFETY: pinned Engine005 accessor takes this,user,pipe, as Friends'
+        // slot 13 does, and returns the Matchmaking proxy (vtable 0x1742d70)
+        // of the interface set ConnectToGlobalUser built for them.
+        let object = unsafe {
+            let get: unsafe extern "C" fn(Object, i32, i32) -> Object =
+                std::mem::transmute(address);
+            get(self.interface.object.as_ptr(), user, pipe)
+        };
+        Ok(ClientMatchmaking(Interface {
+            object: NonNull::new(object).ok_or("Client matchmaking interface unavailable")?,
+            image_base: self.interface.image_base,
+        }))
+    }
+    /// Whether the account is in `lobby` of game `app` now, as the engine's
+    /// matchmaking shows it; `None` when it could not be asked this time.
+    ///
+    /// The engine answers a matchmaking call only for its pipe's AppID (0 on
+    /// the host's own pipe), from the per-app object the game's pipe shares.
+    /// So the question goes through a pipe of its own, set to `app` without
+    /// process tracking, and released at once: kept open, that pipe would
+    /// hold the game's lobbies after the game quits, since the engine leaves
+    /// them only when the last pipe of the app goes.
+    pub fn in_lobby(&self, app: u32, lobby: u64) -> Result<Option<bool>> {
+        let pipe = self.pipe();
+        if pipe == 0 {
+            return Ok(None);
+        }
+        let user = self.connect(pipe);
+        let answer = (|| {
+            if user == 0 || self.utils(pipe)?.set_app_for_pipe(app)? != app {
+                return Ok(None);
+            }
+            let first = self.matchmaking(user, pipe)?.lobby_member(lobby, 0)?;
+            Ok(Some(crate::lobby::member(first)))
+        })();
+        // Lobby updates of the game's AppID may reach this pipe meanwhile.
+        while self.callback(pipe).is_some() {}
+        self.release(user, pipe);
+        answer
     }
     pub fn request_app_info(&self, user: i32, pipe: i32, app: u32) -> Result<()> {
         let address = self.interface.method(17, 0xa02e4c)?;
@@ -267,6 +353,46 @@ impl ClientUser {
     pub fn ticket_length(&self, app: u32) -> Result<u32> {
         Ok(method!(self, 103, 0x89b004, (u32) -> u32, app))
     }
+    /// `AuthorizeMicroTxn(order, answer)`: the player's answer to purchase
+    /// `order` (`EMicroTxnAuthResponse`: 1 authorize, 2 deny). Returns the
+    /// engine's API call handle, 0 when the call failed.
+    pub fn authorize_microtxn(&self, order: u64, approve: bool) -> Result<u64> {
+        // The pinned proxy 0x89fde4 (vtable 0x173fe80, names IClientUser and
+        // AuthorizeMicroTxn at 0x89feb4/0x89febc) serializes the u64 from x1
+        // and the u32 from w2, and returns the reply's 8 bytes. The server
+        // dispatcher (hash 0x32506707 at 0x8004bc) reads 8 then 4 bytes and
+        // calls CUser slot 152 (`ldr x8, [x8, #0x4c0]` at 0x8005ac); its
+        // implementation 0xa6b950 queues CAPIJobAuthorizeMicroTxn with the
+        // order at +0x1e0 and the answer at +0x1e8. That job (0xa7984c)
+        // sends both in EMsg 5505 and, for answer 2 or an accepted answer,
+        // drops the order and posts its dismissal (1020044, 0xa79a48).
+        Ok(method!(self, 152, 0x89fde4, (u64, u32) -> u64, order, if approve { 1 } else { 2 }))
+    }
+}
+
+struct ClientUtils(Interface);
+impl ClientUtils {
+    /// `SetAppIDForCurrentPipe(app, false)`, for this proxy's pipe: the
+    /// AppID the engine then gives it, or 0 when the call failed.
+    fn set_app_for_pipe(&self, app: u32) -> Result<u32> {
+        // The pinned proxy 0x8cc5c8 serializes the u32 and one bool byte and
+        // returns the reply's u32. Its server (0xa139f4) maps the calling pipe
+        // to the AppID and, without tracking, returns it at once: no process
+        // is attached and no game is reported started.
+        Ok(method!(self, 18, 0x8cc5c8, (u32, bool) -> u32, app, false))
+    }
+}
+
+struct ClientMatchmaking(Interface);
+impl ClientMatchmaking {
+    /// `GetLobbyMemberByIndex(lobby, index)`: 0 unless the account is in
+    /// `lobby` and it has that many members.
+    fn lobby_member(&self, lobby: u64, index: i32) -> Result<u64> {
+        // The pinned proxy 0x8d81ac serializes the CSteamID by value and the
+        // i32, and returns the reply's CSteamID, or 0 when the call failed.
+        // Its server (0xabbab0) reads only the lobbies the user is in.
+        Ok(method!(self, 18, 0x8d81ac, (u64, i32) -> u64, lobby, index))
+    }
 }
 
 pub struct ClientFriends(Interface);
@@ -276,5 +402,68 @@ impl ClientFriends {
         // dispatcher independently calls Friends slot 5 with that same scalar.
         method!(self, 5, 0x8b23a0, (i32) -> (), i32::from(online));
         Ok(())
+    }
+    /// `GetFriendGamePlayed(friend)`: the game `friend` plays as this engine
+    /// knows it, or `None` when it knows none.
+    pub fn game_played(&self, friend: u64) -> Result<Option<[u8; crate::lobby::SIZE]>> {
+        let mut info = [0_u8; crate::lobby::SIZE];
+        // The pinned proxy 0x8b4074 serializes the CSteamID by value (x1),
+        // reads exactly 24 bytes of the reply into the buffer in x2, or
+        // zeroes them, and returns the reply's bool.
+        let played = method!(self, 23, 0x8b4074, (u64, *mut u8) -> bool, friend, info.as_mut_ptr());
+        Ok(played.then_some(info))
+    }
+    /// `NotifyGameOverlayStateChanged(pid, app, active, user_initiated)`:
+    /// tells game `app` Steam's overlay opened or closed over it.
+    ///
+    /// The pinned proxy 0x8c42bc (vtable 0x1741520 slot 192; names
+    /// IClientFriends and NotifyGameOverlayStateChanged at 0x8c43bc/0x8c43c4)
+    /// serializes w1 and w2 as u32, then w3 and w4 as one byte each, and
+    /// decodes no value. Its server, CUserFriends slot 192 (0xa9dbdc),
+    /// builds `GameOverlayActivated_t` (331, 12 bytes): active at 0,
+    /// user_initiated at 1, w2 at 4 (the AppID) and w1 at 8 (the overlay's
+    /// pid), and posts it to every pipe of the user, this host's included.
+    pub fn overlay_state(
+        &self,
+        pid: u32,
+        app: u32,
+        active: bool,
+        user_initiated: bool,
+    ) -> Result<()> {
+        method!(self, 192, 0x8c42bc, (u32, u32, bool, bool) -> (), pid, app, active, user_initiated);
+        Ok(())
+    }
+    /// `NotifyLobbyJoinRequested(app, lobby, friend)`: game `app` gets
+    /// `GameLobbyJoinRequested_t` (333), as when the player accepts
+    /// `friend`'s lobby invitation in Steam's overlay.
+    ///
+    /// The pinned proxy 0x8c45e4 (slot 194; names NotifyLobbyJoinRequested
+    /// at 0x8c46c4) serializes w1 as u32 and x2, x3 as CSteamIDs by value
+    /// (0xcc430 writes the 8 bytes of x1), and decodes a one-byte result.
+    /// Its server (0xa9ddcc) stores x2 at 0 and x3 at 8 and posts the 16
+    /// bytes through 0x5c56a4, only to pipes whose AppID is w1.
+    pub fn lobby_join_requested(&self, app: u32, lobby: u64, friend: u64) -> Result<bool> {
+        Ok(method!(self, 194, 0x8c45e4, (u32, u64, u64) -> bool, app, lobby, friend))
+    }
+    /// `NotifyRichPresenceJoinRequested(app, friend, connect)`: game `app`
+    /// gets `GameRichPresenceJoinRequested_t` (337).
+    ///
+    /// The pinned proxy 0x8c4790 (slot 195; names
+    /// NotifyRichPresenceJoinRequested at 0x8c4870) serializes w1 as u32, x2
+    /// by value and x3 as a C string (0xcc1e4: strlen + 1 bytes after a length
+    /// byte, 255 meaning NUL-terminated), and decodes a one-byte result. The
+    /// dispatcher (0x819120) reads them back with 0xcc254 and calls slot 195
+    /// (0x819228, offset 0x618); the server (0xa9ddfc) copies at most 256
+    /// bytes of the string after the friend and posts 264 bytes to pipes
+    /// whose AppID is w1.
+    pub fn rich_presence_join_requested(
+        &self,
+        app: u32,
+        friend: u64,
+        connect: &CStr,
+    ) -> Result<bool> {
+        Ok(
+            method!(self, 195, 0x8c4790, (u32, u64, *const c_char) -> bool, app, friend, connect.as_ptr()),
+        )
     }
 }

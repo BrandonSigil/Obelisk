@@ -33,7 +33,9 @@ struct RootView: View {
         .accessibilityHidden(model.presentedFriends != nil)
         .overlay {
             if let friends = model.presentedFriends {
-                FriendsModal(state: friends, avatars: friendsAvatars, dismiss: { model.closeFriends() },
+                FriendsModal(state: friends, avatars: friendsAvatars,
+                             chat: friends.store.id == "steam" ? model.steam.chat : nil,
+                             dismiss: { model.closeFriends() },
                              retry: model.retryPresentedFriends, signIn: model.signInPresentedFriends)
                     .ignoresSafeArea(.container, edges: .top)
                     .id(friends.account)

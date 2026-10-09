@@ -30,6 +30,7 @@ impl From<Error> for Failure {
 impl Provider for Recording {
     type Account = u64;
     type Store = Game;
+    type Control = crate::supervisor::NoControl;
     type Error = Failure;
     const SUPERVISE: &'static str = "unused";
     const CANCELLED: &'static [&'static str] = &["fixture.cancelled"];
@@ -266,4 +267,9 @@ impl LaunchCloud<Failure> for Cloud {
     fn aborted(&mut self) {
         record(&self.directory, "cloud.aborted");
     }
+}
+
+#[test]
+fn force_quitting_ends_what_the_game_left_running_apart_from_it() {
+    super::force_quitting_ends_what_the_game_left_running_apart_from_it::<Recording>();
 }

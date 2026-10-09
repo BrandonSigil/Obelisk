@@ -385,6 +385,7 @@ final class GameInstallations<Store: InstallationStorefront> {
         let game = selection()?.game
         if isSynchronizingSaves { return L10n.string("ui.cloud.sync_short") }
         if sessions.isRecovering { return L10n.string(Store.recoveringSession) }
+        if let quitStage = primaryQuitStage { return quitStage.title }
         if selectedSession?.running == true { return L10n.string("model.game.running") }
         if isUninstalling && uninstallGame == game { return L10n.string("model.game.uninstalling") }
         if isLaunching && launchGame == game {
@@ -406,22 +407,54 @@ final class GameInstallations<Store: InstallationStorefront> {
     /// Whether the primary action launches the game rather than installing it.
     var primaryActionLaunches: Bool { selectedSession != nil || selectedReceipt != nil }
 
+    /// While the game on screen runs, the primary action ends it instead.
+    var primaryQuitStage: GameQuitStage? {
+        selectedSession?.running == true ? sessions.quitStage : nil
+    }
+
     /// An installation launches from its receipt; only a new download waits for
     /// the storefront to know what it can install.
     var primaryActionAvailable: Bool {
+        if let primaryQuitStage { return primaryQuitStage != .closing }
         guard let selection = selection(), account != nil else { return false }
         if selectedReceipt != nil { return canLaunch(selection.game) }
         return selection.offer != nil && canModify(selection.game)
     }
 
-    /// Launches the installed game, otherwise installs it.
+    /// Launches the installed game, otherwise installs it. While the game
+    /// runs, it quits it, then forces it to quit once it may: the page asks
+    /// its player to confirm that first.
     func primaryAction() {
         guard primaryActionAvailable else { return }
-        if let receipt = selectedReceipt {
+        if primaryQuitStage != nil {
+            endRunningGame()
+        } else if let receipt = selectedReceipt {
             launch(receipt)
         } else {
             downloadSelected()
         }
+    }
+
+    /// Quit, or Force Quit once the running game may be forced, from its
+    /// page or from the library. Its player confirms a Force Quit first.
+    func endRunningGame() {
+        guard let active = sessions.active else { return }
+        switch sessions.quitStage {
+        case .quit:
+            // Only a Mac build runs from its own installation.
+            let macApps = active.account != account ? [] : receipts
+                .filter { $0.gameID == active.game && $0.platform == Store.nativePlatform }
+                .map(\.directory)
+            Task { await sessions.quit(macApps: macApps) }
+        case .forceQuit: forceQuitRunningGame()
+        case .closing, nil: break
+        }
+    }
+
+    /// The Force Quit its player confirmed, while the running game may still
+    /// be forced.
+    func forceQuitRunningGame() {
+        Task { await sessions.forceQuit() }
     }
 
     /// Launches an installation, from its game's page or from the library.

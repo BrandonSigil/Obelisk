@@ -126,6 +126,7 @@ struct AppMenuBarLabel: View {
         Image(systemName: "sailboat.fill")
             .onAppear {
                 lifecycle.libraryCache = model.libraryCache
+                model.overlay.showLibrary = { lifecycle.show() }
                 let (steam, epic, gog) = (model.steam.gameSessions, model.epic.gameSessions, model.gog.gameSessions)
                 lifecycle.games = (
                     running: { steam.active != nil || epic.active != nil || gog.active != nil },

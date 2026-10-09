@@ -242,6 +242,8 @@ pub(crate) fn target(directory: &Path, script: &Script) -> Target {
         working_directory: directory.into(),
         environment: [("PATH".to_string(), "/usr/bin:/bin".to_string())].into(),
         log: None,
+        installation: Some(directory.into()),
+        program: None,
     }
 }
 
@@ -399,6 +401,23 @@ macro_rules! lifecycle_suite {
         #[test]
         fn stopping_a_running_game_ends_it_and_still_finishes_the_session() {
             lifecycle::stopping_a_running_game_ends_it_and_still_finishes_the_session::<$harness>()
+        }
+        #[test]
+        fn quitting_asks_the_running_game_to_close_and_kills_nothing() {
+            lifecycle::quitting_asks_the_running_game_to_close_and_kills_nothing::<$harness>()
+        }
+        #[test]
+        fn force_quitting_ends_a_game_that_ignored_quit_and_what_it_started() {
+            lifecycle::force_quitting_ends_a_game_that_ignored_quit_and_what_it_started::<$harness>(
+            )
+        }
+        #[test]
+        fn quitting_before_spawn_cancels_the_launch() {
+            lifecycle::quitting_before_spawn_cancels_the_launch::<$harness>()
+        }
+        #[test]
+        fn quit_and_force_quit_reach_only_their_session() {
+            lifecycle::quit_and_force_quit_reach_only_their_session::<$harness>()
         }
         #[test]
         fn revoking_before_admission_abandons_the_launch_without_presence() {
@@ -676,6 +695,120 @@ pub(crate) fn stopping_a_running_game_ends_it_and_still_finishes_the_session<H: 
         "a stopped game is no failure"
     );
     assert!(finished.game.is_none());
+}
+
+/// A Mac game may handle SIGTERM to quit as its own Quit would.
+const CLOSES: &str = "trap 'printf asked > quit-asked; exit 4' TERM\nprintf ran > ran\nwhile [ ! -f release-game ]; do /bin/sleep 0.01; done\nexit 3\n";
+/// A frozen game ignores Quit, and leaves a process it started.
+const FROZEN: &str = "trap '' TERM\n/bin/sleep 60 &\nprintf %s $! > started\nprintf ran > ran\nwhile :; do /bin/sleep 0.01; done\n";
+
+pub(crate) fn quitting_asks_the_running_game_to_close_and_kills_nothing<H: Harness>() {
+    let run = launch::<H>(script(CLOSES));
+    run.until(|r| r.phase == Phase::Running);
+    run.client.quit().unwrap();
+    run.client.quit().unwrap();
+    let finished = run.until(Record::finished);
+    assert!(run.directory.join("quit-asked").exists());
+    assert_eq!(finished.phase, Phase::Finished);
+    assert_eq!(finished.exit_code, Some(4), "the game quit by itself");
+    assert_eq!(
+        run.events().last().map(String::as_str),
+        Some("cloud.finished:true")
+    );
+}
+
+pub(crate) fn force_quitting_ends_a_game_that_ignored_quit_and_what_it_started<H: Harness>() {
+    let run = launch::<H>(script(FROZEN));
+    run.until(|r| r.phase == Phase::Running);
+    run.wait_for("started");
+    let started = fs::read_to_string(run.directory.join("started")).unwrap();
+    run.client.quit().unwrap();
+    std::thread::sleep(Duration::from_millis(300));
+    assert_eq!(run.client.snapshot(None).unwrap().phase, Phase::Running);
+    run.client.force_quit().unwrap();
+    run.client.force_quit().unwrap();
+    let finished = run.until(Record::finished);
+    assert_eq!(
+        finished.phase,
+        Phase::Finished,
+        "a game force quit is no failure"
+    );
+    assert!(finished.game.is_none());
+    assert_eq!(
+        run.events().last().map(String::as_str),
+        Some("cloud.finished:true"),
+        "its exit Cloud sync still runs"
+    );
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while identity(started.trim().parse().unwrap()).is_some() {
+        assert!(Instant::now() < deadline, "what the game started survived");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert_eq!(run.exit_code(), "0");
+}
+
+/// A frozen game whose installation runs a process it left apart, which no
+/// longer descends from it. Its installation is the test directory, as only
+/// the core's harness has it.
+const STRAY: &str = "trap '' TERM\ncp /bin/sleep stray && /usr/bin/codesign -s - -f stray 2>/dev/null\n(./stray 60 & printf %s $! > stray.partial && mv stray.partial started)\nprintf ran > ran\nwhile :; do /bin/sleep 0.01; done\n";
+
+pub(crate) fn force_quitting_ends_what_the_game_left_running_apart_from_it<H: Harness>() {
+    let run = launch::<H>(script(STRAY));
+    run.until(|r| r.phase == Phase::Running);
+    run.wait_for("started");
+    let stray: u32 = fs::read_to_string(run.directory.join("started"))
+        .unwrap()
+        .trim()
+        .parse()
+        .unwrap();
+    assert!(identity(stray).is_some());
+    run.client.force_quit().unwrap();
+    let finished = run.until(Record::finished);
+    assert_eq!(finished.phase, Phase::Finished);
+    // The session ends only once the Force Quit is over: the stray process
+    // was killed, and only its reaping is left.
+    let deadline = Instant::now() + Duration::from_secs(1);
+    while identity(stray).is_some() {
+        assert!(Instant::now() < deadline, "the stray process survived");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert_eq!(run.exit_code(), "0");
+}
+
+pub(crate) fn quitting_before_spawn_cancels_the_launch<H: Harness>() {
+    let run = launch::<H>(Script {
+        hold_cloud: true,
+        ..script(QUICK)
+    });
+    run.wait_for("cloud-ready");
+    run.client.quit().unwrap();
+    let cancelled = run.until(Record::finished);
+    assert_eq!(cancelled.failure_reason(), Some(FailureReason::Cancelled));
+    assert!(!run.ran());
+    assert_eq!(
+        run.events().last().map(String::as_str),
+        Some("cloud.aborted")
+    );
+}
+
+pub(crate) fn quit_and_force_quit_reach_only_their_session<H: Harness>() {
+    let run = launch::<H>(script(FROZEN));
+    run.until(|r| r.phase == Phase::Running);
+    let other = || uuid::Uuid::new_v4().to_string();
+    assert!(
+        run.client
+            .command(None, Command::Quit { id: other() }, false)
+            .is_err()
+    );
+    assert!(
+        run.client
+            .command(None, Command::ForceQuit { id: other() }, false)
+            .is_err()
+    );
+    std::thread::sleep(Duration::from_millis(200));
+    assert_eq!(run.client.snapshot(None).unwrap().phase, Phase::Running);
+    run.client.force_quit().unwrap();
+    run.until(Record::finished);
 }
 
 pub(crate) fn revoking_before_admission_abandons_the_launch_without_presence<H: Harness>() {

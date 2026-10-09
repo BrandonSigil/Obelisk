@@ -15,11 +15,27 @@ struct GameActionButton: View {
     var isStep = false
     /// The step's progress, when it has one.
     var stepFraction: Double? = nil
+    /// Set while the game runs: the button then ends it.
+    var quitStage: GameQuitStage? = nil
 
     /// A step outranks a byte-counted transfer: it has no per-file title to show.
+    /// A closing game shows as a step.
     private enum Mode { case idle, transferring, step }
     private var mode: Mode {
-        if isStep { .step } else if isTransferring { .transferring } else { .idle }
+        if isStep || quitStage == .closing { .step } else if isTransferring { .transferring } else { .idle }
+    }
+
+    private var colors: [Color] {
+        switch quitStage {
+        case .quit, .closing: ObeliskStyle.quitGradient
+        case .forceQuit: ObeliskStyle.forceQuitGradient
+        case nil: launches ? ObeliskStyle.launchGradient : ObeliskStyle.installGradient
+        }
+    }
+
+    private var symbol: String {
+        if quitStage != nil { return "stop.fill" }
+        return launches ? "play.fill" : "arrow.down.to.line"
     }
 
     private var showsProgress: Bool {
@@ -30,7 +46,11 @@ struct GameActionButton: View {
         }
     }
     private var helpText: String {
-        mode == .step ? title : transfer?.progressSummary ?? title
+        switch quitStage {
+        case .closing: L10n.string("ui.game.closing_help")
+        case .forceQuit: L10n.string("ui.game.force_quit_help")
+        case .quit, nil: mode == .step ? title : transfer?.progressSummary ?? title
+        }
     }
     private var accessibilityText: String {
         switch mode {
@@ -50,14 +70,14 @@ struct GameActionButton: View {
                     case .transferring:
                         Text(transfer?.buttonTitle ?? L10n.string("ui.transfer.preparing_short"))
                     case .idle:
-                        Label(title, systemImage: launches ? "play.fill" : "arrow.down.to.line")
+                        Label(title, systemImage: symbol)
                     }
                 }
                 .lineLimit(1)
                 .minimumScaleFactor(0.8)
                 .frame(width: 150)
             }
-            .buttonStyle(GameActionButtonStyle(launches: launches, isBusy: mode != .idle))
+            .buttonStyle(GameActionButtonStyle(colors: colors, isBusy: mode != .idle))
             .overlay(alignment: .bottom) {
                 if showsProgress {
                     GameButtonProgress(fraction: mode == .step ? stepFraction : transfer?.progressFraction)
@@ -88,15 +108,15 @@ struct GameActionButton: View {
 }
 
 /// The game's launch button: an uppercase title on a gradient capsule seen
-/// through glass, green to launch and blue to install, as the library's cards.
+/// through glass, green to launch, blue to install, grey to quit and red to
+/// force quit, as the library's cards.
 private struct GameActionButtonStyle: ButtonStyle {
-    let launches: Bool
+    let colors: [Color]
     /// A button showing progress keeps its color while it cannot be pressed.
     let isBusy: Bool
 
     func makeBody(configuration: Configuration) -> some View {
-        Appearance(configuration: configuration, colors: launches ? ObeliskStyle.launchGradient : ObeliskStyle.installGradient,
-                   isBusy: isBusy)
+        Appearance(configuration: configuration, colors: colors, isBusy: isBusy)
     }
 
     private struct Appearance: View {
@@ -160,6 +180,20 @@ private struct GameButtonProgress: View {
                         .onDisappear { moving = false }
                 }
             }
+        }
+    }
+}
+
+extension View {
+    /// Asks before forcing `gameName` to quit, as macOS's own Force Quit does:
+    /// what the game did not save is lost.
+    func forceQuitConfirmation(_ gameName: String, isPresented: Binding<Bool>,
+                               confirm: @escaping () -> Void) -> some View {
+        alert(L10n.string("ui.game.force_quit_title", gameName), isPresented: isPresented) {
+            Button(L10n.string("ui.common.cancel"), role: .cancel) {}
+            Button(L10n.string("model.game.forceQuit"), role: .destructive, action: confirm)
+        } message: {
+            Text(L10n.string("ui.game.force_quit_message"))
         }
     }
 }

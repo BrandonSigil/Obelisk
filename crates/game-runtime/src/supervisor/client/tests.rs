@@ -17,10 +17,7 @@ impl Sample for Steam {
         456
     }
     fn store() -> crate::steam::Store {
-        crate::steam::Store {
-            app_id: 42,
-            host: crate::HostState::Online,
-        }
+        crate::steam::Store::new(42)
     }
 }
 impl Sample for Epic {

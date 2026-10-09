@@ -1,9 +1,9 @@
 //! A storefront's Game sessions across UniFFI. Rust keeps the Reservation,
 //! recovery, Account revocation and the checks on every answer; Swift presents
 //! the state and forwards the player's answers.
-use crate::{ObeliskLocations, SteamHostState};
+use crate::{ObeliskLocations, SteamHostState, steam_chat::SteamGameInvite};
 use game_runtime::{
-    cloud, epic, gog,
+    cloud, epic, gog, protocol,
     sessions::{self, Failure, Sessions, Storefront, Supervised},
     steam, supervisor,
 };
@@ -156,6 +156,17 @@ pub(crate) trait Bridged: Storefront {
     fn game_account(account: &Self::Account) -> GameAccount;
     fn identity(game: &Self::Game, account: &Self::Account) -> GameIdentity;
     fn host(store: &Self::Store) -> Option<SteamHostState>;
+    fn invite_request(store: &Self::Store) -> Option<SteamInviteRequest>;
+    fn lobby(store: &Self::Store) -> Option<u64>;
+    fn overlay_request(_: &Self::Store) -> Option<SteamOverlayRequest> {
+        None
+    }
+    fn received_invites(_: &Self::Store) -> Vec<SteamReceivedInvite> {
+        Vec::new()
+    }
+    fn micro_txn(_: &Self::Store) -> Option<SteamMicroTxn> {
+        None
+    }
 }
 
 impl Bridged for steam::Steam {
@@ -176,6 +187,27 @@ impl Bridged for steam::Steam {
     }
     fn host(store: &steam::Store) -> Option<SteamHostState> {
         Some(store.host.into())
+    }
+    fn invite_request(store: &steam::Store) -> Option<SteamInviteRequest> {
+        store.invite.clone().map(|request| SteamInviteRequest {
+            sequence: request.sequence,
+            invite: request.target.into(),
+        })
+    }
+    fn lobby(store: &steam::Store) -> Option<u64> {
+        store.lobby
+    }
+    fn overlay_request(store: &steam::Store) -> Option<SteamOverlayRequest> {
+        store.overlay.clone().map(Into::into)
+    }
+    fn received_invites(store: &steam::Store) -> Vec<SteamReceivedInvite> {
+        store.invites.iter().cloned().map(Into::into).collect()
+    }
+    fn micro_txn(store: &steam::Store) -> Option<SteamMicroTxn> {
+        store.microtxn.as_ref().map(|pending| SteamMicroTxn {
+            order_id: pending.order_id,
+            app_id: pending.app_id,
+        })
     }
 }
 
@@ -201,6 +233,12 @@ impl Bridged for epic::Epic {
     fn host(_: &epic::Store) -> Option<SteamHostState> {
         None
     }
+    fn invite_request(_: &epic::Store) -> Option<SteamInviteRequest> {
+        None
+    }
+    fn lobby(_: &epic::Store) -> Option<u64> {
+        None
+    }
 }
 
 impl Bridged for gog::Gog {
@@ -222,6 +260,12 @@ impl Bridged for gog::Gog {
         }
     }
     fn host(_: &gog::Store) -> Option<SteamHostState> {
+        None
+    }
+    fn invite_request(_: &gog::Store) -> Option<SteamInviteRequest> {
+        None
+    }
+    fn lobby(_: &gog::Store) -> Option<u64> {
         None
     }
 }
@@ -252,6 +296,114 @@ pub enum GameIdentity {
     },
 }
 
+/// The game asked Steam's overlay to invite friends into `invite`. A new
+/// `sequence` is a new request, even for the same invitation.
+#[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
+pub struct SteamInviteRequest {
+    pub sequence: u64,
+    pub invite: SteamGameInvite,
+}
+
+/// What `ActivateGameOverlayToStore` asks of the store page.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Enum)]
+pub enum SteamStoreFlag {
+    /// Only the page (`k_EOverlayToStoreFlag_None`).
+    ShowPage,
+    AddToCart,
+    AddToCartAndShow,
+}
+
+/// What the game asked Steam's overlay to show; Obelisk shows its own.
+#[derive(Clone, Debug, PartialEq, Eq, uniffi::Enum)]
+pub enum SteamOverlayKind {
+    /// `ActivateGameOverlay`: "friends", "community", "players", "settings",
+    /// "officialgamegroup", "stats", "achievements", "chatroomgroup/<id>", …
+    Dialog { dialog: String },
+    /// `ActivateGameOverlayToUser`: "steamid", "chat", "jointrade", "stats",
+    /// "achievements", "friendadd", … about `steam_id`.
+    User { dialog: String, steam_id: u64 },
+    /// `ActivateGameOverlayToWebPage`: an http or https URL.
+    WebPage { url: String, modal: bool },
+    /// `ActivateGameOverlayToStore`; app 0 is the store's front page.
+    Store { app_id: u32, flag: SteamStoreFlag },
+    /// `ActivateGameOverlayInviteDialog`: invite friends into the lobby.
+    LobbyInvite { lobby_id: u64 },
+    /// `ActivateGameOverlayRemotePlayTogetherInviteDialog`.
+    RemotePlayTogetherInvite { lobby_id: Option<u64> },
+    /// `ActivateGameOverlayInviteDialogConnectString`.
+    ConnectInvite { connect: String },
+    /// Steam's own Remote Play Together dialog.
+    RemotePlayTogether,
+}
+impl From<protocol::OverlayDialog> for SteamOverlayKind {
+    fn from(dialog: protocol::OverlayDialog) -> Self {
+        use protocol::OverlayDialog as Dialog;
+        match dialog {
+            Dialog::Dialog { dialog } => Self::Dialog { dialog },
+            Dialog::User { dialog, steam_id } => Self::User { dialog, steam_id },
+            Dialog::WebPage { url, modal } => Self::WebPage { url, modal },
+            Dialog::Store { app_id, flag } => Self::Store {
+                app_id,
+                flag: match flag {
+                    1 => SteamStoreFlag::AddToCart,
+                    2 => SteamStoreFlag::AddToCartAndShow,
+                    _ => SteamStoreFlag::ShowPage,
+                },
+            },
+            Dialog::LobbyInvite { lobby_id } => Self::LobbyInvite { lobby_id },
+            Dialog::RemotePlayTogetherInvite { lobby_id } => {
+                Self::RemotePlayTogetherInvite { lobby_id }
+            }
+            Dialog::ConnectInvite { connect } => Self::ConnectInvite { connect },
+            Dialog::RemotePlayTogether {} => Self::RemotePlayTogether,
+        }
+    }
+}
+
+/// The latest overlay the game asked for. A new `sequence` is a new
+/// request, even for the same overlay.
+#[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
+pub struct SteamOverlayRequest {
+    pub sequence: u64,
+    pub kind: SteamOverlayKind,
+}
+impl From<game_runtime::OverlayRequest> for SteamOverlayRequest {
+    fn from(request: game_runtime::OverlayRequest) -> Self {
+        Self {
+            sequence: request.sequence,
+            kind: request.dialog.into(),
+        }
+    }
+}
+
+/// An invitation a friend sent into the running game. Accepting it hands it
+/// to the game with `StorefrontSessions::accept_invite`.
+#[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
+pub struct SteamReceivedInvite {
+    pub friend_steam_id: u64,
+    /// Never `None`.
+    pub invite: SteamGameInvite,
+    /// When the game's Steam last told of it, in seconds since the Unix epoch.
+    pub received_at: u64,
+}
+impl From<game_runtime::ReceivedInvite> for SteamReceivedInvite {
+    fn from(invite: game_runtime::ReceivedInvite) -> Self {
+        Self {
+            friend_steam_id: invite.friend,
+            invite: invite.target.into(),
+            received_at: invite.received_at,
+        }
+    }
+}
+
+/// A purchase the running game asks the player to confirm, answered with
+/// `StorefrontSessions::authorize_micro_txn`. Steam tells no price here.
+#[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
+pub struct SteamMicroTxn {
+    pub order_id: u64,
+    pub app_id: u32,
+}
+
 #[derive(Clone, Debug, PartialEq, uniffi::Record)]
 pub struct GameSessionState {
     pub id: String,
@@ -270,6 +422,26 @@ pub struct GameSessionState {
     /// even if it already exited. A game recovered running has none.
     #[uniffi(default = None)]
     pub started_at: Option<u64>,
+    /// The latest invite dialog the Steam game asked for, while its host is
+    /// online: the picker it opens invites into its target.
+    #[uniffi(default = None)]
+    pub invite_request: Option<SteamInviteRequest>,
+    /// The Steam lobby the game is in now, as the account's engine shows it:
+    /// the friends list invites into it.
+    #[uniffi(default = None)]
+    pub lobby_id: Option<u64>,
+    /// The latest overlay the Steam game asked for, while its host is online,
+    /// invite dialogs included: `invite_request` is the same request when it
+    /// asks for one, with the same sequence.
+    #[uniffi(default = None)]
+    pub overlay_request: Option<SteamOverlayRequest>,
+    /// Invitations friends sent into the Steam game, newest first, while its
+    /// host is online.
+    #[uniffi(default = [])]
+    pub received_invites: Vec<SteamReceivedInvite>,
+    /// The purchase the Steam game waits on the player to confirm.
+    #[uniffi(default = None)]
+    pub micro_txn: Option<SteamMicroTxn>,
 }
 
 /// A Rosetta requirement the player can answer.
@@ -301,6 +473,15 @@ fn session_state<P: Bridged>(session: sessions::Session<P>) -> GameSessionState 
     GameSessionState {
         game: P::identity(&session.game, &session.account),
         host: session.store.as_ref().and_then(P::host),
+        invite_request: session.store.as_ref().and_then(P::invite_request),
+        lobby_id: session.store.as_ref().and_then(P::lobby),
+        overlay_request: session.store.as_ref().and_then(P::overlay_request),
+        received_invites: session
+            .store
+            .as_ref()
+            .map(P::received_invites)
+            .unwrap_or_default(),
+        micro_txn: session.store.as_ref().and_then(P::micro_txn),
         id: session.id,
         phase: session.phase.into(),
         reconnecting: session.reconnecting,
@@ -410,6 +591,25 @@ impl StorefrontSessions {
             sessions: Arc::new(sessions),
         })
     }
+
+    /// Runs `call` on the Steam Game sessions; any other storefront's
+    /// sessions refuse it.
+    async fn steam(
+        &self,
+        call: impl FnOnce(&Sessions<steam::Steam>) -> Result<(), Failure> + Send + 'static,
+    ) -> Result<(), GameSessionError> {
+        let Storefronts::Steam(sessions) = &*self.sessions else {
+            let refused = each!(&*self.sessions, sessions => invalid_session(sessions));
+            return Err(GameSessionError::new(refused));
+        };
+        let sessions = sessions.clone();
+        blocking(self.sessions.failed(), move || call(&sessions)).await
+    }
+}
+
+/// A refused session call of `sessions`' storefront.
+fn invalid_session<P: Storefront>(_: &Sessions<P>) -> &'static str {
+    P::INVALID_SESSION
 }
 
 #[uniffi::export(async_runtime = "tokio")]
@@ -469,6 +669,79 @@ impl StorefrontSessions {
         .await
     }
 
+    /// The player's Quit of session `session_id`'s game: it is asked to close
+    /// its windows, and nothing is killed. A launch still preparing is
+    /// cancelled.
+    pub async fn quit(&self, session_id: String) -> Result<(), GameSessionError> {
+        let sessions = self.sessions.clone();
+        blocking(
+            self.sessions.failed(),
+            move || each!(&*sessions, sessions => sessions.quit(&session_id)),
+        )
+        .await
+    }
+
+    /// The player's Force Quit of session `session_id`'s game, which ignored
+    /// Quit: it ends now, with whatever still runs for its installation, and
+    /// its session still settles its Cloud saves. A launch still preparing is
+    /// cancelled.
+    pub async fn force_quit(&self, session_id: String) -> Result<(), GameSessionError> {
+        let sessions = self.sessions.clone();
+        blocking(
+            self.sessions.failed(),
+            move || each!(&*sessions, sessions => sessions.force_quit(&session_id)),
+        )
+        .await
+    }
+
+    /// Obelisk's overlay opened (`active`) or closed over session
+    /// `session_id`'s running Steam game, as Steam's overlay would tell it;
+    /// `user_initiated` when the player opened it rather than the game. The
+    /// game sees a close only after an open.
+    pub async fn overlay_state(
+        &self,
+        session_id: String,
+        active: bool,
+        user_initiated: bool,
+    ) -> Result<(), GameSessionError> {
+        self.steam(move |sessions| sessions.overlay_state(&session_id, active, user_initiated))
+            .await
+    }
+
+    /// The player accepted `friend_steam_id`'s invitation into session
+    /// `session_id`'s running Steam game, from `received_invites` or from
+    /// Steam's chat: the game joins as if Steam's overlay had accepted it.
+    pub async fn accept_invite(
+        &self,
+        session_id: String,
+        friend_steam_id: u64,
+        invite: SteamGameInvite,
+    ) -> Result<(), GameSessionError> {
+        self.steam(move |sessions| {
+            let target = match invite {
+                SteamGameInvite::Lobby { lobby_id } => protocol::InviteTarget::Lobby { lobby_id },
+                SteamGameInvite::Connect { connect } => protocol::InviteTarget::Connect { connect },
+                SteamGameInvite::None => {
+                    return Err(Failure::Failed(steam::Steam::INVALID_SESSION.into()));
+                }
+            };
+            sessions.accept_invite(&session_id, friend_steam_id, target)
+        })
+        .await
+    }
+
+    /// The player's answer to `micro_txn`, the purchase session
+    /// `session_id`'s Steam game waits on: only that order is answered.
+    pub async fn authorize_micro_txn(
+        &self,
+        session_id: String,
+        order_id: u64,
+        approve: bool,
+    ) -> Result<(), GameSessionError> {
+        self.steam(move |sessions| sessions.authorize_microtxn(&session_id, order_id, approve))
+            .await
+    }
+
     /// The player declined to install Rosetta: the waiting launch stops.
     pub fn decline_rosetta(&self, session_id: String, account: GameAccount, decision_id: u64) {
         each!(&*self.sessions, sessions => decline_rosetta(sessions, &session_id, account, decision_id))
@@ -484,4 +757,249 @@ async fn blocking(
         .await
         .map_err(|_| GameSessionError::new(failed))?
         .map_err(Into::into)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const LOBBY: u64 = 109_775_244_421_126_053;
+    const FRIEND: u64 = 76_561_197_960_265_729;
+
+    #[test]
+    fn only_a_steam_session_carries_its_games_invite_request_and_lobby() {
+        let mut store = steam::Store::new(3527290);
+        assert_eq!(steam::Steam::invite_request(&store), None);
+        assert_eq!(steam::Steam::lobby(&store), None);
+        store.lobby = Some(LOBBY);
+        assert_eq!(steam::Steam::lobby(&store), Some(LOBBY));
+        store.invite = Some(game_runtime::InviteRequest {
+            sequence: 2,
+            target: protocol::InviteTarget::Lobby { lobby_id: LOBBY },
+        });
+        assert_eq!(
+            steam::Steam::invite_request(&store),
+            Some(SteamInviteRequest {
+                sequence: 2,
+                invite: SteamGameInvite::Lobby { lobby_id: LOBBY },
+            })
+        );
+        store.invite = Some(game_runtime::InviteRequest {
+            sequence: 3,
+            target: protocol::InviteTarget::Connect {
+                connect: "+connect_lobby 1".into(),
+            },
+        });
+        assert_eq!(
+            steam::Steam::invite_request(&store).map(|request| request.invite),
+            Some(SteamGameInvite::Connect {
+                connect: "+connect_lobby 1".into()
+            })
+        );
+        let gog = gog::Store {
+            product_id: "1207658924".into(),
+        };
+        assert_eq!(gog::Gog::overlay_request(&gog), None);
+        assert!(gog::Gog::received_invites(&gog).is_empty());
+        assert_eq!(gog::Gog::micro_txn(&gog), None);
+    }
+
+    #[test]
+    fn every_overlay_request_reaches_swift_with_its_sequence() {
+        use protocol::OverlayDialog as Dialog;
+        for (dialog, kind) in [
+            (
+                Dialog::Dialog {
+                    dialog: "friends".into(),
+                },
+                SteamOverlayKind::Dialog {
+                    dialog: "friends".into(),
+                },
+            ),
+            (
+                Dialog::User {
+                    dialog: "chat".into(),
+                    steam_id: FRIEND,
+                },
+                SteamOverlayKind::User {
+                    dialog: "chat".into(),
+                    steam_id: FRIEND,
+                },
+            ),
+            (
+                Dialog::WebPage {
+                    url: "https://example.com".into(),
+                    modal: true,
+                },
+                SteamOverlayKind::WebPage {
+                    url: "https://example.com".into(),
+                    modal: true,
+                },
+            ),
+            (
+                Dialog::Store {
+                    app_id: 620,
+                    flag: 0,
+                },
+                SteamOverlayKind::Store {
+                    app_id: 620,
+                    flag: SteamStoreFlag::ShowPage,
+                },
+            ),
+            (
+                Dialog::Store {
+                    app_id: 620,
+                    flag: 1,
+                },
+                SteamOverlayKind::Store {
+                    app_id: 620,
+                    flag: SteamStoreFlag::AddToCart,
+                },
+            ),
+            (
+                Dialog::Store {
+                    app_id: 620,
+                    flag: 2,
+                },
+                SteamOverlayKind::Store {
+                    app_id: 620,
+                    flag: SteamStoreFlag::AddToCartAndShow,
+                },
+            ),
+            (
+                Dialog::LobbyInvite { lobby_id: LOBBY },
+                SteamOverlayKind::LobbyInvite { lobby_id: LOBBY },
+            ),
+            (
+                Dialog::RemotePlayTogetherInvite { lobby_id: None },
+                SteamOverlayKind::RemotePlayTogetherInvite { lobby_id: None },
+            ),
+            (
+                Dialog::ConnectInvite {
+                    connect: "+connect 1".into(),
+                },
+                SteamOverlayKind::ConnectInvite {
+                    connect: "+connect 1".into(),
+                },
+            ),
+            (
+                Dialog::RemotePlayTogether {},
+                SteamOverlayKind::RemotePlayTogether,
+            ),
+        ] {
+            let store = steam::Store {
+                overlay: Some(game_runtime::OverlayRequest {
+                    sequence: 9,
+                    dialog,
+                }),
+                ..steam::Store::new(620)
+            };
+            assert_eq!(
+                steam::Steam::overlay_request(&store),
+                Some(SteamOverlayRequest { sequence: 9, kind })
+            );
+        }
+    }
+
+    #[test]
+    fn received_invites_and_the_pending_purchase_reach_swift() {
+        let store = steam::Store {
+            invites: vec![
+                game_runtime::ReceivedInvite {
+                    friend: FRIEND,
+                    target: protocol::InviteTarget::Connect {
+                        connect: "+connect 10.0.0.1".into(),
+                    },
+                    received_at: 1_790_000_100,
+                },
+                game_runtime::ReceivedInvite {
+                    friend: FRIEND + 1,
+                    target: protocol::InviteTarget::Lobby { lobby_id: LOBBY },
+                    received_at: 1_790_000_000,
+                },
+            ],
+            microtxn: Some(game_runtime::MicroTxn {
+                order_id: 4242,
+                app_id: 620,
+            }),
+            ..steam::Store::new(620)
+        };
+        assert_eq!(
+            steam::Steam::received_invites(&store),
+            [
+                SteamReceivedInvite {
+                    friend_steam_id: FRIEND,
+                    invite: SteamGameInvite::Connect {
+                        connect: "+connect 10.0.0.1".into()
+                    },
+                    received_at: 1_790_000_100,
+                },
+                SteamReceivedInvite {
+                    friend_steam_id: FRIEND + 1,
+                    invite: SteamGameInvite::Lobby { lobby_id: LOBBY },
+                    received_at: 1_790_000_000,
+                },
+            ]
+        );
+        assert_eq!(
+            steam::Steam::micro_txn(&store),
+            Some(SteamMicroTxn {
+                order_id: 4242,
+                app_id: 620
+            })
+        );
+    }
+
+    #[tokio::test]
+    async fn another_storefronts_sessions_refuse_steam_controls() {
+        let sessions =
+            StorefrontSessions::with(Storefronts::Gog(Arc::new(Sessions::new(Box::new(|| {
+                Ok(None)
+            })))));
+        let refused = |result: Result<(), GameSessionError>| match result {
+            Err(GameSessionError::Failure { reason }) => reason,
+            other => panic!("{other:?}"),
+        };
+        let reason = refused(sessions.overlay_state("id".into(), true, false).await);
+        assert_eq!(reason, gog::Gog::INVALID_SESSION);
+        let reason = refused(
+            sessions
+                .accept_invite(
+                    "id".into(),
+                    FRIEND,
+                    SteamGameInvite::Lobby { lobby_id: LOBBY },
+                )
+                .await,
+        );
+        assert_eq!(reason, gog::Gog::INVALID_SESSION);
+        let reason = refused(sessions.authorize_micro_txn("id".into(), 1, true).await);
+        assert_eq!(reason, gog::Gog::INVALID_SESSION);
+    }
+
+    #[tokio::test]
+    async fn steam_sessions_refuse_controls_without_a_running_game() {
+        let sessions = StorefrontSessions::with(Storefronts::Steam(Arc::new(Sessions::new(
+            Box::new(|| Ok(None)),
+        ))));
+        let refused = |result: Result<(), GameSessionError>| match result {
+            Err(GameSessionError::Failure { reason }) => reason,
+            other => panic!("{other:?}"),
+        };
+        assert_eq!(
+            refused(
+                sessions
+                    .accept_invite("id".into(), FRIEND, SteamGameInvite::None)
+                    .await
+            ),
+            steam::Steam::INVALID_SESSION
+        );
+        assert_eq!(
+            refused(sessions.overlay_state("id".into(), true, true).await),
+            steam::Steam::INVALID_SESSION
+        );
+        assert_eq!(
+            refused(sessions.authorize_micro_txn("id".into(), 1, false).await),
+            steam::Steam::INVALID_SESSION
+        );
+    }
 }

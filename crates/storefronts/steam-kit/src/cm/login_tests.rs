@@ -39,7 +39,7 @@ async fn logon_request() -> (SteamConnection, WireLogin) {
         WireLogin::decode(&logon.body[..]).unwrap()
     };
     let (logged_on, wire) = tokio::join!(
-        connection.log_on("fixture", ACCOUNT, "fixture-token"),
+        connection.log_on("fixture", ACCOUNT, "fixture-token", ChatMode::Disabled),
         steam
     );
     logged_on.unwrap();

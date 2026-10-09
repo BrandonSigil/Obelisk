@@ -555,6 +555,14 @@ final class WebAccountModel<Store: WebStorefront> {
         achievements.load { try await Store.achievements(of: game, session: session, language: language) }
     }
 
+    /// Loads the achievements of the library's game `id` into `model`, such
+    /// as the overlay's for the running game.
+    func loadAchievements(of id: Game.ID, into model: GameAchievementsModel) {
+        guard let game = games.first(where: { $0.id == id }), let session else { return }
+        let language = language
+        model.load { try await Store.achievements(of: game, session: session, language: language) }
+    }
+
     /// Every change of the game on screen, and the sign-out, cancels it in `closeGame`.
     private func loadDetails(_ game: Game, session: Store.Session) async {
         defer { if !Task.isCancelled { isLoadingGameDetails = false } }

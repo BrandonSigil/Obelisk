@@ -5,6 +5,8 @@ use std::sync::Arc;
 
 mod steam;
 pub use steam::*;
+mod steam_chat;
+pub use steam_chat::*;
 mod steam_friends;
 pub use steam_friends::*;
 mod steam_native;

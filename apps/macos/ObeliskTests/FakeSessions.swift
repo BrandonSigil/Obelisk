@@ -12,6 +12,24 @@ final class FakeSessions: StorefrontSessionsProtocol, @unchecked Sendable {
         let decisionID: UInt64
     }
 
+    struct OverlayStateCall: Equatable, Sendable {
+        let session: String
+        let active: Bool
+        let userInitiated: Bool
+    }
+
+    struct AcceptedInvite: Equatable, Sendable {
+        let session: String
+        let friend: UInt64
+        let invite: SteamGameInvite
+    }
+
+    struct MicroTxnAnswer: Equatable, Sendable {
+        let session: String
+        let orderID: UInt64
+        let approve: Bool
+    }
+
     private let lock = NSLock()
     private var current: GameSessionsState
     private var waiters: [(after: UInt64, continuation: CheckedContinuation<GameSessionsState, Never>)] = []
@@ -20,6 +38,15 @@ final class FakeSessions: StorefrontSessionsProtocol, @unchecked Sendable {
     private var _declines: [RosettaCall] = []
     private var _revocations: [GameAccount] = []
     private var _stops = 0
+    private var _quits: [String] = []
+    private var _forceQuits: [String] = []
+    private var _overlayStates: [OverlayStateCall] = []
+    private var _acceptedInvites: [AcceptedInvite] = []
+    private var _microTxnAnswers: [MicroTxnAnswer] = []
+    /// Steam's in-game calls fail with this key until the test clears it.
+    private var steamFailure: String?
+    /// Steam's in-game answers wait on it, when the test holds them.
+    private var steamGate: GameSessionGate<Void>?
     /// Resuming after Rosetta fails with this key until the test clears it.
     private var rosettaFailure: String?
     private var rosettaFailuresRemaining = 0
@@ -29,6 +56,19 @@ final class FakeSessions: StorefrontSessionsProtocol, @unchecked Sendable {
     var declines: [RosettaCall] { lock.withLock { _declines } }
     var revocations: [GameAccount] { lock.withLock { _revocations } }
     var stops: Int { lock.withLock { _stops } }
+    /// The sessions the player asked to quit, then to force quit, in order.
+    var quits: [String] { lock.withLock { _quits } }
+    var forceQuits: [String] { lock.withLock { _forceQuits } }
+    /// What the running Steam game was told of the overlay, in order.
+    var overlayStates: [OverlayStateCall] { lock.withLock { _overlayStates } }
+    var acceptedInvites: [AcceptedInvite] { lock.withLock { _acceptedInvites } }
+    var microTxnAnswers: [MicroTxnAnswer] { lock.withLock { _microTxnAnswers } }
+
+    /// Steam's in-game calls fail with `key` until it is nil again.
+    func failSteamCalls(_ key: String?) { lock.withLock { steamFailure = key } }
+
+    /// Accepting an invite and answering a purchase wait on `gate` until it resolves.
+    func holdSteamAnswers(_ gate: GameSessionGate<Void>?) { lock.withLock { steamGate = gate } }
 
     init(recovering: Bool = false) {
         current = GameSessionsState(revision: 1, active: nil, last: nil, recovering: recovering,
@@ -111,6 +151,46 @@ final class FakeSessions: StorefrontSessionsProtocol, @unchecked Sendable {
     }
 
     func stop() async throws { lock.withLock { _stops += 1 } }
+
+    func quit(sessionId: String) async throws { lock.withLock { _quits.append(sessionId) } }
+
+    func forceQuit(sessionId: String) async throws { lock.withLock { _forceQuits.append(sessionId) } }
+
+    func overlayState(sessionId: String, active: Bool, userInitiated: Bool) async throws {
+        let failure = lock.withLock {
+            _overlayStates.append(.init(session: sessionId, active: active, userInitiated: userInitiated))
+            return steamFailure
+        }
+        if let failure { throw GameSessionError.Failure(reason: failure) }
+    }
+
+    /// As Rust does, the accepted invitation leaves the game's list.
+    func acceptInvite(sessionId: String, friendSteamId: UInt64, invite: SteamGameInvite) async throws {
+        try await answerSteam()
+        lock.withLock { _acceptedInvites.append(.init(session: sessionId, friend: friendSteamId, invite: invite)) }
+        publish { state in
+            guard state.active?.id == sessionId else { return }
+            state.active?.receivedInvites.removeAll { $0.friendSteamId == friendSteamId && $0.invite == invite }
+            state.last = state.active
+        }
+    }
+
+    /// As Rust does, the answered purchase no longer waits.
+    func authorizeMicroTxn(sessionId: String, orderId: UInt64, approve: Bool) async throws {
+        try await answerSteam()
+        lock.withLock { _microTxnAnswers.append(.init(session: sessionId, orderID: orderId, approve: approve)) }
+        publish { state in
+            guard state.active?.id == sessionId, state.active?.microTxn?.orderId == orderId else { return }
+            state.active?.microTxn = nil
+            state.last = state.active
+        }
+    }
+
+    private func answerSteam() async throws {
+        let (gate, failure) = lock.withLock { (steamGate, steamFailure) }
+        if let gate { try await gate.wait() }
+        if let failure { throw GameSessionError.Failure(reason: failure) }
+    }
 }
 
 extension GameIdentity {
@@ -160,12 +240,45 @@ extension CloudStatus {
 }
 
 extension GameSessions {
-    /// Game sessions whose state the test publishes through `fake`.
-    convenience init() {
-        self.init(FakeSessions(), history: .temporary())
+    /// Game sessions whose state the test publishes through `fake`. No Mac
+    /// app of the test's machine is ever asked to quit.
+    convenience init(quitting: GameQuitting = GameQuitting(quitMacApps: { _ in false })) {
+        self.init(FakeSessions(), history: .temporary(), quitting: quitting)
     }
 
     var fake: FakeSessions { core as! FakeSessions }
+}
+
+/// A Quit's waits, which end only when the test wakes them, in order, and
+/// the Mac apps it asked to quit.
+@MainActor
+final class FakeQuitting {
+    private var sleeping: [CheckedContinuation<Void, Never>] = []
+    /// What each wait was for, in order.
+    private(set) var delays: [Duration] = []
+    /// The folders of each Quit asked of the Mac apps running from them.
+    private(set) var macApps: [[String]] = []
+    /// Whether a Mac app ran from them and was asked.
+    var macAppRuns = false
+
+    var quitting: GameQuitting {
+        GameQuitting(
+            sleep: { [self] delay in await self.sleep(delay) },
+            quitMacApps: { [self] folders in
+                self.macApps.append(folders)
+                return self.macAppRuns
+            }
+        )
+    }
+
+    var waiting: Int { sleeping.count }
+
+    func wake() { sleeping.removeFirst().resume() }
+
+    private func sleep(_ delay: Duration) async {
+        delays.append(delay)
+        await withCheckedContinuation { sleeping.append($0) }
+    }
 }
 
 actor GameSessionGate<Value: Sendable> {

@@ -38,6 +38,34 @@ extension SteamSessionProtocol {
         return SteamFriendsSnapshot(revision: afterRevision + 1, accountId: 0, connection: .disconnected, friends: [])
     }
     func shutdown() {}
+
+    func setOnline() async throws {}
+    func nextChat(afterSequence: UInt64) async -> SteamChatEvents {
+        let stream = AsyncStream<Void>(bufferingPolicy: .bufferingNewest(1)) { _ in }
+        for await _ in stream {}
+        return SteamChatEvents(events: [], lastSequence: afterSequence, gap: false, connected: false)
+    }
+    func nextOwnGame(afterRevision: UInt64) async -> SteamOwnGame {
+        let stream = AsyncStream<Void>(bufferingPolicy: .bufferingNewest(1)) { _ in }
+        for await _ in stream {}
+        return SteamOwnGame(revision: afterRevision + 1, connected: false, appId: 0, lobbyId: 0, connect: nil, invite: .none)
+    }
+    func refreshOwnGame() async throws {}
+    func activeSessions() async throws -> [SteamChatSession] { [] }
+    func recentMessages(friendSteamId: UInt64, before: SteamChatPosition?, count: UInt32) async throws -> SteamChatHistory {
+        SteamChatHistory(messages: [], moreAvailable: false)
+    }
+    func sendMessage(friendSteamId: UInt64, text: String) async throws -> SteamSentMessage {
+        throw CocoaError(.featureUnsupported)
+    }
+    func sendTyping(friendSteamId: UInt64) async throws {}
+    func ack(friendSteamId: UInt64, timestamp: UInt32) async throws {}
+    func inviteToGame(friendSteamId: UInt64, appId: UInt32) async throws -> SteamInviteKind {
+        throw CocoaError(.featureUnsupported)
+    }
+    func inviteIntoGame(friendSteamId: UInt64, appId: UInt32, invite: SteamGameInvite) async throws -> SteamInviteKind {
+        throw CocoaError(.featureUnsupported)
+    }
 }
 
 /// Saves as Rust does: now, then after every rotation, in order.

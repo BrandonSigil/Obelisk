@@ -98,8 +98,12 @@ final class SteamAchievementsTests: XCTestCase {
         let downloading = GameTransfer(game: "620", state: .downloading, completedBytes: 200_000_000,
                                        totalBytes: 522_734_781, networkBytes: 0, contentBytes: 0, currentFile: "", message: "")
         let buttons = VStack(alignment: .leading, spacing: 12) {
-            GameActionButton(title: L10n.string("model.game.running"), launches: true, transfer: nil,
-                             isTransferring: false, isAvailable: false, action: {}, cancel: {})
+            GameActionButton(title: GameQuitStage.quit.title, launches: true, transfer: nil,
+                             isTransferring: false, isAvailable: true, action: {}, cancel: {}, quitStage: .quit)
+            GameActionButton(title: GameQuitStage.closing.title, launches: true, transfer: nil,
+                             isTransferring: false, isAvailable: false, action: {}, cancel: {}, quitStage: .closing)
+            GameActionButton(title: GameQuitStage.forceQuit.title, launches: true, transfer: nil,
+                             isTransferring: false, isAvailable: true, action: {}, cancel: {}, quitStage: .forceQuit)
             GameActionButton(title: L10n.string("model.game.download"), launches: false,
                              transfer: downloading, isTransferring: true, isAvailable: true, action: {}, cancel: {})
             GameActionButton(title: L10n.string("ui.cloud.sync_short"), launches: true, transfer: nil,

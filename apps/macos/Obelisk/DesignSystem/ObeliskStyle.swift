@@ -13,6 +13,9 @@ enum ObeliskStyle {
     /// Steam's colors to launch and to install a game, leading to trailing.
     static let launchGradient = [Color(red: 0.46, green: 0.77, blue: 0.27), Color(red: 0.32, green: 0.63, blue: 0.20)]
     static let installGradient = [Color(red: 0.28, green: 0.55, blue: 0.98), Color(red: 0.40, green: 0.38, blue: 0.88)]
+    /// A running game's colors: neutral to quit it, red to force it to quit.
+    static let quitGradient = [Color(red: 0.50, green: 0.52, blue: 0.56), Color(red: 0.38, green: 0.40, blue: 0.44)]
+    static let forceQuitGradient = [Color(red: 0.93, green: 0.30, blue: 0.27), Color(red: 0.78, green: 0.16, blue: 0.20)]
     /// A game's portrait cover, on its library card and on its page.
     static let coverCornerRadius: CGFloat = 20
     static let coverAspectRatio: CGFloat = 2.0 / 3.0

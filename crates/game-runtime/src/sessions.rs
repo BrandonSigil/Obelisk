@@ -82,12 +82,20 @@ pub trait Supervised<P: Provider>: Send + Sync {
     /// Ends the game, as quitting Obelisk does; its exit Cloud sync still
     /// runs. Before spawn it cancels preparation.
     fn stop(&self) -> Result<(), String>;
+    /// Asks the game to close its windows; nothing is killed. Before spawn it
+    /// cancels preparation.
+    fn quit(&self) -> Result<(), String>;
+    /// Ends the game now, with whatever still runs for its installation; its
+    /// exit Cloud sync still runs. Before spawn it cancels preparation.
+    fn force_quit(&self) -> Result<(), String>;
     /// Opens the start gate of a supervisor that waits for its UI.
     fn begin(&self) -> Result<(), String>;
     fn choose(&self, account: &P::Account, decision_id: u64, choice: Choice) -> Result<(), String>;
     fn resume_after_rosetta(&self, account: &P::Account, decision_id: u64) -> Result<(), String>;
     /// Account revocation: network work stops, the game keeps running.
     fn revoke(&self, account: &P::Account) -> Result<(), String>;
+    /// The player's `control` of the running game.
+    fn control(&self, account: &P::Account, control: P::Control) -> Result<(), String>;
 }
 
 impl<P: Provider> Supervised<P> for supervisor::Client<P> {
@@ -102,6 +110,12 @@ impl<P: Provider> Supervised<P> for supervisor::Client<P> {
     fn stop(&self) -> Result<(), String> {
         supervisor::Client::stop(self).map_err(|error| error.to_string())
     }
+    fn quit(&self) -> Result<(), String> {
+        supervisor::Client::quit(self).map_err(|error| error.to_string())
+    }
+    fn force_quit(&self) -> Result<(), String> {
+        supervisor::Client::force_quit(self).map_err(|error| error.to_string())
+    }
     fn begin(&self) -> Result<(), String> {
         supervisor::Client::begin(self).map_err(|error| error.to_string())
     }
@@ -115,6 +129,9 @@ impl<P: Provider> Supervised<P> for supervisor::Client<P> {
     }
     fn revoke(&self, account: &P::Account) -> Result<(), String> {
         supervisor::Client::revoke(self, account).map_err(|error| error.to_string())
+    }
+    fn control(&self, account: &P::Account, control: P::Control) -> Result<(), String> {
+        supervisor::Client::control(self, account, control).map_err(|error| error.to_string())
     }
 }
 
@@ -664,6 +681,63 @@ impl<P: Storefront> Sessions<P> {
         }
     }
 
+    /// The player's Quit of session `id`'s game: it is asked to close its
+    /// windows, and nothing is killed. A launch still preparing is cancelled.
+    pub fn quit(&self, id: &str) -> Result<(), Failure> {
+        self.end(id, |client| client.quit())
+    }
+
+    /// The player's Force Quit of session `id`'s game, which ignored Quit: it
+    /// ends now, and its session still settles its Cloud saves. A launch
+    /// still preparing is cancelled.
+    pub fn force_quit(&self, id: &str) -> Result<(), Failure> {
+        self.end(id, |client| client.force_quit())
+    }
+
+    fn end(
+        &self,
+        id: &str,
+        call: impl FnOnce(&dyn Supervised<P>) -> Result<(), String>,
+    ) -> Result<(), Failure> {
+        let (client, operation) = {
+            let inner = self.shared.inner.lock().unwrap();
+            match &inner.active {
+                Some(active) if active.id == id => (inner.client.clone(), inner.operation.clone()),
+                _ => return Err(Failure::Failed(P::INVALID_SESSION.to_owned())),
+            }
+        };
+        match client {
+            Some(client) => call(&*client).map_err(Failure::Failed),
+            None => {
+                if let Some(operation) = operation {
+                    operation.cancel();
+                }
+                Ok(())
+            }
+        }
+    }
+
+    /// The player's `control` of session `id`'s running game. Refused while
+    /// the game does not run, for a signed-out account, and while the
+    /// control connection is lost.
+    pub fn control(&self, id: &str, control: P::Control) -> Result<(), Failure> {
+        let (client, account) = {
+            let inner = self.shared.inner.lock().unwrap();
+            match (&inner.active, &inner.client) {
+                (Some(active), Some(client))
+                    if active.id == id
+                        && active.phase == Phase::Running
+                        && !active.reconnecting
+                        && !inner.revoked.contains(&active.account) =>
+                {
+                    (client.clone(), active.account.clone())
+                }
+                _ => return Err(Failure::Failed(P::INVALID_SESSION.to_owned())),
+            }
+        };
+        client.control(&account, control).map_err(Failure::Failed)
+    }
+
     /// Answers the Cloud question the session `id` shows with `decision_id`.
     /// Cancel stops a launch check still in progress.
     pub fn choose(&self, id: &str, decision_id: u64, choice: Choice) -> Result<(), Failure> {
@@ -951,6 +1025,57 @@ impl<P: Storefront> Drop for Admission<P> {
         if !self.launched.load(Ordering::Acquire) {
             self.shared.finish(&self.operation);
         }
+    }
+}
+
+/// What the player asks of a running Steam game.
+impl Sessions<crate::steam::Steam> {
+    /// Obelisk's overlay opened, or closed, over session `id`'s game, which
+    /// Steam's overlay would tell it. `user_initiated` when the player opened
+    /// it, not the game.
+    pub fn overlay_state(
+        &self,
+        id: &str,
+        active: bool,
+        user_initiated: bool,
+    ) -> Result<(), Failure> {
+        self.control(
+            id,
+            crate::steam::Control::Overlay {
+                active,
+                user_initiated,
+            },
+        )
+    }
+
+    /// The player accepted `friend`'s invitation into session `id`'s running
+    /// game: the game joins as if Steam's overlay had accepted it.
+    pub fn accept_invite(
+        &self,
+        id: &str,
+        friend: u64,
+        target: crate::protocol::InviteTarget,
+    ) -> Result<(), Failure> {
+        if !crate::protocol::individual(friend) || !target.valid() {
+            return Err(Failure::Failed(
+                <crate::steam::Steam as Storefront>::INVALID_SESSION.to_owned(),
+            ));
+        }
+        self.control(id, crate::steam::Control::AcceptInvite { friend, target })
+    }
+
+    /// The player's answer to the purchase `order_id` session `id`'s game
+    /// waits on.
+    pub fn authorize_microtxn(
+        &self,
+        id: &str,
+        order_id: u64,
+        approve: bool,
+    ) -> Result<(), Failure> {
+        self.control(
+            id,
+            crate::steam::Control::AuthorizeMicroTxn { order_id, approve },
+        )
     }
 }
 

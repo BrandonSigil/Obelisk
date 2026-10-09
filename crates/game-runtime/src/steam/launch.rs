@@ -2,7 +2,7 @@
 //! Cloud, and the game slice chosen against the pinned Steam API library.
 use super::*;
 use crate::{
-    NativeStorage, Runtime, package,
+    HostUpdate, NativeStorage, Runtime, package,
     supervisor::{
         Error as Core,
         architecture::Architecture,
@@ -11,6 +11,16 @@ use crate::{
     },
 };
 use std::{io::Read, marker::PhantomData, sync::Arc};
+
+/// Makes `ISteamUtils::IsOverlayEnabled` true for a game in Wine, so it asks
+/// Steam for its overlay (callback 1010001) and Obelisk shows its own: many
+/// games hide their invite or store buttons otherwise. The game's own
+/// steamclient answers it, never the host. In the pinned steamclient.dylib,
+/// that answer is `getenv("SteamOS") != NULL`, and only without it the
+/// `IsOverlayEnabled` export of a loaded overlay renderer, through `dlsym`:
+/// arm64 0xa060b8 (string 0x15a3dd0), x86_64 0x9c6586 (string 0x16af134),
+/// the slice lsteamclient loads. Neither checks the value.
+pub(crate) const OVERLAY_ENABLED: (&str, &str) = ("SteamOS", "1");
 
 /// What a Steam launch asks of the machine. Tests replace it.
 pub(crate) trait Machine: Send + Sync + 'static {
@@ -111,10 +121,7 @@ impl<M: Machine> session::Launch for Launch<M> {
             root: request.root.clone(),
             id: request.id.clone(),
             account_id: credentials.steam_id,
-            store: Store {
-                app_id: request.config.app_id,
-                host: HostState::Online,
-            },
+            store: Store::new(request.config.app_id),
             helpers: helpers.into(),
         };
         let launch = Self {
@@ -183,18 +190,14 @@ impl<M: Machine> session::Launch for Launch<M> {
         } else {
             (self.request.config.helpers.join(package::HOST), "game-exec")
         };
-        let app_id = self.request.config.app_id.to_string();
         let mut environment = target.environment.clone();
         environment.extend(runtime.environment());
-        environment.insert("SteamAppId".into(), app_id.clone());
-        environment.insert("SteamGameId".into(), app_id);
-        if self.request.config.wine.is_some() {
-            // lsteamclient loads the Intel slice of the host's steamclient.dylib.
-            environment.insert(
-                "STEAM_COMPAT_CLIENT_INSTALL_PATH".into(),
-                runtime._prepared.directory.to_string_lossy().into_owned(),
-            );
-        }
+        game_environment(
+            &mut environment,
+            self.request.config.app_id,
+            self.request.config.wine.is_some(),
+            &runtime._prepared.directory,
+        );
         Ok(Prepared {
             host: runtime,
             helper,
@@ -209,6 +212,26 @@ impl<M: Machine> session::Launch for Launch<M> {
         Box::new(move |active| M::publish(&host, active))
     }
 
+    fn control(&self, host: &Arc<Runtime>) -> Option<session::Control<Steam>> {
+        let host = host.clone();
+        Some(Box::new(move |control| {
+            match control {
+                Control::Overlay {
+                    active,
+                    user_initiated,
+                } => host.overlay_state(active, user_initiated),
+                Control::AcceptInvite { friend, target } => host.accept_invite(friend, target),
+                Control::AuthorizeMicroTxn { order_id, approve } => {
+                    host.authorize_microtxn(order_id, approve)
+                }
+            }
+            .map_err(|error| match error {
+                Error::InvalidSession => Core::InvalidSession,
+                _ => Core::Unavailable,
+            })
+        }))
+    }
+
     fn watch(
         &self,
         host: &Arc<Runtime>,
@@ -216,11 +239,11 @@ impl<M: Machine> session::Launch for Launch<M> {
     ) -> Option<std::thread::JoinHandle<()>> {
         let (host, session) = (host.clone(), session.clone());
         Some(std::thread::spawn(move || {
-            let mut previous = HostState::Online;
+            let mut previous = HostUpdate::new(HostState::Online);
             loop {
-                let next = host.next_state(previous);
-                let _ = session.update(|record| record.store.host = next);
-                if matches!(next, HostState::Stopped | HostState::Lost) {
+                let next = host.next_update(&previous);
+                let _ = session.update(|record| record.store.apply(&next));
+                if matches!(next.state, HostState::Stopped | HostState::Lost) {
                     break;
                 }
                 previous = next;
@@ -233,11 +256,33 @@ impl<M: Machine> session::Launch for Launch<M> {
     }
 
     fn terminal(record: &mut Snapshot) {
-        record.store.host = HostState::Stopped;
+        record.store.apply(&HostUpdate::new(HostState::Stopped));
     }
 
     fn rosetta(helper: &Path) -> Result<bool, Core> {
         M::rosetta(helper)
+    }
+}
+
+/// What the game's own Steam API reads, over the host's environment: its
+/// AppID, and in Wine, the host's engine and an enabled overlay.
+fn game_environment(
+    environment: &mut std::collections::HashMap<String, String>,
+    app_id: u32,
+    wine: bool,
+    runtime: &Path,
+) {
+    let app_id = app_id.to_string();
+    environment.insert("SteamAppId".into(), app_id.clone());
+    environment.insert("SteamGameId".into(), app_id);
+    if wine {
+        let (name, value) = OVERLAY_ENABLED;
+        environment.insert(name.into(), value.into());
+        // lsteamclient loads the Intel slice of the host's steamclient.dylib.
+        environment.insert(
+            "STEAM_COMPAT_CLIENT_INSTALL_PATH".into(),
+            runtime.to_string_lossy().into_owned(),
+        );
     }
 }
 

@@ -22,17 +22,23 @@ use tokio::task::JoinHandle;
 use tokio::time::{Instant, timeout, timeout_at};
 use tokio_tungstenite::tungstenite::{Message as WsMessage, protocol::WebSocketConfig};
 
-use crate::{friends, kv, proto};
+use crate::{chat, friends, kv, own_game, proto};
 pub mod achievements;
 mod cloud;
 mod pics;
+mod social;
 use pics::parse_app;
 pub(crate) use pics::supports_platform;
 pub use pics::{AppInfo, ContentLicenses, DepotInfo, LaunchConfig};
+pub use social::{
+    GameInviteKind, History, HistoryMessage, MessageSession, SentMessage, SocialError,
+};
 #[cfg(test)]
 mod login_tests;
 #[cfg(test)]
 mod platforms_tests;
+#[cfg(test)]
+mod social_tests;
 #[cfg(test)]
 mod test_server;
 
@@ -45,6 +51,8 @@ pub(crate) const PROFILE_TIMEOUT: Duration = Duration::from_secs(5);
 /// Apps and packages PICS accepts in one access-token and product request.
 pub(crate) const PICS_BATCH: usize = 50;
 const MULTI: u32 = 1;
+/// A service notification Steam pushes, routed by its header's target name.
+const SERVICE_NOTIFICATION: u32 = 146;
 const SERVICE_RESPONSE: u32 = 147;
 const SERVICE_REQUEST: u32 = 151;
 // Content jobs begin at1; job0 belongs only to initial social hydration.
@@ -103,6 +111,14 @@ impl From<kv::KvError> for CmError {
     fn from(error: kv::KvError) -> Self {
         Self::Protocol(error.to_string())
     }
+}
+
+/// Whether a session takes part in Steam's friends chat. Only the account's
+/// UI session does; Cloud and maintenance sessions stay out of it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ChatMode {
+    Disabled,
+    Enabled,
 }
 
 #[derive(Clone, Debug)]
@@ -317,6 +333,7 @@ pub struct SteamConnection {
     licenses: watch::Receiver<Option<Bytes>>,
     profile: watch::Receiver<ProfileState>,
     friends: friends::FriendsEventSource,
+    social: Social,
     worker: JoinHandle<()>,
     steam_id: u64,
     session_id: i32,
@@ -324,6 +341,21 @@ pub struct SteamConnection {
     next_job: AtomicU64,
     /// Cleared by the worker when Steam logs the session off.
     logged_on: Arc<AtomicBool>,
+}
+
+/// Pushes only a chat-enabled session receives: friends chat notifications and
+/// the account's own game. They end with the connection, like the friends list.
+#[derive(Clone, Default)]
+struct Social {
+    chat: chat::ChatEventSource,
+    own_game: own_game::OwnGameSource,
+}
+
+impl Social {
+    fn disconnect(&self) {
+        self.chat.disconnect();
+        self.own_game.disconnect();
+    }
 }
 
 impl Drop for SteamConnection {
@@ -409,6 +441,8 @@ impl SteamConnection {
         let (profile_tx, profile) = watch::channel(ProfileState::default());
         let friends = friends::FriendsEventSource::new(steam_id);
         let worker_friends = friends.clone();
+        let social = Social::default();
+        let worker_social = social.clone();
         let logged_on = Arc::new(AtomicBool::new(logged_on));
         let session = Arc::clone(&logged_on);
         let worker = tokio::spawn(async move {
@@ -418,19 +452,21 @@ impl SteamConnection {
                 commands,
                 &licenses_tx,
                 &profile_tx,
-                &worker_friends,
+                (&worker_friends, &worker_social),
                 &session,
             )
             .await;
             session.store(false, Ordering::Release);
             profile_tx.send_replace(ProfileState::Disconnected);
             worker_friends.disconnect(false);
+            worker_social.disconnect();
         });
         Self {
             outgoing,
             licenses,
             profile,
             friends,
+            social,
             worker,
             steam_id,
             session_id: 0,
@@ -447,6 +483,7 @@ impl SteamConnection {
         account_name: &str,
         steam_id: u64,
         refresh_token: &str,
+        chat: ChatMode,
     ) -> Result<(), CmError> {
         if self.logged_on.load(Ordering::Acquire)
             || account_name.is_empty()
@@ -475,6 +512,8 @@ impl SteamConnection {
                     protocol_version: PROTOCOL,
                     deprecated_obfuscated_private_ip: login_id,
                     obfuscated_private_ip: Some(proto::LoginAddress { v4: login_id }),
+                    // The new friends chat, as Valve's clients ask for it.
+                    chat_mode: (chat == ChatMode::Enabled).then_some(2),
                     package_version: 1771,
                     language: "english".into(),
                     os_type: (-102_i32) as u32, // EOSType::MacOSUnknown, encoded as uint32.
@@ -855,16 +894,23 @@ impl SteamConnection {
         name: &str,
         request: &impl Message,
     ) -> Result<R, CmError> {
+        self.service_for(name, request, "backend.steam.cm.action.contentRequest")
+            .await
+    }
+
+    async fn service_for<R: Message + Default>(
+        &self,
+        name: &str,
+        request: &impl Message,
+        action: &'static str,
+    ) -> Result<R, CmError> {
         self.ensure_logged_on()?;
         let packet = self
             .request(SERVICE_REQUEST, request, Some(name), SERVICE_RESPONSE)
             .await?
             .next()
             .await?;
-        check_result(
-            packet.header.result,
-            "backend.steam.cm.action.contentRequest",
-        )?;
+        check_result(packet.header.result, action)?;
         R::decode(&packet.body[..]).map_err(Into::into)
     }
 
@@ -910,6 +956,30 @@ impl SteamConnection {
             .await
             .map_err(|_| CmError::Disconnected)?;
         Ok(job)
+    }
+
+    /// Sends a message without a job, as Steam requires for service
+    /// notifications, and as Valve's clients send status and invitations.
+    /// `routing_app` addresses a game's Steam services.
+    async fn send_unjobbed(
+        &self,
+        kind: u32,
+        message: &impl Message,
+        name: Option<&str>,
+        routing_app: Option<u32>,
+    ) -> Result<(), CmError> {
+        self.ensure_logged_on()?;
+        let header = proto::Header {
+            steam_id: Some(self.steam_id),
+            session_id: Some(self.session_id),
+            routing_appid: routing_app,
+            target_name: name.map(str::to_owned),
+            ..Default::default()
+        };
+        self.outgoing
+            .send(Command::Send(encode(kind, &header, message)))
+            .await
+            .map_err(|_| CmError::Disconnected)
     }
 
     /// Sends a request; its `reply` responses reach only the returned replies.
@@ -999,7 +1069,7 @@ async fn connection_worker(
     mut commands: mpsc::Receiver<Command>,
     licenses: &watch::Sender<Option<Bytes>>,
     profile: &watch::Sender<ProfileState>,
-    friends: &friends::FriendsEventSource,
+    (friends, social): (&friends::FriendsEventSource, &Social),
     logged_on: &AtomicBool,
 ) -> Result<(), CmError> {
     let mut routes = Routes::default();
@@ -1040,8 +1110,9 @@ async fn connection_worker(
             _ = tokio::time::sleep_until(last_received + Duration::from_secs(90)), if heartbeat_header.is_some() => return Err(CmError::Disconnected),
             _ = std::future::ready(()), if heartbeat_header.is_some() && hydration.push_due(friends) => {
                 // Read-only push request after a full list or newly accepted
-                // friend. Coalesce relationship bursts without changing the
-                // account's own presence or periodically refreshing statuses.
+                // friend. Coalesce relationship bursts without periodically
+                // refreshing statuses. Hydration never sets the account's
+                // presence: only the UI session's explicit set_online does.
                 let mut header = heartbeat_header.clone().expect("authenticated hydration");
                 header.job_source = Some(FRIENDS_HYDRATION_JOB);
                 header.target_name = Some("Chat.RequestFriendPersonaStates#1".into());
@@ -1069,16 +1140,24 @@ async fn connection_worker(
                             // download request.
                             continue;
                         }
+                        if packet.kind == SERVICE_NOTIFICATION {
+                            if let Some(method) = &packet.header.target_name {
+                                social.chat.receive(method, &packet.body);
+                            }
+                            continue;
+                        }
                         hydration.apply(friends, packet.kind, &packet.body);
                         if packet.kind == PERSONA_STATE
                             && let Some(steam_id) = heartbeat_header.as_ref().and_then(|header| header.steam_id)
-                            && let Some(update) = persona_profile(&packet.body, steam_id)
                         {
-                            profile.send_modify(|state| {
-                                if let ProfileState::Ready(snapshot) = state {
-                                    snapshot.apply(update);
-                                }
-                            });
+                            social.own_game.receive(steam_id, &packet.body);
+                            if let Some(update) = persona_profile(&packet.body, steam_id) {
+                                profile.send_modify(|state| {
+                                    if let ProfileState::Ready(snapshot) = state {
+                                        snapshot.apply(update);
+                                    }
+                                });
+                            }
                         }
                         if packet.kind == LOGGED_OFF {
                             logged_on.store(false, Ordering::Release);
@@ -1680,7 +1759,7 @@ mod tests {
                 commands,
                 &licenses,
                 &profile,
-                &writer,
+                (&writer, &Social::default()),
                 &AtomicBool::new(true),
             )
             .await;

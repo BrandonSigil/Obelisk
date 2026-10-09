@@ -9,9 +9,12 @@ pub mod abi;
 pub mod events;
 #[cfg(target_arch = "aarch64")]
 pub mod host;
+pub mod lobby;
 #[cfg(target_arch = "aarch64")]
 pub mod mach;
 pub mod native;
+pub mod overlay;
+pub mod received;
 
 pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 pub use game_runtime::client_sha256;

@@ -1,4 +1,4 @@
-import Foundation
+import AppKit
 import Observation
 
 /// What one storefront adds to its Game sessions: how its games and accounts
@@ -108,6 +108,57 @@ enum GogGames: GameStorefront {
     )
 }
 
+/// How the player ends the running game: Quit asks it to close, then while
+/// it closes nothing more can be asked until a frozen game may be forced.
+enum GameQuitStage: Equatable {
+    case quit
+    case closing
+    case forceQuit
+
+    var title: String {
+        switch self {
+        case .quit: L10n.string("model.game.quit")
+        case .closing: L10n.string("model.game.closing")
+        case .forceQuit: L10n.string("model.game.forceQuit")
+        }
+    }
+
+    /// What the stage's button does for the game named `title`.
+    func label(title: String) -> String {
+        switch self {
+        case .quit: L10n.string("ui.game.quit_named", title)
+        case .closing: L10n.string("model.game.closing")
+        case .forceQuit: L10n.string("ui.game.force_quit_named", title)
+        }
+    }
+}
+
+/// How the player's Quit reaches a running game, and how long it gets before
+/// Force Quit.
+struct GameQuitting: Sendable {
+    /// How long a game asked to quit gets before the player may force it.
+    var delay: Duration = .seconds(10)
+    /// How long Force Quit stays offered. A game may answer Quit with a
+    /// question of its own, such as saving first, and play on: its player can
+    /// then ask it to quit again rather than only kill it.
+    var window: Duration = .seconds(60)
+    var sleep: @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) }
+    /// Asks the Mac apps running from these folders to quit, as their own
+    /// Quit menu does, and tells whether one was asked.
+    var quitMacApps: @MainActor @Sendable ([String]) -> Bool = GameQuitting.quitApps(in:)
+
+    /// A Mac game handles its app's Quit: SIGTERM, which the supervisor
+    /// otherwise sends, ends most of them at once.
+    @MainActor static func quitApps(in folders: [String]) -> Bool {
+        let roots = folders.map { URL(fileURLWithPath: $0).resolvingSymlinksInPath().path + "/" }
+        let apps = NSWorkspace.shared.runningApplications.filter { app in
+            guard let executable = app.executableURL?.resolvingSymlinksInPath().path else { return false }
+            return roots.contains { executable.hasPrefix($0) }
+        }
+        return apps.map { $0.terminate() }.contains(true)
+    }
+}
+
 typealias SteamGameSessions = GameSessions<SteamGames>
 typealias EpicGameSessions = GameSessions<EpicGames>
 typealias GogGameSessions = GameSessions<GogGames>
@@ -131,6 +182,16 @@ final class GameSessions<Store: GameStorefront> {
         var cloud: CloudStatus
         /// Steam's native host.
         var host: SteamHostState?
+        /// The latest invite dialog a Steam game asked for.
+        var inviteRequest: SteamInviteRequest?
+        /// The Steam lobby a Steam game is in now.
+        var lobbyId: UInt64?
+        /// The latest overlay a Steam game asked for, invite dialogs included.
+        var overlayRequest: SteamOverlayRequest?
+        /// Invitations friends sent into a Steam game, newest first.
+        var receivedInvites: [SteamReceivedInvite]
+        /// The purchase a Steam game waits on the player to authorize.
+        var microTxn: SteamMicroTxn?
         /// A supervisor snapshot backs this session, not only its admission.
         var observed: Bool
         /// How much of Voile has downloaded while the launch waits for it.
@@ -149,6 +210,11 @@ final class GameSessions<Store: GameStorefront> {
             reconnecting = state.reconnecting
             cloud = state.cloud
             host = state.host
+            inviteRequest = state.inviteRequest
+            lobbyId = state.lobbyId
+            overlayRequest = state.overlayRequest
+            receivedInvites = state.receivedInvites
+            microTxn = state.microTxn
             observed = state.observed
             runtimeInstall = state.runtimeInstall
             startedAt = state.startedAt.map { Date(timeIntervalSince1970: TimeInterval($0)) }
@@ -161,6 +227,10 @@ final class GameSessions<Store: GameStorefront> {
     private(set) var isRecovering = true
     private(set) var recoveryError: String?
     var isBusy: Bool { active != nil || isRecovering }
+    /// The player's Quit of the active session's game, until that session
+    /// stops running.
+    private(set) var quitRequest: QuitRequest?
+    @ObservationIgnored let quitting: GameQuitting
     private var revokedAccounts: [Store.AccountID] = []
     private var rosetta: RosettaPrompt?
     /// Rust's Game sessions, which the account's installations admit launches into.
@@ -170,10 +240,19 @@ final class GameSessions<Store: GameStorefront> {
     /// The last session whose launch `history` recorded.
     @ObservationIgnored private var recordedLaunch: String?
     @ObservationIgnored private var revision: UInt64 = 0
+    @ObservationIgnored private var escalation: Task<Void, Never>?
 
-    init(_ core: any StorefrontSessionsProtocol, history: LaunchHistory) {
+    struct QuitRequest: Equatable {
+        let session: String
+        let requestedAt: Date
+        /// `quitting.delay` passed and the game still runs.
+        var forceable = false
+    }
+
+    init(_ core: any StorefrontSessionsProtocol, history: LaunchHistory, quitting: GameQuitting = GameQuitting()) {
         self.core = core
         self.history = history
+        self.quitting = quitting
         apply(core.state())
         let revision = revision
         Task { [weak self] in
@@ -219,6 +298,11 @@ final class GameSessions<Store: GameStorefront> {
             }
         }
         if self.rosetta != rosetta { self.rosetta = rosetta }
+        if let quitRequest, active?.id != quitRequest.session || active?.running != true {
+            self.quitRequest = nil
+            escalation?.cancel()
+            escalation = nil
+        }
     }
 
     /// The game's Reservation: no Transfer, uninstall or other launch of it.
@@ -270,6 +354,45 @@ final class GameSessions<Store: GameStorefront> {
         apply(core.state())
     }
 
+    /// What ending the active session's running game asks of the player now.
+    var quitStage: GameQuitStage? {
+        // A session reconnecting to its supervisor cannot be asked anything.
+        guard let active, active.running, !active.reconnecting else { return nil }
+        guard let quitRequest, quitRequest.session == active.id else { return .quit }
+        return quitRequest.forceable ? .forceQuit : .closing
+    }
+
+    /// The player's Quit: the running game is asked to close its windows, and
+    /// nothing is killed. A Mac game running from one of `macApps` is asked
+    /// as its own Quit menu would. Once `quitting.delay` passed with the game
+    /// still running, the player may force it to quit for `quitting.window`.
+    func quit(macApps: [String] = []) async {
+        guard quitStage == .quit, let active else { return }
+        let session = active.id
+        quitRequest = QuitRequest(session: session, requestedAt: .now)
+        escalation = Task { [weak self, quitting] in
+            try? await quitting.sleep(quitting.delay)
+            guard !Task.isCancelled, self?.quitRequest?.session == session else { return }
+            self?.quitRequest?.forceable = true
+            try? await quitting.sleep(quitting.window)
+            guard !Task.isCancelled, self?.quitRequest?.session == session else { return }
+            self?.quitRequest = nil
+        }
+        if quitting.quitMacApps(macApps) { return }
+        // A refused Quit still lets the player force the game once it is due.
+        try? await core.quit(sessionId: session)
+        apply(core.state())
+    }
+
+    /// The player's Force Quit of a game that ignored Quit: it ends now, and
+    /// its session still settles its Cloud saves. The player confirms it
+    /// first: what the game did not save is lost.
+    func forceQuit() async {
+        guard quitStage == .forceQuit, let active else { return }
+        try? await core.forceQuit(sessionId: active.id)
+        apply(core.state())
+    }
+
     /// Account revocation. Admission checks it at once; the supervisor learns
     /// it as soon as it can be reached.
     func signedOut(account: Store.AccountID) {
@@ -284,6 +407,31 @@ final class GameSessions<Store: GameStorefront> {
         case let GameSessionError.Failure(reason): Store.failure(reason)
         default: error
         }
+    }
+}
+
+extension GameSessions where Store == SteamGames {
+    /// Obelisk's overlay opened or closed over session `id`'s running game,
+    /// which learns it as from Steam's overlay; `userInitiated` when the
+    /// player opened it rather than the game.
+    func overlayState(sessionId id: String, active: Bool, userInitiated: Bool) async throws {
+        do { try await core.overlayState(sessionId: id, active: active, userInitiated: userInitiated) }
+        catch { throw Self.translated(error) }
+    }
+
+    /// The player joins `friend`'s invitation into session `id`'s running
+    /// game, as Steam's overlay would accept it.
+    func acceptInvite(sessionId id: String, friendSteamId friend: UInt64, invite: SteamGameInvite) async throws {
+        do { try await core.acceptInvite(sessionId: id, friendSteamId: friend, invite: invite) }
+        catch { throw Self.translated(error) }
+        refresh()
+    }
+
+    /// The player's answer to the purchase `orderId` session `id`'s game waits on.
+    func authorizeMicroTxn(sessionId id: String, orderId: UInt64, approve: Bool) async throws {
+        do { try await core.authorizeMicroTxn(sessionId: id, orderId: orderId, approve: approve) }
+        catch { throw Self.translated(error) }
+        refresh()
     }
 }
 

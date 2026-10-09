@@ -466,3 +466,84 @@ fn only_processes_running_the_runtime_are_left_behind_wine_processes() {
         "never Obelisk itself"
     );
 }
+
+#[test]
+fn quitting_a_windows_game_asks_its_windows_to_close_and_kills_nothing() {
+    let (_directory, root) = installation();
+    let config = recording_runtime(&root);
+    let environment = environment(&config);
+    let program = root.join("game/Game.exe");
+    let command = quit_command(&config, &environment, Some(&program), 7).unwrap();
+    assert_eq!(command.get_program(), config.runtime.join("bin/wine"));
+    assert_eq!(
+        command.get_args().collect::<Vec<_>>(),
+        ["taskkill", "/T", "/IM", "Game.exe"],
+        "without /F, taskkill only posts WM_CLOSE"
+    );
+    // The game's own environment, which its Wine server agrees with.
+    let envs: HashMap<_, _> = command
+        .get_envs()
+        .map(|(name, value)| (name.to_owned(), value.unwrap().to_owned()))
+        .collect();
+    assert_eq!(envs.len(), environment.len());
+    assert!(
+        environment
+            .iter()
+            .all(|(name, value)| envs[std::ffi::OsStr::new(name)] == **value)
+    );
+
+    quit(&config, &environment, Some(&program), 7);
+    assert_eq!(calls(&root), ["taskkill /T /IM Game.exe"]);
+    assert!(quit_command(&config, &environment, None, 7).is_none());
+}
+
+#[test]
+fn quitting_a_linux_engine_game_uses_its_window_server_quit() {
+    let (_directory, root) = installation();
+    let config = Config {
+        engine: Engine::Linux,
+        ..config(&root)
+    };
+    let environment = HashMap::from([("TMPDIR".to_owned(), "/var/folders/T/".to_owned())]);
+    let command = quit_command(&config, &environment, None, 77).unwrap();
+    assert_eq!(command.get_program(), config.runtime.join("engine/wsdctl"));
+    assert_eq!(
+        command.get_args().collect::<Vec<_>>(),
+        [
+            "/var/folders/T/obelisk-engine-77/wsd.sock",
+            "window",
+            "quit"
+        ]
+    );
+    let command = quit_command(&config, &HashMap::new(), None, 77).unwrap();
+    assert_eq!(
+        command.get_args().next().unwrap(),
+        "/tmp/obelisk-engine-77/wsd.sock"
+    );
+}
+
+#[test]
+fn only_a_prefix_and_its_wine_server_belong_to_one_windows_game() {
+    use std::os::unix::fs::MetadataExt;
+    let (_directory, root) = installation();
+    let config = recording_runtime(&root);
+    let prefix = fs::metadata(&config.prefix).unwrap();
+    assert_eq!(
+        private_folders(&config),
+        [
+            config.prefix.clone(),
+            PathBuf::from(format!(
+                "/tmp/.wine-{}/server-{:x}-{:x}",
+                prefix.uid(),
+                prefix.dev(),
+                prefix.ino()
+            )),
+        ]
+    );
+    let linux = Config {
+        prefix: root.join("Game-linux/prefix"),
+        engine: Engine::Linux,
+        ..config
+    };
+    assert_eq!(private_folders(&linux), [root.join("Game-linux")]);
+}

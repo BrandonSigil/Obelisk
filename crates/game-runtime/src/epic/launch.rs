@@ -317,6 +317,8 @@ pub(super) fn native_target(
             working_directory: plan.target.working_directory.clone().into(),
             environment: environment.clone(),
             log: None,
+            installation: Some(config.install.clone()),
+            program: None,
         },
         architecture,
         ownership,

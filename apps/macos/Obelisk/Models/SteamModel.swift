@@ -18,6 +18,8 @@ final class SteamModel {
     private(set) var avatarURL: URL?
     private(set) var friends: FriendsPresentationState?
     var isFriendsPresented = false
+    /// Shows the game's invite picker over the running game.
+    @ObservationIgnored weak var overlay: (any GameOverlayPresenting)?
     private(set) var games: [SteamGame] = [] {
         didSet { libraryChanges &+= 1 }
     }
@@ -82,6 +84,12 @@ final class SteamModel {
     let cloud: SteamCloudModel
     let rosetta: SteamRosettaModel
     let libraryPlatforms = SteamLibraryPlatforms()
+    /// Chat and game invitations, through the session the friends list follows.
+    let chat: SteamChatModel
+    /// Friends' invitations into the running game.
+    let invitations: SteamReceivedInvitations
+    /// The in-game purchase the running game waits on.
+    let purchase: SteamPurchaseAuthorization
     @ObservationIgnored private let preferences: UserDefaults
     /// Where the account's last library is kept between launches. The
     /// account's session keeps every library it loads there.
@@ -109,6 +117,10 @@ final class SteamModel {
     @ObservationIgnored private var wakeObserver: SystemWakeObservation?
     @ObservationIgnored private var connectionTask: Task<any SteamSessionProtocol, Error>?
     @ObservationIgnored private var pollingActive = false
+    /// The Game session last seen, to tell when one ends.
+    @ObservationIgnored private var observedGameSession: SteamGameSessions.Session?
+    /// The running game's session and the last overlay request it showed.
+    @ObservationIgnored private var followedOverlay: (session: String, sequence: UInt64)?
     @ObservationIgnored let libraryOrdering = LibraryOrdering<SteamGame>()
 
     init(
@@ -131,7 +143,8 @@ final class SteamModel {
         },
         gameSessions: SteamGameSessions = .shared,
         libraryCache: LibraryCache? = nil,
-        installations makeInstallations: MakeInstallations? = nil
+        installations makeInstallations: MakeInstallations? = nil,
+        chat: SteamChatModel? = nil
     ) {
         self.directory = directory
         self.keychain = keychain
@@ -158,10 +171,15 @@ final class SteamModel {
         self.cloud = SteamCloudModel(sessions: gameSessions)
         self.rosetta = SteamRosettaModel(sessions: gameSessions)
         self.installations = SteamInstallations(sessions: gameSessions, cloud: cloud)
+        self.chat = chat ?? SteamChatModel()
+        self.invitations = SteamReceivedInvitations(sessions: gameSessions)
+        self.purchase = SteamPurchaseAuthorization(sessions: gameSessions)
         wakeObserver = SystemWakeObservation { [weak self] in
             Task { @MainActor [weak self] in self?.retryFriends() }
         }
         installations.selection = { [weak self] in self?.installationSelection }
+        self.chat.gameName = { [weak self] in self?.gameName(appId: $0) }
+        observeGameSessions()
     }
 
     deinit {
@@ -417,6 +435,9 @@ final class SteamModel {
             displayName = nil
             avatarURL = nil
             friends = Self.emptyFriends(accountID: credentials.steamId)
+            // Rust's session logged on Online; the chat follows it from here.
+            chat.connect(connected, account: credentials.steamId)
+            followGameSession(account: credentials.steamId)
             observeFriends(connected, generation: current)
             login = nil
             challenge = nil
@@ -554,12 +575,80 @@ final class SteamModel {
         }
     }
 
+    /// The game's name in the library, or as a friend playing it shows it.
+    func gameName(appId: UInt32) -> String? {
+        if let game = games.first(where: { $0.appId == appId }) { return game.name }
+        return friends?.friends.lazy.compactMap(\.activity).first { $0.id == String(appId) }?.name
+    }
+
+    /// A game's own Steam session can leave the account's presence behind it,
+    /// so the account shows Online again once its Game session ends. While it
+    /// runs, the chat follows what the game can invite into.
+    private func observeGameSessions() {
+        let active = withObservationTracking { gameSessions.active } onChange: { [weak self] in
+            Task { @MainActor [weak self] in self?.observeGameSessions() }
+        }
+        if let ended = observedGameSession, active?.id != ended.id, ended.account == steamId { chat.setOnline() }
+        observedGameSession = active
+        followGameSession(account: steamId)
+    }
+
+    /// The chat follows the Game session of `account`: whether it plays, and
+    /// what its running game asked to invite friends into.
+    private func followGameSession(account: UInt64?) {
+        let active = gameSessions.active
+        let playing = account != nil && active?.account == account ? active : nil
+        chat.setPlaying(playing != nil)
+        let running = playing?.running == true ? playing : nil
+        if chat.followGame(session: running?.id, appId: running?.game ?? 0, request: running?.inviteRequest,
+                           lobby: running?.lobbyId) {
+            openInvitePicker()
+        }
+        followOverlayRequest(of: running)
+        if let invite = invitations.follow(session: running?.id, invites: running?.receivedInvites ?? []).first {
+            overlay?.announce(invite)
+        }
+        if purchase.follow(session: running?.id, microTxn: running?.microTxn), let pending = purchase.pending {
+            overlay?.present(.microTxn(orderId: pending.orderId))
+        }
+    }
+
+    /// The running game asked Steam's overlay for one of its pages: Obelisk's
+    /// overlay shows its own. As for invite dialogs, a request the session
+    /// showed when first seen opens nothing.
+    private func followOverlayRequest(of running: SteamGameSessions.Session?) {
+        guard let running else {
+            followedOverlay = nil
+            return
+        }
+        let previous = followedOverlay?.session == running.id ? followedOverlay : nil
+        // A sequence only grows within a session; a request that went keeps it.
+        let sequence = running.overlayRequest?.sequence ?? previous?.sequence ?? 0
+        followedOverlay = (running.id, sequence)
+        guard let previous, let request = running.overlayRequest, request.sequence > previous.sequence,
+              let shown = OverlayRequest.steam(request.kind, appId: running.game, account: steamId) else { return }
+        overlay?.present(shown)
+    }
+
+    /// The running game asked Steam's overlay to invite friends: Obelisk's
+    /// overlay shows over it, its friends list as the picker.
+    private func openInvitePicker() {
+        guard friends != nil, let picker = chat.invitePicker, overlay?.present(.invite(picker)) == true else {
+            chat.closeInvitePicker()
+            return
+        }
+        chat.refreshOwnGame()
+    }
+
     func openFriends() {
         guard friends != nil else { return }
         isFriendsPresented = true
+        chat.refreshOwnGame()
     }
 
-    func closeFriends() { isFriendsPresented = false }
+    func closeFriends() {
+        isFriendsPresented = false
+    }
 
     /// Only explicit retry or system wake can restart an exhausted reconnect cycle.
     func retryFriends() {
@@ -569,6 +658,7 @@ final class SteamModel {
         friends?.connection = .interrupted
         libraryPlatforms.cancel()
         session?.shutdown()
+        chat.suspend()
         let previous = session
         session = nil
         observeFriends(previous, generation: generation)
@@ -608,11 +698,13 @@ final class SteamModel {
                     case .authenticationRequired:
                         observed.shutdown()
                         self.libraryPlatforms.cancel()
+                        self.chat.suspend()
                         self.session = nil
                         return
                     case .disconnected:
                         observed.shutdown()
                         self.libraryPlatforms.cancel()
+                        self.chat.suspend()
                         self.session = nil
                         active = nil
                     }
@@ -631,6 +723,8 @@ final class SteamModel {
                         }
                         self.libraryPlatforms.cancel()
                         self.session = replacement
+                        self.chat.connect(replacement, account: credentials.steamId)
+                        self.followGameSession(account: credentials.steamId)
                         // The previous session is shut down: Transfers,
                         // launches and Cloud maintenance go through this one.
                         self.connectInstallations(replacement, credentials: credentials)
@@ -716,6 +810,10 @@ final class SteamModel {
         detailGeneration += 1
         stopFriends()
         session?.shutdown()
+        chat.reset()
+        followedOverlay = nil
+        invitations.follow(session: nil, invites: [])
+        purchase.follow(session: nil, microTxn: nil)
         sessionCredentials = nil
         friends = nil
         isFriendsPresented = false
@@ -782,9 +880,16 @@ final class SteamModel {
     }
 
     func reloadAchievements() {
-        guard let game = selectedGame, let session else { return }
+        guard let game = selectedGame else { return }
+        loadAchievements(appId: game.appId, into: achievements)
+    }
+
+    /// Loads the achievements of `appId` into `model`, such as the overlay's
+    /// for the running game.
+    func loadAchievements(appId: UInt32, into model: GameAchievementsModel) {
+        guard let session else { return }
         let language = language
-        achievements.load { try await session.achievements(appId: game.appId, language: language).map(GameAchievement.init) }
+        model.load { try await session.achievements(appId: appId, language: language).map(GameAchievement.init) }
     }
 
     /// Remote details tell which builds the account can download, so an

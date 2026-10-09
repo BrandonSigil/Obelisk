@@ -31,6 +31,9 @@ const PREREQUISITES_LOG: &str = "obelisk-prerequisites.log";
 const PREREQUISITE_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 /// Success, "a newer version is already installed" and "restart required".
 const INSTALLED: [i32; 3] = [0, 1638, 3010];
+/// A command that ends a game is stopped after this long: the Wine server it
+/// talks to may be frozen with the game.
+const QUIT_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// The Windows user profile inside `prefix`, where Auto-Cloud roots such as
 /// AppData and Documents live.
@@ -243,6 +246,8 @@ pub(crate) fn target(
         working_directory: target.working_directory.clone().into(),
         environment,
         log: Some(config.log.clone()),
+        installation: Some(install.to_owned()),
+        program: Some(executable),
     })
 }
 
@@ -531,7 +536,7 @@ fn run_prerequisite(
 }
 
 /// The exit code of `child`, or `None` once it ran for `timeout` and was killed.
-fn wait(mut child: Child, timeout: Duration) -> Result<Option<i32>, Error> {
+pub(crate) fn wait(mut child: Child, timeout: Duration) -> Result<Option<i32>, Error> {
     let deadline = Instant::now() + timeout;
     loop {
         if let Some(status) = child.try_wait()? {
@@ -553,6 +558,100 @@ pub(crate) fn stop(config: &Config) {
     if config.engine == Engine::Rosetta {
         let _ = wineserver(&config.runtime, &config.prefix, "-k");
     }
+}
+
+/// Asks the Windows game to quit as its player closing its windows would, and
+/// kills nothing. `environment` is the game's own, `pid` its launch helper's.
+pub(crate) fn quit(
+    config: &Config,
+    environment: &HashMap<String, String>,
+    program: Option<&Path>,
+    pid: u32,
+) {
+    if let Some(command) = quit_command(config, environment, program, pid) {
+        let _ = run(command, QUIT_TIMEOUT);
+    }
+}
+
+/// In Wine for macOS, taskkill without /F posts WM_CLOSE to the windows of
+/// the game's program and of the processes it started, in the game's prefix
+/// and with its environment, which its Wine server must agree with. The Linux
+/// engine's window server asks every window of the game to close, as its own
+/// Quit menu does; a game that shows no window yet is asked nothing.
+fn quit_command(
+    config: &Config,
+    environment: &HashMap<String, String>,
+    program: Option<&Path>,
+    pid: u32,
+) -> Option<Command> {
+    let command = match config.engine {
+        Engine::Rosetta => {
+            let mut command = Command::new(config.wine());
+            command
+                .args(["taskkill", "/T", "/IM"])
+                .arg(program?.file_name()?)
+                .env_clear()
+                .envs(environment);
+            command
+        }
+        Engine::Linux => {
+            let mut command = Command::new(config.runtime.join("engine/wsdctl"));
+            command
+                .arg(crate::linux_engine::window_server(environment, pid))
+                .args(["window", "quit"])
+                .env_clear();
+            command
+        }
+    };
+    Some(command)
+}
+
+/// Kills every process of the prefix at once. Unlike `stop`, it never waits
+/// on a Wine server frozen with its game for longer than `QUIT_TIMEOUT`.
+pub(crate) fn kill(config: &Config) {
+    // The engine's processes follow its launcher, which the session kills.
+    if config.engine == Engine::Rosetta {
+        let mut command = Command::new(config.runtime.join("bin/wineserver"));
+        command
+            .arg("-k")
+            .env_clear()
+            .env("WINEPREFIX", &config.prefix);
+        let _ = run(command, QUIT_TIMEOUT);
+    }
+}
+
+/// The folders whose files only this prefix's processes use: the prefix, and
+/// for Wine for macOS the folder of its Wine server, which Wine names after
+/// the prefix's device and inode.
+pub(crate) fn private_folders(config: &Config) -> Vec<PathBuf> {
+    use std::os::unix::fs::MetadataExt;
+    match config.engine {
+        Engine::Rosetta => {
+            let mut folders = vec![config.prefix.clone()];
+            if let Ok(prefix) = fs::metadata(&config.prefix) {
+                folders.push(PathBuf::from(format!(
+                    "/tmp/.wine-{}/server-{:x}-{:x}",
+                    prefix.uid(),
+                    prefix.dev(),
+                    prefix.ino()
+                )));
+            }
+            folders
+        }
+        Engine::Linux => crate::linux_engine::home(&config.prefix)
+            .map(|home| vec![home.to_owned()])
+            .unwrap_or_default(),
+    }
+}
+
+/// Runs `command` without input or output for at most `timeout`.
+fn run(mut command: Command, timeout: Duration) -> Result<Option<i32>, Error> {
+    let child = command
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()?;
+    wait(child, timeout)
 }
 
 /// Ends the Wine processes an Obelisk that died left behind, and returns how

@@ -183,6 +183,7 @@ pub type IdleGuard = supervisor::IdleGuard<Epic>;
 impl supervisor::Provider for Epic {
     type Account = String;
     type Store = Store;
+    type Control = supervisor::NoControl;
     type Error = Error;
     const SUPERVISE: &'static str = "epic-supervise";
     const CANCELLED: &'static [&'static str] =

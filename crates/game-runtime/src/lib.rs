@@ -282,6 +282,11 @@ impl Launch {
             inner: Mutex::new(Inner {
                 host,
                 proof,
+                overlay: None,
+                requests: 0,
+                lobby: None,
+                invites: Vec::new(),
+                microtxn: None,
                 stopped: false,
             }),
             wakeup,
@@ -366,10 +371,124 @@ pub enum HostState {
     Lost,
     Stopped,
 }
+/// The latest invite dialog the game asked for. `sequence` grows with every
+/// request of the session, so a repeated request still reads as new.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct InviteRequest {
+    pub sequence: u64,
+    pub target: protocol::InviteTarget,
+}
+
+/// The latest overlay the game asked Steam for. `sequence` grows with every
+/// request of the session, so a repeated request still reads as new.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct OverlayRequest {
+    pub sequence: u64,
+    pub dialog: protocol::OverlayDialog,
+}
+impl OverlayRequest {
+    /// The same request, when it asks for an invite dialog.
+    pub fn invite(&self) -> Option<InviteRequest> {
+        Some(InviteRequest {
+            sequence: self.sequence,
+            target: self.dialog.invite()?,
+        })
+    }
+}
+
+/// An invitation a friend sent into the running game.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ReceivedInvite {
+    pub friend: u64,
+    pub target: protocol::InviteTarget,
+    /// When the host last told of it, in seconds since the Unix epoch.
+    pub received_at: u64,
+}
+
+/// A purchase the running game asks the player to confirm.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct MicroTxn {
+    pub order_id: u64,
+    pub app_id: u32,
+}
+
+/// The most invitations a session keeps; the oldest goes first.
+pub const MAX_RECEIVED_INVITES: usize = 16;
+
+/// What the native host tells of the game's Steam session. Everything but
+/// the state only holds while the host is online: a host that lost Steam,
+/// or the game, is in no lobby anyone can join, and can answer nothing.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HostUpdate {
+    pub state: HostState,
+    /// The overlay's invite request, while it asks for an invite dialog.
+    pub invite: Option<InviteRequest>,
+    /// The latest overlay the game asked for.
+    pub overlay: Option<OverlayRequest>,
+    /// The Steam lobby the game is in now, as the engine shows it.
+    pub lobby: Option<u64>,
+    /// Invitations into the game, newest first.
+    pub invites: Vec<ReceivedInvite>,
+    /// The purchase waiting for the player's answer.
+    pub microtxn: Option<MicroTxn>,
+}
+impl HostUpdate {
+    pub fn new(state: HostState) -> Self {
+        Self {
+            state,
+            invite: None,
+            overlay: None,
+            lobby: None,
+            invites: Vec::new(),
+            microtxn: None,
+        }
+    }
+}
+
 struct Inner {
     host: process::Child,
     proof: Proof,
+    overlay: Option<OverlayRequest>,
+    /// Overlay requests of the session so far, the last one's sequence.
+    requests: u64,
+    lobby: Option<u64>,
+    /// Kept across a disconnection: Steam still holds them.
+    invites: Vec<ReceivedInvite>,
+    microtxn: Option<MicroTxn>,
     stopped: bool,
+}
+impl Inner {
+    fn update(&self) -> HostUpdate {
+        let state = self.proof.host_state;
+        if state != HostState::Online {
+            return HostUpdate::new(state);
+        }
+        HostUpdate {
+            state,
+            invite: self.overlay.as_ref().and_then(OverlayRequest::invite),
+            overlay: self.overlay.clone(),
+            lobby: self.lobby,
+            invites: self.invites.clone(),
+            microtxn: self.microtxn.clone(),
+        }
+    }
+    /// Keeps `target` from `friend` first, once.
+    fn received(&mut self, friend: u64, target: protocol::InviteTarget) {
+        if !protocol::individual(friend) || !target.valid() {
+            return;
+        }
+        self.invites
+            .retain(|invite| invite.friend != friend || invite.target != target);
+        self.invites.insert(
+            0,
+            ReceivedInvite {
+                friend,
+                target,
+                received_at: unix_now(),
+            },
+        );
+        self.invites.truncate(MAX_RECEIVED_INVITES);
+    }
 }
 pub struct Runtime {
     inner: Mutex<Inner>,
@@ -397,9 +516,81 @@ impl Runtime {
         if inner.stopped {
             return Ok(());
         }
-        protocol::HostCommand::SetPresence { online }
-            .write(inner.host.input.as_mut().ok_or(Error::StartFailed)?)
+        Self::send(&mut inner, &protocol::HostCommand::SetPresence { online })
             .map_err(|_| Error::StartFailed)
+    }
+    fn send(inner: &mut Inner, command: &protocol::HostCommand) -> Result<(), Error> {
+        command
+            .write(inner.host.input.as_mut().ok_or(Error::Unavailable)?)
+            .map_err(|_| Error::Unavailable)
+    }
+    /// Sends the player's `command` to the host while it serves the game
+    /// online; `change` first checks it against what the host told and
+    /// records its effect. An observer sees that effect at once.
+    fn control(
+        &self,
+        command: &protocol::HostCommand,
+        change: impl FnOnce(&mut Inner) -> Result<(), Error>,
+    ) -> Result<(), Error> {
+        if !command.valid() {
+            return Err(Error::InvalidSession);
+        }
+        let mut inner = self.inner.lock().map_err(|_| Error::Unavailable)?;
+        if inner.stopped || inner.proof.host_state != HostState::Online {
+            return Err(Error::Unavailable);
+        }
+        change(&mut inner)?;
+        let sent = Self::send(&mut inner, command);
+        drop(inner);
+        self.wakeup.notify();
+        sent
+    }
+    /// Tells the game Obelisk's overlay opened or closed over it.
+    pub fn overlay_state(&self, active: bool, user_initiated: bool) -> Result<(), Error> {
+        self.control(
+            &protocol::HostCommand::OverlayState {
+                active,
+                user_initiated,
+            },
+            |_| Ok(()),
+        )
+    }
+    /// Hands the running game the invitation `friend` sent into it, which
+    /// the player accepted, from the host or from Steam's chat alike.
+    pub fn accept_invite(&self, friend: u64, target: protocol::InviteTarget) -> Result<(), Error> {
+        let command = match &target {
+            protocol::InviteTarget::Lobby { lobby_id } => {
+                protocol::HostCommand::AcceptLobbyInvite {
+                    lobby_id: *lobby_id,
+                    friend,
+                }
+            }
+            protocol::InviteTarget::Connect { connect } => {
+                protocol::HostCommand::AcceptRichInvite {
+                    friend,
+                    connect: connect.clone(),
+                }
+            }
+        };
+        self.control(&command, |inner| {
+            inner
+                .invites
+                .retain(|invite| invite.friend != friend || invite.target != target);
+            Ok(())
+        })
+    }
+    /// The player's answer to the purchase the game waits on: only that one.
+    pub fn authorize_microtxn(&self, order_id: u64, approve: bool) -> Result<(), Error> {
+        self.control(
+            &protocol::HostCommand::AuthorizeMicroTxn { order_id, approve },
+            |inner| match &inner.microtxn {
+                Some(pending) if pending.order_id == order_id => {
+                    inner.microtxn = None;
+                    Ok(())
+                }
+                _ => Err(Error::InvalidSession),
+            },
+        )
     }
     pub fn started(&self, pid: u32) -> Result<(), Error> {
         let mut inner = self.inner.lock().map_err(|_| Error::StartFailed)?;
@@ -413,16 +604,19 @@ impl Runtime {
         inner.proof.state = "game_started".into();
         files::report(&self.report, &inner.proof)
     }
-    /// Wait on the private event pipe, independently of the UI. `stopped` wakes
-    /// this wait; Swift task cancellation must not abandon a live game.
-    pub fn next_state(&self, previous: HostState) -> HostState {
+    /// Wait on the private event pipe, independently of the UI, until the
+    /// host's state, the game's invite request or its lobby differs from
+    /// `previous`.
+    /// `stopped` wakes this wait; Swift task cancellation must not abandon a
+    /// live game.
+    pub fn next_update(&self, previous: &HostUpdate) -> HostUpdate {
         loop {
             let generation = self.wakeup.generation();
             let Ok(mut inner) = self.inner.lock() else {
-                return HostState::Lost;
+                return HostUpdate::new(HostState::Lost);
             };
             if inner.stopped {
-                return HostState::Stopped;
+                return HostUpdate::new(HostState::Stopped);
             }
             let before = (inner.proof.host_state, inner.proof.discovery_paths);
             // Sweep without blocking: `next` reports host death as an error, and
@@ -440,8 +634,9 @@ impl Runtime {
             if before != (inner.proof.host_state, inner.proof.discovery_paths) {
                 let _ = files::report(&self.report, &inner.proof);
             }
-            if inner.proof.host_state != previous {
-                return inner.proof.host_state;
+            let update = inner.update();
+            if update != *previous {
+                return update;
             }
             // Never hold the runtime mutex while waiting for pipe input.
             drop(inner);
@@ -473,13 +668,56 @@ impl Runtime {
         }
     }
     fn accept(inner: &mut Inner, event: Event) {
+        let app = inner.proof.app_id;
         match event {
             Event::Discovery { paths } => inner.proof.discovery_paths = paths,
+            // Off Steam, the game's lobby, the dialog that named it and the
+            // purchase it asked about are gone; a reconnected engine reports
+            // its lobby again.
             Event::Disconnected {} if inner.proof.host_state != HostState::Lost => {
                 inner.proof.host_state = HostState::Disconnected;
+                inner.overlay = None;
+                inner.lobby = None;
+                inner.microtxn = None;
             }
             Event::Reconnected {} if inner.proof.host_state != HostState::Lost => {
                 inner.proof.host_state = HostState::Online;
+            }
+            // Only the game this host serves, and only what Steam accepts.
+            Event::OverlayRequested { app_id, request } if app_id == app && request.valid() => {
+                inner.requests += 1;
+                inner.overlay = Some(OverlayRequest {
+                    sequence: inner.requests,
+                    dialog: request,
+                });
+            }
+            Event::GameLobby { app_id, lobby_id } if app_id == app => {
+                inner.lobby = lobby_id.filter(|lobby| protocol::lobby(*lobby));
+            }
+            Event::LobbyInviteReceived {
+                inviter,
+                lobby_id,
+                app_id,
+            } if app_id == app => {
+                inner.received(inviter, protocol::InviteTarget::Lobby { lobby_id });
+            }
+            Event::RichInviteReceived {
+                friend,
+                app_id,
+                connect,
+            } if app_id == app => {
+                inner.received(friend, protocol::InviteTarget::Connect { connect });
+            }
+            Event::MicroTxnRequested { order_id, app_id } if app_id == app && order_id != 0 => {
+                inner.microtxn = Some(MicroTxn { order_id, app_id });
+            }
+            Event::MicroTxnDismissed { order_id }
+                if inner
+                    .microtxn
+                    .as_ref()
+                    .is_some_and(|pending| pending.order_id == order_id) =>
+            {
+                inner.microtxn = None;
             }
             _ => {}
         }
@@ -570,6 +808,11 @@ mod tests {
                     state: "ready".into(),
                 },
                 host,
+                overlay: None,
+                requests: 0,
+                lobby: None,
+                invites: Vec::new(),
+                microtxn: None,
                 stopped: false,
             }),
             wakeup,
@@ -592,11 +835,18 @@ mod tests {
             .write_all(b"go\n")
             .unwrap();
     }
+    fn state(state: HostState) -> HostUpdate {
+        HostUpdate::new(state)
+    }
     fn changed(runtime: &Arc<Runtime>, previous: HostState) -> HostState {
+        updated(runtime, &state(previous)).state
+    }
+    fn updated(runtime: &Arc<Runtime>, previous: &HostUpdate) -> HostUpdate {
         let (send, receive) = std::sync::mpsc::channel();
         let observer = runtime.clone();
+        let previous = previous.clone();
         let worker = std::thread::spawn(move || {
-            let _ = send.send(observer.next_state(previous));
+            let _ = send.send(observer.next_update(&previous));
         });
         let result = receive.recv_timeout(Duration::from_secs(3));
         if result.is_err() {
@@ -632,7 +882,10 @@ mod tests {
             assert_eq!(inner.proof.state, "game_started");
         }
         runtime.stopped(Some(0));
-        assert_eq!(runtime.next_state(HostState::Lost), HostState::Stopped);
+        assert_eq!(
+            runtime.next_update(&state(HostState::Lost)).state,
+            HostState::Stopped
+        );
         let proof: serde_json::Value =
             serde_json::from_slice(&std::fs::read(root.path().join("report.json")).unwrap())
                 .unwrap();
@@ -641,12 +894,360 @@ mod tests {
         assert_eq!(proof["game_exit"], 0);
     }
     #[test]
+    fn overlay_requests_of_the_game_wake_the_observer_with_a_new_sequence() {
+        let root = tempfile::tempdir().unwrap();
+        let lobby = r#"'{"event":"overlay_requested","app_id":42,"request":{"lobby_invite":{"lobby_id":109775244421126053}}}'"#;
+        let script = [
+            // Another game's request and an individual account as a lobby
+            // are ignored; the same lobby asked twice is two requests.
+            r#"read line; printf '%s\n' '{"event":"overlay_requested","app_id":7,"request":{"lobby_invite":{"lobby_id":109775244421126053}}}' '{"event":"overlay_requested","app_id":42,"request":{"lobby_invite":{"lobby_id":76561197960265729}}}' LOBBY"#,
+            "read line; printf '%s\\n' LOBBY",
+            r#"read line; printf '%s\n' '{"event":"overlay_requested","app_id":42,"request":{"connect_invite":{"connect":"+connect 10.0.0.1"}}}'"#,
+            r#"read line; printf '%s\n' '{"event":"overlay_requested","app_id":42,"request":{"web_page":{"url":"file:///etc/passwd","modal":false}}}' '{"event":"overlay_requested","app_id":42,"request":{"store":{"app_id":42,"flag":1}}}'"#,
+            r#"read line; printf '%s\n' '{"event":"disconnected"}'"#,
+            r#"read line; printf '%s\n' '{"event":"reconnected"}'"#,
+            "read line; printf '%s\\n' LOBBY",
+            "read line",
+        ]
+        .join("; ")
+        .replace("LOBBY", lobby);
+        let runtime = Arc::new(runtime(&script, root.path()));
+        runtime.started(1234).unwrap();
+        let request = |sequence, dialog: &protocol::OverlayDialog| OverlayRequest {
+            sequence,
+            dialog: dialog.clone(),
+        };
+        let invite = |sequence, target: &protocol::InviteTarget| InviteRequest {
+            sequence,
+            target: target.clone(),
+        };
+        let dialog = protocol::OverlayDialog::LobbyInvite {
+            lobby_id: 109_775_244_421_126_053,
+        };
+        let target = protocol::InviteTarget::Lobby {
+            lobby_id: 109_775_244_421_126_053,
+        };
+        signal(&runtime);
+        let first = updated(&runtime, &state(HostState::Online));
+        assert_eq!(first.state, HostState::Online);
+        assert_eq!(first.overlay, Some(request(1, &dialog)));
+        assert_eq!(first.invite, Some(invite(1, &target)));
+        signal(&runtime);
+        let second = updated(&runtime, &first);
+        assert_eq!(second.invite, Some(invite(2, &target)));
+        signal(&runtime);
+        let third = updated(&runtime, &second);
+        let connect = protocol::InviteTarget::Connect {
+            connect: "+connect 10.0.0.1".into(),
+        };
+        assert_eq!(third.invite, Some(invite(3, &connect)));
+        signal(&runtime);
+        let store = updated(&runtime, &third);
+        assert_eq!(
+            store.overlay,
+            Some(request(
+                4,
+                &protocol::OverlayDialog::Store {
+                    app_id: 42,
+                    flag: 1
+                }
+            )),
+            "a file URL is no web page"
+        );
+        assert_eq!(store.invite, None, "the store is no invite dialog");
+        signal(&runtime);
+        let disconnected = updated(&runtime, &store);
+        assert_eq!(
+            disconnected,
+            state(HostState::Disconnected),
+            "off Steam, the dialog's target is gone"
+        );
+        signal(&runtime);
+        let reconnected = updated(&runtime, &disconnected);
+        assert_eq!(reconnected, state(HostState::Online), "and it stays gone");
+        signal(&runtime);
+        let again = updated(&runtime, &reconnected);
+        assert_eq!(
+            again.invite,
+            Some(invite(5, &target)),
+            "the session's sequence keeps growing"
+        );
+        runtime.stopped(Some(0));
+        assert_eq!(
+            runtime.next_update(&again),
+            state(HostState::Stopped),
+            "nothing outlives the game"
+        );
+    }
+    const FRIEND: u64 = 76_561_197_960_265_729;
+    const OTHER: u64 = 76_561_197_960_265_730;
+    const LOBBY: u64 = 109_775_244_421_126_053;
+    /// A host that tells `events`, one batch per signal, then records every
+    /// command it gets into `input`.
+    fn recording(root: &std::path::Path, events: &[&str]) -> Arc<Runtime> {
+        let mut script: Vec<String> = events
+            .iter()
+            .map(|batch| format!("read line; printf '%s\\n' {batch}"))
+            .collect();
+        script.push(format!("cat > '{}'", root.join("input").display()));
+        let runtime = Arc::new(runtime(&script.join("; "), root));
+        runtime.started(1234).unwrap();
+        runtime
+    }
+    fn commands(root: &std::path::Path) -> Vec<protocol::HostCommand> {
+        let wire = std::fs::read(root.join("input")).unwrap();
+        let mut input = wire.as_slice();
+        let mut commands = Vec::new();
+        while let Some(command) = protocol::HostCommand::read(&mut input).unwrap() {
+            commands.push(command);
+        }
+        commands
+    }
+    /// The first update after `previous` that is `done`: a batch of events
+    /// may wake the observer more than once.
+    fn until(
+        runtime: &Arc<Runtime>,
+        previous: &HostUpdate,
+        done: impl Fn(&HostUpdate) -> bool,
+    ) -> HostUpdate {
+        let mut update = updated(runtime, previous);
+        while !done(&update) {
+            update = updated(runtime, &update);
+        }
+        update
+    }
+    fn received(friend: u64, target: protocol::InviteTarget) -> (u64, protocol::InviteTarget) {
+        (friend, target)
+    }
+    fn invites(update: &HostUpdate) -> Vec<(u64, protocol::InviteTarget)> {
+        update
+            .invites
+            .iter()
+            .map(|invite| received(invite.friend, invite.target.clone()))
+            .collect()
+    }
+    #[test]
+    fn received_invites_of_the_game_come_newest_first_once_each() {
+        let root = tempfile::tempdir().unwrap();
+        let lobby = format!(
+            r#"'{{"event":"lobby_invite_received","inviter":{FRIEND},"lobby_id":{LOBBY},"app_id":42}}'"#
+        );
+        let rich = format!(
+            r#"'{{"event":"rich_invite_received","friend":{OTHER},"app_id":42,"connect":"+connect 10.0.0.1"}}'"#
+        );
+        let ignored = [
+            format!(r#"'{{"event":"lobby_invite_received","inviter":{FRIEND},"lobby_id":{LOBBY},"app_id":7}}'"#),
+            format!(r#"'{{"event":"lobby_invite_received","inviter":{LOBBY},"lobby_id":{LOBBY},"app_id":42}}'"#),
+            format!(r#"'{{"event":"lobby_invite_received","inviter":{FRIEND},"lobby_id":{FRIEND},"app_id":42}}'"#),
+            format!(r#"'{{"event":"rich_invite_received","friend":{OTHER},"app_id":42,"connect":""}}'"#),
+        ]
+        .join(" ");
+        let many: String = (1..=20)
+            .map(|account| {
+                format!(
+                    r#"'{{"event":"rich_invite_received","friend":{},"app_id":42,"connect":"+connect 10.0.0.{account}"}}'"#,
+                    FRIEND + account
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(" ");
+        let batches = [
+            format!("{lobby} {ignored} {rich}"),
+            lobby.clone(),
+            r#"'{"event":"disconnected"}'"#.to_owned(),
+            r#"'{"event":"reconnected"}'"#.to_owned(),
+            many,
+        ];
+        let runtime = recording(
+            root.path(),
+            &batches.iter().map(String::as_str).collect::<Vec<_>>(),
+        );
+        let lobby = || received(FRIEND, protocol::InviteTarget::Lobby { lobby_id: LOBBY });
+        let rich = || {
+            received(
+                OTHER,
+                protocol::InviteTarget::Connect {
+                    connect: "+connect 10.0.0.1".into(),
+                },
+            )
+        };
+        signal(&runtime);
+        let first = until(&runtime, &state(HostState::Online), |update| {
+            update.invites.len() == 2
+        });
+        assert_eq!(invites(&first), [rich(), lobby()]);
+        signal(&runtime);
+        let second = updated(&runtime, &first);
+        assert_eq!(invites(&second), [lobby(), rich()], "again, first and once");
+        signal(&runtime);
+        let away = updated(&runtime, &second);
+        assert_eq!(
+            away,
+            state(HostState::Disconnected),
+            "off Steam, none shows"
+        );
+        signal(&runtime);
+        let back = updated(&runtime, &away);
+        assert_eq!(invites(&back), [lobby(), rich()], "Steam still holds them");
+        signal(&runtime);
+        let many = until(&runtime, &back, |update| {
+            update.invites.first().map(|invite| invite.friend) == Some(FRIEND + 20)
+        });
+        assert_eq!(many.invites.len(), MAX_RECEIVED_INVITES);
+        assert_eq!(many.invites[0].friend, FRIEND + 20);
+        assert_eq!(many.invites[15].friend, FRIEND + 5, "the oldest go");
+        // Accepting one hands it to the game and takes it off the list.
+        runtime
+            .accept_invite(
+                FRIEND + 20,
+                protocol::InviteTarget::Connect {
+                    connect: "+connect 10.0.0.20".into(),
+                },
+            )
+            .unwrap();
+        let accepted = updated(&runtime, &many);
+        assert_eq!(accepted.invites.len(), MAX_RECEIVED_INVITES - 1);
+        assert_eq!(accepted.invites[0].friend, FRIEND + 19);
+        // An invitation from Steam's chat, never told by the host.
+        runtime
+            .accept_invite(FRIEND, protocol::InviteTarget::Lobby { lobby_id: LOBBY })
+            .unwrap();
+        assert!(matches!(
+            runtime.accept_invite(LOBBY, protocol::InviteTarget::Lobby { lobby_id: LOBBY }),
+            Err(Error::InvalidSession)
+        ));
+        runtime.stopped(Some(0));
+        assert_eq!(runtime.next_update(&accepted), state(HostState::Stopped));
+        assert_eq!(
+            commands(root.path()),
+            [
+                protocol::HostCommand::AcceptRichInvite {
+                    friend: FRIEND + 20,
+                    connect: "+connect 10.0.0.20".into(),
+                },
+                protocol::HostCommand::AcceptLobbyInvite {
+                    lobby_id: LOBBY,
+                    friend: FRIEND,
+                },
+            ]
+        );
+        assert!(matches!(
+            runtime.overlay_state(true, true),
+            Err(Error::Unavailable)
+        ));
+    }
+    #[test]
+    fn only_the_purchase_the_game_waits_on_is_answered_once() {
+        let root = tempfile::tempdir().unwrap();
+        let runtime = recording(
+            root.path(),
+            &[
+                r#"'{"event":"micro_txn_requested","order_id":7,"app_id":7}' '{"event":"micro_txn_requested","order_id":11,"app_id":42}'"#,
+                r#"'{"event":"micro_txn_dismissed","order_id":12}' '{"event":"micro_txn_requested","order_id":12,"app_id":42}'"#,
+                r#"'{"event":"micro_txn_dismissed","order_id":12}'"#,
+                r#"'{"event":"micro_txn_requested","order_id":13,"app_id":42}'"#,
+            ],
+        );
+        let pending = |order_id| {
+            Some(MicroTxn {
+                order_id,
+                app_id: 42,
+            })
+        };
+        signal(&runtime);
+        let first = updated(&runtime, &state(HostState::Online));
+        assert_eq!(first.microtxn, pending(11), "only the game's own");
+        signal(&runtime);
+        let second = updated(&runtime, &first);
+        assert_eq!(second.microtxn, pending(12), "the latest replaces it");
+        signal(&runtime);
+        let dismissed = updated(&runtime, &second);
+        assert_eq!(dismissed.microtxn, None);
+        assert!(matches!(
+            runtime.authorize_microtxn(12, true),
+            Err(Error::InvalidSession)
+        ));
+        signal(&runtime);
+        let third = updated(&runtime, &dismissed);
+        assert_eq!(third.microtxn, pending(13));
+        assert!(matches!(
+            runtime.authorize_microtxn(11, true),
+            Err(Error::InvalidSession)
+        ));
+        runtime.authorize_microtxn(13, false).unwrap();
+        let answered = updated(&runtime, &third);
+        assert_eq!(answered.microtxn, None, "answered once");
+        assert!(matches!(
+            runtime.authorize_microtxn(13, true),
+            Err(Error::InvalidSession)
+        ));
+        runtime.overlay_state(true, false).unwrap();
+        runtime.overlay_state(false, false).unwrap();
+        runtime.stopped(Some(0));
+        assert_eq!(
+            commands(root.path()),
+            [
+                protocol::HostCommand::AuthorizeMicroTxn {
+                    order_id: 13,
+                    approve: false,
+                },
+                protocol::HostCommand::OverlayState {
+                    active: true,
+                    user_initiated: false,
+                },
+                protocol::HostCommand::OverlayState {
+                    active: false,
+                    user_initiated: false,
+                },
+            ]
+        );
+    }
+    #[test]
+    fn the_engines_lobby_follows_the_game_while_the_host_is_online() {
+        let root = tempfile::tempdir().unwrap();
+        let script = [
+            r#"read line; printf '%s\n' '{"event":"game_lobby","app_id":7,"lobby_id":109775244421126053}' '{"event":"game_lobby","app_id":42,"lobby_id":109775244421126053}'"#,
+            r#"read line; printf '%s\n' '{"event":"game_lobby","app_id":42,"lobby_id":109775244423207541}'"#,
+            r#"read line; printf '%s\n' '{"event":"game_lobby","app_id":42,"lobby_id":76561197960265729}'"#,
+            r#"read line; printf '%s\n' '{"event":"game_lobby","app_id":42,"lobby_id":109775244421126053}'"#,
+            r#"read line; printf '%s\n' '{"event":"disconnected"}'"#,
+            "read line",
+        ]
+        .join("; ");
+        let runtime = Arc::new(runtime(&script, root.path()));
+        runtime.started(1234).unwrap();
+        let lobby = |lobby| HostUpdate {
+            lobby,
+            ..state(HostState::Online)
+        };
+        signal(&runtime);
+        let first = updated(&runtime, &state(HostState::Online));
+        assert_eq!(first, lobby(Some(109_775_244_421_126_053)));
+        signal(&runtime);
+        let second = updated(&runtime, &first);
+        assert_eq!(second, lobby(Some(109_775_244_423_207_541)), "a new run");
+        signal(&runtime);
+        let third = updated(&runtime, &second);
+        assert_eq!(third, lobby(None), "an account is no lobby");
+        signal(&runtime);
+        let fourth = updated(&runtime, &third);
+        assert_eq!(fourth, lobby(Some(109_775_244_421_126_053)));
+        signal(&runtime);
+        assert_eq!(
+            updated(&runtime, &fourth),
+            state(HostState::Disconnected),
+            "off Steam, the game is in no lobby"
+        );
+        runtime.stopped(Some(0));
+    }
+    #[test]
     fn game_exit_wakes_observer_and_immediate_exit_cannot_restore_started_state() {
         let root = tempfile::tempdir().unwrap();
         let runtime = Arc::new(runtime("read line", root.path()));
         runtime.started(1234).unwrap();
         let observer = runtime.clone();
-        let worker = std::thread::spawn(move || observer.next_state(HostState::Online));
+        let worker =
+            std::thread::spawn(move || observer.next_update(&state(HostState::Online)).state);
         runtime.stopped(Some(0));
         assert_eq!(worker.join().unwrap(), HostState::Stopped);
         runtime.started(5678).unwrap();
@@ -661,7 +1262,10 @@ mod tests {
         let runtime = runtime("read line", root.path());
         runtime.inner.lock().unwrap().host.stop();
         runtime.started(1234).unwrap();
-        assert_eq!(runtime.next_state(HostState::Online), HostState::Lost);
+        assert_eq!(
+            runtime.next_update(&state(HostState::Online)).state,
+            HostState::Lost
+        );
         assert!(!runtime.inner.lock().unwrap().stopped);
         runtime.stopped(Some(0));
     }

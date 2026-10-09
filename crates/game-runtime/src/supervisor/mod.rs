@@ -8,6 +8,7 @@ pub(crate) mod client;
 pub mod exec;
 pub(crate) mod journal;
 pub(crate) mod ownership;
+pub(crate) mod quit;
 pub(crate) mod rosetta;
 pub(crate) mod session;
 pub(crate) mod storage;
@@ -47,6 +48,13 @@ pub struct Target {
     /// writes its diagnostics there. Without it, standard error is discarded.
     #[serde(default)]
     pub log: Option<PathBuf>,
+    /// The installation the game runs from. Force quitting it ends what still
+    /// runs from there; without one, only the game and what it started end.
+    #[serde(default)]
+    pub installation: Option<PathBuf>,
+    /// The Windows program Wine starts, which quitting asks to close.
+    #[serde(default)]
+    pub program: Option<PathBuf>,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -88,6 +96,9 @@ pub trait Provider: Clone + std::fmt::Debug + PartialEq + Eq + Send + Sync + 'st
         + DeserializeOwned
         + Send
         + Sync;
+    /// What the player may ask of the storefront's running game, such as
+    /// accepting an invitation; `NoControl` when nothing.
+    type Control: std::fmt::Debug + Serialize + DeserializeOwned + Send;
     /// The errors the storefront's callers expect. Core failures map into
     /// it; its display is a localization key.
     type Error: From<Error> + std::fmt::Debug + std::fmt::Display + Send;
@@ -197,6 +208,23 @@ pub(crate) enum Command<P: Provider> {
     Stop {
         id: String,
     },
+    /// The player's Quit: the game is asked to close its windows, and nothing
+    /// is killed. Before spawn it cancels preparation.
+    Quit {
+        id: String,
+    },
+    /// The player's Force Quit, for a game that ignored Quit: it ends now,
+    /// with whatever still runs for its installation. Before spawn it cancels
+    /// preparation.
+    ForceQuit {
+        id: String,
+    },
+    /// The player's `control` of the running game, through its storefront.
+    Control {
+        id: String,
+        account_id: P::Account,
+        control: P::Control,
+    },
     CloudChoice {
         id: String,
         account_id: P::Account,
@@ -213,6 +241,10 @@ pub(crate) enum Command<P: Provider> {
         decision_id: u64,
     },
 }
+
+/// The controls of a storefront that has none to offer.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub enum NoControl {}
 
 /// Storefront-neutral supervisor failures. Each storefront maps them to its
 /// own localization keys.

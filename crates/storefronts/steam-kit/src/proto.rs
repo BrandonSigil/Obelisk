@@ -9,6 +9,8 @@ pub(crate) struct Header {
     pub steam_id: Option<u64>,
     #[prost(int32, optional, tag = "2")]
     pub session_id: Option<i32>,
+    #[prost(uint32, optional, tag = "3")]
+    pub routing_appid: Option<u32>,
     #[prost(fixed64, optional, tag = "10")]
     pub job_source: Option<u64>,
     #[prost(fixed64, optional, tag = "11")]
@@ -66,6 +68,9 @@ pub(crate) struct Logon {
     pub remember_password: bool,
     #[prost(message, optional, tag = "11")]
     pub obfuscated_private_ip: Option<LoginAddress>,
+    /// 2 opts the session into friends chat; absent for every other session.
+    #[prost(uint32, optional, tag = "33")]
+    pub chat_mode: Option<u32>,
     #[prost(string, tag = "50")]
     pub account_name: String,
     #[prost(string, tag = "96")]
@@ -141,6 +146,12 @@ pub(crate) struct Persona {
     pub persona_state: Option<u32>,
     #[prost(uint32, optional, tag = "3")]
     pub game_played_app_id: Option<u32>,
+    #[prost(uint32, optional, tag = "4")]
+    pub game_server_ip: Option<u32>,
+    #[prost(uint32, optional, tag = "5")]
+    pub game_server_port: Option<u32>,
+    #[prost(uint32, optional, tag = "6")]
+    pub persona_state_flags: Option<u32>,
     #[prost(string, optional, tag = "15")]
     pub player_name: Option<String>,
     #[prost(bytes = "vec", optional, tag = "31")]
@@ -149,6 +160,165 @@ pub(crate) struct Persona {
     pub game_name: Option<String>,
     #[prost(fixed64, optional, tag = "56")]
     pub game_id: Option<u64>,
+    #[prost(message, repeated, tag = "71")]
+    pub rich_presence: Vec<RichPresence>,
+    #[prost(fixed64, optional, tag = "73")]
+    pub game_lobby_id: Option<u64>,
+}
+
+#[derive(Clone, PartialEq, prost::Message)]
+pub(crate) struct RichPresence {
+    #[prost(string, tag = "1")]
+    pub key: String,
+    #[prost(string, tag = "2")]
+    pub value: String,
+}
+
+/// CMsgClientChangeStatus, steammessages_clientserver_friends.proto.
+#[derive(Clone, PartialEq, prost::Message)]
+pub(crate) struct ChangeStatus {
+    #[prost(uint32, optional, tag = "1")]
+    pub persona_state: Option<u32>,
+}
+
+/// CMsgClientMMSInviteToLobby, steammessages_clientserver_mms.proto. Its
+/// app_id (1) stays empty as in Valve's UI; the header's routing_appid names the game.
+#[derive(Clone, PartialEq, prost::Message)]
+pub(crate) struct InviteToLobby {
+    #[prost(fixed64, tag = "2")]
+    pub steam_id_lobby: u64,
+    #[prost(fixed64, tag = "3")]
+    pub steam_id_user_invited: u64,
+}
+
+/// CMsgClientInviteToGame, steammessages_clientserver.proto.
+#[derive(Clone, PartialEq, prost::Message)]
+pub(crate) struct InviteToGame {
+    #[prost(fixed64, tag = "1")]
+    pub steam_id_dest: u64,
+    #[prost(fixed64, tag = "2")]
+    pub steam_id_src: u64,
+    #[prost(string, tag = "3")]
+    pub connect_string: String,
+}
+
+// FriendMessages services, steammessages_friendmessages.steamclient.proto.
+
+#[derive(Clone, PartialEq, prost::Message)]
+pub(crate) struct SendMessageRequest {
+    #[prost(fixed64, tag = "1")]
+    pub steamid: u64,
+    #[prost(int32, tag = "2")]
+    pub chat_entry_type: i32,
+    #[prost(string, tag = "3")]
+    pub message: String,
+    #[prost(bool, tag = "4")]
+    pub contains_bbcode: bool,
+    #[prost(bool, tag = "5")]
+    pub echo_to_sender: bool,
+    #[prost(string, tag = "8")]
+    pub client_message_id: String,
+}
+
+#[derive(Clone, PartialEq, prost::Message)]
+pub(crate) struct SendMessageResponse {
+    #[prost(string, tag = "1")]
+    pub modified_message: String,
+    #[prost(uint32, tag = "2")]
+    pub server_timestamp: u32,
+    #[prost(uint32, tag = "3")]
+    pub ordinal: u32,
+    #[prost(string, tag = "4")]
+    pub message_without_bb_code: String,
+}
+
+#[derive(Clone, PartialEq, prost::Message)]
+pub(crate) struct RecentMessagesRequest {
+    #[prost(fixed64, tag = "1")]
+    pub steamid1: u64,
+    #[prost(fixed64, tag = "2")]
+    pub steamid2: u64,
+    #[prost(uint32, tag = "3")]
+    pub count: u32,
+    #[prost(bool, tag = "6")]
+    pub bbcode_format: bool,
+    #[prost(uint32, tag = "8")]
+    pub time_last: u32,
+    #[prost(uint32, tag = "9")]
+    pub ordinal_last: u32,
+}
+
+#[derive(Clone, PartialEq, prost::Message)]
+pub(crate) struct RecentMessagesResponse {
+    #[prost(message, repeated, tag = "1")]
+    pub messages: Vec<FriendMessage>,
+    #[prost(bool, tag = "4")]
+    pub more_available: bool,
+}
+
+#[derive(Clone, PartialEq, prost::Message)]
+pub(crate) struct FriendMessage {
+    #[prost(uint32, tag = "1")]
+    pub accountid: u32,
+    #[prost(uint32, tag = "2")]
+    pub timestamp: u32,
+    #[prost(string, tag = "3")]
+    pub message: String,
+    #[prost(uint32, tag = "4")]
+    pub ordinal: u32,
+}
+
+#[derive(Clone, PartialEq, prost::Message)]
+pub(crate) struct ActiveSessionsRequest {
+    #[prost(uint32, tag = "1")]
+    pub lastmessage_since: u32,
+    #[prost(bool, tag = "2")]
+    pub only_sessions_with_messages: bool,
+}
+
+#[derive(Clone, PartialEq, prost::Message)]
+pub(crate) struct ActiveSessionsResponse {
+    #[prost(message, repeated, tag = "1")]
+    pub message_sessions: Vec<MessageSession>,
+}
+
+#[derive(Clone, PartialEq, prost::Message)]
+pub(crate) struct MessageSession {
+    #[prost(uint32, tag = "1")]
+    pub accountid_friend: u32,
+    #[prost(uint32, tag = "2")]
+    pub last_message: u32,
+    #[prost(uint32, tag = "3")]
+    pub last_view: u32,
+    #[prost(uint32, tag = "4")]
+    pub unread_message_count: u32,
+}
+
+/// AckMessage from the client and NotifyAckMessageEcho from Steam.
+#[derive(Clone, PartialEq, prost::Message)]
+pub(crate) struct AckMessage {
+    #[prost(fixed64, tag = "1")]
+    pub steamid_partner: u64,
+    #[prost(uint32, tag = "2")]
+    pub timestamp: u32,
+}
+
+#[derive(Clone, PartialEq, prost::Message)]
+pub(crate) struct IncomingMessage {
+    #[prost(fixed64, tag = "1")]
+    pub steamid_friend: u64,
+    #[prost(int32, tag = "2")]
+    pub chat_entry_type: i32,
+    #[prost(string, tag = "4")]
+    pub message: String,
+    #[prost(fixed32, tag = "5")]
+    pub rtime32_server_timestamp: u32,
+    #[prost(uint32, tag = "6")]
+    pub ordinal: u32,
+    #[prost(bool, tag = "7")]
+    pub local_echo: bool,
+    #[prost(string, tag = "8")]
+    pub message_no_bbcode: String,
 }
 
 #[derive(Clone, PartialEq, prost::Message)]

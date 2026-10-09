@@ -18,11 +18,13 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex as AsyncMutex;
 
 use crate::{
+    chat::{self, ChatEventSource},
     cm::{
-        AppInfo, ContentLicenses, ContentServer, DepotInfo, PICS_BATCH, SteamConnection,
+        AppInfo, ChatMode, ContentLicenses, ContentServer, DepotInfo, PICS_BATCH, SteamConnection,
         supports_platform,
     },
     content::{CancelToken, CdnAuthorization, ContentClient, ContentError, DepotDownload},
+    own_game::{GameInvite, OwnGame, OwnGameSource},
 };
 mod cloud;
 
@@ -31,9 +33,15 @@ pub use obelisk_core::{installation::TransferProgress, transfer::TransferState};
 /// Opening a game and then downloading it should not pay two PICS token and
 /// product round trips; publisher metadata rarely changes within a minute.
 const APP_INFO_TTL: Duration = Duration::from_secs(60);
+/// Valve's web chat tells a friend about typing at most this often.
+const TYPING_INTERVAL: Duration = Duration::from_secs(10);
+/// How long an invitation waits for Steam's fresh view of the account's game
+/// before trusting the last one.
+const OWN_GAME_FRESHNESS: Duration = Duration::from_secs(3);
 
 pub use crate::cm::OwnedGameInfo as OwnedGame;
 pub use crate::cm::achievements::Achievement;
+pub use crate::cm::{GameInviteKind, History, HistoryMessage, MessageSession, SentMessage};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct GamePlatforms {
@@ -174,6 +182,10 @@ pub struct Client {
     http: reqwest::Client,
     cm: SteamConnection,
     friends: crate::friends::FriendsEventSource,
+    chat: ChatEventSource,
+    own_game: OwnGameSource,
+    /// When each friend last heard that the account is typing.
+    typing: Mutex<HashMap<u64, Instant>>,
     connection_abort: tokio::task::AbortHandle,
     cloud_authorized: std::sync::atomic::AtomicBool,
     /// App and depot IDs expanded through PICS licenses, filled on first content query.
@@ -211,6 +223,9 @@ impl Client {
         Self {
             http: http_client().unwrap(),
             friends: cm.friends_source(),
+            chat: cm.chat_source(),
+            own_game: cm.own_game_source(),
+            typing: Mutex::new(HashMap::new()),
             connection_abort: cm.abort_handle(),
             cloud_authorized: std::sync::atomic::AtomicBool::new(true),
             cm,
@@ -230,12 +245,21 @@ impl Client {
         let mut cm = SteamConnection::connect(http.clone())
             .await
             .map_err(ClientConnectError::from)?;
-        cm.log_on(account_name, steam_id, refresh_token)
+        // Only this UI session joins the friends chat and shows the account
+        // Online; Cloud sessions log on without either.
+        cm.log_on(account_name, steam_id, refresh_token, ChatMode::Enabled)
+            .await
+            .map_err(ClientConnectError::from)?;
+        cm.set_online().await.map_err(ClientConnectError::from)?;
+        cm.refresh_own_game()
             .await
             .map_err(ClientConnectError::from)?;
         Ok(Self {
             http,
             friends: cm.friends_source(),
+            chat: cm.chat_source(),
+            own_game: cm.own_game_source(),
+            typing: Mutex::new(HashMap::new()),
             connection_abort: cm.abort_handle(),
             cloud_authorized: std::sync::atomic::AtomicBool::new(true),
             cm,
@@ -276,12 +300,138 @@ impl Client {
         self.friends.resolve_game_names(account_id, &names);
     }
 
+    /// Shows the account Online again, for instance after a game's own Steam
+    /// session changed its status.
+    pub async fn set_online(&self) -> Result<(), ClientError> {
+        self.cm.set_online().await.map_err(client_error)
+    }
+
+    /// Chat events after `after_sequence`; waits until there are some or the
+    /// session ends.
+    pub async fn next_chat(&self, after_sequence: u64) -> chat::ChatEvents {
+        self.chat.next(after_sequence).await
+    }
+
+    pub async fn send_message(&self, friend: u64, text: &str) -> Result<SentMessage, ClientError> {
+        let sent = self
+            .cm
+            .send_friend_message(friend, text)
+            .await
+            .map_err(client_error)?;
+        // The message ends the typing; the next keystroke may say so again.
+        self.typing
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(&friend);
+        Ok(sent)
+    }
+
+    /// Tells `friend` the account is typing, at most once per interval;
+    /// calls in between do nothing.
+    pub async fn send_typing(&self, friend: u64) -> Result<(), ClientError> {
+        {
+            let now = Instant::now();
+            let mut typing = self.typing.lock().unwrap_or_else(PoisonError::into_inner);
+            typing.retain(|_, sent| now.duration_since(*sent) < TYPING_INTERVAL);
+            if typing.contains_key(&friend) {
+                return Ok(());
+            }
+            typing.insert(friend, now);
+        }
+        let sent = self.cm.send_typing(friend).await;
+        if sent.is_err() {
+            self.typing
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .remove(&friend);
+        }
+        sent.map_err(client_error)
+    }
+
+    /// Up to `count` (at most 50) messages before `before`, a (timestamp,
+    /// ordinal) position, or the latest ones; oldest first.
+    pub async fn recent_messages(
+        &self,
+        friend: u64,
+        before: Option<(u32, u32)>,
+        count: u32,
+    ) -> Result<History, ClientError> {
+        self.cm
+            .recent_messages(friend, before, count)
+            .await
+            .map_err(client_error)
+    }
+
+    /// Conversations with messages, with their unread counts.
+    pub async fn active_sessions(&self) -> Result<Vec<MessageSession>, ClientError> {
+        self.cm.active_sessions().await.map_err(client_error)
+    }
+
+    pub async fn ack(&self, friend: u64, timestamp: u32) -> Result<(), ClientError> {
+        self.cm.ack(friend, timestamp).await.map_err(client_error)
+    }
+
+    pub async fn next_own_game(&self, after_revision: u64) -> OwnGame {
+        self.own_game.next(after_revision).await
+    }
+
+    pub async fn refresh_own_game(&self) -> Result<(), ClientError> {
+        self.cm.refresh_own_game().await.map_err(client_error)
+    }
+
+    /// Invites `friend` into the account's current game, `app_id`, the way
+    /// Steam's friend menu does, and only when that menu would offer it.
+    pub async fn invite_to_game(
+        &self,
+        friend: u64,
+        app_id: u32,
+    ) -> Result<GameInviteKind, ClientError> {
+        let received = self.own_game.received();
+        self.cm.refresh_own_game().await.map_err(client_error)?;
+        let game = self.own_game.fresh(received, OWN_GAME_FRESHNESS).await;
+        if !game.connected {
+            return Err(client_error(crate::cm::CmError::Disconnected));
+        }
+        if app_id == 0 || game.app_id != app_id {
+            return Err(client_error(crate::cm::SocialError::InviteUnavailable));
+        }
+        self.cm
+            .invite(friend, app_id, &game.invite)
+            .await
+            .map_err(client_error)
+    }
+
+    /// Invites `friend` into `invite`, which the account's running game of
+    /// `app_id` named itself, such as the lobby its own Invite button asked
+    /// Steam's overlay for. Steam may never show this session a private
+    /// lobby, so only a persona already showing another game refuses it.
+    pub async fn invite_into_game(
+        &self,
+        friend: u64,
+        app_id: u32,
+        invite: &GameInvite,
+    ) -> Result<GameInviteKind, ClientError> {
+        let game = self.own_game.snapshot();
+        if !game.connected {
+            return Err(client_error(crate::cm::CmError::Disconnected));
+        }
+        if app_id == 0 || !invite.sendable() || (game.app_id != 0 && game.app_id != app_id) {
+            return Err(client_error(crate::cm::SocialError::InviteUnavailable));
+        }
+        self.cm
+            .invite(friend, app_id, invite)
+            .await
+            .map_err(client_error)
+    }
+
     /// Works even while a download owns the CM query mutex. Observers wake
     /// before the worker is aborted, and the old socket cannot keep reconnecting.
     pub fn shutdown(&self) {
         self.cloud_authorized
             .store(false, std::sync::atomic::Ordering::Release);
         self.friends.disconnect(false);
+        self.chat.disconnect();
+        self.own_game.disconnect();
         self.connection_abort.abort();
         self.downloads.cancel();
     }

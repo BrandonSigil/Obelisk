@@ -21,6 +21,61 @@ pub struct Steam;
 pub struct Store {
     pub app_id: u32,
     pub host: HostState,
+    /// The latest invite dialog the game asked for, which Steam's overlay
+    /// would show. A record from before invitations has none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub invite: Option<crate::InviteRequest>,
+    /// The Steam lobby the game is in now, as the account's engine shows it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lobby: Option<u64>,
+    /// The latest overlay the game asked Steam for, invite dialogs included.
+    /// A record from before the overlay has none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub overlay: Option<crate::OverlayRequest>,
+    /// Invitations friends sent into the game, newest first.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub invites: Vec<crate::ReceivedInvite>,
+    /// The purchase the game waits on the player to confirm.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub microtxn: Option<crate::MicroTxn>,
+}
+impl Store {
+    /// A new session of game `app_id`, its host online.
+    pub fn new(app_id: u32) -> Self {
+        Self {
+            app_id,
+            host: HostState::Online,
+            invite: None,
+            lobby: None,
+            overlay: None,
+            invites: Vec::new(),
+            microtxn: None,
+        }
+    }
+    /// What the host tells now.
+    pub(crate) fn apply(&mut self, update: &crate::HostUpdate) {
+        self.host = update.state;
+        self.invite = update.invite.clone();
+        self.overlay = update.overlay.clone();
+        self.lobby = update.lobby;
+        self.invites = update.invites.clone();
+        self.microtxn = update.microtxn.clone();
+    }
+}
+
+/// What the player asks of a running Steam game, through its supervisor.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub enum Control {
+    /// Obelisk's overlay opened or closed over the game.
+    Overlay { active: bool, user_initiated: bool },
+    /// The player accepted `friend`'s invitation into the game.
+    AcceptInvite {
+        friend: u64,
+        target: crate::protocol::InviteTarget,
+    },
+    /// The player's answer to the purchase the game waits on.
+    AuthorizeMicroTxn { order_id: u64, approve: bool },
 }
 
 pub type Snapshot = Record<Steam>;
@@ -40,6 +95,7 @@ pub struct Request {
 impl supervisor::Provider for Steam {
     type Account = u64;
     type Store = Store;
+    type Control = Control;
     type Error = Error;
     const SUPERVISE: &'static str = "supervise";
     const CANCELLED: &'static [&'static str] = &["backend.steam.runtime.cancelled"];
@@ -131,6 +187,8 @@ fn native_target(
             working_directory: target.working_directory.clone().into(),
             environment: crate::native::environment(home),
             log: None,
+            installation: Some(install.to_owned()),
+            program: None,
         },
         steam_api,
     ))

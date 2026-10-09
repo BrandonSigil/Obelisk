@@ -313,7 +313,9 @@ func friendsTestModel(
     accountID: UInt64 = FriendsWireFixture.accountID,
     connect: (@Sendable (SteamCredentials) async throws -> any SteamSessionProtocol)? = nil,
     reconnectDelay: @escaping @Sendable (Int) async throws -> Void = { _ in try Task.checkCancellation() },
-    installations: SteamModel.MakeInstallations? = nil
+    installations: SteamModel.MakeInstallations? = nil,
+    gameSessions: SteamGameSessions = .shared,
+    chat: SteamChatModel? = nil
 ) -> SteamModel {
     SteamModel(
         directory: FileManager.default.temporaryDirectory.appending(path: UUID().uuidString),
@@ -322,7 +324,9 @@ func friendsTestModel(
         news: { _ in [] },
         beginLogin: offlineLogin,
         reconnectDelay: reconnectDelay,
-        installations: installations
+        gameSessions: gameSessions,
+        installations: installations,
+        chat: chat ?? SteamChatModel(isApplicationActive: false)
     )
 }
 

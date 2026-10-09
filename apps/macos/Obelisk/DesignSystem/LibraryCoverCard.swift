@@ -91,21 +91,26 @@ enum LibraryCardAction: Equatable {
     case busy
     /// A Transfer runs for the game.
     case transferring
-    case running
+    /// The game runs: the button ends it, as on the game's page, unless its
+    /// session cannot be asked anything, such as while it reconnects.
+    case running(GameQuitStage?)
 
-    /// What the button does for `title`, when it launches or downloads.
+    /// What the button does for `title`, when it launches, downloads or ends
+    /// the game.
     func label(title: String) -> String? {
         switch self {
         case .launch: L10n.string("ui.game.launch_named", title)
         case .download: L10n.string("ui.game.download_named", title)
-        case .busy, .transferring, .running: nil
+        case let .running(stage): stage?.label(title: title)
+        case .busy, .transferring: nil
         }
     }
 
     var isEnabled: Bool {
         switch self {
         case let .launch(enabled), let .download(enabled): enabled
-        case .busy, .transferring, .running: false
+        case let .running(stage): stage == .quit || stage == .forceQuit
+        case .busy, .transferring: false
         }
     }
 }
@@ -167,7 +172,18 @@ private struct LibraryCardButton: View {
                 .accessibilityLabel(L10n.string("ui.transfer.preparing_accessibility"))
         case .transferring:
             LibraryCardProgress(progress: progress, diameter: Self.diameter)
-        case .running:
+        case .running(.quit):
+            button(symbol: "stop.fill", colors: ObeliskStyle.quitGradient)
+        case .running(.closing):
+            ProgressView()
+                .controlSize(.small)
+                .frame(width: Self.diameter, height: Self.diameter)
+                .help(L10n.string("ui.game.closing_help"))
+                .accessibilityLabel(L10n.string("model.game.closing"))
+        case .running(.forceQuit):
+            button(symbol: "stop.fill", colors: ObeliskStyle.forceQuitGradient,
+                   help: L10n.string("ui.game.force_quit_help"))
+        case .running(nil):
             Image(systemName: "play.fill")
                 .font(.system(size: 12, weight: .bold))
                 .foregroundStyle(.green)
@@ -177,8 +193,9 @@ private struct LibraryCardButton: View {
         }
     }
 
-    /// Green launches, blue downloads, as on the game's page, through glass.
-    private func button(symbol: String, colors: [Color]) -> some View {
+    /// Green launches, blue downloads, grey quits and red forces a quit, as on
+    /// the game's page, through glass.
+    private func button(symbol: String, colors: [Color], help: String? = nil) -> some View {
         let label = action.label(title: title) ?? title
         return Button(action: perform) {
             Image(systemName: symbol)
@@ -196,7 +213,7 @@ private struct LibraryCardButton: View {
         }
         .obeliskButtonStyle(.plain)
         .disabled(!action.isEnabled)
-        .help(label)
+        .help(help ?? label)
         .accessibilityLabel(label)
     }
 }

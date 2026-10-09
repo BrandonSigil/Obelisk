@@ -125,6 +125,7 @@ pub type Client = supervisor::Client<Gog>;
 impl supervisor::Provider for Gog {
     type Account = String;
     type Store = Store;
+    type Control = supervisor::NoControl;
     type Error = Error;
     const SUPERVISE: &'static str = "gog-supervise";
     const CANCELLED: &'static [&'static str] = &["backend.gog.cancelled"];

@@ -80,6 +80,8 @@ fn native_supervisor_acknowledges_and_reports_preparation_failure_without_valve(
                 working_directory: root.0.clone(),
                 environment: Default::default(),
                 log: None,
+                installation: None,
+                program: None,
             },
         },
         &CancelToken::new(),

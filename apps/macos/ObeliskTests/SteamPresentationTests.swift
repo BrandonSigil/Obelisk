@@ -105,9 +105,9 @@ final class SteamPresentationTests: XCTestCase {
         model.open(fixtureGames[0])
         XCTAssertNil(model.details)
         XCTAssertNil(model.installations.selectedReceipt)
-        XCTAssertEqual(model.installations.primaryActionTitle, L10n.string("model.game.running"))
+        XCTAssertEqual(model.installations.primaryActionTitle, L10n.string("model.game.quit"))
         XCTAssertTrue(model.installations.primaryActionLaunches)
-        XCTAssertFalse(model.installations.primaryActionAvailable)
+        XCTAssertTrue(model.installations.primaryActionAvailable, "the running game can be quit")
         await details.release(DetailsRequest(appId: 620, language: "french"), value: fixtureDetails(620))
         try await eventually { model.details != nil }
         XCTAssertTrue(model.installations.primaryActionLaunches)
@@ -673,7 +673,7 @@ final class SteamPresentationTests: XCTestCase {
         fixture.run(.steam(appID: 620))
         try await eventually { model.gameSessions.active?.running == true }
         XCTAssertFalse(model.installations.isSynchronizingSaves)
-        XCTAssertEqual(model.installations.primaryActionTitle, L10n.string("model.game.running"))
+        XCTAssertEqual(model.installations.primaryActionTitle, L10n.string("model.game.quit"))
         fixture.sessions.fake.show(.steam(appID: 620, phase: .finalizing, cloud: .showing(.syncing)))
         fixture.sync(.exit(620, working: true))
         try await eventually { model.installations.isSynchronizingSaves }
@@ -878,12 +878,13 @@ final class SteamPresentationTests: XCTestCase {
         fixture.run(session)
         try await eventually { fixture.model.gameSessions.active?.running == true }
         XCTAssertFalse(fixture.model.installations.isLaunching)
-        XCTAssertEqual(fixture.model.installations.primaryActionTitle, L10n.string("model.game.running"))
-        XCTAssertFalse(fixture.model.installations.primaryActionAvailable)
+        XCTAssertEqual(fixture.model.installations.primaryActionTitle, L10n.string("model.game.quit"))
+        XCTAssertTrue(fixture.model.installations.primaryActionAvailable)
         XCTAssertFalse(fixture.model.installations.canUninstallSelectedGame)
         fixture.model.installations.primaryAction()
         fixture.model.installations.uninstall(fixture.receipt)
         fixture.model.installations.downloadSelected()
+        try await eventually { fixture.sessions.fake.quits == [session.id] }
         XCTAssertEqual(fixture.backend.actions.count, 1, "Only the first launch reached Rust")
         XCTAssertNotNil(fixture.model.installations.selectedReceipt)
         session.host = .disconnected
@@ -898,6 +899,7 @@ final class SteamPresentationTests: XCTestCase {
         fixture.sessions.fake.show(session)
         try await eventually { fixture.model.gameSessions.active?.host == .lost }
         XCTAssertEqual(fixture.model.gameSessionMessage, L10n.string("model.steam.gameHostLost"))
+        XCTAssertEqual(fixture.model.installations.primaryActionTitle, L10n.string("model.game.closing"))
         XCTAssertFalse(fixture.model.installations.primaryActionAvailable)
         XCTAssertTrue(fixture.model.gameSessions.isBusy)
         fixture.run(nil)
@@ -915,12 +917,13 @@ final class SteamPresentationTests: XCTestCase {
         defer { fixture.cleanUp() }
         fixture.backend.publish { $0.gate = .session(620) }
         try await eventually { sessions.active?.running == true && fixture.model.installations.gate == .session(620) }
-        XCTAssertEqual(fixture.model.installations.primaryActionTitle, L10n.string("model.game.running"))
-        XCTAssertFalse(fixture.model.installations.primaryActionAvailable)
+        XCTAssertEqual(fixture.model.installations.primaryActionTitle, L10n.string("model.game.quit"))
+        XCTAssertTrue(fixture.model.installations.primaryActionAvailable)
         XCTAssertFalse(fixture.model.installations.canUninstallSelectedGame)
         fixture.model.installations.primaryAction()
         fixture.model.installations.uninstall(fixture.receipt)
         fixture.model.installations.downloadSelected()
+        try await eventually { sessions.fake.quits.count == 1 }
         XCTAssertEqual(fixture.backend.actions, [])
         fixture.run(nil)
         try await eventually { !sessions.isBusy }

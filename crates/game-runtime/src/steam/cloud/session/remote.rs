@@ -70,6 +70,7 @@ impl CloudRemote for SteamCm {
             &credentials.account_name,
             credentials.steam_id,
             &credentials.refresh_token,
+            steam_kit::cm::ChatMode::Disabled,
         )
         .await?;
         Ok(CmConnection {

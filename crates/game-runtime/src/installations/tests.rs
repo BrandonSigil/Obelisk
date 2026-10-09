@@ -2,7 +2,6 @@
 //! test drives. Steam stands in for every storefront.
 use super::*;
 use crate::{
-    HostState,
     sessions::{Observation, Supervised},
     steam::{Download, Offer, Receipt, Steam, Store},
     supervisor::{FailureReason, Phase},
@@ -248,10 +247,7 @@ impl Game {
             state: Mutex::new(Observation {
                 id: "session".into(),
                 account: 42,
-                store: Store {
-                    app_id: 620,
-                    host: HostState::Online,
-                },
+                store: Store::new(620),
                 phase: Phase::Running,
                 finished: false,
                 failure: None,
@@ -307,7 +303,17 @@ impl Supervised<Steam> for Game {
         self.end(None);
         Ok(())
     }
+    fn quit(&self) -> Result<(), String> {
+        Ok(())
+    }
+    fn force_quit(&self) -> Result<(), String> {
+        self.end(None);
+        Ok(())
+    }
     fn begin(&self) -> Result<(), String> {
+        Ok(())
+    }
+    fn control(&self, _: &u64, _: crate::steam::Control) -> Result<(), String> {
         Ok(())
     }
     fn choose(

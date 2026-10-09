@@ -28,6 +28,10 @@ struct FakeState<P: Provider> {
     begins: usize,
     cancellations: usize,
     stops: usize,
+    /// The player's Quit and Force Quit, in order.
+    quits: Vec<&'static str>,
+    /// The player's controls, with the account each named.
+    controls: Vec<(P::Account, P::Control)>,
     revocations: Vec<P::Account>,
     choices: Vec<(P::Account, u64, Choice)>,
     rosetta_resumes: Vec<(P::Account, u64)>,
@@ -66,6 +70,8 @@ impl<P: Provider> Fake<P> {
                 begins: 0,
                 cancellations: 0,
                 stops: 0,
+                quits: Vec::new(),
+                controls: Vec::new(),
                 revocations: Vec::new(),
                 choices: Vec::new(),
                 rosetta_resumes: Vec::new(),
@@ -154,6 +160,14 @@ impl<P: Provider> Supervised<P> for Fake<P> {
         self.state.lock().unwrap().stops += 1;
         Ok(())
     }
+    fn quit(&self) -> Result<(), String> {
+        self.state.lock().unwrap().quits.push("quit");
+        Ok(())
+    }
+    fn force_quit(&self) -> Result<(), String> {
+        self.state.lock().unwrap().quits.push("force");
+        Ok(())
+    }
     fn begin(&self) -> Result<(), String> {
         let mut state = self.state.lock().unwrap();
         state.begins += 1;
@@ -183,17 +197,18 @@ impl<P: Provider> Supervised<P> for Fake<P> {
         state.revocations.push(account.clone());
         Ok(())
     }
+    fn control(&self, account: &P::Account, control: P::Control) -> Result<(), String> {
+        self.state
+            .lock()
+            .unwrap()
+            .controls
+            .push((account.clone(), control));
+        Ok(())
+    }
 }
 
 fn steam(app_id: u32, phase: Phase) -> Arc<Fake<Steam>> {
-    Fake::with(
-        42,
-        Store {
-            app_id,
-            host: HostState::Online,
-        },
-        phase,
-    )
+    Fake::with(42, Store::new(app_id), phase)
 }
 
 /// Sessions with nothing left to recover.
@@ -921,6 +936,124 @@ async fn stopping_asks_the_running_game_to_end_and_cancels_a_launch_still_prepar
     assert!(canceller.cancelled());
     drop(admission);
     assert!(!sessions.state().busy());
+}
+
+#[tokio::test]
+async fn quitting_reaches_only_the_session_named_and_cancels_a_launch_still_preparing() {
+    let sessions = sessions();
+    settled(&sessions).await;
+    let game = steam(42, Phase::Running);
+    let launch = follow(&sessions, 42, game.clone());
+    eventually(|| running(&sessions)).await;
+    let id = sessions.state().active.unwrap().id;
+    assert_eq!(
+        sessions.quit("another-session"),
+        Err(Failure::Failed(Steam::INVALID_SESSION.into()))
+    );
+    assert_eq!(
+        sessions.force_quit("another-session"),
+        Err(Failure::Failed(Steam::INVALID_SESSION.into()))
+    );
+    sessions.quit(&id).unwrap();
+    sessions.force_quit(&id).unwrap();
+    assert_eq!(game.read(|state| state.quits.clone()), ["quit", "force"]);
+    game.finish(false);
+    assert_eq!(launch.await.unwrap(), Ok(()));
+    assert!(sessions.quit(&id).is_err(), "the session ended");
+
+    let admission = sessions.admit(42, 42).unwrap();
+    let canceller = admission.canceller();
+    let id = sessions.state().active.unwrap().id;
+    sessions.force_quit(&id).unwrap();
+    assert!(canceller.cancelled());
+    drop(admission);
+    assert!(!sessions.state().busy());
+}
+
+#[tokio::test]
+async fn the_players_controls_reach_only_the_running_game_of_a_signed_in_account() {
+    use crate::{protocol::InviteTarget, steam::Control};
+    const FRIEND: u64 = 76_561_197_960_265_729;
+    const LOBBY: u64 = 109_775_244_421_126_053;
+    let refused = || Err(Failure::Failed(Steam::INVALID_SESSION.into()));
+    let sessions = sessions();
+    settled(&sessions).await;
+    let game = steam(42, Phase::Preparing);
+    let launch = follow(&sessions, 42, game.clone());
+    eventually(|| {
+        sessions
+            .state()
+            .active
+            .is_some_and(|active| active.observed)
+    })
+    .await;
+    let id = sessions.state().active.unwrap().id;
+    assert_eq!(
+        sessions.overlay_state(&id, true, false),
+        refused(),
+        "the game does not run yet"
+    );
+    game.phase(Phase::Running);
+    eventually(|| running(&sessions)).await;
+    assert_eq!(
+        sessions.overlay_state("another-session", true, false),
+        refused()
+    );
+    let lobby = InviteTarget::Lobby { lobby_id: LOBBY };
+    assert_eq!(
+        sessions.accept_invite(&id, LOBBY, lobby.clone()),
+        refused(),
+        "a lobby is no friend"
+    );
+    assert_eq!(
+        sessions.accept_invite(
+            &id,
+            FRIEND,
+            InviteTarget::Connect {
+                connect: String::new()
+            }
+        ),
+        refused()
+    );
+    sessions.overlay_state(&id, true, false).unwrap();
+    sessions.accept_invite(&id, FRIEND, lobby.clone()).unwrap();
+    sessions.authorize_microtxn(&id, 7, true).unwrap();
+    assert_eq!(
+        game.read(|state| state.controls.clone()),
+        [
+            (
+                42,
+                Control::Overlay {
+                    active: true,
+                    user_initiated: false
+                }
+            ),
+            (
+                42,
+                Control::AcceptInvite {
+                    friend: FRIEND,
+                    target: lobby
+                }
+            ),
+            (
+                42,
+                Control::AuthorizeMicroTxn {
+                    order_id: 7,
+                    approve: true
+                }
+            ),
+        ]
+    );
+    sessions.revoke(42);
+    assert_eq!(
+        sessions.overlay_state(&id, false, false),
+        refused(),
+        "the account signed out"
+    );
+    game.finish(false);
+    assert_eq!(launch.await.unwrap(), Ok(()));
+    assert_eq!(sessions.overlay_state(&id, false, false), refused());
+    assert_eq!(game.read(|state| state.controls.len()), 3);
 }
 
 /// What a scripted start returns.

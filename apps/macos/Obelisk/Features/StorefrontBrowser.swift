@@ -12,6 +12,7 @@ struct StorefrontBrowser<Model: LibraryStorefront, HeroArtwork: View, HeroLogo: 
     let libraryTitle: String
     let accountName: String?
     let avatarURL: URL?
+    let unreadCount: Int
     let scrollMemory: LibraryScrollMemory
     @ViewBuilder let heroArtwork: (Model.Game) -> HeroArtwork
     @ViewBuilder let heroLogo: (Model.Game) -> HeroLogo
@@ -31,6 +32,7 @@ struct StorefrontBrowser<Model: LibraryStorefront, HeroArtwork: View, HeroLogo: 
         libraryTitle: String,
         accountName: String?,
         avatarURL: URL? = nil,
+        unreadCount: Int = 0,
         scrollMemory: LibraryScrollMemory,
         @ViewBuilder heroArtwork: @escaping (Model.Game) -> HeroArtwork,
         @ViewBuilder heroLogo: @escaping (Model.Game) -> HeroLogo,
@@ -44,6 +46,7 @@ struct StorefrontBrowser<Model: LibraryStorefront, HeroArtwork: View, HeroLogo: 
         self.libraryTitle = libraryTitle
         self.accountName = accountName
         self.avatarURL = avatarURL
+        self.unreadCount = unreadCount
         self.scrollMemory = scrollMemory
         self.heroArtwork = heroArtwork
         self.heroLogo = heroLogo
@@ -88,6 +91,7 @@ struct StorefrontBrowser<Model: LibraryStorefront, HeroArtwork: View, HeroLogo: 
                 libraryTitle: libraryTitle,
                 accountName: accountName,
                 avatarURL: avatarURL,
+                unreadCount: unreadCount,
                 back: back
             ) {
                 accountMenu
@@ -117,6 +121,7 @@ private struct StorefrontBrowserBar<Model: LibraryStorefront, AccountMenu: View>
     let libraryTitle: String
     let accountName: String?
     let avatarURL: URL?
+    let unreadCount: Int
     let back: () -> Void
     @ViewBuilder let accountMenu: AccountMenu
 
@@ -130,7 +135,8 @@ private struct StorefrontBrowserBar<Model: LibraryStorefront, AccountMenu: View>
             game: model.selectedGame.map { game in
                 LibraryGlassBar.GameBar(title: model.title(of: game), libraryTitle: libraryTitle,
                                         showsTitle: bar.showsGameTitle, back: back)
-            }
+            },
+            unreadCount: unreadCount
         ) {
             accountMenu
         }

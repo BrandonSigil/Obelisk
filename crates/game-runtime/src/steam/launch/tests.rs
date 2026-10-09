@@ -122,7 +122,11 @@ impl Machine for FakeMac {
         // Both helpers are the suite's; the adapter chooses between them.
         write_helper(&config.helpers.join(package::HOST), &directory, &script);
         write_helper(&config.cache.join(package::SDK_INTEL), &directory, &script);
-        let runtime = crate::tests::runtime("cat >/dev/null", &config.cache);
+        // The host keeps every command it gets.
+        let runtime = crate::tests::runtime(
+            &format!("cat > '{}'", directory.join("host-input").display()),
+            &config.cache,
+        );
         fs::write(
             directory.join("host-pid"),
             runtime.inner.lock().unwrap().host.id().to_string(),
@@ -311,4 +315,135 @@ fn the_steam_api_search_never_follows_links_or_hidden_folders() {
         steam_api(&launch_target(&bundle, true)),
         Err(Error::ApiMissing)
     ));
+}
+
+#[test]
+fn a_steam_store_keeps_what_the_host_told_and_reads_records_without_it() {
+    let old: Store = serde_json::from_str(r#"{"app_id":42,"host":"online"}"#).unwrap();
+    assert_eq!(old, Store::new(42));
+    let json = serde_json::to_string(&old).unwrap();
+    assert_eq!(json, r#"{"app_id":42,"host":"online"}"#);
+    let lobby = crate::protocol::InviteTarget::Lobby {
+        lobby_id: 109_775_244_421_126_053,
+    };
+    let store = Store {
+        invite: Some(crate::InviteRequest {
+            sequence: 1,
+            target: lobby.clone(),
+        }),
+        overlay: Some(crate::OverlayRequest {
+            sequence: 1,
+            dialog: crate::protocol::OverlayDialog::LobbyInvite {
+                lobby_id: 109_775_244_421_126_053,
+            },
+        }),
+        lobby: Some(109_775_244_421_126_053),
+        invites: vec![crate::ReceivedInvite {
+            friend: FRIEND,
+            target: lobby,
+            received_at: 1_790_000_000,
+        }],
+        microtxn: Some(crate::MicroTxn {
+            order_id: 7,
+            app_id: 42,
+        }),
+        ..old
+    };
+    let json = serde_json::to_string(&store).unwrap();
+    assert_eq!(serde_json::from_str::<Store>(&json).unwrap(), store);
+    let mut terminal = store.clone();
+    terminal.apply(&crate::HostUpdate::new(HostState::Stopped));
+    assert_eq!(
+        terminal,
+        Store {
+            host: HostState::Stopped,
+            ..Store::new(42)
+        }
+    );
+}
+
+const FRIEND: u64 = 76_561_197_960_265_729;
+
+#[test]
+fn only_a_game_in_wine_is_told_steams_overlay_is_enabled() {
+    let mut native = std::collections::HashMap::new();
+    game_environment(&mut native, 42, false, Path::new("/runtime"));
+    assert_eq!(native.get("SteamAppId").map(String::as_str), Some("42"));
+    assert!(!native.contains_key("SteamOS"));
+    assert!(!native.contains_key("STEAM_COMPAT_CLIENT_INSTALL_PATH"));
+    let mut wine = std::collections::HashMap::new();
+    game_environment(&mut wine, 42, true, Path::new("/runtime"));
+    assert_eq!(wine.get("SteamOS").map(String::as_str), Some("1"));
+    assert_eq!(
+        wine.get("STEAM_COMPAT_CLIENT_INSTALL_PATH")
+            .map(String::as_str),
+        Some("/runtime")
+    );
+}
+
+#[test]
+fn the_players_controls_reach_the_host_only_while_the_game_runs() {
+    let run = launch::<SteamHarness>(script(HELD));
+    run.until(|r| r.phase == Phase::Running);
+    let overlay = || Control::Overlay {
+        active: true,
+        user_initiated: true,
+    };
+    run.client.control(&ACCOUNT, overlay()).unwrap();
+    assert!(
+        run.client.control(&(ACCOUNT + 1), overlay()).is_err(),
+        "another account"
+    );
+    assert!(
+        run.client
+            .control(
+                &ACCOUNT,
+                Control::AuthorizeMicroTxn {
+                    order_id: 9,
+                    approve: true
+                }
+            )
+            .is_err(),
+        "no purchase waits"
+    );
+    let invite = |friend| Control::AcceptInvite {
+        friend,
+        target: crate::protocol::InviteTarget::Lobby {
+            lobby_id: 109_775_244_421_126_053,
+        },
+    };
+    assert!(
+        run.client
+            .control(&ACCOUNT, invite(109_775_244_421_126_053))
+            .is_err(),
+        "a lobby invites no one"
+    );
+    run.client.control(&ACCOUNT, invite(FRIEND)).unwrap();
+    run.release("release-game");
+    run.until(Snapshot::finished);
+    assert!(
+        run.client.control(&ACCOUNT, overlay()).is_err(),
+        "the game is gone"
+    );
+    let wire = fs::read(run.directory.join("host-input")).unwrap();
+    let mut input = wire.as_slice();
+    let mut commands = Vec::new();
+    while let Some(command) = crate::protocol::HostCommand::read(&mut input).unwrap() {
+        commands.push(command);
+    }
+    use crate::protocol::HostCommand;
+    // The fake machine records presence apart.
+    assert_eq!(
+        commands,
+        [
+            HostCommand::OverlayState {
+                active: true,
+                user_initiated: true,
+            },
+            HostCommand::AcceptLobbyInvite {
+                lobby_id: 109_775_244_421_126_053,
+                friend: FRIEND,
+            },
+        ]
+    );
 }

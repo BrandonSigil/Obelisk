@@ -72,6 +72,21 @@ pub(crate) fn epic_target(
 /// Starts the window server and Neptune's render server, then the game, and
 /// ends them with it (see the script).
 const LAUNCHER: &str = include_str!("linux_engine/launch.sh");
+/// The private folder of the window server and the render server that the
+/// launcher with `pid` started, in the temporary folder of its `environment`.
+pub(crate) fn sockets(environment: &HashMap<String, String>, pid: u32) -> PathBuf {
+    let root = environment
+        .get("TMPDIR")
+        .filter(|root| !root.is_empty())
+        .map_or("/tmp", String::as_str);
+    Path::new(root).join(format!("obelisk-engine-{pid}"))
+}
+
+/// The window server socket of the launcher with `pid`.
+pub(crate) fn window_server(environment: &HashMap<String, String>, pid: u32) -> PathBuf {
+    sockets(environment, pid).join("wsd.sock")
+}
+
 /// The launcher's variable that names the game in the menu bar, the Dock and
 /// Cmd-Tab: its name in the store, or its program's file name without one.
 pub(crate) const APP_NAME: &str = "OBELISK_APP_NAME";
@@ -232,7 +247,8 @@ pub(crate) fn target(
     environment: HashMap<String, String>,
     config: &wine::Config,
 ) -> Result<Target, Error> {
-    let executable = guest_program(install, target)?;
+    let program = wine::program(install, target)?;
+    let executable = guest_path(install, &program).ok_or(Error::NotExecutable)?;
     let mut environment = environment;
     let name = match environment.get(APP_NAME) {
         Some(title) => app_name(title),
@@ -265,9 +281,11 @@ pub(crate) fn target(
     Ok(Target {
         executable: "/bin/bash".into(),
         arguments,
-        working_directory: install,
+        working_directory: install.clone(),
         environment,
         log: Some(config.log.clone()),
+        installation: Some(install),
+        program: Some(program),
     })
 }
 

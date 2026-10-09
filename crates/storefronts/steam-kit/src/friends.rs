@@ -220,7 +220,7 @@ fn label(value: &str) -> Option<String> {
     Some(value[..end].to_owned())
 }
 
-fn individual(id: u64, account_id: u64) -> bool {
+pub(crate) fn individual(id: u64, account_id: u64) -> bool {
     id != account_id && id as u32 != 0 && (id >> 52) & 0xf == 1
 }
 

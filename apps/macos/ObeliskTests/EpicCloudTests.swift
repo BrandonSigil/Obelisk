@@ -135,8 +135,8 @@ final class EpicCloudTests: XCTestCase {
         sessions.fake.show(.epic(account: "account", namespace: "sandbox", appName: "game"))
         backend.publish { $0.gate = .session("sandbox:game") }
         try await eventually { sessions.active?.phase == .running }
-        XCTAssertEqual(model.installations.primaryActionTitle, L10n.string("model.game.running"))
-        XCTAssertFalse(model.installations.primaryActionAvailable)
+        XCTAssertEqual(model.installations.primaryActionTitle, L10n.string("model.game.quit"))
+        XCTAssertTrue(model.installations.primaryActionAvailable)
         model.installations.downloadSelected()
         XCTAssertEqual(backend.actions, [], "A running game's files stay untouched")
         model.signOut()

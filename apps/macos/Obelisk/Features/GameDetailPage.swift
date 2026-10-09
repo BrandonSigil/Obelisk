@@ -113,7 +113,7 @@ struct GameDetailPage<Model: LibraryStorefront, HeroArtwork: View, Cover: View, 
                 // The part of the cover over the artwork.
                 Color.clear.frame(height: Self.coverOverlap)
                 GameLaunchRow(metrics: metrics) {
-                    GamePrimaryAction(installations: installations, game: game.id)
+                    GamePrimaryAction(installations: installations, game: game.id, gameName: name)
                     if let receipt = installations.selectedReceipt {
                         GameManagementButton(
                             gameName: name,
@@ -209,6 +209,8 @@ struct GameDetailPage<Model: LibraryStorefront, HeroArtwork: View, Cover: View, 
 private struct GamePrimaryAction<Store: InstallationStorefront>: View {
     let installations: GameInstallations<Store>
     let game: Store.GameID
+    let gameName: String
+    @State private var confirmsForceQuit = false
 
     var body: some View {
         let cancelsSynchronization = installations.cloud.canCancelSynchronization(for: game)
@@ -218,7 +220,10 @@ private struct GamePrimaryAction<Store: InstallationStorefront>: View {
             transfer: installations.transfer(for: game),
             isTransferring: installations.activeTransferGame == game,
             isAvailable: installations.primaryActionAvailable,
-            action: installations.primaryAction,
+            action: {
+                if installations.primaryQuitStage == .forceQuit { confirmsForceQuit = true }
+                else { installations.primaryAction() }
+            },
             cancel: {
                 if cancelsSynchronization { installations.cloud.cancelSynchronization(for: game) }
                 else { installations.cancelDownload() }
@@ -226,8 +231,10 @@ private struct GamePrimaryAction<Store: InstallationStorefront>: View {
             isCancellable: cancelsSynchronization
                 || (installations.isLaunching && installations.launchGame == game),
             isStep: installations.isSynchronizingSaves || installations.runtimeInstallFraction != nil,
-            stepFraction: installations.runtimeInstallFraction
+            stepFraction: installations.runtimeInstallFraction,
+            quitStage: installations.primaryQuitStage
         )
+        .forceQuitConfirmation(gameName, isPresented: $confirmsForceQuit, confirm: installations.forceQuitRunningGame)
     }
 }
 

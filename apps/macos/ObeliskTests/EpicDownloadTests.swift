@@ -137,8 +137,8 @@ final class EpicDownloadTests: XCTestCase {
             $0.gate = .session(fixture.game.libraryID)
         }
         try await eventually { fixture.model.installations.selectedSession?.running == true }
-        XCTAssertEqual(fixture.model.installations.primaryActionTitle, L10n.string("model.game.running"))
-        XCTAssertFalse(fixture.model.installations.primaryActionAvailable)
+        XCTAssertEqual(fixture.model.installations.primaryActionTitle, L10n.string("model.game.quit"))
+        XCTAssertTrue(fixture.model.installations.primaryActionAvailable)
     }
 
     func testChangingSelectionDoesNotRetargetAPendingLaunch() async throws {

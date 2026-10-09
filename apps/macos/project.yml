@@ -35,6 +35,7 @@ targets:
         SWIFT_EMIT_LOC_STRINGS: NO
         ASSETCATALOG_COMPILER_APPICON_NAME: ""
         INFOPLIST_KEY_NSHighResolutionCapable: YES
+        INFOPLIST_KEY_NSMicrophoneUsageDescription: "Games launched by Obelisk can use your microphone for in-game voice chat."
         ENABLE_APP_SANDBOX: NO
         SWIFT_INCLUDE_PATHS: "$(SRCROOT)/Obelisk/Bridge/Generated"
         HEADER_SEARCH_PATHS: "$(SRCROOT)/Obelisk/Bridge/Generated"

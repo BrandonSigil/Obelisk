@@ -106,6 +106,8 @@ struct StorefrontLibraryPage<Model: LibraryStorefront, HeroArtwork: View, HeroLo
     /// A game's cover.
     @ViewBuilder let artwork: (Model.Game) -> Artwork
     @State private var position: ScrollPosition
+    /// The running game whose Force Quit its player is asked to confirm.
+    @State private var forceQuitting: String?
     @Environment(\.storefrontBar) private var bar
 
     private static var columns: [GridItem] {
@@ -292,7 +294,7 @@ struct StorefrontLibraryPage<Model: LibraryStorefront, HeroArtwork: View, HeroLo
             installations.isUninstalling ? installations.uninstallGame : nil,
         ].compactMap { $0 })
         func action(for game: Model.Game) -> LibraryCardAction {
-            if game.id == running { return .running }
+            if game.id == running { return .running(installations.sessions.quitStage) }
             if game.id == transferring { return .transferring }
             if preparing.contains(game.id) { return .busy }
             if installed.contains(game.id) { return .launch(enabled: installations.canLaunch(game.id)) }
@@ -314,13 +316,23 @@ struct StorefrontLibraryPage<Model: LibraryStorefront, HeroArtwork: View, HeroLo
                     matchID: game.id,
                     open: { open(game, .cover) },
                     perform: {
-                        if case .launch = action { model.launchFromLibrary(game) }
-                        else { model.downloadFromLibrary(game) }
+                        switch action {
+                        case .launch: model.launchFromLibrary(game)
+                        case .running(.forceQuit): forceQuitting = title
+                        case .running: installations.endRunningGame()
+                        default: model.downloadFromLibrary(game)
+                        }
                     }
                 ) {
                     artwork(game)
                 }
             }
+        }
+        .forceQuitConfirmation(forceQuitting ?? "", isPresented: Binding(
+            get: { forceQuitting != nil },
+            set: { if !$0 { forceQuitting = nil } }
+        )) {
+            installations.forceQuitRunningGame()
         }
     }
 

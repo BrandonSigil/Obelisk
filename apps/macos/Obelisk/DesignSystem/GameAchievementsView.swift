@@ -34,7 +34,6 @@ struct GameAchievementsView: View {
     let gameName: String
     let retry: () -> Void
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.displayScale) private var displayScale
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
@@ -51,7 +50,7 @@ struct GameAchievementsView: View {
             }
             .padding(.horizontal, 24)
             .padding(.top, 24)
-            content
+            GameAchievementsList(model: model, retry: retry)
         }
         .frame(width: 560, height: 540)
         .background { AchievementSheetDismissal { dismiss() } }
@@ -80,9 +79,16 @@ struct GameAchievementsView: View {
             .help(L10n.string("ui.common.close"))
         }
     }
+}
 
-    @ViewBuilder
-    private var content: some View {
+/// A game's achievements, their load or its failure: in the game's sheet and
+/// in the overlay.
+struct GameAchievementsList: View {
+    let model: GameAchievementsModel
+    let retry: () -> Void
+    @Environment(\.displayScale) private var displayScale
+
+    var body: some View {
         if model.isLoading {
             ProgressView(L10n.string("ui.game.achievements.loading"))
                 .frame(maxWidth: .infinity, maxHeight: .infinity)

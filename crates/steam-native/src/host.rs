@@ -1,5 +1,9 @@
-use crate::{Result, abi::Engine, mach};
-use game_runtime::protocol::{Credentials, Event, Failure, HostCommand};
+use crate::{
+    Result,
+    abi::{ClientFriends, ClientUser, Engine},
+    lobby, mach, overlay, received,
+};
+use game_runtime::protocol::{Credentials, Event, Failure, HostCommand, OverlayDialog};
 use std::{
     ffi::{CStr, CString},
     fs::File,
@@ -29,10 +33,21 @@ pub fn serve(
     let presence = Arc::new(Mutex::new(None));
     let parent_closed = stop.clone();
     let requested_presence = presence.clone();
+    // The player's other commands wait for the loop, which holds the engine.
+    let (commands, player) = std::sync::mpsc::sync_channel(16);
     std::thread::spawn(move || {
         let mut input = std::io::stdin().lock();
-        while let Ok(Some(HostCommand::SetPresence { online })) = HostCommand::read(&mut input) {
-            *requested_presence.lock().unwrap() = Some(online);
+        while let Ok(Some(command)) = HostCommand::read(&mut input) {
+            match command {
+                HostCommand::SetPresence { online } => {
+                    *requested_presence.lock().unwrap() = Some(online);
+                }
+                command => {
+                    if commands.send(command).is_err() {
+                        break;
+                    }
+                }
+            }
         }
         parent_closed.store(true, Ordering::Release);
     });
@@ -71,9 +86,15 @@ pub fn serve(
     let mut applied_presence = None;
     let mut last_check = Instant::now() - Duration::from_secs(1);
     let mut paths = 0_u32;
+    let mut requests = overlay::Throttle::new(Duration::from_millis(500));
+    let mut budget = overlay::Budget::new(8, Duration::from_secs(1));
+    let mut lobbies = lobby::Lobbies::new();
+    let mut overlay_active = false;
+    let mut wanted = vec![(overlay::REQUESTED, overlay::SIZE)];
+    wanted.extend(received::CALLBACKS);
     while !stop.load(Ordering::Acquire) {
         for _ in 0..100 {
-            let Some((id, _)) = engine.callback(pipe) else {
+            let Some((id, payload)) = engine.callback_payload(pipe, &wanted) else {
                 break;
             };
             if id == 101 {
@@ -82,6 +103,40 @@ pub fn serve(
             if id == 103 {
                 observed_connection = false;
                 applied_presence = None;
+            }
+            // The supervisor accepts no event before Ready. The engine echoes
+            // the host's own overlay state (331) here too: it is not read.
+            let (true, Some(payload)) = (ready, payload) else {
+                continue;
+            };
+            if id == overlay::REQUESTED {
+                let Some(request) = overlay::request(&payload, app) else {
+                    continue;
+                };
+                // Even a coalesced request names the game's lobby now.
+                if let OverlayDialog::LobbyInvite { lobby_id } = request {
+                    lobbies.named(lobby_id);
+                }
+                if requests.admit(request.clone(), Instant::now()) {
+                    emit(
+                        output,
+                        &Event::OverlayRequested {
+                            app_id: app,
+                            request,
+                        },
+                    )?;
+                }
+            } else if let Some(event) = received::event(id, &payload, app)
+                && budget.admit(Instant::now())
+            {
+                emit(output, &event)?;
+            }
+        }
+        // The player's commands, once the game's Steam is ready. A refused
+        // call stops nothing: the game keeps its Steam.
+        while let Ok(command) = player.try_recv() {
+            if ready {
+                let _ = perform(&friends, &client, app, &mut overlay_active, command);
             }
         }
         if last_check.elapsed() >= Duration::from_millis(250) {
@@ -126,12 +181,35 @@ pub fn serve(
             if ready && !online && !disconnected {
                 emit(output, &Event::Disconnected {})?;
                 disconnected = true;
+                lobbies.forget();
             }
             if online {
                 if disconnected {
                     emit(output, &Event::Reconnected {})?;
                 }
                 disconnected = false;
+            }
+            let now = Instant::now();
+            // A refused read stops its source, never the game's Steam.
+            if ready
+                && online
+                && lobbies.due(now)
+                && let Some(lobby_id) = lobbies.read(
+                    now,
+                    || {
+                        let info = friends.game_played(expected_id)?;
+                        Ok(info.and_then(|info| lobby::current(&info, app)))
+                    },
+                    |lobby| engine.in_lobby(app, lobby),
+                )
+            {
+                emit(
+                    output,
+                    &Event::GameLobby {
+                        app_id: app,
+                        lobby_id,
+                    },
+                )?;
             }
         }
         if !ready && deadline.elapsed() > Duration::from_secs(45) {
@@ -212,5 +290,43 @@ pub fn serve(
         }
     }
     engine.release(user, pipe);
+    Ok(())
+}
+
+/// Carries out the player's `command` for game `app`. Steam's overlay always
+/// opens before it closes: the game's Steam client drops a close it never saw
+/// opened, so a close without an open, or the same state twice, is not sent.
+fn perform(
+    friends: &ClientFriends,
+    client: &ClientUser,
+    app: u32,
+    overlay_active: &mut bool,
+    command: HostCommand,
+) -> Result<()> {
+    if !command.valid() {
+        return Err("Invalid host command".into());
+    }
+    match command {
+        HostCommand::SetPresence { .. } => {}
+        HostCommand::OverlayState {
+            active,
+            user_initiated,
+        } => {
+            if active != *overlay_active {
+                // No overlay process exists: pid 0.
+                friends.overlay_state(0, app, active, user_initiated)?;
+                *overlay_active = active;
+            }
+        }
+        HostCommand::AcceptLobbyInvite { lobby_id, friend } => {
+            friends.lobby_join_requested(app, lobby_id, friend)?;
+        }
+        HostCommand::AcceptRichInvite { friend, connect } => {
+            friends.rich_presence_join_requested(app, friend, &CString::new(connect)?)?;
+        }
+        HostCommand::AuthorizeMicroTxn { order_id, approve } => {
+            client.authorize_microtxn(order_id, approve)?;
+        }
+    }
     Ok(())
 }
