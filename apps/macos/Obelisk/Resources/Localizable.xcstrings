@@ -273,23 +273,6 @@
         }
       }
     },
-    "app.addGame": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Add a game…"
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Ajouter un jeu…"
-          }
-        }
-      }
-    },
     "app.library": {
       "extractionState": "manual",
       "localizations": {
@@ -4047,176 +4030,6 @@
         }
       }
     },
-    "model.app.actionFailed": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%1$@.\n%2$@"
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%1$@.\n%2$@"
-          }
-        }
-      }
-    },
-    "model.app.add": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Add"
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Ajouter"
-          }
-        }
-      }
-    },
-    "model.app.addFailed": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Unable to add this game"
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Impossible d’ajouter ce jeu"
-          }
-        }
-      }
-    },
-    "model.app.addGame": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Add a game"
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Ajouter un jeu"
-          }
-        }
-      }
-    },
-    "model.app.chooseGame": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Choose a Mac application or a Windows executable."
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Choisissez une application Mac ou un exécutable Windows."
-          }
-        }
-      }
-    },
-    "model.app.historyFailed": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "The game started, but its play history could not be saved"
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Le jeu a été lancé, mais son historique n’a pas pu être enregistré"
-          }
-        }
-      }
-    },
-    "model.app.launchFailed": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Unable to launch this game.\n%@"
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Impossible de lancer ce jeu.\n%@"
-          }
-        }
-      }
-    },
-    "model.app.readLibrary": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Unable to read the library"
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Impossible de lire la bibliothèque"
-          }
-        }
-      }
-    },
-    "model.app.removeFailed": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Unable to remove this game"
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Impossible de retirer ce jeu"
-          }
-        }
-      }
-    },
-    "model.app.windowsUnavailable": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Launching Windows games is not available yet. Your game will remain in the library."
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Le lancement des jeux Windows n’est pas encore disponible. Votre jeu reste dans la bibliothèque."
-          }
-        }
-      }
-    },
     "model.appearance.dark": {
       "extractionState": "manual",
       "localizations": {
@@ -4761,74 +4574,6 @@
         }
       }
     },
-    "model.library.corruptLibrary": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "The catalog is damaged or its version is not supported. It has not been changed."
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Le catalogue est endommagé ou sa version n’est pas prise en charge. Il n’a pas été modifié."
-          }
-        }
-      }
-    },
-    "model.library.invalidGame": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Select an existing, accessible .app application or .exe file."
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Sélectionnez une application .app ou un fichier .exe existant et accessible."
-          }
-        }
-      }
-    },
-    "model.library.notFound": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "This game is no longer in the catalog. Refresh the library."
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Ce jeu n’est plus présent dans le catalogue. Actualisez la bibliothèque."
-          }
-        }
-      }
-    },
-    "model.library.storage": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Unable to access the library folder. Check its permissions and available space."
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "L’accès au dossier de la bibliothèque a échoué. Vérifiez ses autorisations et l’espace disponible."
-          }
-        }
-      }
-    },
     "model.platform.macos": {
       "extractionState": "manual",
       "localizations": {
@@ -4931,23 +4676,6 @@
         }
       }
     },
-    "model.section.home.subtitle": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Your recently added and played games."
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Vos jeux ajoutés et lancés récemment."
-          }
-        }
-      }
-    },
     "model.section.home.title": {
       "extractionState": "manual",
       "localizations": {
@@ -4961,57 +4689,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Accueil"
-          }
-        }
-      }
-    },
-    "model.section.other.subtitle": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "The games you add from your Mac."
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Les jeux que vous ajoutez depuis votre Mac."
-          }
-        }
-      }
-    },
-    "model.section.other.title": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Other"
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Autres"
-          }
-        }
-      }
-    },
-    "model.section.settings.subtitle": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Make %@ your gaming space."
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Faites de %@ votre espace de jeu."
           }
         }
       }
@@ -5869,23 +5546,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Masquer l’avertissement"
-          }
-        }
-      }
-    },
-    "ui.common.error": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "An error occurred"
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Une erreur est survenue"
           }
         }
       }
@@ -6856,108 +6516,6 @@
         }
       }
     },
-    "ui.game.configure_windows_engine": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Set up a compatible engine to launch Windows games."
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Configurez un moteur compatible pour lancer les jeux Windows."
-          }
-        }
-      }
-    },
-    "ui.game.engine_not_configured": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Engine not configured"
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Moteur non configuré"
-          }
-        }
-      }
-    },
-    "ui.game.kind.macos": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "macOS app"
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Application macOS"
-          }
-        }
-      }
-    },
-    "ui.game.kind.windows": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Windows executable"
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Exécutable Windows"
-          }
-        }
-      }
-    },
-    "ui.game.last_launch_app": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Last launched from %1$@"
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Dernier lancement depuis %1$@"
-          }
-        }
-      }
-    },
-    "ui.game.launch": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Launch"
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Lancer"
-          }
-        }
-      }
-    },
     "ui.game.launch_named": {
       "extractionState": "manual",
       "localizations": {
@@ -7230,40 +6788,6 @@
         }
       }
     },
-    "ui.game.ready_to_launch": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Ready to launch"
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Prêt à lancer"
-          }
-        }
-      }
-    },
-    "ui.game.remove": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Remove from library"
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Retirer de la bibliothèque"
-          }
-        }
-      }
-    },
     "ui.game.show_files": {
       "extractionState": "manual",
       "localizations": {
@@ -7373,57 +6897,6 @@
         }
       }
     },
-    "ui.library.add_game": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Add a game"
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Ajouter un jeu"
-          }
-        }
-      }
-    },
-    "ui.library.add_game_help": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Add a macOS app or a Windows executable"
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Ajouter une application macOS ou un exécutable Windows"
-          }
-        }
-      }
-    },
-    "ui.library.adding_game": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Adding game…"
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Ajout en cours…"
-          }
-        }
-      }
-    },
     "ui.library.empty": {
       "extractionState": "manual",
       "localizations": {
@@ -7499,57 +6972,6 @@
         }
       }
     },
-    "ui.library.loading": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Loading library…"
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Chargement de la bibliothèque…"
-          }
-        }
-      }
-    },
-    "ui.library.local_empty_description": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Add a game from your Mac to find it in %1$@."
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Ajoutez un jeu de votre Mac pour le retrouver dans %1$@."
-          }
-        }
-      }
-    },
-    "ui.library.local_empty_title": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Add your local games."
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Ajoutez vos jeux locaux."
-          }
-        }
-      }
-    },
     "ui.library.no_games_found": {
       "extractionState": "manual",
       "localizations": {
@@ -7563,23 +6985,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Aucun jeu trouvé"
-          }
-        }
-      }
-    },
-    "ui.library.recent_empty_title": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Your games, all in one place."
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Vos jeux, au même endroit."
           }
         }
       }
@@ -7601,40 +7006,6 @@
         }
       }
     },
-    "ui.library.search": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Search games"
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Rechercher un jeu"
-          }
-        }
-      }
-    },
-    "ui.library.search_accessibility": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Search for a game in the library"
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Rechercher un jeu dans la bibliothèque"
-          }
-        }
-      }
-    },
     "ui.library.store_accessibility": {
       "extractionState": "manual",
       "localizations": {
@@ -7648,23 +7019,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Bibliothèque %1$@"
-          }
-        }
-      }
-    },
-    "ui.library.supported_files": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "macOS apps and .exe files"
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Applications macOS et fichiers .exe"
           }
         }
       }
@@ -7767,40 +7121,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Effacer la recherche"
-          }
-        }
-      }
-    },
-    "ui.search.no_matching_games": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "No games match “%1$@”."
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Aucun jeu ne correspond à « %1$@ »."
-          }
-        }
-      }
-    },
-    "ui.search.no_results": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "No results"
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Aucun résultat"
           }
         }
       }
@@ -12600,6 +11920,217 @@
           "stringUnit": {
             "state": "translated",
             "value": "Magasin %@"
+          }
+        }
+      }
+    },
+    "ui.home.recent": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Recently played"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Joués récemment"
+          }
+        }
+      }
+    },
+    "ui.home.installed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Installed on this Mac"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Installés sur ce Mac"
+          }
+        }
+      }
+    },
+    "ui.home.installed_count": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld installed"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld installed"
+                }
+              }
+            }
+          }
+        },
+        "fr": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld installé"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld installés"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "ui.home.search_label": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Search all your libraries"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Rechercher dans toutes vos bibliothèques"
+          }
+        }
+      }
+    },
+    "ui.home.results": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Results"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Résultats"
+          }
+        }
+      }
+    },
+    "ui.home.welcome_title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Welcome to %@"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Bienvenue dans %@"
+          }
+        }
+      }
+    },
+    "ui.home.welcome_subtitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sign in to a store to find all your games here."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Connectez une boutique pour retrouver tous vos jeux ici."
+          }
+        }
+      }
+    },
+    "ui.home.shelf_previous": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Previous"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Précédent"
+          }
+        }
+      }
+    },
+    "ui.home.shelf_next": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Next"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Suivant"
+          }
+        }
+      }
+    },
+    "ui.home.signed_out": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Not signed in"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Non connecté"
+          }
+        }
+      }
+    },
+    "ui.home.sign_in_store": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sign in to %@"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Se connecter à %@"
           }
         }
       }

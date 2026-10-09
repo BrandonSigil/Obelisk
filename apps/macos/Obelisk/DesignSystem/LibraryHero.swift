@@ -3,20 +3,17 @@ import SwiftUI
 /// A game shown wide at the top of a library, its artwork reaching under the
 /// library's floating bar. Its text stays light, with its own shadow, in both
 /// appearances.
-struct LibraryHero<Artwork: View, Logo: View>: View {
+struct LibraryHero<Artwork: View, Logo: View, Actions: View>: View {
     /// The game's name, read aloud as the hero's heading.
     let title: String
     let details: [Detail]
-    let open: () -> Void
     @ViewBuilder let artwork: Artwork
     /// What shows the game's name over its artwork, if the artwork does not.
     @ViewBuilder let logo: Logo
+    /// The hero's buttons, such as `LibraryHeroOpenButton`.
+    @ViewBuilder let actions: Actions
 
-    struct Detail: Identifiable {
-        let symbol: String
-        let text: String
-        var id: String { symbol }
-    }
+    typealias Detail = LibraryHeroDetail
 
     var body: some View {
         // How far the artwork reaches up under the library's bar.
@@ -29,20 +26,27 @@ struct LibraryHero<Artwork: View, Logo: View>: View {
                         .accessibilityHidden(true)
                     HStack(spacing: 16) {
                         ForEach(details) { detail in
-                            Label(detail.text, systemImage: detail.symbol)
+                            Label {
+                                Text(detail.text)
+                            } icon: {
+                                if let symbol = detail.symbol {
+                                    Image(systemName: symbol)
+                                } else if let logo = detail.logo {
+                                    Image(logo)
+                                        .renderingMode(.template)
+                                        .resizable()
+                                        .scaledToFit()
+                                        .frame(width: 13, height: 13)
+                                }
+                            }
                         }
                     }
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(.white)
                     .shadow(color: .black.opacity(0.6), radius: 6)
-                    Button(action: open) {
-                        Label(L10n.string("ui.library.hero.open"), systemImage: "arrow.right")
-                            .labelStyle(TrailingIconLabelStyle())
-                            .font(.system(size: 13, weight: .semibold))
-                            .padding(.horizontal, 6)
+                    HStack(spacing: 12) {
+                        actions
                     }
-                    .obeliskButtonStyle(.glassProminent)
-                    .controlSize(.large)
                     .padding(.top, 4)
                 }
                 .padding(.horizontal, ObeliskStyle.contentPadding)
@@ -59,6 +63,27 @@ struct LibraryHero<Artwork: View, Logo: View>: View {
                 }
             }
             .heroFrame()
+    }
+}
+
+/// One fact of a hero's game under its logo, such as when it was last played.
+struct LibraryHeroDetail: Identifiable {
+    let text: String
+    /// An SF Symbol, or an asset such as a storefront's logo.
+    let symbol: String?
+    let logo: String?
+    var id: String { symbol ?? logo ?? text }
+
+    init(symbol: String, text: String) {
+        self.symbol = symbol
+        logo = nil
+        self.text = text
+    }
+
+    init(logo: String, text: String) {
+        symbol = nil
+        self.logo = logo
+        self.text = text
     }
 }
 
@@ -103,6 +128,48 @@ struct HeroBackdrop<Artwork: View>: View {
 private struct OpenTopRectangle: Shape {
     func path(in rect: CGRect) -> Path {
         Path(CGRect(x: rect.minX, y: rect.minY - 10_000, width: rect.width, height: rect.height + 10_000))
+    }
+}
+
+extension LibraryHero where Actions == LibraryHeroOpenButton {
+    /// A library's hero, whose button opens the game's page.
+    init(title: String, details: [Detail], open: @escaping () -> Void,
+         @ViewBuilder artwork: () -> Artwork, @ViewBuilder logo: () -> Logo) {
+        self.init(title: title, details: details, artwork: artwork, logo: logo) {
+            LibraryHeroOpenButton(prominent: true, open: open)
+        }
+    }
+}
+
+/// Opens the hero's game page: the hero's main button, or plain glass as tall
+/// as the game's action button beside it.
+struct LibraryHeroOpenButton: View {
+    let prominent: Bool
+    let open: () -> Void
+
+    var body: some View {
+        let label = Label(L10n.string("ui.library.hero.open"), systemImage: "arrow.right")
+            .labelStyle(TrailingIconLabelStyle())
+        if prominent {
+            Button(action: open) {
+                label
+                    .font(.system(size: 13, weight: .semibold))
+                    .padding(.horizontal, 6)
+            }
+            .obeliskButtonStyle(.glassProminent)
+            .controlSize(.large)
+        } else {
+            Button(action: open) {
+                label
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 20)
+                    .frame(height: 44)
+                    .modifier(StorefrontControlGlass())
+                    .contentShape(.capsule)
+            }
+            .obeliskButtonStyle(.plain)
+        }
     }
 }
 

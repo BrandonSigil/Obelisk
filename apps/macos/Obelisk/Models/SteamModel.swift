@@ -104,7 +104,11 @@ final class SteamModel {
     @ObservationIgnored private var session: (any SteamSessionProtocol)?
     @ObservationIgnored private var login: (any SteamLoginProtocol)?
     private var steamId: UInt64? { sessionCredentials?.steamId }
-    @ObservationIgnored private var started = false
+    /// The saved session's restoration; true when it ended without a newer
+    /// sign-in or sign-out.
+    @ObservationIgnored private var restoration: Task<Bool, Never>?
+    /// Whether the QR sign-in was offered once the restoration ended.
+    @ObservationIgnored private var offeredSignIn = false
     @ObservationIgnored private var generation = 0
     @ObservationIgnored private var detailGeneration = 0
     @ObservationIgnored private var detailsRequestGeneration = 0
@@ -262,27 +266,36 @@ final class SteamModel {
         filter == .macOS && libraryPlatforms.hasFailures ? L10n.string("ui.filter.platforms_unavailable") : nil
     }
 
-    func start() async {
-        guard !started else { return }
-        started = true
-        isRestoring = true
+    /// Restores the saved session once, then offers the QR sign-in when none
+    /// restored, unless `signIn` is false: Home restores every storefront at
+    /// launch, and a signed-out Steam waits for its own tab to ask Steam for a
+    /// QR code. Returns once the restoration ends.
+    func start(signIn: Bool = true) async {
+        if restoration == nil {
+            isRestoring = true
+            restoration = Task { await restore() }
+        }
+        guard await restoration?.value == true, signIn, !offeredSignIn else { return }
+        offeredSignIn = true
+        if !isConnected { beginQR() }
+    }
+
+    private func restore() async -> Bool {
         let current = generation
         do {
             if let credentials = try await keychain.load() {
-                guard current == generation else { return }
+                guard current == generation else { return false }
                 showCachedLibrary(of: credentials.steamId)
                 await connect(credentials, generation: current, persist: false)
             }
         } catch {
-            guard current == generation else { return }
+            guard current == generation else { return false }
             storageWarning = error.localizedDescription
         }
-        guard current == generation else { return }
+        guard current == generation else { return false }
         isRestoring = false
-        if !isConnected {
-            dropCachedLibrary()
-            beginQR()
-        }
+        if !isConnected { dropCachedLibrary() }
+        return true
     }
 
     /// Shows the account's last library at once, while its session connects.

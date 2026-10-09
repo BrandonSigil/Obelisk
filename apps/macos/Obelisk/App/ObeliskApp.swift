@@ -11,17 +11,19 @@ struct ObeliskApp: App {
             RootView(model: model)
                 .preferredColorScheme(model.appearance.colorScheme)
                 .environment(\.locale, L10n.locale)
-                .task { model.refresh() }
+                .task {
+                    // The test host is no Obelisk of its own: it signs no account in.
+                    if ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil {
+                        await model.restoreStorefronts()
+                    }
+                }
         }
         .defaultSize(width: 1120, height: 760)
         .windowStyle(.hiddenTitleBar)
         .windowToolbarStyle(.unified)
         .commands {
-            CommandGroup(replacing: .newItem) {
-                Button(L10n.string("app.addGame"), action: model.importGame)
-                    .keyboardShortcut("o")
-                    .disabled(model.presentedFriends != nil)
-            }
+            // Obelisk has a single window and nothing to create.
+            CommandGroup(replacing: .newItem) {}
             CommandGroup(replacing: .appSettings) {
                 Button(L10n.string("app.settings")) { model.selection = .settings }
                     .keyboardShortcut(",")

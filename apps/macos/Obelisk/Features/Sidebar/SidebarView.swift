@@ -3,14 +3,12 @@ import SwiftUI
 struct SidebarView: View {
     @Bindable var model: AppModel
 
-    private let stores: [LibrarySection] = [.steam, .epic, .gog, .other]
-
     var body: some View {
         List(selection: selection(where: { $0 != .settings })) {
             row(.home)
 
             Section {
-                ForEach(stores) { row($0) }
+                ForEach(LibrarySection.storefronts) { row($0) }
             } header: {
                 Text(L10n.string("ui.library.title"))
                     .font(.system(size: 13, weight: .semibold))

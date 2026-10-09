@@ -1,4 +1,4 @@
-import SwiftUI
+import Foundation
 
 enum GamePlatform {
     case macOS, windows
@@ -25,22 +25,5 @@ enum GamePlatform {
         case .macOS: "AppleLogo"
         case .windows: "WindowsLogo"
         }
-    }
-}
-
-/// A compact system logo that stays legible over both light and dark artwork.
-struct GamePlatformBadge: View {
-    let platform: GamePlatform
-
-    var body: some View {
-        Image(platform.logoAssetName)
-            .resizable()
-            .scaledToFit()
-            .frame(width: 15, height: 15)
-            .foregroundStyle(.white)
-            .frame(width: 30, height: 30)
-            .background(.black.opacity(0.7), in: RoundedRectangle(cornerRadius: 7))
-            .accessibilityHidden(true)
-            .allowsHitTesting(false)
     }
 }

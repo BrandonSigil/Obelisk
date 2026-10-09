@@ -1,23 +1,19 @@
 import SwiftUI
 
-/// The floating bar of a signed-in storefront: the account on the leading
-/// edge, the library's search on the trailing one. On a game's page, a back
-/// button comes before the account and the search leaves; the game's title
-/// takes the middle once its page scrolled under the bar. Its backdrop only
-/// shows while content scrolls beneath it, never over a hero's artwork.
-struct LibraryGlassBar<AccountMenu: View>: View {
-    let storeTitle: String
-    let accountName: String?
-    let avatarURL: URL?
+/// The floating bar over a library: its own controls on the leading edge,
+/// such as a storefront's account, and the library's search on the trailing
+/// one. On a game's page, a back button comes first and the search leaves;
+/// the game's title takes the middle once its page scrolled under the bar.
+/// Its backdrop only shows while content scrolls beneath it, never over a
+/// hero's artwork.
+struct LibraryGlassBar<Leading: View>: View {
     @Binding var searchText: String
+    /// Names what the search looks through, for VoiceOver.
+    let searchLabel: String
     var showsBackdrop = true
     /// The game whose page shows, if any.
     var game: GameBar?
-    /// Unread messages of the account, badged on its avatar.
-    var unreadCount = 0
-    /// Opens the storefront's own store, signed in as the account.
-    var openStore: (() -> Void)?
-    @ViewBuilder let accountMenu: AccountMenu
+    @ViewBuilder let leading: Leading
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     /// What the bar shows of a game's page.
@@ -41,21 +37,13 @@ struct LibraryGlassBar<AccountMenu: View>: View {
                         .transition(.scale(scale: 0.4).combined(with: .opacity))
                 }
 
-                LibraryAccountPill(storeTitle: storeTitle, accountName: accountName, avatarURL: avatarURL,
-                                   unreadCount: unreadCount) {
-                    accountMenu
-                }
-
-                if let openStore {
-                    StorefrontGlassButton(systemName: "storefront", label: L10n.string("ui.store.openStore", storeTitle),
-                                          identifier: "storefront-store", action: openStore)
-                }
+                leading
 
                 Spacer(minLength: 12)
                     .overlay { StorefrontWindowDragRegion() }
 
                 if game == nil {
-                    LibrarySearchField(storeTitle: storeTitle, text: $searchText)
+                    LibrarySearchField(label: searchLabel, text: $searchText)
                         .transition(.scale(scale: 0.85, anchor: .trailing).combined(with: .opacity))
                 }
             }
@@ -180,7 +168,8 @@ struct AccountAvatar: View {
 }
 
 struct LibrarySearchField: View {
-    let storeTitle: String
+    /// Names what the search looks through, for VoiceOver.
+    let label: String
     @Binding var text: String
     @FocusState private var isFocused: Bool
 
@@ -192,7 +181,7 @@ struct LibrarySearchField: View {
             TextField(L10n.string("ui.search.placeholder"), text: $text)
                 .textFieldStyle(.plain)
                 .focused($isFocused)
-                .accessibilityLabel(L10n.string("ui.search.store_library", storeTitle))
+                .accessibilityLabel(label)
                 .accessibilityIdentifier("storefront-search")
                 .onExitCommand {
                     if text.isEmpty { isFocused = false }

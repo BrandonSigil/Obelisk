@@ -34,19 +34,29 @@ struct GogView: View {
             accountName: model.accountName,
             avatarURL: model.avatarURL,
             storePage: model.storePage,
-            scrollMemory: libraryScroll
-        ) { game in
-            StorefrontArtwork(imageURL: game.headerImageUrl ?? game.imageUrl, maxPixelSize: 2048)
-        } heroLogo: { game in
-            // GOG's backgrounds leave out the game's name.
-            LibraryHeroLogo(url: nil, title: game.title)
-        } artwork: { game in
-            StorefrontArtwork(imageURL: game.imageUrl ?? game.headerImageUrl)
-        } accountMenu: {
+            scrollMemory: libraryScroll,
+            heroArtwork: Self.heroArtwork,
+            heroLogo: Self.heroLogo,
+            artwork: Self.cover
+        ) {
             accountMenu
         } gamePage: { game, context in
             GogGameDetailView(model: model, game: game, context: context)
         }
+    }
+
+    /// A game's wide artwork, as its library's hero and its page show it.
+    static func heroArtwork(_ game: GogGame) -> StorefrontArtwork {
+        StorefrontArtwork(imageURL: game.headerImageUrl ?? game.imageUrl, maxPixelSize: 2048)
+    }
+
+    /// The game's title: GOG's backgrounds leave out its name.
+    static func heroLogo(_ game: GogGame) -> LibraryHeroLogo {
+        LibraryHeroLogo(url: nil, title: game.title)
+    }
+
+    static func cover(_ game: GogGame) -> StorefrontArtwork {
+        StorefrontArtwork(imageURL: game.imageUrl ?? game.headerImageUrl)
     }
 
     @ViewBuilder private var accountMenu: some View {

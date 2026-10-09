@@ -82,6 +82,59 @@ extension LibraryStorefront {
         guard let receipt = installations.receipt(for: game.id, preferring: Store.nativePlatform) else { return }
         installations.launch(receipt)
     }
+
+    /// Runs a card's button: launches, downloads or ends the game. Force
+    /// Quit asks the player first, through `confirmForceQuit`.
+    func performCardAction(_ action: LibraryCardAction, for game: Game, confirmForceQuit: () -> Void) {
+        switch action {
+        case .launch: launchFromLibrary(game)
+        case .running(.forceQuit): confirmForceQuit()
+        case .running: installations.endRunningGame()
+        default: downloadFromLibrary(game)
+        }
+    }
+
+    /// The game a Transfer belongs to, also once it left the library.
+    func transferName(_ game: Store.GameID) -> String? {
+        games.first { $0.id == game }.map(title(of:))
+            ?? installations.receipts.first { $0.gameID == game }?.name
+    }
+}
+
+/// What each card's button shows and does, read once for a whole set of
+/// cards: these change with an operation, not with its progress.
+@MainActor
+struct LibraryCardActions<Model: LibraryStorefront> {
+    private let model: Model
+    private let installed: Set<Model.Store.GameID>
+    private let transferring: Model.Store.GameID?
+    private let running: Model.Store.GameID?
+    private let preparing: Set<Model.Store.GameID>
+
+    init(_ model: Model) {
+        let installations = model.installations
+        let session = installations.sessions.activeGame
+        self.model = model
+        installed = Set(installations.receipts.map(\.gameID))
+        transferring = installations.activeTransferGame
+        running = session.flatMap { $0.running ? $0.game : nil }
+        preparing = Set([
+            session?.game,
+            installations.isLaunching ? installations.launchGame : nil,
+            installations.isUninstalling ? installations.uninstallGame : nil,
+        ].compactMap { $0 })
+    }
+
+    func isInstalled(_ game: Model.Game) -> Bool { installed.contains(game.id) }
+
+    func callAsFunction(_ game: Model.Game) -> LibraryCardAction {
+        let installations = model.installations
+        if game.id == running { return .running(installations.sessions.quitStage) }
+        if game.id == transferring { return .transferring }
+        if preparing.contains(game.id) { return .busy }
+        if installed.contains(game.id) { return .launch(enabled: installations.canLaunch(game.id)) }
+        return .download(enabled: installations.canModify(game.id) && model.canInstallFromLibrary(game))
+    }
 }
 
 /// Where a library was scrolled, kept while a game's page replaces it. Nothing
@@ -183,7 +236,7 @@ struct StorefrontLibraryPage<Model: LibraryStorefront, HeroArtwork: View, HeroLo
             bar?.showsGameTitle = false
         }
         .safeAreaBar(edge: .bottom, spacing: 0) {
-            LibraryTransferBar(installations: model.installations, name: name)
+            LibraryTransferBar(installations: model.installations, name: model.transferName)
         }
         .ignoresSafeArea(.container, edges: .top)
     }
@@ -284,28 +337,11 @@ struct StorefrontLibraryPage<Model: LibraryStorefront, HeroArtwork: View, HeroLo
     }
 
     private func grid(_ games: [Model.Game]) -> some View {
-        // Read once for the whole grid: these change with an operation, not
-        // with its progress.
         let installations = model.installations
-        let installed = Set(installations.receipts.map(\.gameID))
-        let transferring = installations.activeTransferGame
-        let session = installations.sessions.activeGame
-        let running = session.flatMap { $0.running ? $0.game : nil }
-        let preparing = Set([
-            session?.game,
-            installations.isLaunching ? installations.launchGame : nil,
-            installations.isUninstalling ? installations.uninstallGame : nil,
-        ].compactMap { $0 })
-        func action(for game: Model.Game) -> LibraryCardAction {
-            if game.id == running { return .running(installations.sessions.quitStage) }
-            if game.id == transferring { return .transferring }
-            if preparing.contains(game.id) { return .busy }
-            if installed.contains(game.id) { return .launch(enabled: installations.canLaunch(game.id)) }
-            return .download(enabled: installations.canModify(game.id) && model.canInstallFromLibrary(game))
-        }
+        let actions = LibraryCardActions(model)
         return LazyVGrid(columns: Self.columns, alignment: .leading, spacing: 18) {
             ForEach(games) { game in
-                let action = action(for: game)
+                let action = actions(game)
                 let title = model.title(of: game)
                 LibraryCoverCard(
                     title: title,
@@ -318,14 +354,7 @@ struct StorefrontLibraryPage<Model: LibraryStorefront, HeroArtwork: View, HeroLo
                     progress: { installations.transfer(for: game.id)?.progressFraction },
                     matchID: game.id,
                     open: { open(game, .cover) },
-                    perform: {
-                        switch action {
-                        case .launch: model.launchFromLibrary(game)
-                        case .running(.forceQuit): forceQuitting = title
-                        case .running: installations.endRunningGame()
-                        default: model.downloadFromLibrary(game)
-                        }
-                    }
+                    perform: { model.performCardAction(action, for: game) { forceQuitting = title } }
                 ) {
                     artwork(game)
                 }
@@ -338,17 +367,11 @@ struct StorefrontLibraryPage<Model: LibraryStorefront, HeroArtwork: View, HeroLo
             installations.forceQuitRunningGame()
         }
     }
-
-    /// The game a Transfer belongs to, also once it left the library.
-    private func name(_ game: Model.Store.GameID) -> String? {
-        model.games.first { $0.id == game }.map(model.title(of:))
-            ?? model.installations.receipts.first { $0.gameID == game }?.name
-    }
 }
 
 /// The storefront's running Transfer. It reads the Transfer in its own body,
 /// so a progress tick redraws the pill, not the library.
-private struct LibraryTransferBar<Store: InstallationStorefront>: View {
+struct LibraryTransferBar<Store: InstallationStorefront>: View {
     let installations: GameInstallations<Store>
     let name: (Store.GameID) -> String?
 

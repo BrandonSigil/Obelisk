@@ -1,7 +1,7 @@
 import Foundation
 
 enum LibrarySection: String, CaseIterable, Identifiable, Sendable {
-    case home, steam, epic, gog, other, settings
+    case home, steam, epic, gog, settings
 
     var id: String { rawValue }
 
@@ -11,7 +11,6 @@ enum LibrarySection: String, CaseIterable, Identifiable, Sendable {
         case .steam: L10n.string("model.section.steam.title")
         case .epic: L10n.string("model.section.epic.title")
         case .gog: L10n.string("model.section.gog.title")
-        case .other: L10n.string("model.section.other.title")
         case .settings: L10n.string("model.section.settings.title")
         }
     }
@@ -22,7 +21,6 @@ enum LibrarySection: String, CaseIterable, Identifiable, Sendable {
         case .steam: "gearshape.2"
         case .epic: "shield.lefthalf.filled"
         case .gog: "square.stack.3d.up"
-        case .other: "square.grid.2x2"
         case .settings: "gearshape"
         }
     }
@@ -36,14 +34,23 @@ enum LibrarySection: String, CaseIterable, Identifiable, Sendable {
         }
     }
 
-    var subtitle: String {
+    /// What the storefront's library holds, in a line; nil for Obelisk's own sections.
+    var storeSubtitle: String? {
         switch self {
-        case .home: L10n.string("model.section.home.subtitle")
         case .steam: L10n.string("model.section.steam.subtitle")
         case .epic: L10n.string("model.section.epic.subtitle")
         case .gog: L10n.string("model.section.gog.subtitle")
-        case .other: L10n.string("model.section.other.subtitle")
-        case .settings: L10n.string("model.section.settings.subtitle", AppIdentity.name)
+        default: nil
+        }
+    }
+
+    /// The storefront's full name, as "Epic Games"; nil for Obelisk's own sections.
+    var storeName: String? {
+        switch self {
+        case .steam: L10n.string("ui.store.steam")
+        case .epic: L10n.string("ui.store.epic")
+        case .gog: L10n.string("ui.store.gog")
+        default: nil
         }
     }
 

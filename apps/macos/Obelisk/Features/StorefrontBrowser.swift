@@ -138,19 +138,22 @@ private struct StorefrontBrowserBar<Model: LibraryStorefront, AccountMenu: View>
 
     var body: some View {
         LibraryGlassBar(
-            storeTitle: storeTitle,
-            accountName: accountName,
-            avatarURL: avatarURL,
             searchText: $model.searchText,
+            searchLabel: L10n.string("ui.search.store_library", storeTitle),
             showsBackdrop: bar.showsBackdrop,
             game: model.selectedGame.map { game in
                 LibraryGlassBar.GameBar(title: model.title(of: game), libraryTitle: libraryTitle,
                                         showsTitle: bar.showsGameTitle, back: back)
-            },
-            unreadCount: model.unreadCount,
-            openStore: openStore
+            }
         ) {
-            accountMenu
+            LibraryAccountPill(storeTitle: storeTitle, accountName: accountName, avatarURL: avatarURL,
+                               unreadCount: model.unreadCount) {
+                accountMenu
+            }
+            if let openStore {
+                StorefrontGlassButton(systemName: "storefront", label: L10n.string("ui.store.openStore", storeTitle),
+                                      identifier: "storefront-store", action: openStore)
+            }
         }
     }
 }
@@ -215,6 +218,9 @@ struct GameTransition {
     /// Where the open game came from; nil when it opened without motion, as
     /// when a test or a refresh opens it.
     let source: GameOpeningSource?
+    /// The card the page's cover flies from and back to, when its game alone
+    /// does not name it: on Home, a game may show on more than one shelf.
+    var card: AnyHashable? = nil
 }
 
 extension EnvironmentValues {
@@ -240,7 +246,8 @@ struct GameCoverMatch: ViewModifier {
         if let transition {
             content.matchedGeometryEffect(
                 // While motion is reduced, the page only fades in and out.
-                id: ID(game: game, matched: !isPage || (transition.source == .cover && !reduceMotion)),
+                id: ID(game: isPage ? transition.card ?? game : game,
+                       matched: !isPage || (transition.source == .cover && !reduceMotion)),
                 in: transition.namespace
             )
         } else {

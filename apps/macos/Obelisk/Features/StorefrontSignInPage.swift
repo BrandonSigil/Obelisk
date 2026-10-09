@@ -3,8 +3,6 @@ import SwiftUI
 
 /// A storefront's sign-in, shared by every store: its logo and title over a
 /// wall of covers, then a glass card holding the store's own way to sign in.
-/// Dark in both appearances, as a library's hero: a light veil turns the
-/// covers grey.
 struct StorefrontSignInPage<Card: View>: View {
     private let section: LibrarySection
     private let title: String
@@ -31,16 +29,33 @@ struct StorefrontSignInPage<Card: View>: View {
     }
 
     var body: some View {
+        SignInPage(section: section, title: title, subtitle: subtitle) {
+            StorefrontWarningBanner(message: $warning)
+                .frame(maxWidth: cardWidth)
+            card
+                .padding(30)
+                .frame(maxWidth: cardWidth)
+                .modifier(StorefrontPanelGlass(cornerRadius: 26))
+        }
+    }
+}
+
+/// A sign-in page: its section's emblem, title and subtitle over a wall of
+/// covers in the section's colors, then what the page offers, centered while
+/// it fits. Dark in both appearances, as a library's hero: a light veil turns
+/// the covers grey.
+struct SignInPage<Content: View>: View {
+    let section: LibrarySection
+    let title: String
+    let subtitle: String
+    @ViewBuilder let content: Content
+
+    var body: some View {
         GeometryReader { geometry in
             ScrollView {
                 VStack(spacing: 26) {
                     header
-                    StorefrontWarningBanner(message: $warning)
-                        .frame(maxWidth: cardWidth)
-                    card
-                        .padding(30)
-                        .frame(maxWidth: cardWidth)
-                        .modifier(StorefrontPanelGlass(cornerRadius: 26))
+                    content
                 }
                 .padding(.horizontal, ObeliskStyle.contentPadding)
                 // Clear of the title bar band, and centered while it fits.
@@ -49,7 +64,11 @@ struct StorefrontSignInPage<Card: View>: View {
             }
             .scrollBounceBehavior(.basedOnSize)
         }
-        .background { SignInBackdrop(section: section) }
+        .background {
+            CoverWallBackdrop(section: section)
+                .backgroundExtensionEffect()
+                .ignoresSafeArea()
+        }
         .overlay(alignment: .top) {
             StorefrontWindowDragRegion()
                 .frame(height: ObeliskStyle.titleBarHeight)
@@ -76,48 +95,43 @@ struct StorefrontSignInPage<Card: View>: View {
     }
 }
 
-/// The store's logo on glass.
-private struct SignInEmblem: View {
+/// The store's logo on glass, or Home's obelisk.
+struct SignInEmblem: View {
     let section: LibrarySection
+    var size: CGFloat = 76
+
+    private var logo: String? {
+        section == .home ? "MenuBarIcon" : section.logoAssetName
+    }
 
     var body: some View {
         Group {
-            if let logo = section.logoAssetName {
+            if let logo {
                 Image(logo)
                     .renderingMode(.template)
                     .resizable()
                     .scaledToFit()
-                    .frame(width: 38, height: 38)
+                    .frame(width: size / 2, height: size / 2)
             } else {
                 Image(systemName: section.symbol)
-                    .font(.system(size: 30, weight: .medium))
+                    .font(.system(size: size * 0.4, weight: .medium))
             }
         }
         .foregroundStyle(.primary)
-        .frame(width: 76, height: 76)
-        .modifier(StorefrontPanelGlass(cornerRadius: 22))
+        .frame(width: size, height: size)
+        .modifier(StorefrontPanelGlass(cornerRadius: size * 0.29))
         .accessibilityHidden(true)
     }
 }
 
-/// A wall of covers under the store's colors, reaching under the sidebar.
-private struct SignInBackdrop: View {
+/// A wall of covers under the store's colors, or Obelisk's own.
+struct CoverWallBackdrop: View {
     let section: LibrarySection
-
-    private var tint: Color {
-        switch section {
-        case .steam: Color(red: 0.40, green: 0.75, blue: 0.96)
-        case .epic: Color(white: 0.85)
-        case .gog: Color(red: 0.69, green: 0.43, blue: 0.91)
-        default: ObeliskStyle.accent
-        }
-    }
 
     var body: some View {
         let base = Color(white: 0.07)
+        let tint = section.tint
         SignInCoverWall(glow: base.mix(with: tint, by: 0.45), soft: base.mix(with: tint, by: 0.16), base: base, tintOpacity: 0.3)
-            .backgroundExtensionEffect()
-            .ignoresSafeArea()
     }
 }
 

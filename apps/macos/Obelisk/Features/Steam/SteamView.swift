@@ -25,18 +25,28 @@ struct SteamView: View {
             accountName: model.displayName,
             avatarURL: model.avatarURL,
             storePage: model.storePage,
-            scrollMemory: libraryScroll
-        ) { game in
-            SteamArtwork(appId: game.appId, portrait: false, iconHash: game.iconHash)
-        } heroLogo: { game in
-            LibraryHeroLogo(url: SteamArtwork.logoURL(appId: game.appId), title: game.name)
-        } artwork: { game in
-            SteamArtwork(appId: game.appId, iconHash: game.iconHash)
-        } accountMenu: {
+            scrollMemory: libraryScroll,
+            heroArtwork: Self.heroArtwork,
+            heroLogo: Self.heroLogo,
+            artwork: Self.cover
+        ) {
             accountMenu
         } gamePage: { game, context in
             SteamGameDetailView(model: model, game: game, context: context)
         }
+    }
+
+    /// A game's wide artwork, as its library's hero and its page show it.
+    static func heroArtwork(_ game: SteamGame) -> SteamArtwork {
+        SteamArtwork(appId: game.appId, portrait: false, iconHash: game.iconHash)
+    }
+
+    static func heroLogo(_ game: SteamGame) -> LibraryHeroLogo {
+        LibraryHeroLogo(url: SteamArtwork.logoURL(appId: game.appId), title: game.name)
+    }
+
+    static func cover(_ game: SteamGame) -> SteamArtwork {
+        SteamArtwork(appId: game.appId, iconHash: game.iconHash)
     }
 
     @ViewBuilder private var accountMenu: some View {

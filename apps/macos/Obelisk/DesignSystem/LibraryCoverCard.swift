@@ -8,6 +8,8 @@ struct LibraryCoverCard<Artwork: View>: View {
     let accessibilityLabel: String
     var help: String?
     var platform: GamePlatform?
+    /// The storefront the game belongs to, where a page mixes several.
+    var store: LibrarySection?
     let action: LibraryCardAction
     /// The Transfer's progress, read by the button alone so a progress tick
     /// redraws only the button.
@@ -42,9 +44,16 @@ struct LibraryCoverCard<Artwork: View>: View {
                 Button(label, action: perform)
             }
         }
+        .overlay(alignment: .topLeading) {
+            if hovered, let logo = store?.logoAssetName {
+                LibraryCardBadge(logo: logo)
+                    .padding(Self.barInset + 2)
+                    .transition(.opacity.combined(with: .scale(scale: 0.85)))
+            }
+        }
         .overlay(alignment: .topTrailing) {
             if hovered, let platform {
-                LibraryPlatformBadge(platform: platform)
+                LibraryCardBadge(logo: platform.logoAssetName)
                     .padding(Self.barInset + 2)
                     .transition(.opacity.combined(with: .scale(scale: 0.85)))
             }
@@ -249,12 +258,12 @@ private struct LibraryCardProgress: View {
     }
 }
 
-/// The system a game runs on, in glass over its cover.
-struct LibraryPlatformBadge: View {
-    let platform: GamePlatform
+/// The system a game runs on, or its storefront, in glass over its cover.
+struct LibraryCardBadge: View {
+    let logo: String
 
     var body: some View {
-        Image(platform.logoAssetName)
+        Image(logo)
             .renderingMode(.template)
             .resizable()
             .scaledToFit()

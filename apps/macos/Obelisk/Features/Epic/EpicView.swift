@@ -33,20 +33,28 @@ struct EpicView: View {
             libraryTitle: L10n.string("ui.epic.library"),
             accountName: model.accountName,
             storePage: model.storePage,
-            scrollMemory: libraryScroll
-        ) { game in
-            StorefrontArtwork(imageURL: game.headerImageUrl ?? game.imageUrl, maxPixelSize: 2048)
-        } heroLogo: { _ in
-            // Epic's wide artwork already shows the game's name, and its
-            // catalog rarely has a separate logo.
-            EmptyView()
-        } artwork: { game in
-            StorefrontArtwork(imageURL: game.imageUrl)
-        } accountMenu: {
+            scrollMemory: libraryScroll,
+            heroArtwork: Self.heroArtwork,
+            heroLogo: Self.heroLogo,
+            artwork: Self.cover
+        ) {
             accountMenu
         } gamePage: { game, context in
             EpicGameDetailView(model: model, game: game, context: context)
         }
+    }
+
+    /// A game's wide artwork, as its library's hero and its page show it.
+    static func heroArtwork(_ game: EpicGame) -> StorefrontArtwork {
+        StorefrontArtwork(imageURL: game.headerImageUrl ?? game.imageUrl, maxPixelSize: 2048)
+    }
+
+    /// None: Epic's wide artwork already shows the game's name, and its
+    /// catalog rarely has a separate logo.
+    static func heroLogo(_ game: EpicGame) -> EmptyView { EmptyView() }
+
+    static func cover(_ game: EpicGame) -> StorefrontArtwork {
+        StorefrontArtwork(imageURL: game.imageUrl)
     }
 
     @ViewBuilder private var accountMenu: some View {

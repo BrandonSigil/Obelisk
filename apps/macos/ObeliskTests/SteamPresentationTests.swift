@@ -994,6 +994,32 @@ final class SteamPresentationTests: XCTestCase {
     }
 
     @MainActor
+    func testHomeRestoresWithoutAQRCodeAndTheSteamTabAsksForOneOnce() async throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        let starts = FixtureLoginStarts()
+        let login = FixtureLogin(qrUrl: "https://s.team/q/fixture", failsPolling: true)
+        let model = SteamModel(directory: root, keychain: FixtureCredentialStore(value: nil),
+                               connect: { _ in throw SteamError.Failure(reason: "Fixture: nothing to restore") },
+                               news: { _ in [] },
+                               beginLogin: { start in await starts.record(start); return login },
+                               localeIdentifier: "fr-FR")
+
+        // Home restores every storefront at launch: no saved session, and no QR code.
+        await model.start(signIn: false)
+        XCTAssertFalse(model.isRestoring)
+        XCTAssertNil(model.qrURL)
+        var recorded = await starts.all
+        XCTAssertEqual(recorded, [], "Restoring alone never asks Steam for a QR code")
+
+        // The Steam tab then offers the QR sign-in, once however often it opens.
+        await model.start()
+        await model.start()
+        try await eventually { model.qrURL != nil }
+        recorded = await starts.all
+        XCTAssertEqual(recorded, [.qr])
+    }
+
+    @MainActor
     func testCredentialSignInSubmitsSteamGuardAndConnects() async throws {
         let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         let details = FixtureResponses<DetailsRequest, SteamGameDetails>()

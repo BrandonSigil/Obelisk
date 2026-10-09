@@ -29,6 +29,18 @@ enum ObeliskStyle {
     }
 }
 
+extension LibrarySection {
+    /// The storefront's color, or Obelisk's violet for its own sections.
+    var tint: Color {
+        switch self {
+        case .steam: Color(red: 0.40, green: 0.75, blue: 0.96)
+        case .epic: Color(white: 0.85)
+        case .gog: Color(red: 0.69, green: 0.43, blue: 0.91)
+        default: ObeliskStyle.accent
+        }
+    }
+}
+
 struct ObeliskPalette {
     let colorScheme: ColorScheme
 

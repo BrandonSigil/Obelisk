@@ -11,16 +11,12 @@ struct RootView: View {
                 .navigationSplitViewColumnWidth(ObeliskStyle.sidebarWidth)
         } detail: {
             Group {
-                if model.selection == .settings {
-                    SettingsView(model: model)
-                } else if model.selection == .steam {
-                    SteamView(model: model.steam)
-                } else if model.selection == .epic {
-                    EpicView(model: model.epic)
-                } else if model.selection == .gog {
-                    GogView(model: model.gog)
-                } else {
-                    LibraryView(model: model)
+                switch model.selection {
+                case .home: HomeView(model: model)
+                case .steam: SteamView(model: model.steam)
+                case .epic: EpicView(model: model.epic)
+                case .gog: GogView(model: model.gog)
+                case .settings: SettingsView(model: model)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -57,7 +53,6 @@ struct RootView: View {
         .sheet(isPresented: Binding(get: { model.presentedPrompt != nil }, set: { _ in })) {
             prompt.interactiveDismissDisabled()
         }
-        .errorAlert(L10n.string("ui.common.error"), message: $model.errorMessage)
     }
 
     @ViewBuilder private var prompt: some View {
