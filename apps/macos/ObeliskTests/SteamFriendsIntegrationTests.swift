@@ -315,13 +315,15 @@ func friendsTestModel(
     reconnectDelay: @escaping @Sendable (Int) async throws -> Void = { _ in try Task.checkCancellation() },
     installations: SteamModel.MakeInstallations? = nil,
     gameSessions: SteamGameSessions = .shared,
-    chat: SteamChatModel? = nil
+    chat: SteamChatModel? = nil,
+    webCookies: @escaping @Sendable (any SteamSessionProtocol) async throws -> [SteamWebCookie] = { _ in [] }
 ) -> SteamModel {
     SteamModel(
         directory: FileManager.default.temporaryDirectory.appending(path: UUID().uuidString),
         keychain: FriendsTestCredentials(accountID: accountID),
         connect: connect ?? { _ in session! },
         news: { _ in [] },
+        webCookies: webCookies,
         beginLogin: offlineLogin,
         reconnectDelay: reconnectDelay,
         gameSessions: gameSessions,

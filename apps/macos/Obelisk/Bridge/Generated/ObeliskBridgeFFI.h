@@ -790,6 +790,11 @@ uint64_t uniffi_obelisk_bridge_fn_method_steamsession_profile(uint64_t ptr
 void uniffi_obelisk_bridge_fn_method_steamsession_shutdown(uint64_t ptr, RustCallStatus *_Nonnull out_status
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_OBELISK_BRIDGE_FN_METHOD_STEAMSESSION_WEB_COOKIES
+#define UNIFFI_FFIDEF_UNIFFI_OBELISK_BRIDGE_FN_METHOD_STEAMSESSION_WEB_COOKIES
+uint64_t uniffi_obelisk_bridge_fn_method_steamsession_web_cookies(uint64_t ptr
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_OBELISK_BRIDGE_FN_METHOD_STEAMSESSION_ACK
 #define UNIFFI_FFIDEF_UNIFFI_OBELISK_BRIDGE_FN_METHOD_STEAMSESSION_ACK
 uint64_t uniffi_obelisk_bridge_fn_method_steamsession_ack(uint64_t ptr, uint64_t friend_steam_id, uint32_t timestamp
@@ -1798,6 +1803,12 @@ uint16_t uniffi_obelisk_bridge_checksum_method_steamsession_profile(void
 #ifndef UNIFFI_FFIDEF_UNIFFI_OBELISK_BRIDGE_CHECKSUM_METHOD_STEAMSESSION_SHUTDOWN
 #define UNIFFI_FFIDEF_UNIFFI_OBELISK_BRIDGE_CHECKSUM_METHOD_STEAMSESSION_SHUTDOWN
 uint16_t uniffi_obelisk_bridge_checksum_method_steamsession_shutdown(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_OBELISK_BRIDGE_CHECKSUM_METHOD_STEAMSESSION_WEB_COOKIES
+#define UNIFFI_FFIDEF_UNIFFI_OBELISK_BRIDGE_CHECKSUM_METHOD_STEAMSESSION_WEB_COOKIES
+uint16_t uniffi_obelisk_bridge_checksum_method_steamsession_web_cookies(void
     
 );
 #endif

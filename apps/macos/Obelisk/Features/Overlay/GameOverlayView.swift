@@ -64,7 +64,7 @@ struct GameOverlayView: View {
                                         back: { overlay.back() }, retry: overlay.retryAchievements)
             }
         case .webPage(let url):
-            OverlayWebPage(url: url, close: { overlay.back() })
+            OverlayWebPage(url: url, cookies: { await overlay.webCookies(for: url) }, close: { overlay.back() })
                 .id(url)
         case .home, .friends, .invite, .user, .store, .microTxn:
             OverlayHome(overlay: overlay)
@@ -274,6 +274,8 @@ private struct OverlayAchievementsPage: View {
 /// outlives the page.
 private struct OverlayWebPage: View {
     let url: URL
+    /// Sign the page in, such as Steam's store as the player's account.
+    let cookies: () async -> [HTTPCookie]
     let close: () -> Void
     @State private var browser: OverlayBrowser?
 
@@ -318,7 +320,7 @@ private struct OverlayWebPage: View {
             .clipShape(UnevenRoundedRectangle(bottomLeadingRadius: 24, bottomTrailingRadius: 24))
         }
         .modifier(StorefrontPanelGlass(cornerRadius: 24))
-        .task(id: url) { browser = OverlayBrowser(url: url) }
+        .task(id: url) { browser = OverlayBrowser(url: url, cookies: await cookies()) }
         .accessibilityIdentifier("game-overlay-web-page")
     }
 }
@@ -332,14 +334,20 @@ final class OverlayBrowser: NSObject, WKNavigationDelegate, WKUIDelegate {
     private(set) var canGoBack = false
     private(set) var isLoading = true
 
-    init(url: URL) {
+    /// Its cookies last as long as the page: its data store keeps nothing,
+    /// and Obelisk signs a Steam page in again each time it opens.
+    init(url: URL, cookies: [HTTPCookie] = []) {
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = .nonPersistent()
         webView = WKWebView(frame: .zero, configuration: configuration)
         super.init()
         webView.navigationDelegate = self
         webView.uiDelegate = self
-        webView.load(URLRequest(url: url))
+        let store = configuration.websiteDataStore.httpCookieStore
+        Task { [webView] in
+            for cookie in cookies { await store.setCookie(cookie) }
+            webView.load(URLRequest(url: url))
+        }
     }
 
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {

@@ -294,6 +294,22 @@ impl SteamSession {
         self.client.next_friends(after_revision).await.into()
     }
 
+    /// Cookies that sign Steam's sites in as this session's account.
+    pub async fn web_cookies(&self) -> Result<Vec<SteamWebCookie>, SteamError> {
+        Ok(self
+            .client
+            .web_cookies()
+            .await?
+            .into_iter()
+            .map(|cookie| SteamWebCookie {
+                domain: cookie.domain.into(),
+                name: cookie.name.into(),
+                value: cookie.value,
+                http_only: cookie.http_only,
+            })
+            .collect())
+    }
+
     /// Also wakes UniFFI futures, whose Swift wrappers do not cancel Rust awaits.
     pub fn shutdown(&self) {
         self.client.shutdown();
@@ -413,6 +429,15 @@ pub async fn steam_news(app_id: u32) -> Result<Vec<SteamNews>, SteamError> {
             source: item.source,
         })
         .collect())
+}
+
+// A login cookie signs Steam's sites in: deliberately no Debug.
+#[derive(Clone, uniffi::Record)]
+pub struct SteamWebCookie {
+    pub domain: String,
+    pub name: String,
+    pub value: String,
+    pub http_only: bool,
 }
 
 #[cfg(test)]

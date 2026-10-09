@@ -592,6 +592,25 @@ impl SteamConnection {
         self.profile.borrow().received()
     }
 
+    /// A web access token for the logged-on account, asked over this
+    /// authenticated connection as Valve's client asks it.
+    pub(crate) async fn web_access_token(
+        &self,
+        refresh_token: &str,
+    ) -> Result<(u64, String), CmError> {
+        let response: proto::WebAccessTokenResponse = self
+            .service_for(
+                "Authentication.GenerateAccessTokenForApp#1",
+                &proto::WebAccessTokenRequest {
+                    refresh_token: refresh_token.into(),
+                    steam_id: self.steam_id,
+                },
+                "backend.steam.cm.action.signIn",
+            )
+            .await?;
+        Ok((self.steam_id, response.access_token))
+    }
+
     pub(crate) async fn request_profile(&self) -> Result<ProfileRequest, CmError> {
         self.ensure_logged_on()?;
         let request = ProfileRequest::new(self.profile.clone())?;

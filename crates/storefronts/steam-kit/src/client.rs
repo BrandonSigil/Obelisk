@@ -195,6 +195,8 @@ pub struct Client {
     /// Lets a cancellation reach a download still picking its build, before
     /// its Transfer exists.
     picking: Mutex<Option<CancelToken>>,
+    /// The session's own token, to ask Steam for web access tokens.
+    refresh_token: String,
 }
 
 impl Client {
@@ -233,6 +235,7 @@ impl Client {
             app_infos: Mutex::new(HashMap::new()),
             downloads: Transfers::default(),
             picking: Mutex::new(None),
+            refresh_token: String::new(),
         }
     }
 
@@ -267,7 +270,24 @@ impl Client {
             app_infos: Mutex::new(HashMap::new()),
             downloads: Transfers::default(),
             picking: Mutex::new(None),
+            refresh_token: refresh_token.into(),
         })
+    }
+
+    /// Cookies that sign Steam's sites in as the account, through a web
+    /// access token this session asks for.
+    pub async fn web_cookies(&self) -> Result<Vec<crate::auth::WebCookie>, ClientError> {
+        let (steam_id, token) = self
+            .cm
+            .web_access_token(&self.refresh_token)
+            .await
+            .map_err(client_error)?;
+        if crate::auth::steam_id_from_refresh_token(&token).ok() != Some(steam_id) {
+            return Err(client_error(crate::cm::CmError::Protocol(
+                "backend.steam.cm.invalidSession".into(),
+            )));
+        }
+        Ok(crate::auth::web_cookies(steam_id, &token))
     }
 
     pub async fn next_friends(&self, after_revision: u64) -> crate::friends::FriendsSnapshot {

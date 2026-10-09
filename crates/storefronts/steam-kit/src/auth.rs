@@ -14,12 +14,23 @@ use std::time::Duration;
 use base64::{Engine as _, engine::general_purpose};
 use prost::Message;
 use reqwest::{Client, Method};
-use rsa::{BigUint, Pkcs1v15Encrypt, RsaPublicKey, rand_core::OsRng, traits::PublicKeyParts};
+use rsa::{
+    BigUint, Pkcs1v15Encrypt, RsaPublicKey,
+    rand_core::{OsRng, RngCore},
+    traits::PublicKeyParts,
+};
 use thiserror::Error;
 
 const AUTH_API: &str = "https://api.steampowered.com/IAuthenticationService";
 const MAX_RESPONSE_BYTES: usize = 1_048_576;
 const MAX_TOKEN_BYTES: usize = 32_768;
+/// Steam's sites that read its login cookie.
+const WEB_DOMAINS: [&str; 4] = [
+    "store.steampowered.com",
+    "steamcommunity.com",
+    "help.steampowered.com",
+    "checkout.steampowered.com",
+];
 
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum AuthError {
@@ -167,6 +178,57 @@ pub fn steam_id_from_refresh_token(token: &str) -> Result<u64, AuthError> {
         .filter(|value| valid_individual_steam_id(*value))
         .ok_or(AuthError::Protocol)?;
     Ok(steam_id)
+}
+
+/// Cookies that sign Steam's sites in with a web access token, as Valve's
+/// client signs its own browser in, and as SteamKit's `webLogOn` does. Ask
+/// the token over the account's CM session (`Client::web_cookies`): Steam
+/// refuses a client refresh token sent to its Web API for one, and revoked
+/// the session the one time Obelisk tried.
+pub fn web_cookies(steam_id: u64, access_token: &str) -> Vec<WebCookie> {
+    let login = format!("{steam_id}%7C%7C{access_token}");
+    let session = random_hex::<12>();
+    let client_session = random_hex::<8>();
+    WEB_DOMAINS
+        .into_iter()
+        .flat_map(|domain| {
+            [
+                WebCookie {
+                    domain,
+                    name: "steamLoginSecure",
+                    value: login.clone(),
+                    http_only: true,
+                },
+                WebCookie {
+                    domain,
+                    name: "sessionid",
+                    value: session.clone(),
+                    http_only: false,
+                },
+                WebCookie {
+                    domain,
+                    name: "clientsessionid",
+                    value: client_session.clone(),
+                    http_only: false,
+                },
+            ]
+        })
+        .collect()
+}
+
+fn random_hex<const BYTES: usize>() -> String {
+    let mut bytes = [0u8; BYTES];
+    OsRng.fill_bytes(&mut bytes);
+    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+/// A cookie that signs Steam's sites in. Its value is a secret: no `Debug`.
+pub struct WebCookie {
+    pub domain: &'static str,
+    pub name: &'static str,
+    pub value: String,
+    /// Steam's pages read `sessionid` from script; the login stays out of reach.
+    pub http_only: bool,
 }
 
 fn valid_individual_steam_id(value: u64) -> bool {

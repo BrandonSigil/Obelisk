@@ -567,3 +567,18 @@ pub(crate) struct OwnedGame {
     #[prost(int32, tag = "19")]
     pub playtime_disconnected: i32,
 }
+
+/// Authentication.GenerateAccessTokenForApp#1, over the account's CM session.
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub(crate) struct WebAccessTokenRequest {
+    #[prost(string, tag = "1")]
+    pub refresh_token: String,
+    #[prost(fixed64, tag = "2")]
+    pub steam_id: u64,
+}
+
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub(crate) struct WebAccessTokenResponse {
+    #[prost(string, tag = "1")]
+    pub access_token: String,
+}

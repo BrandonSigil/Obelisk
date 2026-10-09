@@ -319,6 +319,35 @@ final class GameOverlaySteamTests: XCTestCase {
         XCTAssertEqual(overlay.request, .microTxn(orderId: 5))
     }
 
+    @MainActor
+    func testSteamPagesAreSignedInAsTheAccount() async throws {
+        let session = ChatBridgeTestSession(games: [Self.peak])
+        let requests = WebSignInRequests()
+        let model = friendsTestModel(connect: { _ in session }, webCookies: { asked in
+            requests.record(asked === session ? Self.account : 0)
+            return [SteamWebCookie(domain: "store.steampowered.com", name: "steamLoginSecure",
+                                   value: "\(Self.account)%7C%7Caccess", httpOnly: true)]
+        })
+        let fixture = OverlayFixture(steam: model)
+        let store = URL(string: "https://store.steampowered.com/app/620")!
+        let noCookies = await fixture.overlay.webCookies(for: store)
+        XCTAssertTrue(noCookies.isEmpty, "Signed out")
+
+        await model.start()
+        try await eventually { model.friends?.connection == .connected }
+        let cookies = await fixture.overlay.webCookies(for: store)
+        XCTAssertEqual(cookies.map(\.name), ["steamLoginSecure"])
+        XCTAssertEqual(cookies.first?.domain, "store.steampowered.com")
+        XCTAssertEqual(cookies.first?.value, "\(Self.account)%7C%7Caccess")
+        XCTAssertEqual(cookies.first?.isSecure, true)
+        XCTAssertEqual(cookies.first?.isHTTPOnly, true)
+        let other = await fixture.overlay.webCookies(for: URL(string: "https://store.epicgames.com/")!)
+        XCTAssertTrue(other.isEmpty, "Another site's page")
+        let community = await fixture.overlay.webCookies(for: URL(string: "https://steamcommunity.com/app/620")!)
+        XCTAssertEqual(community.count, 1)
+        XCTAssertEqual(requests.accounts, [Self.account], "Kept a while")
+    }
+
     // MARK: Fixture
 
     /// A signed-in account's overlay, with PEAK in front once it runs.
@@ -343,4 +372,11 @@ final class GameOverlaySteamTests: XCTestCase {
         state.lobbyId = lobby
         return state
     }
+}
+
+private final class WebSignInRequests: @unchecked Sendable {
+    private let lock = NSLock()
+    private var recorded: [UInt64] = []
+    var accounts: [UInt64] { lock.withLock { recorded } }
+    func record(_ account: UInt64) { lock.withLock { recorded.append(account) } }
 }

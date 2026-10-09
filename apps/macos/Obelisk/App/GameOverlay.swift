@@ -457,6 +457,16 @@ final class GameOverlayController: GameOverlayPresenting {
         return steam.friends?.friends.first { $0.steamID == steamId }
     }
 
+    /// Cookies that sign a Steam page in as the Steam account; a page of
+    /// another site gets none.
+    func webCookies(for url: URL) async -> [HTTPCookie] {
+        guard let host = url.host(), Self.steamSites.contains(where: { host == $0 || host.hasSuffix("." + $0) })
+        else { return [] }
+        return await steam.webCookies()
+    }
+
+    private static let steamSites = ["steampowered.com", "steamcommunity.com"]
+
     nonisolated static func storeURL(appId: UInt32) -> URL {
         URL(string: appId == 0 ? "https://store.steampowered.com/" : "https://store.steampowered.com/app/\(appId)")!
     }

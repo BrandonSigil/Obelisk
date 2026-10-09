@@ -73,6 +73,9 @@ final class SteamModel {
     @ObservationIgnored private let keychain: any SteamCredentialStore
     @ObservationIgnored private let connectSession: @Sendable (SteamCredentials) async throws -> any SteamSessionProtocol
     @ObservationIgnored private let loadNews: @Sendable (UInt32) async throws -> [SteamNews]
+    @ObservationIgnored private let loadWebCookies: @Sendable (any SteamSessionProtocol) async throws -> [SteamWebCookie]
+    /// The account's web sign-in, kept a while: its access token lasts a day.
+    @ObservationIgnored private var webSignIn: (steamId: UInt64, date: Date, cookies: [HTTPCookie])?
     @ObservationIgnored private let beginLogin: @Sendable (SteamLoginStart) async throws -> any SteamLoginProtocol
     let gameSessions: SteamGameSessions
     /// The Rust installations of the account a session signed in, whose
@@ -128,6 +131,9 @@ final class SteamModel {
         keychain: any SteamCredentialStore = SteamKeychain(),
         connect: (@Sendable (SteamCredentials) async throws -> any SteamSessionProtocol)? = nil,
         news: @escaping @Sendable (UInt32) async throws -> [SteamNews] = { try await steamNews(appId: $0) },
+        webCookies: @escaping @Sendable (any SteamSessionProtocol) async throws -> [SteamWebCookie] = {
+            try await $0.webCookies()
+        },
         beginLogin: @escaping @Sendable (SteamLoginStart) async throws -> any SteamLoginProtocol = { start in
             switch start {
             case .qr:
@@ -150,6 +156,7 @@ final class SteamModel {
         self.keychain = keychain
         self.connectSession = connect ?? { [libraryCache] in try await SteamSessionConnection.connect($0, library: libraryCache) }
         self.loadNews = news
+        self.loadWebCookies = webCookies
         self.beginLogin = beginLogin
         self.language = steamLanguage(locale: localeIdentifier)
         self.preferences = preferences
@@ -815,6 +822,7 @@ final class SteamModel {
         invitations.follow(session: nil, invites: [])
         purchase.follow(session: nil, microTxn: nil)
         sessionCredentials = nil
+        webSignIn = nil
         friends = nil
         isFriendsPresented = false
         loginTask?.cancel()
@@ -935,6 +943,30 @@ final class SteamModel {
     }
 
     /// The account's installations, behind `session`.
+    /// Cookies that sign Steam's sites in as the connected account, as the
+    /// Steam client signs its own browser in: its session asks Steam for a web
+    /// access token. None while signed out, or when Steam refuses them: the
+    /// page then shows signed out.
+    func webCookies() async -> [HTTPCookie] {
+        guard let credentials = sessionCredentials, let session else { return [] }
+        if let webSignIn, webSignIn.steamId == credentials.steamId, webSignIn.date.timeIntervalSinceNow > -3_600 {
+            return webSignIn.cookies
+        }
+        guard let loaded = try? await loadWebCookies(session),
+              sessionCredentials?.steamId == credentials.steamId else { return [] }
+        let cookies = loaded.compactMap(Self.cookie)
+        webSignIn = (credentials.steamId, Date(), cookies)
+        return cookies
+    }
+
+    nonisolated static func cookie(_ cookie: SteamWebCookie) -> HTTPCookie? {
+        var properties: [HTTPCookiePropertyKey: Any] = [
+            .domain: cookie.domain, .path: "/", .name: cookie.name, .value: cookie.value, .secure: "TRUE",
+        ]
+        if cookie.httpOnly { properties[HTTPCookiePropertyKey("HttpOnly")] = "TRUE" }
+        return HTTPCookie(properties: properties)
+    }
+
     private func connectInstallations(_ session: any SteamSessionProtocol, credentials: SteamCredentials) {
         let receipts = directory.appending(path: "steam-installations-\(credentials.steamId).json")
         installations.connect(account: credentials.steamId,

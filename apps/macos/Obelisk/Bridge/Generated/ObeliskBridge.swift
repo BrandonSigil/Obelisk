@@ -3174,6 +3174,11 @@ public protocol SteamSessionProtocol: AnyObject, Sendable {
     func shutdown() 
     
     /**
+     * Cookies that sign Steam's sites in as this session's account.
+     */
+    func webCookies() async throws  -> [SteamWebCookie]
+    
+    /**
      * Marks the conversation read up to `timestamp` in every session.
      */
     func ack(friendSteamId: UInt64, timestamp: UInt32) async throws 
@@ -3509,6 +3514,25 @@ open func shutdown()  {try! rustCall() {
             self.uniffiCloneHandle(),uniffiCallStatus
     )
 }
+}
+    
+    /**
+     * Cookies that sign Steam's sites in as this session's account.
+     */
+open func webCookies()async throws  -> [SteamWebCookie]  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_obelisk_bridge_fn_method_steamsession_web_cookies(
+                        self.uniffiCloneHandle()
+                )
+            },
+            pollFunc: ffi_obelisk_bridge_rust_future_poll_rust_buffer,
+            completeFunc: ffi_obelisk_bridge_rust_future_complete_rust_buffer,
+            freeFunc: ffi_obelisk_bridge_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterSequenceTypeSteamWebCookie.lift,
+            errorHandler: FfiConverterTypeSteamError_lift
+        )
 }
     
     /**
@@ -8271,6 +8295,68 @@ public func FfiConverterTypeSteamSentMessage_lower(_ value: SteamSentMessage) ->
 }
 
 
+public struct SteamWebCookie: Equatable, Hashable {
+    public var domain: String
+    public var name: String
+    public var value: String
+    public var httpOnly: Bool
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(domain: String, name: String, value: String, httpOnly: Bool) {
+        self.domain = domain
+        self.name = name
+        self.value = value
+        self.httpOnly = httpOnly
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension SteamWebCookie: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeSteamWebCookie: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SteamWebCookie {
+        return
+            try SteamWebCookie(
+                domain: FfiConverterString.read(from: &buf), 
+                name: FfiConverterString.read(from: &buf), 
+                value: FfiConverterString.read(from: &buf), 
+                httpOnly: FfiConverterBool.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: SteamWebCookie, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.domain, into: &buf)
+        FfiConverterString.write(value.name, into: &buf)
+        FfiConverterString.write(value.value, into: &buf)
+        FfiConverterBool.write(value.httpOnly, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSteamWebCookie_lift(_ buf: RustBuffer) throws -> SteamWebCookie {
+    return try FfiConverterTypeSteamWebCookie.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSteamWebCookie_lower(_ value: SteamWebCookie) -> RustBuffer {
+    return FfiConverterTypeSteamWebCookie.lower(value)
+}
+
+
 public struct StorefrontInfo: Equatable, Hashable {
     public var id: StorefrontId
     public var displayName: String
@@ -12356,6 +12442,31 @@ fileprivate struct FfiConverterSequenceTypeSteamReceivedInvite: FfiConverterRust
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterSequenceTypeSteamWebCookie: FfiConverterRustBuffer {
+    typealias SwiftType = [SteamWebCookie]
+
+    public static func write(_ value: [SteamWebCookie], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeSteamWebCookie.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [SteamWebCookie] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [SteamWebCookie]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeSteamWebCookie.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterSequenceTypeStorefrontInfo: FfiConverterRustBuffer {
     typealias SwiftType = [StorefrontInfo]
 
@@ -12861,6 +12972,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_obelisk_bridge_checksum_method_steamsession_shutdown() != 361) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_obelisk_bridge_checksum_method_steamsession_web_cookies() != 46146) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_obelisk_bridge_checksum_method_steamsession_ack() != 61905) {

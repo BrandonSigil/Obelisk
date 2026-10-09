@@ -352,6 +352,45 @@ async fn http_missing_result_and_oversized_response_are_rejected() {
     server.join().unwrap();
 }
 
+#[test]
+fn web_cookies_sign_every_steam_site_in_with_one_session() {
+    let cookies = web_cookies(TEST_STEAM_ID, "access");
+    assert_eq!(cookies.len(), 3 * WEB_DOMAINS.len());
+    let first = |name| {
+        cookies
+            .iter()
+            .find(|cookie| cookie.name == name)
+            .unwrap()
+            .value
+            .clone()
+    };
+    for domain in WEB_DOMAINS {
+        let named = |name| {
+            cookies
+                .iter()
+                .find(|cookie| cookie.domain == domain && cookie.name == name)
+                .unwrap()
+        };
+        assert_eq!(
+            named("steamLoginSecure").value,
+            format!("{TEST_STEAM_ID}%7C%7Caccess")
+        );
+        assert!(named("steamLoginSecure").http_only);
+        assert_eq!(
+            named("sessionid").value,
+            first("sessionid"),
+            "One session for every site"
+        );
+        assert_eq!(named("sessionid").value.len(), 24);
+        assert!(!named("sessionid").http_only);
+        assert_eq!(named("clientsessionid").value.len(), 16);
+    }
+    assert_ne!(
+        first("sessionid"),
+        web_cookies(TEST_STEAM_ID, "access")[1].value
+    );
+}
+
 #[tokio::test]
 #[ignore = "Contacts Steam to create an unauthenticated QR request; no account or password required"]
 async fn live_qr_handshake_and_pending_poll() {
