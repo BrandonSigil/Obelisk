@@ -260,6 +260,19 @@ enum ProfileState {
     Disconnected,
 }
 
+impl ProfileState {
+    fn received(&self) -> Option<AccountProfile> {
+        match self {
+            Self::Ready(snapshot)
+                if snapshot.name_revision != 0 && snapshot.avatar_revision != 0 =>
+            {
+                Some(snapshot.value.clone())
+            }
+            _ => None,
+        }
+    }
+}
+
 impl Default for ProfileState {
     fn default() -> Self {
         Self::Ready(ProfileSnapshot::default())
@@ -572,6 +585,13 @@ impl SteamConnection {
 
     /// Requests only the connected account's profile. Persona updates have their
     /// own channel so this optional query never drains content or license replies.
+    /// The profile Steam last told this connection, when it told both its
+    /// name and its avatar. Steam tells them unasked as the account goes
+    /// online, and may then leave a request for them unanswered.
+    pub(crate) fn received_profile(&self) -> Option<AccountProfile> {
+        self.profile.borrow().received()
+    }
+
     pub(crate) async fn request_profile(&self) -> Result<ProfileRequest, CmError> {
         self.ensure_logged_on()?;
         let request = ProfileRequest::new(self.profile.clone())?;
@@ -1949,6 +1969,27 @@ mod tests {
             ProfileRequest::new(receiver).unwrap().receive().await,
             Err(CmError::Disconnected)
         ));
+    }
+
+    #[test]
+    fn a_profile_steam_told_unasked_serves_once_it_has_name_and_avatar() {
+        let mut state = ProfileState::default();
+        assert_eq!(state.received(), None);
+        for flag in [PERSONA_PLAYER_NAME, PERSONA_PRESENCE] {
+            assert_eq!(state.received(), None, "Only part of it so far");
+            let update = persona_profile(
+                &persona_body(TEST_STEAM_ID, flag, &[0xab; 20]),
+                TEST_STEAM_ID,
+            )
+            .unwrap();
+            if let ProfileState::Ready(snapshot) = &mut state {
+                snapshot.apply(update);
+            }
+        }
+        let profile = state.received().unwrap();
+        assert_eq!(profile.display_name.as_deref(), Some("Zagrios"));
+        assert!(profile.avatar_url.is_some());
+        assert_eq!(ProfileState::Disconnected.received(), None);
     }
 
     #[tokio::test]

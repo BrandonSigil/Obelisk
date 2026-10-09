@@ -438,12 +438,19 @@ impl Client {
 
     pub async fn profile(&self) -> Result<crate::cm::AccountProfile, ClientError> {
         // Include any wait for a content query in the optional profile's budget.
-        tokio::time::timeout(crate::cm::PROFILE_TIMEOUT, async {
+        let fresh = tokio::time::timeout(crate::cm::PROFILE_TIMEOUT, async {
             let request = self.cm.request_profile().await.map_err(client_error)?;
             request.receive().await.map_err(client_error)
         })
-        .await
-        .map_err(|_| client_error(crate::cm::CmError::Timeout))?
+        .await;
+        match fresh {
+            Ok(profile) => profile,
+            // Steam may not answer for what it already told.
+            Err(_) => self
+                .cm
+                .received_profile()
+                .ok_or_else(|| client_error(crate::cm::CmError::Timeout)),
+        }
     }
 
     /// Ordered by the CM layer: most recently played first, then name.
