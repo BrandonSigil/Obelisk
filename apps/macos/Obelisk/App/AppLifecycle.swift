@@ -123,7 +123,7 @@ struct AppMenuBarLabel: View {
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
-        Image(systemName: "sailboat.fill")
+        Image("MenuBarIcon")
             .onAppear {
                 lifecycle.libraryCache = model.libraryCache
                 model.overlay.showLibrary = { lifecycle.show() }

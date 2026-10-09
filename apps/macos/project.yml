@@ -33,7 +33,7 @@ targets:
         GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_KEY_CFBundleDevelopmentRegion: en
         SWIFT_EMIT_LOC_STRINGS: NO
-        ASSETCATALOG_COMPILER_APPICON_NAME: ""
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         INFOPLIST_KEY_NSHighResolutionCapable: YES
         INFOPLIST_KEY_NSMicrophoneUsageDescription: "Games launched by Obelisk can use your microphone for in-game voice chat."
         ENABLE_APP_SANDBOX: NO

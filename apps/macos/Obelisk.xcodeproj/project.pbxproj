@@ -78,6 +78,7 @@
 		A89CEDB9D81E67E0B302B247 /* FriendsPresentationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BAD9C2A5BE6895E16311595E /* FriendsPresentationTests.swift */; };
 		AA15695CC7B017747DF01F13 /* WebPagePanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 71B84A879738CA0A8065D8D8 /* WebPagePanel.swift */; };
 		AB4A0762F59B39FA0776E9A8 /* EpicAuthorizationCallback.swift in Sources */ = {isa = PBXBuildFile; fileRef = 14359EAB3A6D5E361D38FE59 /* EpicAuthorizationCallback.swift */; };
+		AEC56396DDE7A1F56466B1E8 /* AppIcon.icon in Resources */ = {isa = PBXBuildFile; fileRef = 26271A38AE614A8FF717BBEE /* AppIcon.icon */; };
 		AF4E34D44AB88A0C909571C5 /* WebAccountModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5448960DE75EF416844F946E /* WebAccountModel.swift */; };
 		B151A7F54ABB00ACFE73EA6D /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 07228AE3E2D76B31781B0323 /* AppModel.swift */; };
 		B3B05906FF7E3CA901417773 /* CachedArtwork.swift in Sources */ = {isa = PBXBuildFile; fileRef = BBB7F9CA7F940C0DBF11C4EA /* CachedArtwork.swift */; };
@@ -154,6 +155,7 @@
 		1614CF7FBF3DDD00B5219A01 /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
 		1D5405CB088EA19AD505B1A0 /* FriendsPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FriendsPanel.swift; sourceTree = "<group>"; };
 		227855532D819D3EBB47F064 /* LibraryGame.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryGame.swift; sourceTree = "<group>"; };
+		26271A38AE614A8FF717BBEE /* AppIcon.icon */ = {isa = PBXFileReference; lastKnownFileType = wrapper.icon; path = AppIcon.icon; sourceTree = "<group>"; };
 		2814FFCECA443BD312EBE9ED /* FakeSessions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FakeSessions.swift; sourceTree = "<group>"; };
 		2A693B320451C2B98EB35A1B /* GameCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GameCard.swift; sourceTree = "<group>"; };
 		2C2249CAA2BF6A77AF8E4C67 /* EpicModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EpicModel.swift; sourceTree = "<group>"; };
@@ -504,6 +506,7 @@
 		D097EA20F0309EB0E5E264FD /* Resources */ = {
 			isa = PBXGroup;
 			children = (
+				26271A38AE614A8FF717BBEE /* AppIcon.icon */,
 				335270F46EDAB725B750C311 /* Assets.xcassets */,
 				A81C3CDA0864A7B9D92047F9 /* Localizable.xcstrings */,
 			);
@@ -630,6 +633,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				AEC56396DDE7A1F56466B1E8 /* AppIcon.icon in Resources */,
 				F1B60E611D6C3B696BAA5B2B /* Assets.xcassets in Resources */,
 				A36434FAE650B3C10F4BB67F /* Localizable.xcstrings in Resources */,
 			);
@@ -843,7 +847,7 @@
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = C6E717BEA15BD379DE482B47 /* App.xcconfig */;
 			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = "";
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				COMBINE_HIDPI_IMAGES = YES;
 				ENABLE_APP_SANDBOX = NO;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -931,7 +935,7 @@
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = C6E717BEA15BD379DE482B47 /* App.xcconfig */;
 			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = "";
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				COMBINE_HIDPI_IMAGES = YES;
 				ENABLE_APP_SANDBOX = NO;
 				GENERATE_INFOPLIST_FILE = YES;
