@@ -276,6 +276,12 @@ impl EpicSession {
         self.client.disconnect().await.map_err(Into::into)
     }
 
+    /// Opens Epic's site signed in as the account, then `redirect_url`, an
+    /// Epic page. The address holds a single-use code: never keep or log it.
+    pub async fn web_sign_in_url(&self, redirect_url: String) -> Result<String, EpicError> {
+        Ok(self.client.web_sign_in_url(&redirect_url).await?)
+    }
+
     pub async fn game_details(
         &self,
         namespace: String,

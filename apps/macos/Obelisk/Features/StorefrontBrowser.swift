@@ -13,6 +13,8 @@ struct StorefrontBrowser<Model: LibraryStorefront, HeroArtwork: View, HeroLogo: 
     let accountName: String?
     let avatarURL: URL?
     let unreadCount: Int
+    /// How the storefront's store opens, signed in as the account.
+    let storePage: (@MainActor () async -> WebPageStart)?
     let scrollMemory: LibraryScrollMemory
     @ViewBuilder let heroArtwork: (Model.Game) -> HeroArtwork
     @ViewBuilder let heroLogo: (Model.Game) -> HeroLogo
@@ -23,6 +25,7 @@ struct StorefrontBrowser<Model: LibraryStorefront, HeroArtwork: View, HeroLogo: 
     @State private var bar = StorefrontBarState()
     /// Where the open game came from, once a game opened with motion.
     @State private var source: GameOpeningSource?
+    @State private var showsStore = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     init(
@@ -33,6 +36,7 @@ struct StorefrontBrowser<Model: LibraryStorefront, HeroArtwork: View, HeroLogo: 
         accountName: String?,
         avatarURL: URL? = nil,
         unreadCount: Int = 0,
+        storePage: (@MainActor () async -> WebPageStart)? = nil,
         scrollMemory: LibraryScrollMemory,
         @ViewBuilder heroArtwork: @escaping (Model.Game) -> HeroArtwork,
         @ViewBuilder heroLogo: @escaping (Model.Game) -> HeroLogo,
@@ -47,6 +51,7 @@ struct StorefrontBrowser<Model: LibraryStorefront, HeroArtwork: View, HeroLogo: 
         self.accountName = accountName
         self.avatarURL = avatarURL
         self.unreadCount = unreadCount
+        self.storePage = storePage
         self.scrollMemory = scrollMemory
         self.heroArtwork = heroArtwork
         self.heroLogo = heroLogo
@@ -92,11 +97,21 @@ struct StorefrontBrowser<Model: LibraryStorefront, HeroArtwork: View, HeroLogo: 
                 accountName: accountName,
                 avatarURL: avatarURL,
                 unreadCount: unreadCount,
+                openStore: storePage.map { _ in { showsStore = true } },
                 back: back
             ) {
                 accountMenu
             }
         }
+        .overlay {
+            if showsStore, let storePage {
+                StorefrontStoreModal(storeTitle: storeTitle, storeID: storeID, start: storePage) {
+                    showsStore = false
+                }
+                .transition(.opacity)
+            }
+        }
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: showsStore)
         .environment(\.storefrontBar, bar)
         .environment(\.gameTransition, GameTransition(namespace: namespace, source: source))
         .ignoresSafeArea(.container, edges: .top)
@@ -122,6 +137,7 @@ private struct StorefrontBrowserBar<Model: LibraryStorefront, AccountMenu: View>
     let accountName: String?
     let avatarURL: URL?
     let unreadCount: Int
+    let openStore: (() -> Void)?
     let back: () -> Void
     @ViewBuilder let accountMenu: AccountMenu
 
@@ -136,9 +152,38 @@ private struct StorefrontBrowserBar<Model: LibraryStorefront, AccountMenu: View>
                 LibraryGlassBar.GameBar(title: model.title(of: game), libraryTitle: libraryTitle,
                                         showsTitle: bar.showsGameTitle, back: back)
             },
-            unreadCount: unreadCount
+            unreadCount: unreadCount,
+            openStore: openStore
         ) {
             accountMenu
+        }
+    }
+}
+
+/// The storefront's store over its library, in a web page signed in as the
+/// account. Clicking beside it or Escape closes it.
+private struct StorefrontStoreModal: View {
+    let storeTitle: String
+    let storeID: String
+    let start: @MainActor () async -> WebPageStart
+    let close: () -> Void
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(reduceTransparency ? 0.45 : 0.28)
+                .ignoresSafeArea()
+                .contentShape(Rectangle())
+                .onTapGesture(perform: close)
+                .accessibilityHidden(true)
+            WebPagePanel(url: URL(string: "about:blank")!, start: start, close: close, showsCloseButton: true,
+                         placeholderTitle: L10n.string("ui.store.openStore", storeTitle),
+                         identifier: "\(storeID)-store")
+                .padding(.horizontal, 32)
+                .padding(.top, ObeliskStyle.titleBarHeight)
+                .padding(.bottom, 28)
+                .accessibilityLabel(L10n.string("ui.store.openStore", storeTitle))
+                .accessibilityAddTraits(.isModal)
         }
     }
 }

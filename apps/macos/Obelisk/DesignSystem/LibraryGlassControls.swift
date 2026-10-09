@@ -15,6 +15,8 @@ struct LibraryGlassBar<AccountMenu: View>: View {
     var game: GameBar?
     /// Unread messages of the account, badged on its avatar.
     var unreadCount = 0
+    /// Opens the storefront's own store, signed in as the account.
+    var openStore: (() -> Void)?
     @ViewBuilder let accountMenu: AccountMenu
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -39,6 +41,10 @@ struct LibraryGlassBar<AccountMenu: View>: View {
                 LibraryAccountPill(storeTitle: storeTitle, accountName: accountName, avatarURL: avatarURL,
                                    unreadCount: unreadCount) {
                     accountMenu
+                }
+
+                if let openStore {
+                    LibraryStoreButton(storeTitle: storeTitle, action: openStore)
                 }
 
                 Spacer(minLength: 12)
@@ -74,6 +80,24 @@ struct LibraryGlassBar<AccountMenu: View>: View {
                 .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: showsBackdrop)
                 .allowsHitTesting(false)
         }
+    }
+}
+
+/// Opens the storefront's store in Obelisk.
+struct LibraryStoreButton: View {
+    let storeTitle: String
+    let action: () -> Void
+
+    var body: some View {
+        let label = L10n.string("ui.store.openStore", storeTitle)
+        Button(action: action) {
+            StorefrontGlassIcon(systemName: "storefront", size: 14)
+                .foregroundStyle(.primary)
+        }
+        .obeliskButtonStyle(.plain)
+        .accessibilityLabel(label)
+        .accessibilityIdentifier("storefront-store")
+        .help(label)
     }
 }
 

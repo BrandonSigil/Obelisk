@@ -79,6 +79,12 @@ protocol WebStorefront: InstallationStorefront, SendableMetatype where GameID ==
     @MainActor static func installations(of session: Session, account: String, language: String,
                                           sessions: any StorefrontSessionsProtocol, receipts: URL,
                                           locations: ObeliskLocations) -> any InstallationsBackend<Self>
+    /// An address that opens the storefront's site signed in as the
+    /// session's account and goes on to `page`; nil when its site has none.
+    static func webSignInURL(session: Session, page: URL) async throws -> URL?
+    /// Forgets what the storefront's site keeps of the account.
+    @MainActor static func forgetWebSignIn()
+
     /// The storefront refused the account: a restore forgets the saved
     /// session, and any later call signs the account out.
     static func isUnauthorized(_ error: Error) -> Bool
@@ -91,6 +97,8 @@ protocol WebStorefront: InstallationStorefront, SendableMetatype where GameID ==
 
 extension WebStorefront {
     static func avatar(of session: Session) -> URL? { nil }
+    static func webSignInURL(session: Session, page: URL) async throws -> URL? { nil }
+    @MainActor static func forgetWebSignIn() {}
 }
 
 /// One account of a storefront that signs in on its web page: its sign-in
@@ -324,8 +332,16 @@ final class WebAccountModel<Store: WebStorefront> {
     /// Account revocation: forgets the Library cache, the launches and the
     /// saved session, revokes the presence, installations and Cloud, then
     /// revokes the session once the Keychain removal ends.
+    /// Where the storefront's site opens on `page`: signed in as the account
+    /// when its storefront can sign it in, else as its site remembers.
+    func webPage(_ page: URL) async -> URL {
+        guard let session, let url = try? await Store.webSignInURL(session: session, page: page) else { return page }
+        return url
+    }
+
     func signOut() {
         guard !isSigningOut else { return }
+        Store.forgetWebSignIn()
         if let account = library.accountID ?? library.cachedAccount {
             libraryCache?.forget(account: Store.account(account))
             gameSessions.history.forget(account: account, in: Store.self)

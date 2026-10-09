@@ -9,6 +9,15 @@ extension GogGames: WebStorefront {
     typealias Details = GogGameDetails
 
     static let storeID = "gog"
+    /// The store through its site's own sign-in, as its Sign in button
+    /// opens it: GOG's site takes no token of the app, but its sign-in page
+    /// remembers the account Obelisk's sign-in signed in there, and then
+    /// returns to the store signed in without asking.
+    static let storeURL: URL = {
+        let back = "https://www.gog.com/on_login_success?returnTo=/"
+            .addingPercentEncoding(withAllowedCharacters: .alphanumerics)!
+        return URL(string: "https://login.gog.com/auth?client_id=46755278331571209&response_type=code&redirect_uri=\(back)")!
+    }()
     static let webSignIn = WebSignIn.gog
     static func keychain() -> any CredentialStore<GogCredentials> { GogKeychain() }
 

@@ -106,6 +106,27 @@ impl Client {
         .await
     }
 
+    /// Opens Epic's site signed in as the account, then goes on to
+    /// `redirect`, as launchers open Epic's store: the page spends a new
+    /// exchange code. The address is a secret until it loads.
+    pub async fn web_sign_in_url(&self, redirect: &str) -> Result<String, EpicError> {
+        let redirect = Url::parse(redirect).map_err(|_| EpicError::Protocol)?;
+        if redirect.scheme() != "https"
+            || !redirect
+                .host_str()
+                .is_some_and(|host| host == "epicgames.com" || host.ends_with(".epicgames.com"))
+        {
+            return Err(EpicError::Protocol);
+        }
+        let code = self.exchange_code().await?;
+        let mut url =
+            Url::parse("https://www.epicgames.com/id/exchange").map_err(|_| EpicError::Protocol)?;
+        url.query_pairs_mut()
+            .append_pair("exchangeCode", &code)
+            .append_pair("redirectUrl", redirect.as_str());
+        Ok(url.into())
+    }
+
     pub async fn credentials(&self) -> Result<Credentials, EpicError> {
         self.session
             .lock()

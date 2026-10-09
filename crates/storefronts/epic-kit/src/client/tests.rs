@@ -182,6 +182,35 @@ fn token(account: &str) -> Value {
 }
 
 #[tokio::test]
+async fn web_sign_in_spends_an_exchange_code_on_epics_site_only() {
+    let mock = Mock::new(vec![reply(
+        "/account/api/oauth/exchange",
+        200,
+        json!({"code":"single-use-code"}),
+    )]);
+    let client = mock.client(false);
+    for elsewhere in [
+        "http://store.epicgames.com/",
+        "https://example.com/",
+        "https://epicgames.com.example.com/",
+    ] {
+        assert!(matches!(
+            client.web_sign_in_url(elsewhere).await,
+            Err(EpicError::Protocol)
+        ));
+    }
+    let url = client
+        .web_sign_in_url("https://store.epicgames.com/fr/")
+        .await
+        .unwrap();
+    assert_eq!(
+        url,
+        "https://www.epicgames.com/id/exchange?exchangeCode=single-use-code&redirectUrl=https%3A%2F%2Fstore.epicgames.com%2Ffr%2F"
+    );
+    assert_eq!(mock.requests().len(), 1, "No code for another site");
+}
+
+#[tokio::test]
 async fn supervisor_exchange_creates_a_distinct_session_without_rotating_parent_credentials() {
     let mock = Mock::new(vec![
         reply(

@@ -91,6 +91,7 @@ extension GogSessionProtocol {
 // Models take launches as injected closures, so a fake
 // session never has to build a Rust-backed object.
 extension EpicSessionProtocol {
+    func webSignInUrl(redirectUrl: String) async throws -> String { throw CocoaError(.featureUnsupported) }
     func persist(credentials: any CredentialSave) async {
         let session = self
         saveEveryRotation(credentials) { await session.nextCredentialsRevision(afterRevision: $0) }

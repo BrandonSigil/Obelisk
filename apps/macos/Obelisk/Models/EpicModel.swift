@@ -19,6 +19,7 @@ extension EpicGames: WebStorefront {
     typealias Presence = EpicFriends
 
     static let storeID = "epic"
+    static let storeURL = URL(string: "https://store.epicgames.com/")!
     static let webSignIn = WebSignIn.epic
     static func keychain() -> any CredentialStore<EpicCredentials> { EpicKeychain() }
 
@@ -39,6 +40,10 @@ extension EpicGames: WebStorefront {
         )
     }
     static func disconnect(_ session: Session) async throws { try await session.disconnect() }
+    /// Each address spends a new exchange code of the session.
+    static func webSignInURL(session: Session, page: URL) async throws -> URL? {
+        URL(string: try await session.webSignInUrl(redirectUrl: page.absoluteString))
+    }
 
     static func games(of session: Session) async throws -> [EpicGame] { try await session.games() }
     /// Epic answers every game's playtime in one request, by app name.

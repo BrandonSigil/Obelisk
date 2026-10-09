@@ -1260,6 +1260,12 @@ public protocol EpicSessionProtocol: AnyObject, Sendable {
     
     func stopFriends() 
     
+    /**
+     * Opens Epic's site signed in as the account, then `redirect_url`, an
+     * Epic page. The address holds a single-use code: never keep or log it.
+     */
+    func webSignInUrl(redirectUrl: String) async throws  -> String
+    
 }
 open class EpicSession: EpicSessionProtocol, @unchecked Sendable {
     fileprivate let handle: UInt64
@@ -1553,6 +1559,26 @@ open func stopFriends()  {try! rustCall() {
             self.uniffiCloneHandle(),uniffiCallStatus
     )
 }
+}
+    
+    /**
+     * Opens Epic's site signed in as the account, then `redirect_url`, an
+     * Epic page. The address holds a single-use code: never keep or log it.
+     */
+open func webSignInUrl(redirectUrl: String)async throws  -> String  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_obelisk_bridge_fn_method_epicsession_web_sign_in_url(
+                        self.uniffiCloneHandle(),FfiConverterString.lower(redirectUrl)
+                )
+            },
+            pollFunc: ffi_obelisk_bridge_rust_future_poll_rust_buffer,
+            completeFunc: ffi_obelisk_bridge_rust_future_complete_rust_buffer,
+            freeFunc: ffi_obelisk_bridge_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterString.lift,
+            errorHandler: FfiConverterTypeEpicError_lift
+        )
 }
     
 
@@ -12804,6 +12830,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_obelisk_bridge_checksum_method_epicsession_stop_friends() != 62372) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_obelisk_bridge_checksum_method_epicsession_web_sign_in_url() != 65487) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_obelisk_bridge_checksum_method_storefrontsessions_accept_invite() != 8710) {

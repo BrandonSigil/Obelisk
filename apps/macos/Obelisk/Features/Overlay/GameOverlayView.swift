@@ -64,7 +64,8 @@ struct GameOverlayView: View {
                                         back: { overlay.back() }, retry: overlay.retryAchievements)
             }
         case .webPage(let url):
-            OverlayWebPage(url: url, cookies: { await overlay.webCookies(for: url) }, close: { overlay.back() })
+            WebPagePanel(url: url, start: { WebPageStart(url: url, cookies: await overlay.webCookies(for: url)) },
+                         close: { overlay.back() }, identifier: "game-overlay-web-page")
                 .id(url)
         case .home, .friends, .invite, .user, .store, .microTxn:
             OverlayHome(overlay: overlay)
@@ -268,126 +269,6 @@ private struct OverlayAchievementsPage: View {
         .modifier(StorefrontPanelGlass(cornerRadius: 24))
         .accessibilityIdentifier("game-overlay-achievements-page")
     }
-}
-
-/// A web page in the overlay, such as a Steam store page. Nothing it stores
-/// outlives the page.
-private struct OverlayWebPage: View {
-    let url: URL
-    /// Sign the page in, such as Steam's store as the player's account.
-    let cookies: () async -> [HTTPCookie]
-    let close: () -> Void
-    @State private var browser: OverlayBrowser?
-
-    var body: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 10) {
-                OverlayBackButton {
-                    if browser?.canGoBack == true { browser?.webView.goBack() } else { close() }
-                }
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(browser?.title ?? url.host() ?? url.absoluteString)
-                        .font(.system(size: 13, weight: .semibold))
-                    Text((browser?.url ?? url).host() ?? "")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                }
-                .lineLimit(1)
-                Spacer(minLength: 12)
-                if browser?.isLoading == true { ProgressView().controlSize(.small) }
-                Button {
-                    browser?.webView.reload()
-                } label: {
-                    StorefrontGlassIcon(systemName: "arrow.clockwise", size: 13).foregroundStyle(.primary)
-                }
-                .obeliskButtonStyle(.plain)
-                .accessibilityLabel(L10n.string("ui.overlay.web.reload"))
-                .help(L10n.string("ui.overlay.web.reload"))
-                Button {
-                    NSWorkspace.shared.open(browser?.url ?? url)
-                } label: {
-                    StorefrontGlassIcon(systemName: "safari", size: 14).foregroundStyle(.primary)
-                }
-                .obeliskButtonStyle(.plain)
-                .accessibilityLabel(L10n.string("ui.overlay.web.openInBrowser"))
-                .help(L10n.string("ui.overlay.web.openInBrowser"))
-            }
-            .padding(.horizontal, 14)
-            .frame(height: 60)
-            Group {
-                if let browser { OverlayWebView(webView: browser.webView) } else { Color.clear }
-            }
-            .clipShape(UnevenRoundedRectangle(bottomLeadingRadius: 24, bottomTrailingRadius: 24))
-        }
-        .modifier(StorefrontPanelGlass(cornerRadius: 24))
-        .task(id: url) { browser = OverlayBrowser(url: url, cookies: await cookies()) }
-        .accessibilityIdentifier("game-overlay-web-page")
-    }
-}
-
-/// The page's web view and what its toolbar shows of it.
-@MainActor @Observable
-final class OverlayBrowser: NSObject, WKNavigationDelegate, WKUIDelegate {
-    @ObservationIgnored let webView: WKWebView
-    private(set) var title: String?
-    private(set) var url: URL?
-    private(set) var canGoBack = false
-    private(set) var isLoading = true
-
-    /// Its cookies last as long as the page: its data store keeps nothing,
-    /// and Obelisk signs a Steam page in again each time it opens.
-    init(url: URL, cookies: [HTTPCookie] = []) {
-        let configuration = WKWebViewConfiguration()
-        configuration.websiteDataStore = .nonPersistent()
-        webView = WKWebView(frame: .zero, configuration: configuration)
-        super.init()
-        webView.navigationDelegate = self
-        webView.uiDelegate = self
-        let store = configuration.websiteDataStore.httpCookieStore
-        Task { [webView] in
-            for cookie in cookies { await store.setCookie(cookie) }
-            webView.load(URLRequest(url: url))
-        }
-    }
-
-    func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
-        isLoading = true
-    }
-
-    func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) { update() }
-
-    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        update()
-        isLoading = false
-    }
-
-    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
-        isLoading = false
-    }
-
-    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
-        isLoading = false
-    }
-
-    /// A link that opens a new window opens in the page instead.
-    func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration,
-                 for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
-        if navigationAction.targetFrame == nil { webView.load(navigationAction.request) }
-        return nil
-    }
-
-    private func update() {
-        title = webView.title.flatMap { $0.isEmpty ? nil : $0 }
-        url = webView.url
-        canGoBack = webView.canGoBack
-    }
-}
-
-private struct OverlayWebView: NSViewRepresentable {
-    let webView: WKWebView
-
-    func makeNSView(context: Context) -> WKWebView { webView }
-    func updateNSView(_ nsView: WKWebView, context: Context) {}
 }
 
 enum OverlayFormatting {

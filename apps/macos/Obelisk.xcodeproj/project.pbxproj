@@ -76,6 +76,7 @@
 		A798CF83144BC714FCDD4B5E /* L10n.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B7436ED3349489C9B7701E9 /* L10n.swift */; };
 		A825F027C9D69C539AF0EC57 /* SidebarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 69A52CBDF11147EF8F197B50 /* SidebarView.swift */; };
 		A89CEDB9D81E67E0B302B247 /* FriendsPresentationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BAD9C2A5BE6895E16311595E /* FriendsPresentationTests.swift */; };
+		AA15695CC7B017747DF01F13 /* WebPagePanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 71B84A879738CA0A8065D8D8 /* WebPagePanel.swift */; };
 		AB4A0762F59B39FA0776E9A8 /* EpicAuthorizationCallback.swift in Sources */ = {isa = PBXBuildFile; fileRef = 14359EAB3A6D5E361D38FE59 /* EpicAuthorizationCallback.swift */; };
 		AF4E34D44AB88A0C909571C5 /* WebAccountModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5448960DE75EF416844F946E /* WebAccountModel.swift */; };
 		B151A7F54ABB00ACFE73EA6D /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 07228AE3E2D76B31781B0323 /* AppModel.swift */; };
@@ -186,6 +187,7 @@
 		6BA7860DE0C2DA6C6B9A10A1 /* EpicDownloadTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EpicDownloadTests.swift; sourceTree = "<group>"; };
 		6DDA40BCB74AB6466C8480A8 /* SteamModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SteamModel.swift; sourceTree = "<group>"; };
 		714DCB4122305280323834A2 /* SteamView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SteamView.swift; sourceTree = "<group>"; };
+		71B84A879738CA0A8065D8D8 /* WebPagePanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebPagePanel.swift; sourceTree = "<group>"; };
 		7298188EC35A04AFEA0DB706 /* SteamSessionConnection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SteamSessionConnection.swift; sourceTree = "<group>"; };
 		72D237960BFC8153E4DEA065 /* SignInControls.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SignInControls.swift; sourceTree = "<group>"; };
 		73D2C6DE75D09DE47D45318B /* EpicView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EpicView.swift; sourceTree = "<group>"; };
@@ -539,6 +541,7 @@
 				B6234A0AF6F082FF4C927220 /* StorefrontControls.swift */,
 				D612A23EC652408A1618071A /* StorefrontLibraryComponents.swift */,
 				513D153BB2AFAAD3B75C6107 /* StorefrontScrollView.swift */,
+				71B84A879738CA0A8065D8D8 /* WebPagePanel.swift */,
 			);
 			path = DesignSystem;
 			sourceTree = "<group>";
@@ -802,6 +805,7 @@
 				D79952394F300AACEEB217CD /* StorefrontSignInPage.swift in Sources */,
 				AF4E34D44AB88A0C909571C5 /* WebAccountModel.swift in Sources */,
 				EB4B025E91606E11CB1F016C /* WebAuthentication.swift in Sources */,
+				AA15695CC7B017747DF01F13 /* WebPagePanel.swift in Sources */,
 				CAD48EA12B965CC997C4CCF6 /* WebSignInView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
