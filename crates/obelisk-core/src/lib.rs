@@ -4,6 +4,7 @@
 //! Swift owns macOS presentation and native application launching.
 
 mod atomic_file;
+pub mod date;
 pub mod install;
 pub mod installation;
 pub mod launch;

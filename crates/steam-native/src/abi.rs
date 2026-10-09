@@ -283,8 +283,10 @@ impl Engine {
             if user == 0 || self.utils(pipe)?.set_app_for_pipe(app)? != app {
                 return Ok(None);
             }
+            // The engine gives 0 for a lobby the account is not in, and a
+            // lobby's member is an individual account.
             let first = self.matchmaking(user, pipe)?.lobby_member(lobby, 0)?;
-            Ok(Some(crate::lobby::member(first)))
+            Ok(Some(game_runtime::protocol::individual(first)))
         })();
         // Lobby updates of the game's AppID may reach this pipe meanwhile.
         while self.callback(pipe).is_some() {}

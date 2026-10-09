@@ -481,9 +481,7 @@ fn install_prerequisites(
         if run_prerequisite(config, home, prerequisite, &log)? {
             ran.insert(prerequisite.id.clone());
             let text: Vec<_> = ran.iter().map(String::as_str).collect();
-            let temporary = record.with_extension("partial");
-            fs::write(&temporary, text.join("\n"))?;
-            fs::rename(&temporary, &record)?;
+            obelisk_core::write_atomic(&record, text.join("\n").as_bytes())?;
         }
     }
     // The game must not start while an installer's processes still run.

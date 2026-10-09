@@ -2,7 +2,7 @@
 //! Account rights and CDN metadata are always fetched before consulting this cache.
 use std::path::{Path, PathBuf};
 
-use obelisk_core::install::{self, PARTIAL_DIRECTORY, hex};
+use obelisk_core::install::{self, PARTIAL_DIRECTORY, hex, unhex};
 use sha1::{Digest, Sha1};
 
 use crate::{
@@ -29,8 +29,7 @@ impl ManifestCacheKey {
     ) -> Option<Self> {
         let hash = hash?;
         if validate_identity(namespace, catalog_item_id, app_name, platform).is_err()
-            || hash.len() != 40
-            || !hash.bytes().all(|byte| byte.is_ascii_hexdigit())
+            || unhex::<20>(hash).is_none()
         {
             return None;
         }

@@ -251,17 +251,7 @@ impl UploadTransaction {
             if bytes.len() as u64 > MAX_JOURNAL {
                 return Err(CloudError::Storage);
             }
-            let mut temporary = tempfile::NamedTempFile::new_in(&self.directory)
-                .map_err(|_| CloudError::Storage)?;
-            temporary
-                .write_all(&bytes)
-                .map_err(|_| CloudError::Storage)?;
-            temporary
-                .as_file()
-                .sync_all()
-                .map_err(|_| CloudError::Storage)?;
-            temporary
-                .persist(self.directory.join("state.json"))
+            obelisk_core::write_atomic(&self.directory.join("state.json"), &bytes)
                 .map_err(|_| CloudError::Storage)?;
             sync(&self.directory)
         })();

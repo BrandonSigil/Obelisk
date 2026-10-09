@@ -191,3 +191,21 @@ fn a_windows_game_saves_under_its_prefix_profile() {
     );
     assert_eq!(cloud.platform().mask(), 1);
 }
+
+#[test]
+fn libraries_compare_by_their_bytes_across_blocks() {
+    let directory = tempfile::tempdir().unwrap();
+    let write = |name: &str, bytes: &[u8]| {
+        let path = directory.path().join(name);
+        fs::write(&path, bytes).unwrap();
+        path
+    };
+    let library = vec![7_u8; BLOCK as usize * 2 + 5];
+    let mut changed = library.clone();
+    *changed.last_mut().unwrap() = 8;
+    let original = write("original", &library);
+
+    assert!(same_contents(&original, &write("copy", &library)).unwrap());
+    assert!(!same_contents(&original, &write("changed", &changed)).unwrap());
+    assert!(!same_contents(&original, &write("shorter", &library[1..])).unwrap());
+}

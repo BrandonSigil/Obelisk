@@ -119,7 +119,7 @@ final class SteamPresentationTests: XCTestCase {
         XCTAssertEqual(model.gameSessionMessage, L10n.string("model.steam.recoveringSession"))
         XCTAssertEqual(model.installations.primaryActionTitle, L10n.string("model.game.running"))
         XCTAssertFalse(model.installations.primaryActionAvailable)
-        XCTAssertTrue(sessions.protects(620))
+        XCTAssertEqual(sessions.active?.game, 620, "The game stays reserved while it reconnects")
         XCTAssertTrue(sessions.isBusy)
         running.reconnecting = false
         sessions.fake.show(running)
@@ -943,7 +943,7 @@ final class SteamPresentationTests: XCTestCase {
         XCTAssertTrue(fixture.model.gameSessions.isBusy)
         XCTAssertEqual(fixture.sessions.fake.revocations, [.steam(steamId: 42)])
         let replacement = SteamModel(directory: fixture.root, preferences: fixture.preferences, gameSessions: fixture.model.gameSessions)
-        XCTAssertTrue(replacement.gameSessions.protects(620))
+        XCTAssertEqual(replacement.gameSessions.active?.game, 620)
         XCTAssertTrue(replacement.gameSessions.isBusy)
         fixture.sessions.fake.show(nil)
         try await eventually { !replacement.gameSessions.isBusy }

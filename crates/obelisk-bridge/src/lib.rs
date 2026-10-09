@@ -202,11 +202,6 @@ impl From<obelisk_core::storefront::StorefrontDescriptor> for StorefrontInfo {
 }
 
 #[uniffi::export]
-pub fn core_version() -> String {
-    env!("CARGO_PKG_VERSION").to_owned()
-}
-
-#[uniffi::export]
 pub fn storefronts() -> Vec<StorefrontInfo> {
     use obelisk_core::storefront::{StorefrontCapabilities, StorefrontDescriptor};
     vec![
@@ -268,7 +263,6 @@ mod tests {
         assert!(sources[1].available);
         assert!(sources[2].available);
         assert!(sources[3].available);
-        assert!(!core_version().is_empty());
     }
 
     #[test]

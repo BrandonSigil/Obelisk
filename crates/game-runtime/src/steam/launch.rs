@@ -111,11 +111,7 @@ impl<M: Machine> session::Launch for Launch<M> {
         {
             return Err(Error::InvalidSession);
         }
-        // The Rosetta helper app sits beside the storefront helpers directory.
-        let helpers = request
-            .config
-            .helpers
-            .parent()
+        let helpers = crate::supervisor::rosetta::helpers(&request.config.helpers)
             .unwrap_or(&request.config.helpers);
         let opening = Opening {
             root: request.root.clone(),
@@ -184,7 +180,7 @@ impl<M: Machine> session::Launch for Launch<M> {
         // the bundled host's gated exec.
         let (helper, subcommand) = if architecture == Some(Architecture::Intel) {
             (
-                runtime._prepared.directory.join(package::SDK_INTEL),
+                runtime.prepared.directory.join(package::SDK_INTEL),
                 "exec-game",
             )
         } else {
@@ -196,7 +192,7 @@ impl<M: Machine> session::Launch for Launch<M> {
             &mut environment,
             self.request.config.app_id,
             self.request.config.wine.is_some(),
-            &runtime._prepared.directory,
+            &runtime.prepared.directory,
         );
         Ok(Prepared {
             host: runtime,

@@ -122,7 +122,7 @@ impl<S: Services> lifecycle::Launch for Launch<S> {
                 namespace: request.config.namespace.clone(),
                 app_name: request.config.app_name.clone(),
             },
-            helpers: helpers(&request.config)?,
+            helpers: helpers(&request.config)?.into(),
         };
         let launch = Self {
             request,
@@ -228,13 +228,12 @@ impl<S: Services> lifecycle::Launch for Launch<S> {
 
 /// `config.helper` is `Helpers/SteamNative/obelisk-steam-host`; the Rosetta
 /// helper app sits beside `SteamNative`, as for Steam.
-fn helpers(config: &Configuration) -> Result<PathBuf> {
-    Ok(config
+fn helpers(config: &Configuration) -> Result<&Path> {
+    config
         .helper
         .parent()
-        .and_then(Path::parent)
-        .ok_or(Error::Session)?
-        .into())
+        .and_then(crate::supervisor::rosetta::helpers)
+        .ok_or(Error::Session)
 }
 
 /// The plan's ownership token in a private folder that lives as long as the
@@ -248,10 +247,7 @@ fn ownership_token(plan: &LaunchPlan) -> Result<Option<(tempfile::TempDir, PathB
         .permissions(std::fs::Permissions::from_mode(0o700))
         .tempdir()?;
     let path = directory.path().join("ownership.bin");
-    crate::files::atomic_write(&path, crate::files::Durability::FileSync, |f| {
-        f.write_all(bytes)?;
-        Ok(())
-    })?;
+    obelisk_core::write_atomic(&path, bytes)?;
     Ok(Some((directory, path)))
 }
 
@@ -304,25 +300,18 @@ pub(super) fn native_target(
     config: &Configuration,
     environment: &std::collections::HashMap<String, String>,
 ) -> Result<(Target, Architecture, Option<tempfile::TempDir>)> {
-    let (executable, architecture) = crate::native::executable(&config.install, &plan.target)?;
     let mut arguments = plan.target.arguments.clone();
     let ownership = ownership_token(plan)?.map(|(directory, path)| {
         arguments.push(format!("-epicovt={}", path.display()));
         directory
     });
-    Ok((
-        Target {
-            executable,
-            arguments,
-            working_directory: plan.target.working_directory.clone().into(),
-            environment: environment.clone(),
-            log: None,
-            installation: Some(config.install.clone()),
-            program: None,
-        },
-        architecture,
-        ownership,
-    ))
+    let (target, architecture) = crate::native::target(
+        &config.install,
+        &plan.target,
+        arguments,
+        environment.clone(),
+    )?;
+    Ok((target, architecture, ownership))
 }
 
 /// The `obelisk-steam-host epic-supervise` entry point.

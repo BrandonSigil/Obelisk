@@ -20,8 +20,24 @@ struct SteamChatLine: Identifiable, Equatable, Sendable {
     /// Steam's clock, in seconds since 1970.
     let timestamp: UInt32
     let content: Content
+    /// A message's BBCode as it shows, rendered once its conversation keeps it.
+    fileprivate(set) var contents: [SteamChatContent] = []
+
+    init(id: ID, timestamp: UInt32, content: Content) {
+        self.id = id
+        self.timestamp = timestamp
+        self.content = content
+    }
 
     var date: Date { Date(timeIntervalSince1970: TimeInterval(timestamp)) }
+
+    /// The games the line names.
+    var appIds: [UInt32] {
+        switch content {
+        case .message: contents.compactMap { if case .invitation(let invitation) = $0 { invitation.appId } else { nil } }
+        case .invitationSent(let appId): [appId]
+        }
+    }
 
     var fromMe: Bool {
         if case .message(let fromMe, _) = content { fromMe } else { true }
@@ -57,14 +73,17 @@ struct SteamConversation: Equatable, Sendable {
     var isInviting = false
     var isFriendTyping = false
     var error: String?
-    var draft = ""
 
     /// Whether any line was new. The same message can arrive as an event, in
     /// a history page and as the answer to sending it.
     @discardableResult
     mutating func merge(_ added: [SteamChatLine]) -> Bool {
         let known = Set(lines.map(\.id))
-        let new = added.filter { !known.contains($0.id) }
+        let new = added.filter { !known.contains($0.id) }.map { line in
+            var line = line
+            if case .message(_, let bbcode) = line.content { line.contents = SteamBBCode.render(bbcode) }
+            return line
+        }
         guard !new.isEmpty else { return false }
         lines = (lines + new).sorted { $0.order < $1.order }
         return true
@@ -103,6 +122,9 @@ struct SteamInviteOffer: Equatable, Sendable {
 @MainActor @Observable
 final class SteamChatModel {
     private(set) var conversations: [UInt64: SteamConversation] = [:]
+    /// What the account is writing to each friend, apart from the
+    /// conversations so that typing redraws none of their messages.
+    private(set) var drafts: [UInt64: String] = [:]
     /// Unread messages per friend, as Steam counts them.
     private(set) var unread: [UInt64: Int] = [:]
     private(set) var ownGame: SteamOwnGame?
@@ -144,7 +166,7 @@ final class SteamChatModel {
     @ObservationIgnored private var ownGameRequested: ContinuousClock.Instant?
     @ObservationIgnored private let ownGameInterval: Duration
     /// The running game's session and the last invite request it showed.
-    @ObservationIgnored private var followedRequest: (session: String, sequence: UInt64)?
+    @ObservationIgnored private var followedRequest = SessionSequence()
 
     /// Tests tell activity themselves instead of following the application.
     init(typingTimeout: Duration = .seconds(11), ownGameInterval: Duration = .seconds(20),
@@ -186,6 +208,7 @@ final class SteamChatModel {
         followGame(session: nil, appId: 0, request: nil, lobby: nil)
         account = nil
         conversations = [:]
+        drafts = [:]
         unread = [:]
         visibleFriend = nil
         acknowledged = [:]
@@ -426,13 +449,13 @@ final class SteamChatModel {
 
     // MARK: Composing
 
-    func draft(for friend: UInt64) -> String { conversations[friend]?.draft ?? "" }
+    func draft(for friend: UInt64) -> String { drafts[friend] ?? "" }
 
     /// Tells the friend the account is typing, at most every 10 seconds as
     /// Valve's clients do.
     func setDraft(_ text: String, for friend: UInt64) {
-        let previous = conversations[friend]?.draft ?? ""
-        conversations[friend, default: SteamConversation()].draft = text
+        let previous = draft(for: friend)
+        drafts[friend] = text
         guard let session, text.count > previous.count,
               !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         let now = ContinuousClock.now
@@ -442,12 +465,12 @@ final class SteamChatModel {
     }
 
     func send(to friend: UInt64) {
-        guard let session, let conversation = conversations[friend], !conversation.isSending else { return }
-        let text = conversation.draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let session, conversations[friend]?.isSending != true else { return }
+        let text = draft(for: friend).trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
-        conversations[friend]?.isSending = true
+        conversations[friend, default: SteamConversation()].isSending = true
         conversations[friend]?.error = nil
-        conversations[friend]?.draft = ""
+        drafts[friend] = ""
         let current = generation
         let account = account
         Task { [weak self] in
@@ -462,7 +485,7 @@ final class SteamChatModel {
             } catch {
                 guard let self, account == self.account else { return }
                 // A session that ended meanwhile cleared the flag; the text still goes back.
-                if self.conversations[friend]?.draft.isEmpty == true { self.conversations[friend]?.draft = text }
+                if self.conversations[friend] != nil && self.draft(for: friend).isEmpty { self.drafts[friend] = text }
                 guard current == self.generation else { return }
                 self.conversations[friend]?.isSending = false
                 self.conversations[friend]?.error = SteamModel.message(error)
@@ -502,22 +525,19 @@ final class SteamChatModel {
     @discardableResult
     func followGame(session id: String?, appId: UInt32, request: SteamInviteRequest?, lobby: UInt64?) -> Bool {
         guard let id, appId != 0 else {
-            followedRequest = nil
+            followedRequest = SessionSequence()
             if gameLobby != nil { gameLobby = nil }
             closeInvitePicker()
             return false
         }
-        let previous = followedRequest
-        // A sequence only grows within a session; a request that went keeps it.
-        let sequence = request?.sequence ?? (previous?.session == id ? previous?.sequence ?? 0 : 0)
-        followedRequest = (id, sequence)
+        let isNew = followedRequest.advance(session: id, sequence: request?.sequence)
         let current = lobby.map { (appId: appId, lobbyId: $0) }
         if gameLobby?.appId != current?.appId || gameLobby?.lobbyId != current?.lobbyId { gameLobby = current }
         guard let request else {
             closeInvitePicker()
             return false
         }
-        guard let previous, previous.session == id, request.sequence > previous.sequence else { return false }
+        guard isNew else { return false }
         invitePicker = SteamInviteOffer(appId: appId, gameName: gameName(appId), invite: request.invite,
                                         request: request.sequence)
         pickerInvited = []
@@ -542,9 +562,9 @@ final class SteamChatModel {
         Task { [weak self] in
             do {
                 if let invite = offer.invite {
-                    _ = try await session.inviteIntoGame(friendSteamId: friend, appId: offer.appId, invite: invite)
+                    try await session.inviteIntoGame(friendSteamId: friend, appId: offer.appId, invite: invite)
                 } else {
-                    _ = try await session.inviteToGame(friendSteamId: friend, appId: offer.appId)
+                    try await session.inviteToGame(friendSteamId: friend, appId: offer.appId)
                 }
                 guard let self, current == self.generation else { return }
                 if self.invitePicker == offer { self.pickerInvited.insert(friend) }

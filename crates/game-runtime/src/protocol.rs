@@ -143,11 +143,7 @@ impl HostCommand {
             Self::SetPresence { .. } | Self::OverlayState { .. } => true,
             Self::AcceptLobbyInvite { lobby_id, friend } => lobby(*lobby_id) && individual(*friend),
             Self::AcceptRichInvite { friend, connect } => {
-                individual(*friend)
-                    && InviteTarget::Connect {
-                        connect: connect.clone(),
-                    }
-                    .valid()
+                individual(*friend) && self::connect(connect)
             }
             Self::AuthorizeMicroTxn { order_id, .. } => *order_id != 0,
         }
@@ -324,9 +320,7 @@ impl InviteTarget {
     pub fn valid(&self) -> bool {
         match self {
             Self::Lobby { lobby_id } => lobby(*lobby_id),
-            Self::Connect { connect } => {
-                !connect.is_empty() && connect.len() <= Self::MAX_CONNECT && !connect.contains('\0')
-            }
+            Self::Connect { connect } => self::connect(connect),
         }
     }
 }
@@ -391,10 +385,7 @@ impl OverlayDialog {
             Self::Store { flag, .. } => *flag <= Self::MAX_STORE_FLAG,
             Self::LobbyInvite { lobby_id } => lobby(*lobby_id),
             Self::RemotePlayTogetherInvite { lobby_id } => lobby_id.is_none_or(lobby),
-            Self::ConnectInvite { connect } => InviteTarget::Connect {
-                connect: connect.clone(),
-            }
-            .valid(),
+            Self::ConnectInvite { connect } => self::connect(connect),
             Self::RemotePlayTogether {} => true,
         }
     }
@@ -422,6 +413,11 @@ pub fn lobby(steam_id: u64) -> bool {
 /// an account number.
 pub fn individual(steam_id: u64) -> bool {
     (steam_id >> 52) & 0xf == 1 && steam_id >> 56 != 0 && steam_id as u32 != 0
+}
+
+/// A rich presence connect string that fits Steam's buffer.
+pub fn connect(connect: &str) -> bool {
+    !connect.is_empty() && connect.len() <= InviteTarget::MAX_CONNECT && !connect.contains('\0')
 }
 
 #[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
@@ -579,6 +575,7 @@ mod tests {
         assert!(!lobby(0x0186_0000_0000_0000), "no account number");
         assert!(individual(FRIEND));
         assert!(!individual(LOBBY) && !individual(0) && !individual(FRIEND & !0xffff_ffff));
+        assert!(!individual(FRIEND & ((1 << 56) - 1)), "no universe");
         for valid in [
             OverlayDialog::Dialog {
                 dialog: "chatroomgroup/123".into(),

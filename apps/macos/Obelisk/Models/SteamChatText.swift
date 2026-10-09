@@ -93,13 +93,6 @@ enum SteamBBCode {
         return contents
     }
 
-    /// The message as one line of text, for notifications and accessibility.
-    static func plainText(_ bbcode: String) -> String {
-        render(bbcode).compactMap {
-            if case .text(let text) = $0 { String(text.characters) } else { nil }
-        }.joined(separator: " ")
-    }
-
     private enum Token: Equatable {
         case text(String)
         /// The unnamed argument (`[url=…]`, `[emoticon …]`) is keyed "".

@@ -1,4 +1,4 @@
-use std::io::{Cursor, Read, Write};
+use std::io::{Read, Write};
 
 use aes::{
     Aes256,
@@ -157,18 +157,18 @@ fn decrypt_name(name: &str, key: &[u8; 32]) -> Result<String, ContentError> {
         .bytes()
         .filter(|byte| !byte.is_ascii_whitespace())
         .collect();
-    let encrypted = STANDARD
+    let mut encrypted = STANDARD
         .decode(encoded)
         .map_err(|_| invalid("backend.steam.format.invalidEncryptedFileName"))?;
-    let mut bytes = decrypt(&encrypted, key)?;
+    let bytes = decrypt(&mut encrypted, key)?;
     // Steam's encrypted filename representation includes a UTF-8 NUL terminator.
-    if bytes.last() == Some(&0) {
-        bytes.pop();
-    }
-    String::from_utf8(bytes).map_err(|_| invalid("backend.steam.format.invalidUtf8FileName"))
+    let bytes = bytes.strip_suffix(&[0]).unwrap_or(bytes);
+    String::from_utf8(bytes.to_vec())
+        .map_err(|_| invalid("backend.steam.format.invalidUtf8FileName"))
 }
 
-fn decrypt(data: &[u8], key: &[u8; 32]) -> Result<Vec<u8>, ContentError> {
+/// Decrypts in place and returns the plaintext, which lies within `data`.
+fn decrypt<'a>(data: &'a mut [u8], key: &[u8; 32]) -> Result<&'a [u8], ContentError> {
     if data.len() < 32 || !data.len().is_multiple_of(16) {
         return Err(invalid("backend.steam.format.invalidAesBlockSize"));
     }
@@ -176,17 +176,13 @@ fn decrypt(data: &[u8], key: &[u8; 32]) -> Result<Vec<u8>, ContentError> {
     let mut iv = aes::cipher::Block::<Aes256>::default();
     iv.copy_from_slice(&data[..16]);
     aes.decrypt_block(&mut iv);
-    let mut plaintext = data[16..].to_vec();
-    let length = cbc::Decryptor::<Aes256>::new(key.into(), &iv)
-        .decrypt_padded::<Pkcs7>(&mut plaintext)
-        .map_err(|_| invalid("backend.steam.format.decryptionFailed"))?
-        .len();
-    plaintext.truncate(length);
-    Ok(plaintext)
+    cbc::Decryptor::<Aes256>::new(key.into(), &iv)
+        .decrypt_padded::<Pkcs7>(&mut data[16..])
+        .map_err(|_| invalid("backend.steam.format.decryptionFailed"))
 }
 
 pub(super) fn decode_chunk(
-    encrypted: &[u8],
+    encrypted: &mut [u8],
     expected: &Chunk,
     key: &[u8; 32],
 ) -> Result<Vec<u8>, ContentError> {
@@ -198,11 +194,11 @@ pub(super) fn decode_chunk(
     }
     let compressed = decrypt(encrypted, key)?;
     let output = if compressed.starts_with(b"VZa") {
-        unpack_vzip(&compressed, expected.original_size as usize)?
+        unpack_vzip(compressed, expected.original_size as usize)?
     } else if compressed.starts_with(b"VSZa") {
-        unpack_vzstd(&compressed, expected.original_size as usize)?
+        unpack_vzstd(compressed, expected.original_size as usize)?
     } else if compressed.starts_with(b"PK\x03\x04") {
-        unpack_zip(&compressed, expected.original_size as usize)?
+        unpack_zip(compressed, expected.original_size as usize)?
     } else {
         return Err(invalid("backend.steam.format.unknownCompression"));
     };
@@ -308,10 +304,10 @@ fn unpack_vzip(data: &[u8], expected: usize) -> Result<Vec<u8>, ContentError> {
         return Err(invalid("backend.steam.format.invalidVzipDictionary"));
     }
     // Adapt Valve's envelope into an LZMA-alone header, keeping the original LZMA stream.
-    let mut lzma = Vec::with_capacity(data.len());
-    lzma.extend_from_slice(&data[7..12]);
-    lzma.extend_from_slice(&(original_size as u64).to_le_bytes());
-    lzma.extend_from_slice(&data[12..footer]);
+    let mut header = [0_u8; 13];
+    header[..5].copy_from_slice(&data[7..12]);
+    header[5..].copy_from_slice(&(original_size as u64).to_le_bytes());
+    let mut lzma = (&header[..]).chain(&data[12..footer]);
     let options = lzma_rs::decompress::Options {
         memlimit: Some(MAX_CHUNK_BYTES),
         ..Default::default()
@@ -320,7 +316,7 @@ fn unpack_vzip(data: &[u8], expected: usize) -> Result<Vec<u8>, ContentError> {
         bytes: Vec::with_capacity(expected),
         limit: expected,
     };
-    lzma_rs::lzma_decompress_with_options(&mut Cursor::new(lzma), &mut output, &options)
+    lzma_rs::lzma_decompress_with_options(&mut lzma, &mut output, &options)
         .map_err(|_| invalid("backend.steam.format.lzmaFailed"))?;
     if output.bytes.len() != expected || crc32fast::hash(&output.bytes) != crc {
         return Err(invalid("backend.steam.format.invalidVzipChecksum"));
@@ -351,7 +347,7 @@ fn unpack_vzstd(data: &[u8], expected: usize) -> Result<Vec<u8>, ContentError> {
 }
 
 fn read_limited(reader: impl Read, limit: usize) -> Result<Vec<u8>, ContentError> {
-    let mut output = Vec::new();
+    let mut output = Vec::with_capacity(limit);
     reader
         .take(limit as u64 + 1)
         .read_to_end(&mut output)

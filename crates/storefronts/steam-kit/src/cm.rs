@@ -50,6 +50,9 @@ const IO_TIMEOUT: Duration = Duration::from_secs(15);
 pub(crate) const PROFILE_TIMEOUT: Duration = Duration::from_secs(5);
 /// Apps and packages PICS accepts in one access-token and product request.
 pub(crate) const PICS_BATCH: usize = 50;
+/// Requests one query keeps in flight at once; the worker routes each reply
+/// to its own job, so they need not wait for each other.
+pub(crate) const CONCURRENT_REQUESTS: usize = 4;
 const MULTI: u32 = 1;
 /// A service notification Steam pushes, routed by its header's target name.
 const SERVICE_NOTIFICATION: u32 = 146;
@@ -583,8 +586,6 @@ impl SteamConnection {
         self.worker.abort_handle()
     }
 
-    /// Requests only the connected account's profile. Persona updates have their
-    /// own channel so this optional query never drains content or license replies.
     /// The profile Steam last told this connection, when it told both its
     /// name and its avatar. Steam tells them unasked as the account goes
     /// online, and may then leave a request for them unanswered.
@@ -611,6 +612,8 @@ impl SteamConnection {
         Ok((self.steam_id, response.access_token))
     }
 
+    /// Requests only the connected account's profile. Persona updates have their
+    /// own channel so this optional query never drains content or license replies.
     pub(crate) async fn request_profile(&self) -> Result<ProfileRequest, CmError> {
         self.ensure_logged_on()?;
         let request = ProfileRequest::new(self.profile.clone())?;
@@ -671,12 +674,6 @@ impl SteamConnection {
         Ok(games)
     }
 
-    /// Resolves licensed packages to app IDs (including DLC) for download checks.
-    /// Steam still authorizes every depot key and manifest request individually.
-    pub async fn owned_app_ids(&self) -> Result<Vec<u32>, CmError> {
-        Ok(self.content_licenses().await?.apps.into_iter().collect())
-    }
-
     /// Preserve both namespaces when expanding active PICS packages.
     pub async fn content_licenses(&self) -> Result<ContentLicenses, CmError> {
         self.ensure_logged_on()?;
@@ -701,9 +698,14 @@ impl SteamConnection {
                 access_token: license.access_token,
             })
             .collect();
+        let requests: Vec<_> = packages
+            .chunks(PICS_BATCH)
+            .map(|batch| self.products(&[], batch))
+            .collect();
+        let mut batches = futures_util::stream::iter(requests).buffered(CONCURRENT_REQUESTS);
         let mut rights = ContentLicenses::default();
-        for batch in packages.chunks(PICS_BATCH) {
-            let response = self.products(&[], batch).await?;
+        while let Some(response) = batches.next().await {
+            let response = response?;
             if !response.unknown_packages.is_empty() {
                 return Err(CmError::Protocol(
                     "backend.steam.cm.packagesUnavailable".into(),
@@ -735,45 +737,56 @@ impl SteamConnection {
     /// Unknown or removed apps are omitted. Malformed metadata fails the request.
     pub async fn app_infos(&self, app_ids: &[u32]) -> Result<Vec<AppInfo>, CmError> {
         self.ensure_logged_on()?;
+        let requests: Vec<_> = app_ids
+            .chunks(PICS_BATCH)
+            .map(|batch| self.app_info_batch(batch))
+            .collect();
+        let mut batches = futures_util::stream::iter(requests).buffered(CONCURRENT_REQUESTS);
         let mut apps = Vec::new();
-        for batch in app_ids.chunks(PICS_BATCH) {
-            let token_packet = self
-                .request(
-                    TOKEN_REQUEST,
-                    &proto::AccessTokenRequest {
-                        package_ids: Vec::new(),
-                        app_ids: batch.to_vec(),
-                    },
-                    None,
-                    TOKEN_RESPONSE,
-                )
-                .await?
-                .next()
-                .await?;
-            let tokens = proto::AccessTokenResponse::decode(&token_packet.body[..])?;
-            let token_map: HashMap<_, _> = tokens
-                .apps
-                .into_iter()
-                .map(|token| (token.id, token.token))
-                .collect();
-            let requested: Vec<_> = batch
-                .iter()
-                .map(|id| proto::ProductId {
-                    id: *id,
-                    access_token: token_map.get(id).copied().unwrap_or(0),
-                })
-                .collect();
-            let response = self.products(&requested, &[]).await?;
-            for info in response.apps {
-                if info.missing_token {
-                    return Err(CmError::Rejected {
-                        action: "backend.steam.cm.action.metadata",
-                        result: 15,
-                    });
-                }
-                if !info.buffer.is_empty() {
-                    apps.push(parse_app(info.id, &info.buffer)?);
-                }
+        while let Some(batch) = batches.next().await {
+            apps.extend(batch?);
+        }
+        Ok(apps)
+    }
+
+    async fn app_info_batch(&self, batch: &[u32]) -> Result<Vec<AppInfo>, CmError> {
+        let token_packet = self
+            .request(
+                TOKEN_REQUEST,
+                &proto::AccessTokenRequest {
+                    package_ids: Vec::new(),
+                    app_ids: batch.to_vec(),
+                },
+                None,
+                TOKEN_RESPONSE,
+            )
+            .await?
+            .next()
+            .await?;
+        let tokens = proto::AccessTokenResponse::decode(&token_packet.body[..])?;
+        let token_map: HashMap<_, _> = tokens
+            .apps
+            .into_iter()
+            .map(|token| (token.id, token.token))
+            .collect();
+        let requested: Vec<_> = batch
+            .iter()
+            .map(|id| proto::ProductId {
+                id: *id,
+                access_token: token_map.get(id).copied().unwrap_or(0),
+            })
+            .collect();
+        let response = self.products(&requested, &[]).await?;
+        let mut apps = Vec::new();
+        for info in response.apps {
+            if info.missing_token {
+                return Err(CmError::Rejected {
+                    action: "backend.steam.cm.action.metadata",
+                    result: 15,
+                });
+            }
+            if !info.buffer.is_empty() {
+                apps.push(parse_app(info.id, &info.buffer)?);
             }
         }
         Ok(apps)

@@ -157,29 +157,20 @@ fn sandbox(config: &Config, directory: &Path) -> Result<String, Error> {
     }
     Ok(profile)
 }
-/// Durability is explicit: session recovery requires fsync, diagnostics do not.
-#[derive(Clone, Copy)]
-pub(crate) enum Durability {
-    Atomic,
-    FileSync,
-}
-
-pub(crate) fn atomic_write(
+/// Replaces `path` atomically without fsync: diagnostics need no durability,
+/// unlike [`obelisk_core::write_atomic`].
+fn atomic_write(
     path: &Path,
-    durability: Durability,
     write: impl FnOnce(&mut std::fs::File) -> Result<(), Error>,
 ) -> Result<(), Error> {
     let mut temporary = tempfile::NamedTempFile::new_in(path.parent().ok_or(Error::Storage)?)?;
     write(temporary.as_file_mut())?;
-    if matches!(durability, Durability::FileSync) {
-        temporary.as_file().sync_all()?;
-    }
     temporary.persist(path).map_err(|_| Error::Storage)?;
     Ok(())
 }
 
 pub(crate) fn report(path: &Path, proof: &crate::Proof) -> Result<(), Error> {
-    atomic_write(path, Durability::Atomic, |file| {
+    atomic_write(path, |file| {
         serde_json::to_writer_pretty(file, proof).map_err(|_| Error::Storage)
     })
 }
@@ -318,21 +309,19 @@ mod atomic_tests {
     fn incomplete_atomic_writes_preserve_the_previous_file_and_remove_temporary_files() {
         let root = tempfile::tempdir().unwrap();
         let path = root.path().join("state.json");
-        for durability in [Durability::Atomic, Durability::FileSync] {
-            fs::write(&path, b"previous").unwrap();
-            let result = atomic_write(&path, durability, |file| {
-                file.write_all(b"incomplete")?;
-                Err(Error::Storage)
-            });
-            assert!(result.is_err());
-            assert_eq!(fs::read(&path).unwrap(), b"previous");
-            assert_eq!(fs::read_dir(root.path()).unwrap().count(), 1);
-            atomic_write(&path, durability, |file| {
-                file.write_all(b"complete")?;
-                Ok(())
-            })
-            .unwrap();
-            assert_eq!(fs::read(&path).unwrap(), b"complete");
-        }
+        fs::write(&path, b"previous").unwrap();
+        let result = atomic_write(&path, |file| {
+            file.write_all(b"incomplete")?;
+            Err(Error::Storage)
+        });
+        assert!(result.is_err());
+        assert_eq!(fs::read(&path).unwrap(), b"previous");
+        assert_eq!(fs::read_dir(root.path()).unwrap().count(), 1);
+        atomic_write(&path, |file| {
+            file.write_all(b"complete")?;
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(fs::read(&path).unwrap(), b"complete");
     }
 }

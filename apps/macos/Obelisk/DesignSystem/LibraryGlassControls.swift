@@ -155,15 +155,9 @@ struct AccountAvatar: View {
     var body: some View {
         ZStack {
             Circle().fill(.primary.opacity(0.12))
-            if let url {
-                AsyncImage(url: url) { phase in
-                    if let image = phase.image {
-                        image.resizable().scaledToFill()
-                    } else {
-                        placeholder
-                    }
-                }
-            } else {
+            CachedArtwork(url: url, maxPixelSize: 64) { image in
+                image.resizable().scaledToFill()
+            } placeholder: {
                 placeholder
             }
         }

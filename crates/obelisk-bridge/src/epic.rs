@@ -44,18 +44,6 @@ pub fn epic_authorization_code(input: String) -> Result<String, EpicError> {
     auth::authorization_code(&input).map_err(Into::into)
 }
 
-/// The directory name the Epic engine installs into, so the host removes only
-/// directories it created without re-deriving the hashing scheme.
-#[uniffi::export]
-pub fn epic_installation_directory_name(
-    namespace: String,
-    catalog_item_id: String,
-    app_name: String,
-    platform: String,
-) -> String {
-    client::installation_directory_name(&namespace, &catalog_item_id, &app_name, &platform)
-}
-
 #[derive(Clone, uniffi::Record)]
 pub struct EpicCredentials {
     pub account_id: String,

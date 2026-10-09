@@ -59,7 +59,25 @@ pub struct OwnGame {
     pub app_id: u32,
     pub lobby_id: u64,
     pub connect: Option<String>,
-    pub invite: GameInvite,
+}
+
+impl OwnGame {
+    /// What Steam's own friend menu would offer for this game now.
+    pub fn invite(&self) -> GameInvite {
+        if self.app_id == 0 {
+            GameInvite::None
+        } else if self.lobby_id != 0 {
+            GameInvite::Lobby {
+                lobby_id: self.lobby_id,
+            }
+        } else if let Some(connect) = &self.connect {
+            GameInvite::Connect {
+                connect: connect.clone(),
+            }
+        } else {
+            GameInvite::None
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -91,7 +109,6 @@ impl OwnGameSource {
                     app_id: 0,
                     lobby_id: 0,
                     connect: None,
-                    invite: GameInvite::None,
                 },
                 received: 0,
             })
@@ -173,7 +190,6 @@ impl OwnGameSource {
                 app_id: 0,
                 lobby_id: 0,
                 connect: None,
-                invite: GameInvite::None,
             };
             true
         });
@@ -210,19 +226,6 @@ fn apply(game: &mut OwnGame, flags: u32, persona: &proto::Persona) {
             .map(|pair| pair.value.clone())
             .filter(|connect| !connect.is_empty());
     }
-    game.invite = if game.app_id == 0 {
-        GameInvite::None
-    } else if game.lobby_id != 0 {
-        GameInvite::Lobby {
-            lobby_id: game.lobby_id,
-        }
-    } else if let Some(connect) = &game.connect {
-        GameInvite::Connect {
-            connect: connect.clone(),
-        }
-    } else {
-        GameInvite::None
-    };
 }
 
 /// Wire bodies for debug fixtures, so tests feed the production decoder.
@@ -310,7 +313,7 @@ mod tests {
         assert_eq!(game.app_id, 620);
         assert_eq!(game.connect.as_deref(), Some("+cx"));
         assert_eq!(
-            game.invite,
+            game.invite(),
             GameInvite::Lobby {
                 lobby_id: 0x0186_0000_0000_0042
             }
@@ -325,7 +328,7 @@ mod tests {
             &persona(REQUESTED, playing(620, 0, Some("+connect 1"))),
         );
         assert_eq!(
-            source.snapshot().invite,
+            source.snapshot().invite(),
             GameInvite::Connect {
                 connect: "+connect 1".into()
             }
@@ -335,16 +338,19 @@ mod tests {
             ACCOUNT,
             &persona(REQUESTED, playing(620, 9, Some("+connect 1"))),
         );
-        assert_eq!(source.snapshot().invite, GameInvite::Lobby { lobby_id: 9 });
+        assert_eq!(
+            source.snapshot().invite(),
+            GameInvite::Lobby { lobby_id: 9 }
+        );
         // No game, no invitation, whatever the leftovers say.
         source.receive(
             ACCOUNT,
             &persona(REQUESTED, playing(0, 9, Some("+connect 1"))),
         );
-        assert_eq!(source.snapshot().invite, GameInvite::None);
+        assert_eq!(source.snapshot().invite(), GameInvite::None);
         // A game without lobby or connect string offers nothing.
         source.receive(ACCOUNT, &persona(REQUESTED, playing(620, 0, None)));
-        assert_eq!(source.snapshot().invite, GameInvite::None);
+        assert_eq!(source.snapshot().invite(), GameInvite::None);
         // The app may come from the game ID's low 24 bits.
         source.receive(
             ACCOUNT,
@@ -359,7 +365,10 @@ mod tests {
             ),
         );
         assert_eq!(source.snapshot().app_id, 620);
-        assert_eq!(source.snapshot().invite, GameInvite::Lobby { lobby_id: 5 });
+        assert_eq!(
+            source.snapshot().invite(),
+            GameInvite::Lobby { lobby_id: 5 }
+        );
     }
 
     #[test]
@@ -395,7 +404,7 @@ mod tests {
             &persona(RICH_PRESENCE, playing(0, 0, Some("+join"))),
         );
         assert_eq!(
-            source.snapshot().invite,
+            source.snapshot().invite(),
             GameInvite::Connect {
                 connect: "+join".into()
             }
@@ -443,6 +452,6 @@ mod tests {
         source.disconnect();
         let ended = waiting.await.unwrap();
         assert!(!ended.connected);
-        assert_eq!(ended.invite, GameInvite::None);
+        assert_eq!(ended.invite(), GameInvite::None);
     }
 }

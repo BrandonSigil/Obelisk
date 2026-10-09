@@ -2408,16 +2408,6 @@ public protocol SteamChatFixtureProtocol: AnyObject, Sendable {
     
     func readElsewhere(friendSteamId: UInt64, timestamp: UInt32) 
     
-    /**
-     * A raw service notification body, as Steam's EMsg 146 carries it.
-     */
-    func receiveNotification(method: String, body: Data) 
-    
-    /**
-     * A raw ClientPersonaState body.
-     */
-    func receivePersonaState(body: Data) 
-    
     func typing(friendSteamId: UInt64) 
     
 }
@@ -2563,31 +2553,6 @@ open func readElsewhere(friendSteamId: UInt64, timestamp: UInt32)  {try! rustCal
             self.uniffiCloneHandle(),
         FfiConverterUInt64.lower(friendSteamId),
         FfiConverterUInt32.lower(timestamp),uniffiCallStatus
-    )
-}
-}
-    
-    /**
-     * A raw service notification body, as Steam's EMsg 146 carries it.
-     */
-open func receiveNotification(method: String, body: Data)  {try! rustCall() {
-        uniffiCallStatus in
-    uniffi_obelisk_bridge_fn_method_steamchatfixture_receive_notification(
-            self.uniffiCloneHandle(),
-        FfiConverterString.lower(method),
-        FfiConverterData.lower(body),uniffiCallStatus
-    )
-}
-}
-    
-    /**
-     * A raw ClientPersonaState body.
-     */
-open func receivePersonaState(body: Data)  {try! rustCall() {
-        uniffiCallStatus in
-    uniffi_obelisk_bridge_fn_method_steamchatfixture_receive_persona_state(
-            self.uniffiCloneHandle(),
-        FfiConverterData.lower(body),uniffiCallStatus
     )
 }
 }
@@ -3216,13 +3181,13 @@ public protocol SteamSessionProtocol: AnyObject, Sendable {
      * reported itself. Fails with `backend.steam.invite.unavailable` for an
      * invitation Steam cannot carry or while the account plays another game.
      */
-    func inviteIntoGame(friendSteamId: UInt64, appId: UInt32, invite: SteamGameInvite) async throws  -> SteamInviteKind
+    func inviteIntoGame(friendSteamId: UInt64, appId: UInt32, invite: SteamGameInvite) async throws 
     
     /**
      * Fails with `backend.steam.invite.unavailable` unless the account plays
      * `app_id` and that game can take an invitation now.
      */
-    func inviteToGame(friendSteamId: UInt64, appId: UInt32) async throws  -> SteamInviteKind
+    func inviteToGame(friendSteamId: UInt64, appId: UInt32) async throws 
     
     /**
      * Suspends until chat events follow `after_sequence` or the session ends.
@@ -3601,7 +3566,7 @@ open func activeSessions()async throws  -> [SteamChatSession]  {
      * reported itself. Fails with `backend.steam.invite.unavailable` for an
      * invitation Steam cannot carry or while the account plays another game.
      */
-open func inviteIntoGame(friendSteamId: UInt64, appId: UInt32, invite: SteamGameInvite)async throws  -> SteamInviteKind  {
+open func inviteIntoGame(friendSteamId: UInt64, appId: UInt32, invite: SteamGameInvite)async throws   {
     return
         try  await uniffiRustCallAsync(
             rustFutureFunc: {
@@ -3609,10 +3574,10 @@ open func inviteIntoGame(friendSteamId: UInt64, appId: UInt32, invite: SteamGame
                         self.uniffiCloneHandle(),FfiConverterUInt64.lower(friendSteamId),FfiConverterUInt32.lower(appId),FfiConverterTypeSteamGameInvite_lower(invite)
                 )
             },
-            pollFunc: ffi_obelisk_bridge_rust_future_poll_rust_buffer,
-            completeFunc: ffi_obelisk_bridge_rust_future_complete_rust_buffer,
-            freeFunc: ffi_obelisk_bridge_rust_future_free_rust_buffer,
-            liftFunc: FfiConverterTypeSteamInviteKind_lift,
+            pollFunc: ffi_obelisk_bridge_rust_future_poll_void,
+            completeFunc: ffi_obelisk_bridge_rust_future_complete_void,
+            freeFunc: ffi_obelisk_bridge_rust_future_free_void,
+            liftFunc: { $0 },
             errorHandler: FfiConverterTypeSteamError_lift
         )
 }
@@ -3621,7 +3586,7 @@ open func inviteIntoGame(friendSteamId: UInt64, appId: UInt32, invite: SteamGame
      * Fails with `backend.steam.invite.unavailable` unless the account plays
      * `app_id` and that game can take an invitation now.
      */
-open func inviteToGame(friendSteamId: UInt64, appId: UInt32)async throws  -> SteamInviteKind  {
+open func inviteToGame(friendSteamId: UInt64, appId: UInt32)async throws   {
     return
         try  await uniffiRustCallAsync(
             rustFutureFunc: {
@@ -3629,10 +3594,10 @@ open func inviteToGame(friendSteamId: UInt64, appId: UInt32)async throws  -> Ste
                         self.uniffiCloneHandle(),FfiConverterUInt64.lower(friendSteamId),FfiConverterUInt32.lower(appId)
                 )
             },
-            pollFunc: ffi_obelisk_bridge_rust_future_poll_rust_buffer,
-            completeFunc: ffi_obelisk_bridge_rust_future_complete_rust_buffer,
-            freeFunc: ffi_obelisk_bridge_rust_future_free_rust_buffer,
-            liftFunc: FfiConverterTypeSteamInviteKind_lift,
+            pollFunc: ffi_obelisk_bridge_rust_future_poll_void,
+            completeFunc: ffi_obelisk_bridge_rust_future_complete_void,
+            freeFunc: ffi_obelisk_bridge_rust_future_free_void,
+            liftFunc: { $0 },
             errorHandler: FfiConverterTypeSteamError_lift
         )
 }
@@ -8056,8 +8021,6 @@ public struct SteamOwnGame: Equatable, Hashable {
      * 0 when the account plays nothing.
      */
     public var appId: UInt32
-    public var lobbyId: UInt64
-    public var connect: String?
     public var invite: SteamGameInvite
 
     // Default memberwise initializers are never public by default, so we
@@ -8065,12 +8028,10 @@ public struct SteamOwnGame: Equatable, Hashable {
     public init(revision: UInt64, connected: Bool, 
         /**
          * 0 when the account plays nothing.
-         */appId: UInt32, lobbyId: UInt64, connect: String?, invite: SteamGameInvite) {
+         */appId: UInt32, invite: SteamGameInvite) {
         self.revision = revision
         self.connected = connected
         self.appId = appId
-        self.lobbyId = lobbyId
-        self.connect = connect
         self.invite = invite
     }
 
@@ -8093,8 +8054,6 @@ public struct FfiConverterTypeSteamOwnGame: FfiConverterRustBuffer {
                 revision: FfiConverterUInt64.read(from: &buf), 
                 connected: FfiConverterBool.read(from: &buf), 
                 appId: FfiConverterUInt32.read(from: &buf), 
-                lobbyId: FfiConverterUInt64.read(from: &buf), 
-                connect: FfiConverterOptionString.read(from: &buf), 
                 invite: FfiConverterTypeSteamGameInvite.read(from: &buf)
         )
     }
@@ -8103,8 +8062,6 @@ public struct FfiConverterTypeSteamOwnGame: FfiConverterRustBuffer {
         FfiConverterUInt64.write(value.revision, into: &buf)
         FfiConverterBool.write(value.connected, into: &buf)
         FfiConverterUInt32.write(value.appId, into: &buf)
-        FfiConverterUInt64.write(value.lobbyId, into: &buf)
-        FfiConverterOptionString.write(value.connect, into: &buf)
         FfiConverterTypeSteamGameInvite.write(value.invite, into: &buf)
     }
 }
@@ -10829,72 +10786,6 @@ public func FfiConverterTypeSteamHostState_lower(_ value: SteamHostState) -> Rus
 
 
 
-
-public enum SteamInviteKind: Equatable, Hashable {
-    
-    case lobby
-    case connect
-
-
-
-
-
-}
-
-#if compiler(>=6)
-extension SteamInviteKind: Sendable {}
-#endif
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public struct FfiConverterTypeSteamInviteKind: FfiConverterRustBuffer {
-    typealias SwiftType = SteamInviteKind
-
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SteamInviteKind {
-        let variant: Int32 = try readInt(&buf)
-        switch variant {
-        
-        case 1: return .lobby
-        
-        case 2: return .connect
-        
-        default: throw UniffiInternalError.unexpectedEnumCase
-        }
-    }
-
-    public static func write(_ value: SteamInviteKind, into buf: inout [UInt8]) {
-        switch value {
-        
-        
-        case .lobby:
-            writeInt(&buf, Int32(1))
-        
-        
-        case .connect:
-            writeInt(&buf, Int32(2))
-        
-        }
-    }
-}
-
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeSteamInviteKind_lift(_ buf: RustBuffer) throws -> SteamInviteKind {
-    return try FfiConverterTypeSteamInviteKind.lift(buf)
-}
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeSteamInviteKind_lower(_ value: SteamInviteKind) -> RustBuffer {
-    return FfiConverterTypeSteamInviteKind.lower(value)
-}
-
-
-
 /**
  * What the game asked Steam's overlay to show; Obelisk shows its own.
  */
@@ -12612,13 +12503,6 @@ fileprivate func uniffiFutureContinuationCallback(handle: UInt64, pollResult: In
         print("uniffiFutureContinuationCallback invalid handle")
     }
 }
-public func coreVersion() -> String  {
-    return try!  FfiConverterString.lift(try! rustCall() {
-        uniffiCallStatus in
-    uniffi_obelisk_bridge_fn_func_core_version(uniffiCallStatus
-    )
-})
-}
 public func storefronts() -> [StorefrontInfo]  {
     return try!  FfiConverterSequenceTypeStorefrontInfo.lift(try! rustCall() {
         uniffiCallStatus in
@@ -12631,21 +12515,6 @@ public func epicAuthorizationCode(input: String)throws  -> String  {
         uniffiCallStatus in
     uniffi_obelisk_bridge_fn_func_epic_authorization_code(
         FfiConverterString.lower(input),uniffiCallStatus
-    )
-})
-}
-/**
- * The directory name the Epic engine installs into, so the host removes only
- * directories it created without re-deriving the hashing scheme.
- */
-public func epicInstallationDirectoryName(namespace: String, catalogItemId: String, appName: String, platform: String) -> String  {
-    return try!  FfiConverterString.lift(try! rustCall() {
-        uniffiCallStatus in
-    uniffi_obelisk_bridge_fn_func_epic_installation_directory_name(
-        FfiConverterString.lower(namespace),
-        FfiConverterString.lower(catalogItemId),
-        FfiConverterString.lower(appName),
-        FfiConverterString.lower(platform),uniffiCallStatus
     )
 })
 }
@@ -12742,16 +12611,10 @@ private let initializationResult: InitializationResult = {
     if bindings_contract_version != scaffolding_contract_version {
         return InitializationResult.contractVersionMismatch
     }
-    if (uniffi_obelisk_bridge_checksum_func_core_version() != 52245) {
-        return InitializationResult.apiChecksumMismatch
-    }
     if (uniffi_obelisk_bridge_checksum_func_storefronts() != 5932) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_obelisk_bridge_checksum_func_epic_authorization_code() != 42633) {
-        return InitializationResult.apiChecksumMismatch
-    }
-    if (uniffi_obelisk_bridge_checksum_func_epic_installation_directory_name() != 16962) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_obelisk_bridge_checksum_func_epic_login_url() != 45052) {
@@ -13012,10 +12875,10 @@ private let initializationResult: InitializationResult = {
     if (uniffi_obelisk_bridge_checksum_method_steamsession_active_sessions() != 4743) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_obelisk_bridge_checksum_method_steamsession_invite_into_game() != 44762) {
+    if (uniffi_obelisk_bridge_checksum_method_steamsession_invite_into_game() != 13368) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_obelisk_bridge_checksum_method_steamsession_invite_to_game() != 41141) {
+    if (uniffi_obelisk_bridge_checksum_method_steamsession_invite_to_game() != 13709) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_obelisk_bridge_checksum_method_steamsession_next_chat() != 57601) {
@@ -13055,12 +12918,6 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_obelisk_bridge_checksum_method_steamchatfixture_read_elsewhere() != 44124) {
-        return InitializationResult.apiChecksumMismatch
-    }
-    if (uniffi_obelisk_bridge_checksum_method_steamchatfixture_receive_notification() != 46852) {
-        return InitializationResult.apiChecksumMismatch
-    }
-    if (uniffi_obelisk_bridge_checksum_method_steamchatfixture_receive_persona_state() != 12879) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_obelisk_bridge_checksum_method_steamchatfixture_typing() != 62764) {

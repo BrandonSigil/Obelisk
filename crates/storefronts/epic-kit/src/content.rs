@@ -226,7 +226,10 @@ struct DiskInstall {
 enum ChunkState {
     Cached,
     Pending,
-    Stored,
+    /// Written by this run; `verified` once read back and hashed.
+    Stored {
+        verified: bool,
+    },
 }
 
 struct PlannedFile {
@@ -373,11 +376,11 @@ impl DiskInstall {
                     }
                     // Verified on disk earlier in this run and not yet evicted;
                     // the entry is dropped with the file at every removal site.
-                    Some(ChunkState::Cached) => {
+                    Some(ChunkState::Cached | ChunkState::Stored { verified: true }) => {
                         plan.reused.insert(part.guid);
                         continue;
                     }
-                    Some(ChunkState::Stored) | None => (),
+                    Some(ChunkState::Stored { verified: false }) | None => (),
                 }
                 let chunk = self
                     .manifest
@@ -394,6 +397,7 @@ impl DiskInstall {
                     self.prefetch
                         .chunks
                         .entry(part.guid)
+                        .and_modify(|state| *state = ChunkState::Stored { verified: true })
                         .or_insert(ChunkState::Cached);
                     plan.reused.insert(part.guid);
                 } else {
@@ -428,8 +432,10 @@ impl DiskInstall {
         let manifest = Arc::clone(&self.manifest);
         for guid in &plan.verify_after_delivery {
             self.cancel.check()?;
-            if !matches!(self.prefetch.chunks.get(guid), Some(ChunkState::Stored)) {
-                return Err(EpicError::Protocol);
+            match self.prefetch.chunks.get(guid) {
+                Some(ChunkState::Stored { verified: true }) => continue,
+                Some(ChunkState::Stored { verified: false }) => (),
+                _ => return Err(EpicError::Protocol),
             }
             let chunk = manifest.chunks.get(guid).ok_or(EpicError::Protocol)?;
             let path = checked_file_path(chunk_root, Path::new(&chunk_key(chunk)))?;
@@ -441,6 +447,9 @@ impl DiskInstall {
             )? {
                 return Err(EpicError::Integrity);
             }
+            self.prefetch
+                .chunks
+                .insert(*guid, ChunkState::Stored { verified: true });
         }
         let mut delivered = HashSet::new();
         let partial_name = format!("{}.part", hex(&Sha1::digest(file.filename.as_bytes())));
@@ -470,7 +479,9 @@ impl DiskInstall {
                 let path = checked_file_path(chunk_root, Path::new(&chunk_key(chunk)))?;
                 fs::write(path, &bytes)?;
                 self.prefetch.pending.pop_front();
-                self.prefetch.chunks.insert(part.guid, ChunkState::Stored);
+                self.prefetch
+                    .chunks
+                    .insert(part.guid, ChunkState::Stored { verified: false });
                 current = Some((part.guid, bytes));
             }
             let start = part.offset as usize;

@@ -670,15 +670,7 @@ impl<P: Storefront> Sessions<P> {
             let inner = self.shared.inner.lock().unwrap();
             (inner.client.clone(), inner.operation.clone())
         };
-        match client {
-            Some(client) => client.stop().map_err(Failure::Failed),
-            None => {
-                if let Some(operation) = operation {
-                    operation.cancel();
-                }
-                Ok(())
-            }
-        }
+        Self::call_or_cancel(client, operation, |client| client.stop())
     }
 
     /// The player's Quit of session `id`'s game: it is asked to close its
@@ -706,6 +698,16 @@ impl<P: Storefront> Sessions<P> {
                 _ => return Err(Failure::Failed(P::INVALID_SESSION.to_owned())),
             }
         };
+        Self::call_or_cancel(client, operation, call)
+    }
+
+    /// Makes `call` on the session's supervisor, or cancels the launch still
+    /// preparing before it has one.
+    fn call_or_cancel(
+        client: Option<Arc<dyn Supervised<P>>>,
+        operation: Option<Arc<Operation>>,
+        call: impl FnOnce(&dyn Supervised<P>) -> Result<(), String>,
+    ) -> Result<(), Failure> {
         match client {
             Some(client) => call(&*client).map_err(Failure::Failed),
             None => {
@@ -1025,77 +1027,6 @@ impl<P: Storefront> Drop for Admission<P> {
         if !self.launched.load(Ordering::Acquire) {
             self.shared.finish(&self.operation);
         }
-    }
-}
-
-/// What the player asks of a running Steam game.
-impl Sessions<crate::steam::Steam> {
-    /// Obelisk's overlay opened, or closed, over session `id`'s game, which
-    /// Steam's overlay would tell it. `user_initiated` when the player opened
-    /// it, not the game.
-    pub fn overlay_state(
-        &self,
-        id: &str,
-        active: bool,
-        user_initiated: bool,
-    ) -> Result<(), Failure> {
-        self.control(
-            id,
-            crate::steam::Control::Overlay {
-                active,
-                user_initiated,
-            },
-        )
-    }
-
-    /// The player accepted `friend`'s invitation into session `id`'s running
-    /// game: the game joins as if Steam's overlay had accepted it.
-    pub fn accept_invite(
-        &self,
-        id: &str,
-        friend: u64,
-        target: crate::protocol::InviteTarget,
-    ) -> Result<(), Failure> {
-        if !crate::protocol::individual(friend) || !target.valid() {
-            return Err(Failure::Failed(
-                <crate::steam::Steam as Storefront>::INVALID_SESSION.to_owned(),
-            ));
-        }
-        self.control(id, crate::steam::Control::AcceptInvite { friend, target })
-    }
-
-    /// The player's answer to the purchase `order_id` session `id`'s game
-    /// waits on.
-    pub fn authorize_microtxn(
-        &self,
-        id: &str,
-        order_id: u64,
-        approve: bool,
-    ) -> Result<(), Failure> {
-        self.control(
-            id,
-            crate::steam::Control::AuthorizeMicroTxn { order_id, approve },
-        )
-    }
-}
-
-impl Storefront for crate::steam::Steam {
-    type Game = u32;
-    const BEGINS: bool = false;
-    const INVALID_SESSION: &'static str = "backend.steam.runtime.invalidSession";
-    const SESSION_FAILED: &'static str = "backend.steam.runtime.startFailed";
-    fn game(store: &crate::steam::Store) -> u32 {
-        store.app_id
-    }
-}
-
-impl Storefront for crate::epic::Epic {
-    type Game = crate::epic::Store;
-    const BEGINS: bool = true;
-    const INVALID_SESSION: &'static str = "backend.epic.cloud.invalidSession";
-    const SESSION_FAILED: &'static str = "backend.epic.cloud.failed";
-    fn game(store: &crate::epic::Store) -> crate::epic::Store {
-        store.clone()
     }
 }
 

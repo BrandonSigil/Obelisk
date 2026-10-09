@@ -1,6 +1,10 @@
 //! Bounded reads and the status mapping every GOG request shares.
 use std::{io::Read, time::Duration};
 
+use obelisk_core::{
+    date,
+    transfer::{BodyError, BodySize, CancelToken, read_body},
+};
 use reqwest::{RequestBuilder, Response, StatusCode, Url};
 
 use crate::GogError;
@@ -27,23 +31,22 @@ pub(crate) async fn bounded_json<T: serde::de::DeserializeOwned>(
 }
 
 pub(crate) async fn bounded_bytes(
-    mut response: reqwest::Response,
+    response: reqwest::Response,
     limit: usize,
 ) -> Result<Vec<u8>, GogError> {
-    if response
-        .content_length()
-        .is_some_and(|length| length > limit as u64)
-    {
-        return Err(GogError::Protocol);
-    }
-    let mut body = Vec::new();
-    while let Some(chunk) = response.chunk().await.map_err(|_| GogError::Network)? {
-        if chunk.len() > limit.saturating_sub(body.len()) {
-            return Err(GogError::Protocol);
-        }
-        body.extend_from_slice(&chunk);
-    }
-    Ok(body)
+    read_body(
+        response.content_length(),
+        response.bytes_stream(),
+        BodySize::AtMost(limit as u64),
+        &CancelToken::new(),
+        |_| {},
+    )
+    .await
+    .map_err(|error| match error {
+        // An oversized answer is malformed, unlike a chunk of the wrong size.
+        BodyError::Size => GogError::Protocol,
+        error => error.into(),
+    })
 }
 
 /// A content-system document: zlib-compressed JSON, or plain JSON for the
@@ -187,15 +190,7 @@ pub(crate) fn unix_seconds(text: &str) -> Option<u64> {
             seconds -= sign * minutes * 60;
         }
     }
-    // Days since the epoch of the proleptic Gregorian date, after Howard
-    // Hinnant's `days_from_civil`.
-    let year = if month <= 2 { year - 1 } else { year };
-    let era = year.div_euclid(400);
-    let of_era = year - era * 400;
-    let of_year = (153 * ((month + 9) % 12) + 2) / 5 + day - 1;
-    let of_cycle = of_era * 365 + of_era / 4 - of_era / 100 + of_year;
-    let days = era * 146_097 + of_cycle - 719_468;
-    u64::try_from(days * 86_400 + seconds).ok()
+    u64::try_from(date::days_from_civil(year, month, day) * 86_400 + seconds).ok()
 }
 
 #[cfg(test)]

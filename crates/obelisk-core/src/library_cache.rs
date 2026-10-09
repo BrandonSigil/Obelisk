@@ -21,6 +21,8 @@ use std::{
     time::Duration,
 };
 
+use crate::date;
+
 /// Its name in the library directory, beside the catalog's `library.json`.
 pub const FILE_NAME: &str = "library-cache.json";
 const VERSION: u64 = 1;
@@ -325,7 +327,7 @@ fn id(entry: &Entry) -> Option<&str> {
 /// `at` in UTC, as Swift's `ISO8601DateFormatter` writes a date.
 fn iso8601(at: u64) -> String {
     let (days, seconds) = (at / 86_400, at % 86_400);
-    let (year, month, day) = civil(days);
+    let (year, month, day) = date::civil_from_days(days as i64);
     format!(
         "{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}Z",
         seconds / 3600,
@@ -356,33 +358,8 @@ fn parse_iso8601(text: &str) -> Option<u64> {
     if hour > 23 || minute > 59 || second > 59 {
         return None;
     }
-    Some(days(year, month, day) * 86_400 + hour * 3600 + minute * 60 + second)
-}
-
-/// The date `days` after 1970-01-01, by Howard Hinnant's `civil_from_days`.
-fn civil(days: u64) -> (u64, u64, u64) {
-    let days = days + 719_468;
-    let (era, of_era) = (days / 146_097, days % 146_097);
-    let year_of_era = (of_era - of_era / 1460 + of_era / 36_524 - of_era / 146_096) / 365;
-    let of_year = of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
-    let shifted_month = (5 * of_year + 2) / 153;
-    let day = of_year - (153 * shifted_month + 2) / 5 + 1;
-    let month = if shifted_month < 10 {
-        shifted_month + 3
-    } else {
-        shifted_month - 9
-    };
-    let year = year_of_era + era * 400 + u64::from(month <= 2);
-    (year, month, day)
-}
-
-/// The days from 1970-01-01 to a date from 1970 on, by `days_from_civil`.
-fn days(year: u64, month: u64, day: u64) -> u64 {
-    let year = if month <= 2 { year - 1 } else { year };
-    let (era, year_of_era) = (year / 400, year % 400);
-    let of_year = (153 * ((month + 9) % 12) + 2) / 5 + day - 1;
-    let of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + of_year;
-    era * 146_097 + of_era - 719_468
+    let days = date::days_from_civil(year as i64, month as i64, day as i64) as u64;
+    Some(days * 86_400 + hour * 3600 + minute * 60 + second)
 }
 
 #[cfg(test)]

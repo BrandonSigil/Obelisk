@@ -221,12 +221,22 @@ final class GameSessions<Store: GameStorefront> {
         }
     }
 
+    /// The active session's game, as the library and the Cloud indicator read it.
+    struct ActiveGame: Equatable {
+        let game: Store.GameID
+        let account: Store.AccountID
+        let running: Bool
+    }
+
     private(set) var active: Session?
+    /// Changes with `active`'s game and phase only, not with its progress,
+    /// such as Voile's download while the launch waits for it.
+    private(set) var activeGame: ActiveGame?
     /// The last session observed, kept after it ends.
     private(set) var last: Session?
     private(set) var isRecovering = true
     private(set) var recoveryError: String?
-    var isBusy: Bool { active != nil || isRecovering }
+    var isBusy: Bool { activeGame != nil || isRecovering }
     /// The player's Quit of the active session's game, until that session
     /// stops running.
     private(set) var quitRequest: QuitRequest?
@@ -286,6 +296,8 @@ final class GameSessions<Store: GameStorefront> {
         }
         // Repeated states do not invalidate unchanged presentation.
         if self.active != active { self.active = active }
+        let activeGame = active.map { ActiveGame(game: $0.game, account: $0.account, running: $0.running) }
+        if self.activeGame != activeGame { self.activeGame = activeGame }
         if self.last != last { self.last = last }
         if isRecovering != state.recovering { isRecovering = state.recovering }
         let recoveryError = state.recoveryFailed ? L10n.string(Store.recoveringSession) : nil
@@ -303,11 +315,6 @@ final class GameSessions<Store: GameStorefront> {
             escalation?.cancel()
             escalation = nil
         }
-    }
-
-    /// The game's Reservation: no Transfer, uninstall or other launch of it.
-    func protects(_ game: Store.GameID?) -> Bool {
-        isRecovering || (game != nil && active?.game == game)
     }
 
     func revoked(_ account: Store.AccountID) -> Bool { revokedAccounts.contains(account) }

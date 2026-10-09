@@ -134,13 +134,16 @@ async fn current_build(
     Ok((manifest, build.version_name))
 }
 
-/// A content-system document, without any account credential.
-async fn document<T: serde::de::DeserializeOwned>(
+/// A content-system document, without any account credential, inflated and
+/// parsed off the async workers.
+async fn document<T: serde::de::DeserializeOwned + Send + 'static>(
     api: &Api,
     url: reqwest::Url,
 ) -> Result<T, GogError> {
     let bytes = bounded_bytes(send(api.http.get(url)).await?, MAX_MANIFEST_BYTES).await?;
-    inflate_json(&bytes, MAX_MANIFEST_BYTES as u64 * 4)
+    tokio::task::spawn_blocking(move || inflate_json(&bytes, MAX_MANIFEST_BYTES as u64 * 4))
+        .await
+        .map_err(|_| GogError::Protocol)?
 }
 
 /// A depot's items, from its manifest under the CDN's `folder`.

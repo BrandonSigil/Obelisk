@@ -87,7 +87,7 @@ struct SettingsView: View {
                             .padding(.horizontal, 18)
                             .padding(.vertical, 12)
 
-                            if section != .gog {
+                            if section != LibrarySection.storefronts.last {
                                 Divider().padding(.leading, 60)
                             }
                         }

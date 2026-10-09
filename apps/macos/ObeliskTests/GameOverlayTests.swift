@@ -35,8 +35,9 @@ final class GameOverlayTests: XCTestCase {
 
         // Its pages open inside it; Back returns home.
         fixture.frontmost = Self.obelisk
-        overlay.present(.store(appId: 620))
-        XCTAssertEqual(overlay.request, .webPage(URL(string: "https://store.steampowered.com/app/620")!))
+        let store = URL(string: "https://store.steampowered.com/app/620")!
+        overlay.present(.webPage(store))
+        XCTAssertEqual(overlay.request, .webPage(store))
         overlay.show(.achievements)
         XCTAssertEqual(overlay.request, .achievements)
         XCTAssertEqual(overlay.achievements?.storeID, "steam")

@@ -267,17 +267,26 @@ pub struct Md5Part {
     pub md5: [u8; 16],
 }
 
+/// How much of a file on disk matched its digest.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Matched {
+    pub whole: bool,
+    /// The leading parts that hashed as expected, before the first that did
+    /// not; none when the file is missing or its size differs.
+    pub parts: usize,
+}
+
 /// Reads a file through its digest in 64 KiB reads, reporting bytes read in
 /// bounded batches without treating them as validated content. A missing file
-/// or a size mismatch is simply `false`; cancellation is checked before every
-/// read.
+/// or a size mismatch simply does not match; cancellation is checked before
+/// every read.
 pub(crate) fn verify_file_with_progress(
     path: &Path,
     size: u64,
     digest: FileDigest<'_>,
     cancel: &CancelToken,
     progress: impl FnMut(u64),
-) -> Result<bool, InstallError> {
+) -> Result<Matched, InstallError> {
     match digest {
         FileDigest::Sha1(expected) => {
             verify_parts::<Sha1>(path, size, [(size, expected)], cancel, progress)
@@ -298,6 +307,7 @@ pub fn verify_sha1_file(
     cancel: &CancelToken,
 ) -> Result<bool, InstallError> {
     verify_file_with_progress(path, size, FileDigest::Sha1(expected), cancel, |_| {})
+        .map(|matched| matched.whole)
 }
 
 /// Hashes each consecutive part of the file on its own, stopping at the first
@@ -308,19 +318,22 @@ fn verify_parts<'a, D: Digest>(
     parts: impl IntoIterator<Item = (u64, &'a [u8])> + Clone,
     cancel: &CancelToken,
     mut progress: impl FnMut(u64),
-) -> Result<bool, InstallError> {
+) -> Result<Matched, InstallError> {
     let mut file = match File::open(path) {
         Ok(file) => file,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(false),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Matched::default()),
         Err(error) => return Err(error.into()),
     };
     let parts_size: u64 = parts.clone().into_iter().map(|(size, _)| size).sum();
     if file.metadata()?.len() != size || parts_size != size {
-        return Ok(false);
+        return Ok(Matched::default());
     }
     let mut buffer = [0_u8; 64 * 1024];
     let mut pending = 0_u64;
-    let mut matches = true;
+    let mut matched = Matched {
+        whole: true,
+        parts: 0,
+    };
     for (part_size, expected) in parts {
         let mut hasher = D::new();
         let mut remaining = part_size;
@@ -339,14 +352,15 @@ fn verify_parts<'a, D: Digest>(
             }
         }
         if hasher.finalize()[..] != *expected {
-            matches = false;
+            matched.whole = false;
             break;
         }
+        matched.parts += 1;
     }
     if pending != 0 {
         progress(pending);
     }
-    Ok(matches)
+    Ok(matched)
 }
 
 /// Whether the file starts as a program does: a Mach-O binary or a script.

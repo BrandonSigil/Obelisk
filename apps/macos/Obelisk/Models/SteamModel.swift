@@ -19,7 +19,7 @@ final class SteamModel {
     private(set) var friends: FriendsPresentationState?
     var isFriendsPresented = false
     /// Shows the game's invite picker over the running game.
-    @ObservationIgnored weak var overlay: (any GameOverlayPresenting)?
+    @ObservationIgnored weak var overlay: GameOverlayController?
     private(set) var games: [SteamGame] = [] {
         didSet { libraryChanges &+= 1 }
     }
@@ -123,7 +123,7 @@ final class SteamModel {
     /// The Game session last seen, to tell when one ends.
     @ObservationIgnored private var observedGameSession: SteamGameSessions.Session?
     /// The running game's session and the last overlay request it showed.
-    @ObservationIgnored private var followedOverlay: (session: String, sequence: UInt64)?
+    @ObservationIgnored private var followedOverlay = SessionSequence()
     @ObservationIgnored let libraryOrdering = LibraryOrdering<SteamGame>()
 
     init(
@@ -197,6 +197,8 @@ final class SteamModel {
     }
 
     var isConnected: Bool { sessionCredentials != nil }
+
+    var unreadCount: Int { chat.totalUnread }
 
     /// Whether the library shows: once connected, or from the cache while the
     /// saved session restores.
@@ -625,14 +627,11 @@ final class SteamModel {
     /// showed when first seen opens nothing.
     private func followOverlayRequest(of running: SteamGameSessions.Session?) {
         guard let running else {
-            followedOverlay = nil
+            followedOverlay = SessionSequence()
             return
         }
-        let previous = followedOverlay?.session == running.id ? followedOverlay : nil
-        // A sequence only grows within a session; a request that went keeps it.
-        let sequence = running.overlayRequest?.sequence ?? previous?.sequence ?? 0
-        followedOverlay = (running.id, sequence)
-        guard let previous, let request = running.overlayRequest, request.sequence > previous.sequence,
+        guard followedOverlay.advance(session: running.id, sequence: running.overlayRequest?.sequence),
+              let request = running.overlayRequest,
               let shown = OverlayRequest.steam(request.kind, appId: running.game, account: steamId) else { return }
         overlay?.present(shown)
     }
@@ -800,7 +799,7 @@ final class SteamModel {
         }
         presentation.lastKnownOnlineCount = snapshot.connection == .ready
             ? presentation.onlineCount : friends?.lastKnownOnlineCount
-        friends = presentation
+        if friends != presentation { friends = presentation }
     }
 
     func signOut() {
@@ -818,7 +817,7 @@ final class SteamModel {
         stopFriends()
         session?.shutdown()
         chat.reset()
-        followedOverlay = nil
+        followedOverlay = SessionSequence()
         invitations.follow(session: nil, invites: [])
         purchase.follow(session: nil, microTxn: nil)
         sessionCredentials = nil
@@ -942,7 +941,6 @@ final class SteamModel {
         news = []
     }
 
-    /// The account's installations, behind `session`.
     /// Cookies that sign Steam's sites in as the connected account, as the
     /// Steam client signs its own browser in: its session asks Steam for a web
     /// access token. None while signed out, or when Steam refuses them: the

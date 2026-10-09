@@ -82,8 +82,8 @@ protocol WebStorefront: InstallationStorefront, SendableMetatype where GameID ==
                                           sessions: any StorefrontSessionsProtocol, receipts: URL,
                                           locations: ObeliskLocations) -> any InstallationsBackend<Self>
     /// An address that opens the storefront's site signed in as the
-    /// session's account and goes on to `page`; nil when its site has none.
-    static func webSignInURL(session: Session, page: URL) async throws -> URL?
+    /// session's account and goes on to `storeURL`; nil when its site has none.
+    static func webSignInURL(session: Session) async throws -> URL?
 
     /// The storefront refused the account: a restore forgets the saved
     /// session, and any later call signs the account out.
@@ -97,7 +97,7 @@ protocol WebStorefront: InstallationStorefront, SendableMetatype where GameID ==
 
 extension WebStorefront {
     static func avatar(of session: Session) -> URL? { nil }
-    static func webSignInURL(session: Session, page: URL) async throws -> URL? { nil }
+    static func webSignInURL(session: Session) async throws -> URL? { nil }
 }
 
 /// One account of a storefront that signs in on its web page: its sign-in
@@ -332,7 +332,7 @@ final class WebAccountModel<Store: WebStorefront> {
     /// can sign it in, else as its site remembers.
     func storePage() async -> WebPageStart {
         var url = Store.storeURL
-        if let session, let signedIn = try? await Store.webSignInURL(session: session, page: url) { url = signedIn }
+        if let session, let signedIn = try? await Store.webSignInURL(session: session) { url = signedIn }
         return WebPageStart(url: url, dataStore: Store.webSignIn.store.dataStore)
     }
 
@@ -566,15 +566,19 @@ final class WebAccountModel<Store: WebStorefront> {
     func canInstallFromLibrary(_ game: Game) -> Bool { game.offer != nil }
 
     func reloadAchievements() {
-        guard let game = selectedGame, let session else { return }
-        let language = language
-        achievements.load { try await Store.achievements(of: game, session: session, language: language) }
+        guard let game = selectedGame else { return }
+        load(achievementsOf: game, into: achievements)
     }
 
     /// Loads the achievements of the library's game `id` into `model`, such
     /// as the overlay's for the running game.
     func loadAchievements(of id: Game.ID, into model: GameAchievementsModel) {
-        guard let game = games.first(where: { $0.id == id }), let session else { return }
+        guard let game = games.first(where: { $0.id == id }) else { return }
+        load(achievementsOf: game, into: model)
+    }
+
+    private func load(achievementsOf game: Game, into model: GameAchievementsModel) {
+        guard let session else { return }
         let language = language
         model.load { try await Store.achievements(of: game, session: session, language: language) }
     }

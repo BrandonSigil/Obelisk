@@ -19,6 +19,63 @@ pub async fn next_matching<T: Clone>(
     }
 }
 
+/// A revision that grows with each change, such as a credential rotation,
+/// until it is stopped. Clones share one revision.
+#[derive(Clone, Debug)]
+pub struct Revisions(watch::Sender<RevisionState>);
+
+#[derive(Clone, Copy, Debug)]
+struct RevisionState {
+    revision: u64,
+    stopped: bool,
+}
+
+impl Revisions {
+    /// Starts at revision 1.
+    pub fn new() -> Self {
+        Self(
+            watch::channel(RevisionState {
+                revision: 1,
+                stopped: false,
+            })
+            .0,
+        )
+    }
+
+    /// The revision now.
+    pub fn current(&self) -> u64 {
+        self.0.borrow().revision
+    }
+
+    /// The first revision other than `after`; `None` once stopped.
+    pub async fn next(&self, after: u64) -> Option<u64> {
+        next_matching(self.0.subscribe(), |state| {
+            state.stopped || state.revision != after
+        })
+        .await
+        .ok()
+        .filter(|state| !state.stopped)
+        .map(|state| state.revision)
+    }
+
+    /// Moves on to the next revision.
+    pub fn advance(&self) {
+        self.0
+            .send_modify(|state| state.revision = state.revision.wrapping_add(1));
+    }
+
+    /// Ends every wait for a next revision, now and later.
+    pub fn stop(&self) {
+        self.0.send_modify(|state| state.stopped = true);
+    }
+}
+
+impl Default for Revisions {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

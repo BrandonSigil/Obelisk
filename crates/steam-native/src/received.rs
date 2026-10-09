@@ -16,7 +16,7 @@
 //! - `MicroTxnAuthDismissCallback_t` (1020044, 16 bytes), posted at 0xa79a58
 //!   once the player answered: the order at 0 and its AppID at 8.
 use crate::overlay::{terminated, text, u32_at, u64_at};
-use game_runtime::protocol::{Event, InviteTarget, individual};
+use game_runtime::protocol::{Event, individual};
 
 pub const LOBBY_INVITE: (i32, usize) = (503, 24);
 pub const RICH_INVITE: (i32, usize) = (1_010_035, 0x10c);
@@ -55,11 +55,7 @@ pub fn event(id: i32, payload: &[u8], app: u32) -> Option<Event> {
         1_010_035 => {
             let (friend, app_id) = (u64_at(payload, 0)?, u32_at(payload, 8)?);
             let connect = text(terminated(payload.get(0xc..0x10c)?)?)?;
-            let valid = InviteTarget::Connect {
-                connect: connect.clone(),
-            }
-            .valid();
-            if !individual(friend) || app_id == 0 || !valid {
+            if !individual(friend) || app_id == 0 || !game_runtime::protocol::connect(&connect) {
                 return None;
             }
             Event::RichInviteReceived {

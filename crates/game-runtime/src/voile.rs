@@ -3,6 +3,7 @@
 //! install-dev.sh put in `current` takes precedence.
 //!
 //! The release also carries the Linux engine's runtime, in its `linux` folder.
+use obelisk_core::transfer::CancelToken;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use std::{
@@ -12,11 +13,10 @@ use std::{
     path::{Path, PathBuf},
     sync::{
         OnceLock,
-        atomic::{AtomicBool, AtomicU64, Ordering},
+        atomic::{AtomicU64, Ordering},
     },
     time::Duration,
 };
-use tokio::sync::Notify;
 
 const RELEASE: &str = include_str!("../voile-release.json");
 /// Where install-dev.sh puts a locally built runtime.
@@ -141,8 +141,7 @@ pub struct Install {
     received: AtomicU64,
     /// The size of the archive being installed, once known.
     total: AtomicU64,
-    cancelled: AtomicBool,
-    cancel: Notify,
+    cancel: CancelToken,
 }
 
 impl Install {
@@ -151,8 +150,7 @@ impl Install {
     }
 
     pub fn cancel(&self) {
-        self.cancelled.store(true, Ordering::Release);
-        self.cancel.notify_waiters();
+        self.cancel.cancel();
     }
 
     /// The bytes downloaded so far, and the archive's size.
@@ -184,18 +182,23 @@ impl Install {
         if !has_wine(&runtime) || version(&runtime).as_deref() != Some(release.version.as_str()) {
             return Err(Failure::Damaged);
         }
-        let destination = root.join(&release.version);
-        if destination.exists() {
-            fs::remove_dir_all(&destination)?;
-        }
-        fs::rename(&runtime, &destination)?;
-        // No game runs from the releases removed here: only Steam launches
-        // Windows games, and this install runs inside the one Game session
-        // its Reservation gate admits.
-        remove_entries(root, |name| {
-            name != DEVELOPMENT && name != release.version && !name.starts_with(UNFINISHED)
-        });
-        Ok(destination)
+        let (root, version) = (root.to_owned(), release.version.clone());
+        tokio::task::spawn_blocking(move || {
+            let destination = root.join(&version);
+            if destination.exists() {
+                fs::remove_dir_all(&destination)?;
+            }
+            fs::rename(&runtime, &destination)?;
+            // No game runs from the releases removed here: only Steam launches
+            // Windows games, and this install runs inside the one Game session
+            // its Reservation gate admits.
+            remove_entries(&root, |name| {
+                name != DEVELOPMENT && name != version && !name.starts_with(UNFINISHED)
+            });
+            Ok(destination)
+        })
+        .await
+        .map_err(|_| Failure::Storage)?
     }
 
     /// Checks `archive` (or downloads it) and extracts it into a folder of
@@ -207,8 +210,14 @@ impl Install {
         archive: Option<&Path>,
     ) -> Result<tempfile::TempDir, Failure> {
         self.total.store(expected.size, Ordering::Release);
-        fs::create_dir_all(root)?;
-        remove_entries(root, |name| name.starts_with(UNFINISHED));
+        let unfinished = root.to_owned();
+        tokio::task::spawn_blocking(move || {
+            fs::create_dir_all(&unfinished)?;
+            remove_entries(&unfinished, |name| name.starts_with(UNFINISHED));
+            Ok::<_, Failure>(())
+        })
+        .await
+        .map_err(|_| Failure::Storage)??;
         let downloaded;
         let archive = match archive {
             Some(archive) => {
@@ -290,16 +299,7 @@ impl Install {
 
     /// Stops waiting for `work` as soon as the install is cancelled.
     async fn cancellable<T>(&self, work: impl Future<Output = T>) -> Result<T, Failure> {
-        let cancelled = self.cancel.notified();
-        tokio::pin!(cancelled);
-        cancelled.as_mut().enable();
-        if self.cancelled.load(Ordering::Acquire) {
-            return Err(Failure::Cancelled);
-        }
-        tokio::select! {
-            output = work => Ok(output),
-            () = cancelled => Err(Failure::Cancelled),
-        }
+        self.cancel.race(work).await.map_err(|_| Failure::Cancelled)
     }
 }
 

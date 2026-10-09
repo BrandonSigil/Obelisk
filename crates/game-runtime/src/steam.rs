@@ -21,23 +21,8 @@ pub struct Steam;
 pub struct Store {
     pub app_id: u32,
     pub host: HostState,
-    /// The latest invite dialog the game asked for, which Steam's overlay
-    /// would show. A record from before invitations has none.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub invite: Option<crate::InviteRequest>,
-    /// The Steam lobby the game is in now, as the account's engine shows it.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub lobby: Option<u64>,
-    /// The latest overlay the game asked Steam for, invite dialogs included.
-    /// A record from before the overlay has none.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub overlay: Option<crate::OverlayRequest>,
-    /// Invitations friends sent into the game, newest first.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub invites: Vec<crate::ReceivedInvite>,
-    /// The purchase the game waits on the player to confirm.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub microtxn: Option<crate::MicroTxn>,
+    #[serde(flatten)]
+    pub requests: crate::GameRequests,
 }
 impl Store {
     /// A new session of game `app_id`, its host online.
@@ -45,21 +30,13 @@ impl Store {
         Self {
             app_id,
             host: HostState::Online,
-            invite: None,
-            lobby: None,
-            overlay: None,
-            invites: Vec::new(),
-            microtxn: None,
+            requests: crate::GameRequests::default(),
         }
     }
     /// What the host tells now.
     pub(crate) fn apply(&mut self, update: &crate::HostUpdate) {
         self.host = update.state;
-        self.invite = update.invite.clone();
-        self.overlay = update.overlay.clone();
-        self.lobby = update.lobby;
-        self.invites = update.invites.clone();
-        self.microtxn = update.microtxn.clone();
+        self.requests = update.requests.clone();
     }
 }
 
@@ -179,19 +156,13 @@ fn native_target(
     home: &Path,
 ) -> Result<(Target, PathBuf), Error> {
     let steam_api = launch::steam_api(target)?;
-    let (executable, _) = crate::native::executable(install, target)?;
-    Ok((
-        Target {
-            executable,
-            arguments: target.arguments.clone(),
-            working_directory: target.working_directory.clone().into(),
-            environment: crate::native::environment(home),
-            log: None,
-            installation: Some(install.to_owned()),
-            program: None,
-        },
-        steam_api,
-    ))
+    let (target, _) = crate::native::target(
+        install,
+        target,
+        target.arguments.clone(),
+        crate::native::environment(home),
+    )?;
+    Ok((target, steam_api))
 }
 
 /// Starts the supervisor of `request`'s game, as a new Game session;
@@ -349,4 +320,62 @@ pub(crate) fn parent(directory: &str) -> PathBuf {
         .parent()
         .map(Path::to_owned)
         .unwrap_or_default()
+}
+
+impl crate::sessions::Storefront for Steam {
+    type Game = u32;
+    const BEGINS: bool = false;
+    const INVALID_SESSION: &'static str = "backend.steam.runtime.invalidSession";
+    const SESSION_FAILED: &'static str = "backend.steam.runtime.startFailed";
+    fn game(store: &Store) -> u32 {
+        store.app_id
+    }
+}
+
+/// What the player asks of a running Steam game.
+impl crate::sessions::Sessions<Steam> {
+    /// Obelisk's overlay opened, or closed, over session `id`'s game, which
+    /// Steam's overlay would tell it. `user_initiated` when the player opened
+    /// it, not the game.
+    pub fn overlay_state(
+        &self,
+        id: &str,
+        active: bool,
+        user_initiated: bool,
+    ) -> Result<(), crate::sessions::Failure> {
+        self.control(
+            id,
+            Control::Overlay {
+                active,
+                user_initiated,
+            },
+        )
+    }
+
+    /// The player accepted `friend`'s invitation into session `id`'s running
+    /// game: the game joins as if Steam's overlay had accepted it.
+    pub fn accept_invite(
+        &self,
+        id: &str,
+        friend: u64,
+        target: crate::protocol::InviteTarget,
+    ) -> Result<(), crate::sessions::Failure> {
+        if !crate::protocol::individual(friend) || !target.valid() {
+            return Err(crate::sessions::Failure::Failed(
+                <Steam as crate::sessions::Storefront>::INVALID_SESSION.to_owned(),
+            ));
+        }
+        self.control(id, Control::AcceptInvite { friend, target })
+    }
+
+    /// The player's answer to the purchase `order_id` session `id`'s game
+    /// waits on.
+    pub fn authorize_microtxn(
+        &self,
+        id: &str,
+        order_id: u64,
+        approve: bool,
+    ) -> Result<(), crate::sessions::Failure> {
+        self.control(id, Control::AuthorizeMicroTxn { order_id, approve })
+    }
 }

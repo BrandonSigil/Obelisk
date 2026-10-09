@@ -1,6 +1,9 @@
 //! A native game's executable inside its installation, and the environment
 //! every game starts with, whatever its storefront.
-use crate::{Error, supervisor::architecture::Architecture};
+use crate::{
+    Error,
+    supervisor::{Target, architecture::Architecture},
+};
 use obelisk_core::launch::LaunchTarget;
 use std::{
     collections::HashMap,
@@ -61,6 +64,29 @@ fn bundle_executable(bundle: &Path) -> Result<PathBuf, Error> {
         return Err(Error::InvalidApplication);
     }
     Ok(executable)
+}
+
+/// The Mac game `launched` names inside `install`, started with `arguments`
+/// and `environment`, and the architecture it runs as.
+pub fn target(
+    install: &Path,
+    launched: &LaunchTarget,
+    arguments: Vec<String>,
+    environment: HashMap<String, String>,
+) -> Result<(Target, Architecture), Error> {
+    let (executable, architecture) = executable(install, launched)?;
+    Ok((
+        Target {
+            executable,
+            arguments,
+            working_directory: launched.working_directory.clone().into(),
+            environment,
+            log: None,
+            installation: Some(install.to_owned()),
+            program: None,
+        },
+        architecture,
+    ))
 }
 
 /// The environment every game starts with: the player's home, account and

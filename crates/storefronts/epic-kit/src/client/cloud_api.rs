@@ -482,10 +482,22 @@ impl Cloud<'_> {
             while let Some(result) = gets.next().await {
                 let (chunk, bytes) = result?;
                 self.cancel.check()?;
-                decoded.insert(chunk.guid, content::decode_chunk(&bytes, chunk)?);
+                let guid = chunk.guid;
+                let chunk = chunk.clone();
+                let bytes = self
+                    .cancel
+                    .spawn_blocking(move || content::decode_chunk(&bytes, &chunk))
+                    .await
+                    .map_err(|_| EpicError::Protocol)??;
+                decoded.insert(guid, bytes);
             }
         }
-        let files = codec::reconstruct(&manifest, &decoded, self.cancel)?;
+        let cancel = self.cancel.clone();
+        let files = self
+            .cancel
+            .spawn_blocking(move || codec::reconstruct(&manifest, &decoded, &cancel))
+            .await
+            .map_err(|_| EpicError::Protocol)??;
         Ok(Snapshot { revision, files })
     }
 }

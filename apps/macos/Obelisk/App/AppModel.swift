@@ -3,6 +3,18 @@ import Observation
 import SwiftUI
 import UniformTypeIdentifiers
 
+/// A storefront whose account shows its friends: Steam and Epic.
+@MainActor
+protocol FriendsStorefront: AnyObject {
+    var friends: FriendsPresentationState? { get }
+    func closeFriends()
+    func retryFriends()
+    func signOut()
+}
+
+extension SteamModel: FriendsStorefront {}
+extension WebAccountModel: FriendsStorefront where Store == EpicGames {}
+
 @MainActor
 @Observable
 final class AppModel {
@@ -65,18 +77,25 @@ final class AppModel {
         return nil
     }
 
+    /// The storefront whose friends `storeID` names; GOG shows none.
+    private func friendsModel(storeID: String?) -> (any FriendsStorefront)? {
+        switch storeID {
+        case "steam": steam
+        case "epic": epic
+        default: nil
+        }
+    }
+
     var presentedFriends: FriendsPresentationState? {
         guard let activeFriendsAccount else { return nil }
-        let state = activeFriendsAccount.storeID == "steam" ? steam.friends : epic.friends
+        let state = friendsModel(storeID: activeFriendsAccount.storeID)?.friends
         return state?.account == activeFriendsAccount ? state : nil
     }
 
     func presentFriends(storeID: String) {
-        let state = storeID == "steam" ? steam.friends : epic.friends
-        guard let state else { return }
+        guard let model = friendsModel(storeID: storeID), let state = model.friends else { return }
         activeFriendsAccount = state.account
-        if storeID == "steam" { epic.closeFriends() }
-        else { steam.closeFriends() }
+        for other in [steam, epic] as [any FriendsStorefront] where other !== model { other.closeFriends() }
     }
 
     func closeFriends(storeID: String? = nil) {
@@ -91,13 +110,11 @@ final class AppModel {
     }
 
     func retryPresentedFriends() {
-        if activeFriendsAccount?.storeID == "steam" { steam.retryFriends() }
-        else if activeFriendsAccount?.storeID == "epic" { epic.retryFriends() }
+        friendsModel(storeID: activeFriendsAccount?.storeID)?.retryFriends()
     }
 
     func signInPresentedFriends() {
-        if activeFriendsAccount?.storeID == "steam" { steam.signOut() }
-        else if activeFriendsAccount?.storeID == "epic" { epic.signOut() }
+        friendsModel(storeID: activeFriendsAccount?.storeID)?.signOut()
         closeFriends()
     }
 

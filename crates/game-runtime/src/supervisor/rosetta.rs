@@ -8,6 +8,12 @@ pub(crate) fn helper(helpers: &Path) -> PathBuf {
     helpers.join("Obelisk Rosetta.app/Contents/MacOS/ObeliskRosetta")
 }
 
+/// The directory that bundles the Rosetta helper app, which sits beside the
+/// storefront helpers directory `storefront` (`Helpers/SteamNative`).
+pub(crate) fn helpers(storefront: &Path) -> Option<&Path> {
+    storefront.parent()
+}
+
 pub(crate) struct Gate {
     pub(crate) helper: PathBuf,
     pub(crate) check: fn(&Path) -> Result<bool, Error>,

@@ -89,6 +89,14 @@ pub trait CdnAuthorization: Sync {
     fn token<'a>(&'a self, host: &'a str) -> BoxFuture<'a, Option<String>>;
 }
 
+/// One installed depot.
+#[derive(Debug)]
+pub struct DepotInstallation {
+    pub summary: DownloadSummary,
+    /// The installation paths of the install scripts its manifest flags.
+    pub install_scripts: Vec<String>,
+}
+
 #[derive(Debug, Error)]
 pub enum ContentError {
     #[error("backend.steam.content.cancelled")]
@@ -175,28 +183,6 @@ impl ContentClient {
         .map_err(|_| invalid("backend.steam.content.manifestReadInterrupted"))?
     }
 
-    /// The installation paths of the install scripts an installed depot carries,
-    /// from the manifest its installation cached.
-    pub async fn install_scripts(
-        &self,
-        destination: &Path,
-        depot_id: u32,
-        manifest_id: u64,
-        key: &[u8; 32],
-    ) -> Result<Vec<String>, ContentError> {
-        let cached = self
-            .cached_manifest(destination, depot_id, manifest_id, key)
-            .await?
-            .ok_or_else(|| invalid("backend.steam.content.manifestReadInterrupted"))?;
-        Ok(cached
-            .manifest
-            .files
-            .iter()
-            .filter(|file| !file.is_directory() && file.flags & crate::install_script::FLAG != 0)
-            .map(|file| file.name.clone())
-            .collect())
-    }
-
     /// Opt-in protocol smoke test: validates the smallest real file (up to 8 MiB)
     /// without installing a depot or writing any game files.
     #[cfg(test)]
@@ -237,12 +223,12 @@ impl ContentClient {
         let mut size = 0_u64;
         for chunk in &file.chunks {
             let path = format!("depot/{}/chunk/{}", plan.depot_id, hex(&chunk.sha));
-            let (encrypted, _) = mirrors
+            let (mut encrypted, _) = mirrors
                 .fetch(&path, None, 0, &cancel, |url| {
                     self.fetch(url, MAX_CHUNK_BYTES, &cancel, |_| {})
                 })
                 .await?;
-            let plaintext = decode_chunk(&encrypted, chunk, &plan.depot_key)?;
+            let plaintext = decode_chunk(&mut encrypted, chunk, &plan.depot_key)?;
             size += plaintext.len() as u64;
             hasher.update(plaintext);
         }
@@ -263,7 +249,7 @@ impl ContentClient {
         plan: &DepotDownload<'_>,
         cancel: &CancelToken,
         progress: impl Fn(DownloadProgress) + Send + Sync + 'static,
-    ) -> Result<DownloadSummary, ContentError> {
+    ) -> Result<DepotInstallation, ContentError> {
         cancel.check()?;
         let mirrors = Mirrors::new(&plan.servers, plan.authorization)?;
         let reporter = Reporter::new(
@@ -340,6 +326,12 @@ impl ContentClient {
             status.phase = DownloadPhase::Verifying;
             status.current_file.clear();
         });
+        let install_scripts = manifest
+            .files
+            .iter()
+            .filter(|file| !file.is_directory() && file.flags & crate::install_script::FLAG != 0)
+            .map(|file| file.name.clone())
+            .collect();
 
         let disk = DiskInstall::engine_side(
             plan.destination.clone(),
@@ -358,7 +350,10 @@ impl ContentClient {
                 async move { fetched.await.map(|bytes| (place, bytes)) }
             })
             .await?;
-        Ok(reporter.summary(reused_bytes))
+        Ok(DepotInstallation {
+            summary: reporter.summary(reused_bytes),
+            install_scripts,
+        })
     }
 
     /// Fetches one chunk through the depot's servers and decodes it. Chunk
@@ -385,14 +380,14 @@ impl ContentClient {
                 u64::from(chunk.compressed_size),
                 cancel,
                 |url| async move {
-                    let (encrypted, received) = self
+                    let (mut encrypted, received) = self
                         .fetch(url, MAX_CHUNK_BYTES, cancel, |received| {
                             reporter.update(|status| status.network_bytes += received);
                         })
                         .await?;
                     let expected = chunk.clone();
                     let decoded = cancel
-                        .spawn_blocking(move || decode_chunk(&encrypted, &expected, &key))
+                        .spawn_blocking(move || decode_chunk(&mut encrypted, &expected, &key))
                         .await
                         .map_err(|_| {
                             invalid("backend.steam.content.chunkDecryptionInterrupted")
@@ -488,6 +483,8 @@ struct PreparedFile<'a> {
     hasher: Sha1,
     /// Chunks hashed so far, from the start of the file.
     hashed: usize,
+    /// Holds a chunk read back from the partial file.
+    buffer: Vec<u8>,
     reused_bytes: u64,
 }
 
@@ -504,23 +501,21 @@ impl PreparedFile<'_> {
         self.partial.write_all(bytes)?;
         self.present[index] = true;
         self.missing -= 1;
-        self.hash_present(Some((index, bytes)))
+        self.hash_present(index, bytes)
     }
 
     /// Hashes the chunks present from where hashing stopped. The chunk just
     /// written is hashed from memory; one that arrived early is read back.
-    fn hash_present(&mut self, written: Option<(usize, &[u8])>) -> Result<(), ContentError> {
-        let mut buffer = Vec::new();
+    fn hash_present(&mut self, written: usize, bytes: &[u8]) -> Result<(), ContentError> {
         while self.present.get(self.hashed) == Some(&true) {
-            match written {
-                Some((index, bytes)) if index == self.hashed => self.hasher.update(bytes),
-                _ => {
-                    let chunk = &self.file.chunks[self.hashed];
-                    buffer.resize(chunk.original_size as usize, 0);
-                    self.partial.seek(SeekFrom::Start(chunk.offset))?;
-                    self.partial.read_exact(&mut buffer)?;
-                    self.hasher.update(&buffer);
-                }
+            if self.hashed == written {
+                self.hasher.update(bytes);
+            } else {
+                let chunk = &self.file.chunks[self.hashed];
+                self.buffer.resize(chunk.original_size as usize, 0);
+                self.partial.seek(SeekFrom::Start(chunk.offset))?;
+                self.partial.read_exact(&mut self.buffer)?;
+                self.hasher.update(&self.buffer);
             }
             self.hashed += 1;
         }
@@ -674,6 +669,10 @@ impl DiskInstall {
         partial.set_len(file.size)?;
         let mut present = vec![false; file.chunks.len()];
         let mut buffer = Vec::new();
+        // The present chunks at the start of the file are hashed as they are
+        // verified, rather than read again.
+        let mut hasher = Sha1::new();
+        let mut hashed = 0;
         for (index, chunk) in file.chunks.iter().enumerate() {
             self.cancel.check()?;
             if chunk.offset + u64::from(chunk.original_size) > existing {
@@ -684,6 +683,10 @@ impl DiskInstall {
             partial.seek(SeekFrom::Start(chunk.offset))?;
             partial.read_exact(&mut buffer)?;
             present[index] = format::verify_chunk(&buffer, chunk).is_ok();
+            if present[index] && index == hashed {
+                hasher.update(&buffer);
+                hashed += 1;
+            }
         }
         let reused_bytes = file
             .chunks
@@ -708,7 +711,7 @@ impl DiskInstall {
                 break;
             }
         }
-        let mut prepared = PreparedFile {
+        Ok(PreparedFile {
             file,
             relative,
             target,
@@ -716,12 +719,11 @@ impl DiskInstall {
             partial,
             missing: present.iter().filter(|present| !**present).count(),
             present,
-            hasher: Sha1::new(),
-            hashed: 0,
+            hasher,
+            hashed,
+            buffer,
             reused_bytes,
-        };
-        prepared.hash_present(None)?;
-        Ok(prepared)
+        })
     }
 
     /// Checks a fully assembled file's hash and publishes it atomically.

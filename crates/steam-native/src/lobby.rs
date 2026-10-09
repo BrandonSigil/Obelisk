@@ -31,13 +31,6 @@ pub fn current(info: &[u8; SIZE], app: u32) -> Option<u64> {
     game_runtime::protocol::lobby(lobby).then_some(lobby)
 }
 
-/// Whether `first`, the member at index 0 the engine gives for a lobby, shows
-/// the account in it: the engine gives 0 for a lobby the account is not in,
-/// and a lobby's member is an individual account.
-pub fn member(first: u64) -> bool {
-    (first >> 52) & 0xf == 1 && first >> 56 != 0 && first as u32 != 0
-}
-
 /// The game's lobby from both sources, read on the follower's interval.
 pub struct Lobbies {
     follower: Follower,
@@ -203,15 +196,6 @@ mod tests {
 
     const ALICE: u64 = 76_561_197_960_265_729;
     const NEXT: u64 = 109_775_244_423_207_541;
-
-    #[test]
-    fn a_member_is_an_individual_account() {
-        assert!(member(ALICE));
-        assert!(!member(0), "the engine's answer outside the lobby");
-        assert!(!member(LOBBY), "a lobby is no member");
-        assert!(!member(ALICE & !0xffff_ffff), "no account number");
-        assert!(!member(ALICE & ((1 << 56) - 1)), "no universe");
-    }
 
     fn none() -> crate::Result<Option<u64>> {
         Ok(None)

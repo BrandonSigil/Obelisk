@@ -12,7 +12,6 @@ struct StorefrontBrowser<Model: LibraryStorefront, HeroArtwork: View, HeroLogo: 
     let libraryTitle: String
     let accountName: String?
     let avatarURL: URL?
-    let unreadCount: Int
     /// How the storefront's store opens, signed in as the account.
     let storePage: (@MainActor () async -> WebPageStart)?
     let scrollMemory: LibraryScrollMemory
@@ -35,7 +34,6 @@ struct StorefrontBrowser<Model: LibraryStorefront, HeroArtwork: View, HeroLogo: 
         libraryTitle: String,
         accountName: String?,
         avatarURL: URL? = nil,
-        unreadCount: Int = 0,
         storePage: (@MainActor () async -> WebPageStart)? = nil,
         scrollMemory: LibraryScrollMemory,
         @ViewBuilder heroArtwork: @escaping (Model.Game) -> HeroArtwork,
@@ -50,7 +48,6 @@ struct StorefrontBrowser<Model: LibraryStorefront, HeroArtwork: View, HeroLogo: 
         self.libraryTitle = libraryTitle
         self.accountName = accountName
         self.avatarURL = avatarURL
-        self.unreadCount = unreadCount
         self.storePage = storePage
         self.scrollMemory = scrollMemory
         self.heroArtwork = heroArtwork
@@ -96,7 +93,6 @@ struct StorefrontBrowser<Model: LibraryStorefront, HeroArtwork: View, HeroLogo: 
                 libraryTitle: libraryTitle,
                 accountName: accountName,
                 avatarURL: avatarURL,
-                unreadCount: unreadCount,
                 openStore: storePage.map { _ in { showsStore = true } },
                 back: back
             ) {
@@ -127,8 +123,8 @@ struct StorefrontBrowser<Model: LibraryStorefront, HeroArtwork: View, HeroLogo: 
     }
 }
 
-/// The browser's bar. It reads the scroll state in its own body, so scrolling
-/// redraws the bar alone.
+/// The browser's bar. It reads the scroll state and the unread messages in its
+/// own body, so they redraw the bar alone.
 private struct StorefrontBrowserBar<Model: LibraryStorefront, AccountMenu: View>: View {
     @Bindable var model: Model
     let bar: StorefrontBarState
@@ -136,7 +132,6 @@ private struct StorefrontBrowserBar<Model: LibraryStorefront, AccountMenu: View>
     let libraryTitle: String
     let accountName: String?
     let avatarURL: URL?
-    let unreadCount: Int
     let openStore: (() -> Void)?
     let back: () -> Void
     @ViewBuilder let accountMenu: AccountMenu
@@ -152,7 +147,7 @@ private struct StorefrontBrowserBar<Model: LibraryStorefront, AccountMenu: View>
                 LibraryGlassBar.GameBar(title: model.title(of: game), libraryTitle: libraryTitle,
                                         showsTitle: bar.showsGameTitle, back: back)
             },
-            unreadCount: unreadCount,
+            unreadCount: model.unreadCount,
             openStore: openStore
         ) {
             accountMenu

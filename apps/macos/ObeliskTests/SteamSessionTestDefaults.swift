@@ -49,7 +49,7 @@ extension SteamSessionProtocol {
     func nextOwnGame(afterRevision: UInt64) async -> SteamOwnGame {
         let stream = AsyncStream<Void>(bufferingPolicy: .bufferingNewest(1)) { _ in }
         for await _ in stream {}
-        return SteamOwnGame(revision: afterRevision + 1, connected: false, appId: 0, lobbyId: 0, connect: nil, invite: .none)
+        return SteamOwnGame(revision: afterRevision + 1, connected: false, appId: 0, invite: .none)
     }
     func refreshOwnGame() async throws {}
     func activeSessions() async throws -> [SteamChatSession] { [] }
@@ -61,10 +61,10 @@ extension SteamSessionProtocol {
     }
     func sendTyping(friendSteamId: UInt64) async throws {}
     func ack(friendSteamId: UInt64, timestamp: UInt32) async throws {}
-    func inviteToGame(friendSteamId: UInt64, appId: UInt32) async throws -> SteamInviteKind {
+    func inviteToGame(friendSteamId: UInt64, appId: UInt32) async throws {
         throw CocoaError(.featureUnsupported)
     }
-    func inviteIntoGame(friendSteamId: UInt64, appId: UInt32, invite: SteamGameInvite) async throws -> SteamInviteKind {
+    func inviteIntoGame(friendSteamId: UInt64, appId: UInt32, invite: SteamGameInvite) async throws {
         throw CocoaError(.featureUnsupported)
     }
 }

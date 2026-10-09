@@ -8,9 +8,10 @@ use std::{
 };
 
 use futures_util::{StreamExt, TryStreamExt, stream};
+use obelisk_core::watch::Revisions;
 use reqwest::Url;
 use serde::Deserialize;
-use tokio::sync::{Mutex, watch};
+use tokio::sync::Mutex;
 
 use crate::{
     EpicError,
@@ -58,8 +59,9 @@ pub struct Client {
     downloads: download::Downloads,
     api: Api,
     session: Arc<Mutex<Option<Session>>>,
-    credential_events: watch::Sender<CredentialRevision>,
+    credential_events: Revisions,
     social: crate::social::SocialService,
+    installation_sizes: crate::details::InstallationSizes,
 }
 
 impl Client {
@@ -166,6 +168,7 @@ impl Client {
                     catalog_item_id,
                     app_name,
                     platform,
+                    &self.installation_sizes,
                 )
                 .await;
                 // Re-raise so the funnel refreshes the token once; the funnel
@@ -198,12 +201,9 @@ impl Client {
             downloads: download::Downloads::default(),
             api,
             session: Arc::new(Mutex::new(Some(session))),
-            credential_events: watch::channel(CredentialRevision {
-                revision: 1,
-                stopped: false,
-            })
-            .0,
+            credential_events: Revisions::new(),
             social,
+            installation_sizes: Default::default(),
         }
     }
 
@@ -294,28 +294,21 @@ impl Client {
         self.social.next(after_revision).await
     }
 
-    /// A separate watch reports refresh immediately, even if the next HTTP request fails.
     /// The revision of the credentials now, which grows with each rotation.
     pub fn credentials_revision(&self) -> u64 {
-        self.credential_events.borrow().revision
+        self.credential_events.current()
     }
 
+    /// A separate watch reports refresh immediately, even if the next HTTP request fails.
     pub async fn next_credentials_revision(&self, after_revision: u64) -> Option<u64> {
-        obelisk_core::watch::next_matching(self.credential_events.subscribe(), |state| {
-            state.stopped || state.revision != after_revision
-        })
-        .await
-        .ok()
-        .filter(|state| !state.stopped)
-        .map(|state| state.revision)
+        self.credential_events.next(after_revision).await
     }
 
     /// Synchronous cancellation crosses UniFFI even when a Swift task is suspended.
     /// This does not revoke OAuth or affect a running content transfer.
     pub fn shutdown_observers(&self) {
         self.social.stop();
-        self.credential_events
-            .send_modify(|state| state.stopped = true);
+        self.credential_events.stop();
     }
 
     pub async fn disconnect(&self) -> Result<(), EpicError> {
@@ -348,17 +341,11 @@ pub(crate) fn validate_identity(
     Ok(())
 }
 
-#[derive(Clone, Copy)]
-struct CredentialRevision {
-    revision: u64,
-    stopped: bool,
-}
-
 #[derive(Clone)]
 pub(crate) struct SocialAuth {
     pub(crate) api: Api,
     session: Arc<Mutex<Option<Session>>>,
-    credential_events: watch::Sender<CredentialRevision>,
+    credential_events: Revisions,
 }
 impl SocialAuth {
     pub(crate) async fn access_token(&self, rejected: Option<&str>) -> Result<String, EpicError> {
@@ -375,8 +362,7 @@ impl SocialAuth {
                 || rejected.as_deref() == Some(&session.access_token)
             {
                 *session = auth.api.refresh(&session.credentials).await?;
-                auth.credential_events
-                    .send_modify(|state| state.revision = state.revision.wrapping_add(1));
+                auth.credential_events.advance();
             }
             Ok(session.access_token.clone())
         })
@@ -745,15 +731,7 @@ fn catalog_image_by_kind(item: &CatalogItem, kinds: &[&str]) -> Option<String> {
                 .iter()
                 .filter(move |image| image.kind == *kind)
         })
-        .find(|image| {
-            Url::parse(&image.url).is_ok_and(|url| {
-                url.scheme() == "https"
-                    && url.host_str().is_some()
-                    && url.username().is_empty()
-                    && url.password().is_none()
-            })
-        })
-        .map(|image| image.url.clone())
+        .find_map(|image| auth::safe_https_url(image.url.clone()))
 }
 
 async fn library_items(api: &Api, access_token: &str) -> Result<Vec<LibraryItem>, EpicError> {

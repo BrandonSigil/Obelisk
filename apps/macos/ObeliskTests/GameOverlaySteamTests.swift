@@ -43,11 +43,11 @@ final class GameOverlaySteamTests: XCTestCase {
         XCTAssertNil(page(.webPage(url: "javascript:alert(1)", modal: false)))
         XCTAssertNil(page(.webPage(url: "not a url", modal: false)))
 
-        XCTAssertEqual(page(.store(appId: 620, flag: .showPage)), .store(appId: 620))
-        XCTAssertEqual(page(.store(appId: 620, flag: .addToCart)), .store(appId: 620))
-        XCTAssertEqual(page(.store(appId: 0, flag: .addToCartAndShow)), .store(appId: 0))
-        XCTAssertEqual(GameOverlayController.storeURL(appId: 0), URL(string: "https://store.steampowered.com/")!,
-                       "App 0 is the store's front page")
+        let store = URL(string: "https://store.steampowered.com/app/620")!
+        XCTAssertEqual(page(.store(appId: 620, flag: .showPage)), .webPage(store))
+        XCTAssertEqual(page(.store(appId: 620, flag: .addToCart)), .webPage(store))
+        XCTAssertEqual(page(.store(appId: 0, flag: .addToCartAndShow)),
+                       .webPage(URL(string: "https://store.steampowered.com/")!), "App 0 is the store's front page")
 
         XCTAssertNil(page(.lobbyInvite(lobbyId: 1)), "The friends list picks for invite dialogs")
         XCTAssertNil(page(.connectInvite(connect: "+connect 1")))

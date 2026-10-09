@@ -221,7 +221,7 @@ final class SteamChatIntegrationTests: XCTestCase {
         // A lobby the persona shows comes first, as in Steam's own menu.
         sessions.fake.show(peakSession(requests: 1, lobby: Self.peakLobby))
         session.chat.ownGame(appId: Self.peak.appId, lobbyId: 109_775_244_421_126_054, connect: nil)
-        try await eventually { chat.ownGame?.lobbyId == 109_775_244_421_126_054 && chat.gameLobby != nil }
+        try await eventually { chat.ownGame?.invite == .lobby(lobbyId: 109_775_244_421_126_054) && chat.gameLobby != nil }
         XCTAssertEqual(chat.inviteOffer(for: alice), SteamInviteOffer(appId: Self.peak.appId, gameName: "PEAK"))
         // A persona showing another game refuses the engine's lobby.
         session.chat.ownGame(appId: 730, lobbyId: 0, connect: nil)
@@ -733,14 +733,21 @@ final class SteamChatPresentationTests: XCTestCase {
         XCTAssertEqual(SteamBBCode.render("salut [gameinvite appid=730 connect=\"+connect 1\"][/gameinvite] !"),
                        [.text(AttributedString("salut ")), .invitation(SteamChatInvitation(kind: .game, appId: 730)),
                         .text(AttributedString(" !"))])
-        XCTAssertEqual(SteamBBCode.plainText("[emoticon]steamhappy[/emoticon] [sticker type=\"Corgi\" limit=\"0\"][/sticker]"),
+        XCTAssertEqual(plainText(of: "[emoticon]steamhappy[/emoticon] [sticker type=\"Corgi\" limit=\"0\"][/sticker]"),
                        ":steamhappy: Corgi")
-        XCTAssertEqual(SteamBBCode.plainText("[url]https://store.steampowered.com[/url] [1] [unclosed"),
+        XCTAssertEqual(plainText(of: "[url]https://store.steampowered.com[/url] [1] [unclosed"),
                        "https://store.steampowered.com [1] [unclosed")
         guard case .text(let unsafe)? = SteamBBCode.render("[url=file:///etc/passwd]x[/url]").first else { return XCTFail() }
         XCTAssertTrue(unsafe.runs.allSatisfy { $0.link == nil }, "Only web links open from a conversation")
         guard case .text(let bare)? = SteamBBCode.render("vu sur https://example.org/b ?").first else { return XCTFail() }
         XCTAssertEqual(bare.runs.compactMap(\.link), [URL(string: "https://example.org/b")!])
+    }
+
+    /// The text a message shows, without its invitations.
+    private func plainText(of bbcode: String) -> String {
+        SteamBBCode.render(bbcode).compactMap {
+            if case .text(let text) = $0 { String(text.characters) } else { nil }
+        }.joined(separator: " ")
     }
 
     func testConversationKeepsEachMessageOnceInSteamOrder() {
@@ -752,6 +759,7 @@ final class SteamChatPresentationTests: XCTestCase {
                             .message(timestamp: 5, ordinal: 0, fromMe: false, bbcode: "old")])
         XCTAssertEqual(conversation.lines.map(\.id), [.message(timestamp: 5, ordinal: 0), .message(timestamp: 10, ordinal: 0),
                                                       .message(timestamp: 10, ordinal: 1), .note(1)])
+        XCTAssertEqual(conversation.lines.first?.contents, [.text(AttributedString("old"))], "Rendered as it is kept")
         XCTAssertEqual(conversation.oldestPosition, SteamChatPosition(timestamp: 5, ordinal: 0))
         XCTAssertEqual(conversation.latestTimestamp, 10)
 
@@ -882,16 +890,13 @@ final class ChatBridgeTestSession: SteamSessionProtocol, @unchecked Sendable {
     func ack(friendSteamId: UInt64, timestamp: UInt32) async throws {
         lock.withLock { _acks.append(Ack(friend: friendSteamId, timestamp: timestamp)) }
     }
-    func inviteToGame(friendSteamId: UInt64, appId: UInt32) async throws -> SteamInviteKind {
+    func inviteToGame(friendSteamId: UInt64, appId: UInt32) async throws {
         if let failure = inviteFailure { throw failure }
         lock.withLock { _invites.append(Invite(friend: friendSteamId, appId: appId)) }
-        return .lobby
     }
-    func inviteIntoGame(friendSteamId: UInt64, appId: UInt32, invite: SteamGameInvite) async throws -> SteamInviteKind {
+    func inviteIntoGame(friendSteamId: UInt64, appId: UInt32, invite: SteamGameInvite) async throws {
         if let failure = inviteFailure { throw failure }
         lock.withLock { _reportedInvites.append(ReportedInvite(friend: friendSteamId, appId: appId, invite: invite)) }
-        if case .connect = invite { return .connect }
-        return .lobby
     }
 }
 

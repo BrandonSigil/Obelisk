@@ -5,7 +5,7 @@ use std::{
     io::Write,
 };
 
-use obelisk_core::transfer::CancelToken;
+use obelisk_core::{date, transfer::CancelToken};
 use sha1::{Digest, Sha1};
 
 use super::{
@@ -372,48 +372,14 @@ fn encode_manifest(manifest: &Manifest) -> Result<Vec<u8>, EpicError> {
     Ok(output)
 }
 
-fn leap(year: u64) -> bool {
-    year.is_multiple_of(4) && (!year.is_multiple_of(100) || year.is_multiple_of(400))
-}
-fn months(year: u64) -> [u64; 12] {
-    [
-        31,
-        if leap(year) { 29 } else { 28 },
-        31,
-        30,
-        31,
-        30,
-        31,
-        31,
-        30,
-        31,
-        30,
-        31,
-    ]
-}
-
 pub(crate) fn timestamp(seconds: u64) -> Result<String, EpicError> {
-    let mut days = seconds / 86_400;
-    let mut year = 1970;
-    while days >= if leap(year) { 366 } else { 365 } {
-        days -= if leap(year) { 366 } else { 365 };
-        year += 1;
-        if year > 9999 {
-            return Err(EpicError::Protocol);
-        }
-    }
-    let mut month = 1;
-    for count in months(year) {
-        if days < count {
-            break;
-        }
-        days -= count;
-        month += 1;
+    let (year, month, day) = date::civil_from_days((seconds / 86_400) as i64);
+    if year > 9999 {
+        return Err(EpicError::Protocol);
     }
     let time = seconds % 86_400;
     Ok(format!(
-        "{year:04}.{month:02}.{:02}-{:02}.{:02}.{:02}",
-        days + 1,
+        "{year:04}.{month:02}.{day:02}-{:02}.{:02}.{:02}",
         time / 3600,
         time % 3600 / 60,
         time % 60
@@ -439,21 +405,16 @@ pub(crate) fn manifest_time(name: &str) -> Result<u64, EpicError> {
         <[u64; 6]>::try_from(values).map_err(|_| EpicError::Protocol)?;
     if !(1970..=9999).contains(&year)
         || !(1..=12).contains(&month)
-        || day == 0
-        || day > months(year)[month as usize - 1]
+        || !(1..=31).contains(&day)
         || hour > 23
         || minute > 59
         || second > 59
     {
         return Err(EpicError::Protocol);
     }
-    let days: u64 = (1970..year)
-        .map(|y| if leap(y) { 366 } else { 365 })
-        .sum::<u64>()
-        + months(year)[..month as usize - 1].iter().sum::<u64>()
-        + day
-        - 1;
+    let days = date::days_from_civil(year as i64, month as i64, day as i64) as u64;
     let seconds = days * 86_400 + hour * 3600 + minute * 60 + second;
+    // A day past its month's end lands in the next month and fails here.
     if timestamp(seconds)? != name {
         return Err(EpicError::Protocol);
     }

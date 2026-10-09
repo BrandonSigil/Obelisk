@@ -629,10 +629,7 @@ fn save<R: Serialize>(file: &Path, receipts: &[R]) -> std::io::Result<()> {
     if let Some(parent) = file.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let bytes = serde_json::to_vec(receipts)?;
-    let partial = file.with_extension("partial");
-    std::fs::write(&partial, bytes)?;
-    std::fs::rename(&partial, file)
+    obelisk_core::write_atomic(file, &serde_json::to_vec(receipts)?)
 }
 
 /// One account's installations of one storefront. A clone is the same
@@ -1200,7 +1197,9 @@ impl<S: Storefront> Shared<S> {
         self.content.removed(receipt, request).await?;
         // As Steam deletes a Proton prefix, the prefix goes with its game,
         // after the Cloud archive took its saves.
-        if let Some(Err(_)) = self.content.remove_prefix(receipt) {
+        let (content, receipt) = (self.content.clone(), receipt.clone());
+        let prefix = tokio::task::spawn_blocking(move || content.remove_prefix(&receipt)).await;
+        if !matches!(prefix, Ok(None | Some(Ok(())))) {
             self.update(|inner| Self::warn(inner, "model.installations.prefixNotRemoved"));
         }
         Ok(!signed_out())

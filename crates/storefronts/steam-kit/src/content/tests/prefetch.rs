@@ -184,7 +184,8 @@ async fn cancellation_bounds_prepared_files_and_resumes_each_verified_partial() 
     let resumed = client
         .download_depot(&plan(directory.path()), &CancelToken::new(), |_| {})
         .await
-        .unwrap();
+        .unwrap()
+        .summary;
     // The verified partial chunk, and the chunk written before cancellation.
     assert!(resumed.reused_bytes > reused);
     assert_eq!(resumed.completed_files, files.len() as u32);

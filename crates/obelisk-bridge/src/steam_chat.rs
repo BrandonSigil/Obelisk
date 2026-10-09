@@ -3,7 +3,7 @@
 //! tells Swift it fell behind and must reload the history it shows.
 use std::sync::Arc;
 
-use steam_kit::{chat, client, own_game};
+use steam_kit::{chat, own_game};
 
 use crate::{SteamError, SteamSession};
 
@@ -141,8 +141,6 @@ pub struct SteamOwnGame {
     pub connected: bool,
     /// 0 when the account plays nothing.
     pub app_id: u32,
-    pub lobby_id: u64,
-    pub connect: Option<String>,
     pub invite: SteamGameInvite,
 }
 
@@ -152,6 +150,16 @@ impl From<SteamGameInvite> for own_game::GameInvite {
             SteamGameInvite::None => Self::None,
             SteamGameInvite::Lobby { lobby_id } => Self::Lobby { lobby_id },
             SteamGameInvite::Connect { connect } => Self::Connect { connect },
+        }
+    }
+}
+
+impl From<own_game::GameInvite> for SteamGameInvite {
+    fn from(invite: own_game::GameInvite) -> Self {
+        match invite {
+            own_game::GameInvite::None => Self::None,
+            own_game::GameInvite::Lobby { lobby_id } => Self::Lobby { lobby_id },
+            own_game::GameInvite::Connect { connect } => Self::Connect { connect },
         }
     }
 }
@@ -171,21 +179,9 @@ impl From<own_game::OwnGame> for SteamOwnGame {
             revision: game.revision,
             connected: game.connected,
             app_id: game.app_id,
-            lobby_id: game.lobby_id,
-            connect: game.connect,
-            invite: match game.invite {
-                own_game::GameInvite::None => SteamGameInvite::None,
-                own_game::GameInvite::Lobby { lobby_id } => SteamGameInvite::Lobby { lobby_id },
-                own_game::GameInvite::Connect { connect } => SteamGameInvite::Connect { connect },
-            },
+            invite: game.invite().into(),
         }
     }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Enum)]
-pub enum SteamInviteKind {
-    Lobby,
-    Connect,
 }
 
 #[uniffi::export(async_runtime = "tokio")]
@@ -284,13 +280,9 @@ impl SteamSession {
         &self,
         friend_steam_id: u64,
         app_id: u32,
-    ) -> Result<SteamInviteKind, SteamError> {
-        Ok(
-            match self.client.invite_to_game(friend_steam_id, app_id).await? {
-                client::GameInviteKind::Lobby => SteamInviteKind::Lobby,
-                client::GameInviteKind::Connect => SteamInviteKind::Connect,
-            },
-        )
+    ) -> Result<(), SteamError> {
+        self.client.invite_to_game(friend_steam_id, app_id).await?;
+        Ok(())
     }
 
     /// Invites into `invite`, which the account's running game of `app_id`
@@ -301,17 +293,11 @@ impl SteamSession {
         friend_steam_id: u64,
         app_id: u32,
         invite: SteamGameInvite,
-    ) -> Result<SteamInviteKind, SteamError> {
-        Ok(
-            match self
-                .client
-                .invite_into_game(friend_steam_id, app_id, &invite.into())
-                .await?
-            {
-                client::GameInviteKind::Lobby => SteamInviteKind::Lobby,
-                client::GameInviteKind::Connect => SteamInviteKind::Connect,
-            },
-        )
+    ) -> Result<(), SteamError> {
+        self.client
+            .invite_into_game(friend_steam_id, app_id, &invite.into())
+            .await?;
+        Ok(())
     }
 }
 
@@ -335,16 +321,6 @@ impl SteamChatFixture {
             chat: chat::ChatEventSource::new(),
             own_game: own_game::OwnGameSource::new(),
         })
-    }
-
-    /// A raw service notification body, as Steam's EMsg 146 carries it.
-    pub fn receive_notification(&self, method: String, body: Vec<u8>) {
-        self.chat.receive(&method, &body);
-    }
-
-    /// A raw ClientPersonaState body.
-    pub fn receive_persona_state(&self, body: Vec<u8>) {
-        self.own_game.receive(self.account_id, &body);
     }
 
     pub fn incoming_message(

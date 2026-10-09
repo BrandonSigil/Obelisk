@@ -1,8 +1,14 @@
 //! Current platform manifests for installation estimates and verified downloads.
+use obelisk_core::install::unhex;
 use reqwest::Url;
 use serde::Deserialize;
 use sha1::{Digest, Sha1};
-use std::{path::Path, time::Duration};
+use std::{
+    collections::HashMap,
+    path::Path,
+    sync::{Mutex, PoisonError},
+    time::Duration,
+};
 
 use crate::{
     EpicError,
@@ -15,6 +21,30 @@ use crate::{
 pub(crate) mod diagnostic;
 pub(crate) mod manifest_cache;
 
+/// Installation sizes by game identity and live asset hash, which names one
+/// immutable build: reopening a game's page skips its manifest.
+#[derive(Default)]
+pub(crate) struct InstallationSizes(Mutex<HashMap<SizeKey, u64>>);
+
+type SizeKey = ([String; 4], String);
+
+impl InstallationSizes {
+    fn get(&self, key: &SizeKey) -> Option<u64> {
+        self.0
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(key)
+            .copied()
+    }
+
+    fn insert(&self, key: SizeKey, size: u64) {
+        self.0
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(key, size);
+    }
+}
+
 pub(crate) async fn installation_size(
     api: &Api,
     access_token: &str,
@@ -22,20 +52,48 @@ pub(crate) async fn installation_size(
     catalog_item_id: &str,
     app_name: &str,
     platform: &str,
+    sizes: &InstallationSizes,
 ) -> Result<u64, EpicError> {
-    let fetched = fetch_manifest(
+    let mut trace = trace(namespace, catalog_item_id, app_name, platform);
+    let asset = live_asset(
         api,
         access_token,
         namespace,
         catalog_item_id,
         app_name,
         platform,
-        None,
+        &mut trace,
     )
-    .await?;
-    tokio::task::spawn_blocking(move || manifest::installation_size(&fetched.bytes))
+    .await;
+    let asset = reported(&mut trace, asset)?;
+    let key = asset.hash.clone().map(|hash| {
+        (
+            [namespace, catalog_item_id, app_name, platform].map(str::to_owned),
+            hash,
+        )
+    });
+    if let Some(size) = key.as_ref().and_then(|key| sizes.get(key)) {
+        return Ok(size);
+    }
+    let fetched = asset_manifest(
+        api,
+        &asset,
+        namespace,
+        catalog_item_id,
+        app_name,
+        platform,
+        None,
+        &mut trace,
+    )
+    .await;
+    let fetched = reported(&mut trace, fetched)?;
+    let size = tokio::task::spawn_blocking(move || manifest::installation_size(&fetched.bytes))
         .await
-        .map_err(|_| EpicError::Protocol)?
+        .map_err(|_| EpicError::Protocol)??;
+    if let Some(key) = key {
+        sizes.insert(key, size);
+    }
+    Ok(size)
 }
 
 pub(crate) struct FetchedManifest {
@@ -56,44 +114,74 @@ pub(crate) async fn fetch_manifest(
     platform: &str,
     cache_directory: Option<&Path>,
 ) -> Result<FetchedManifest, EpicError> {
-    let mut trace = diagnostic::Trace {
+    let mut trace = trace(namespace, catalog_item_id, app_name, platform);
+    let result = async {
+        let asset = live_asset(
+            api,
+            access_token,
+            namespace,
+            catalog_item_id,
+            app_name,
+            platform,
+            &mut trace,
+        )
+        .await?;
+        asset_manifest(
+            api,
+            &asset,
+            namespace,
+            catalog_item_id,
+            app_name,
+            platform,
+            cache_directory,
+            &mut trace,
+        )
+        .await
+    }
+    .await;
+    reported(&mut trace, result)
+}
+
+fn trace(
+    namespace: &str,
+    catalog_item_id: &str,
+    app_name: &str,
+    platform: &str,
+) -> diagnostic::Trace {
+    diagnostic::Trace {
         platform: platform.into(),
         namespace: namespace.into(),
         catalog_item_id: catalog_item_id.into(),
         app_name: app_name.into(),
         ..Default::default()
-    };
-    let result = fetch_traced(
-        api,
-        access_token,
-        namespace,
-        catalog_item_id,
-        app_name,
-        platform,
-        cache_directory,
-        &mut trace,
-    )
-    .await;
+    }
+}
+
+/// Writes `trace` when `result` failed other than by the network or a
+/// cancellation.
+fn reported<T>(
+    trace: &mut diagnostic::Trace,
+    result: Result<T, EpicError>,
+) -> Result<T, EpicError> {
     if let Err(error) = &result
         && !matches!(error, EpicError::Cancelled | EpicError::Network)
     {
         trace.error = format!("{error:?}");
-        diagnostic::write(&trace);
+        diagnostic::write(trace);
     }
     result
 }
 
-#[allow(clippy::too_many_arguments)]
-async fn fetch_traced(
+/// The game's live build as the launcher service describes it.
+async fn live_asset(
     api: &Api,
     access_token: &str,
     namespace: &str,
     catalog_item_id: &str,
     app_name: &str,
     platform: &str,
-    cache_directory: Option<&Path>,
     trace: &mut diagnostic::Trace,
-) -> Result<FetchedManifest, EpicError> {
+) -> Result<Asset, EpicError> {
     trace.step = "identity";
     validate_identity(namespace, catalog_item_id, app_name, platform)?;
     let mut url = Url::parse(&api.launcher).map_err(|_| EpicError::Protocol)?;
@@ -126,7 +214,7 @@ async fn fetch_traced(
     let response: AssetResponse =
         serde_json::from_value(response).map_err(|_| EpicError::Protocol)?;
     trace.step = "asset count";
-    let [asset] = response.elements.as_slice() else {
+    let Ok([asset]) = <[Asset; 1]>::try_from(response.elements) else {
         return Err(EpicError::Protocol);
     };
     trace.asset_hash = asset.hash.clone();
@@ -134,6 +222,20 @@ async fn fetch_traced(
     if asset.manifests.is_empty() || asset.manifests.len() > 8 {
         return Err(EpicError::Protocol);
     }
+    Ok(asset)
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn asset_manifest(
+    api: &Api,
+    asset: &Asset,
+    namespace: &str,
+    catalog_item_id: &str,
+    app_name: &str,
+    platform: &str,
+    cache_directory: Option<&Path>,
+    trace: &mut diagnostic::Trace,
+) -> Result<FetchedManifest, EpicError> {
     trace.step = "manifest cache";
     let cache_key = cache_directory.and_then(|_| {
         manifest_cache::ManifestCacheKey::new(
@@ -354,11 +456,7 @@ fn checked_size(bytes: &[u8], hash: Option<&str>) -> Result<u64, EpicError> {
 
 fn checked_hash(bytes: &[u8], hash: Option<&str>) -> Result<(), EpicError> {
     if let Some(hash) = hash
-        && (hash.len() != 40
-            || !hash.bytes().all(|byte| byte.is_ascii_hexdigit())
-            || Sha1::digest(bytes).iter().enumerate().any(|(index, byte)| {
-                u8::from_str_radix(&hash[index * 2..index * 2 + 2], 16) != Ok(*byte)
-            }))
+        && !unhex::<20>(hash).is_some_and(|expected| Sha1::digest(bytes)[..] == expected)
     {
         return Err(EpicError::Protocol);
     }
@@ -558,8 +656,16 @@ mod tests {
                 .unwrap();
             String::from_utf8(request).unwrap()
         });
-        let result =
-            installation_size(&api, "account-token", "ns", "catalog", "game/name", "Mac").await;
+        let result = installation_size(
+            &api,
+            "account-token",
+            "ns",
+            "catalog",
+            "game/name",
+            "Mac",
+            &InstallationSizes::default(),
+        )
+        .await;
         assert!(matches!(result, Err(EpicError::Unauthorized)));
         let request = server.join().unwrap();
         assert!(request.starts_with("GET /launcher/api/public/assets/v2/platform/Mac/namespace/ns/catalogItem/catalog/app/game%2Fname/label/Live HTTP/1.1"));

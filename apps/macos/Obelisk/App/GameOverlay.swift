@@ -13,21 +13,8 @@ enum OverlayRequest: Equatable {
     /// A Steam user: their conversation, or their profile when they are no friend.
     case user(steamId: UInt64)
     case webPage(URL)
-    /// A Steam game's store page; app 0 is the store's front page.
-    case store(appId: UInt32)
     /// The in-game purchase a Steam game asks the player to authorize.
     case microTxn(orderId: UInt64)
-}
-
-/// Shows the overlay over the running game, for the requests of the game's
-/// Steam engine.
-@MainActor
-protocol GameOverlayPresenting: AnyObject {
-    /// The game asks for `request`. False when no game runs to show it over.
-    @discardableResult func present(_ request: OverlayRequest) -> Bool
-    /// A friend's invitation reached the running game: the player hears of
-    /// it, without leaving the game.
-    func announce(_ invite: SteamReceivedInvite)
 }
 
 /// The running game the overlay shows, whichever storefront launched it.
@@ -133,7 +120,7 @@ struct GameOverlayEnvironment {
 /// achievements and web pages. It follows the running Game session, and
 /// takes Shift-Tab only while the game, or the overlay itself, is in front.
 @MainActor @Observable
-final class GameOverlayController: GameOverlayPresenting {
+final class GameOverlayController {
     private(set) var isPresented = false
     /// What shows; navigating inside the overlay replaces it.
     private(set) var request: OverlayRequest = .home
@@ -202,14 +189,10 @@ final class GameOverlayController: GameOverlayPresenting {
 
     // MARK: Showing
 
+    /// Shows `request`, at the player's demand (`userInitiated`) or the
+    /// game's. False when no game runs to show it over.
     @discardableResult
-    func present(_ request: OverlayRequest) -> Bool {
-        present(request, userInitiated: false)
-    }
-
-    /// Shows `request`, at the player's demand (`userInitiated`) or the game's.
-    @discardableResult
-    func present(_ request: OverlayRequest, userInitiated: Bool) -> Bool {
+    func present(_ request: OverlayRequest, userInitiated: Bool = false) -> Bool {
         // A request may come before the session's change reached the overlay.
         follow(runningSession)
         guard session != nil else { return false }
@@ -245,8 +228,6 @@ final class GameOverlayController: GameOverlayPresenting {
             } else {
                 self.request = .webPage(Self.profileURL(steamId: steamId))
             }
-        case .store(let appId):
-            self.request = .webPage(Self.storeURL(appId: appId))
         case .achievements:
             self.request = .achievements
             loadAchievements()
@@ -267,7 +248,7 @@ final class GameOverlayController: GameOverlayPresenting {
     @discardableResult
     func back() -> Bool {
         switch request {
-        case .achievements, .webPage, .store:
+        case .achievements, .webPage:
             request = .home
             return true
         case .microTxn(let orderId):
@@ -337,6 +318,8 @@ final class GameOverlayController: GameOverlayPresenting {
         steamFriend(invite.friendSteamId)
     }
 
+    /// A friend's invitation reached the running game: the player hears of
+    /// it, without leaving the game.
     func announce(_ invite: SteamReceivedInvite) {
         follow(runningSession)
         guard let session, case .steam = session.game, !isPresented else { return }
@@ -467,6 +450,7 @@ final class GameOverlayController: GameOverlayPresenting {
 
     private static let steamSites = ["steampowered.com", "steamcommunity.com"]
 
+    /// A Steam game's store page; app 0 is the store's front page.
     nonisolated static func storeURL(appId: UInt32) -> URL {
         URL(string: appId == 0 ? "https://store.steampowered.com/" : "https://store.steampowered.com/app/\(appId)")!
     }

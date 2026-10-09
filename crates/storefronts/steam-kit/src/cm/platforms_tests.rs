@@ -112,28 +112,44 @@ async fn respond_batch(
     expected_ids: &[u32],
     result: proto::ProductResponse,
 ) {
-    let token_request = server.request(TOKEN_REQUEST).await;
-    let tokens = proto::AccessTokenRequest::decode(token_request.body.clone()).unwrap();
-    assert_eq!(tokens.app_ids, expected_ids);
-    assert!(tokens.package_ids.is_empty());
-    server
-        .reply(
-            &token_request,
-            TOKEN_RESPONSE,
-            &proto::AccessTokenResponse::default(),
-        )
-        .await;
+    respond_batches(server, &[(expected_ids, result)]).await;
+}
 
-    let product_request = server.request(PRODUCT_REQUEST).await;
-    let products = proto::ProductRequest::decode(product_request.body.clone()).unwrap();
-    assert_eq!(
-        products.apps.iter().map(|app| app.id).collect::<Vec<_>>(),
-        expected_ids
-    );
-    assert!(products.packages.is_empty());
-    server
-        .reply(&product_request, PRODUCT_RESPONSE, &result)
-        .await;
+/// Answers PICS batches sent together: every token request, then every product
+/// request, each matched to its batch by the apps it names.
+async fn respond_batches(
+    server: &mut test_server::TestServer,
+    batches: &[(&[u32], proto::ProductResponse)],
+) {
+    let mut token_requests = Vec::new();
+    for _ in batches {
+        token_requests.push(server.request(TOKEN_REQUEST).await);
+    }
+    for token_request in &token_requests {
+        let tokens = proto::AccessTokenRequest::decode(token_request.body.clone()).unwrap();
+        assert!(batches.iter().any(|(ids, _)| tokens.app_ids == *ids));
+        assert!(tokens.package_ids.is_empty());
+        server
+            .reply(
+                token_request,
+                TOKEN_RESPONSE,
+                &proto::AccessTokenResponse::default(),
+            )
+            .await;
+    }
+    for _ in batches {
+        let product_request = server.request(PRODUCT_REQUEST).await;
+        let products = proto::ProductRequest::decode(product_request.body.clone()).unwrap();
+        let ids: Vec<_> = products.apps.iter().map(|app| app.id).collect();
+        let (_, result) = batches
+            .iter()
+            .find(|(expected, _)| *expected == ids)
+            .expect("a product request for a sent batch");
+        assert!(products.packages.is_empty());
+        server
+            .reply(&product_request, PRODUCT_RESPONSE, result)
+            .await;
+    }
 }
 
 fn metadata(ids: &[u32]) -> proto::ProductResponse {
@@ -166,8 +182,12 @@ async fn library_platforms_batches_51_ids_preserves_unknown_and_reuses_metadata(
     requested.extend([51, 0]);
     let responder = async {
         let first: Vec<_> = (1..=50).collect();
-        respond_batch(&mut server, &first, metadata(&first)).await;
-        respond_batch(&mut server, &[51], metadata(&[51])).await;
+        // Both batches are in flight at once.
+        respond_batches(
+            &mut server,
+            &[(&first, metadata(&first)), (&[51], metadata(&[51]))],
+        )
+        .await;
     };
     let (result, ()) = tokio::join!(client.platforms(&requested), responder);
     let result = result.unwrap();

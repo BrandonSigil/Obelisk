@@ -49,7 +49,7 @@ struct GameOverlayView: View {
         switch overlay.request {
         case .achievements, .webPage: false
         case .microTxn(let orderId): overlay.pendingPurchase?.orderId != orderId
-        case .home, .friends, .invite, .user, .store: true
+        case .home, .friends, .invite, .user: true
         }
     }
 
@@ -67,7 +67,7 @@ struct GameOverlayView: View {
                          close: { overlay.back() }, placeholderTitle: url.host() ?? url.absoluteString,
                          identifier: "game-overlay-web-page")
                 .id(url)
-        case .home, .friends, .invite, .user, .store, .microTxn:
+        case .home, .friends, .invite, .user, .microTxn:
             OverlayHome(overlay: overlay)
         }
     }
@@ -171,7 +171,9 @@ private struct OverlayHome: View {
                                     identifier: "game-overlay-achievements") { overlay.show(.achievements) }
                         if case .steam(let appId)? = overlay.session?.game {
                             OverlayTile(title: L10n.string("ui.overlay.storePage"), systemImage: "bag",
-                                        identifier: "game-overlay-store") { overlay.show(.store(appId: appId)) }
+                                        identifier: "game-overlay-store") {
+                                overlay.show(.webPage(GameOverlayController.storeURL(appId: appId)))
+                            }
                         }
                         OverlayTile(title: L10n.string("ui.overlay.library"), systemImage: "square.grid.2x2",
                                     identifier: "game-overlay-library") { overlay.openLibrary() }
@@ -215,16 +217,6 @@ private struct OverlayTile: View {
     }
 }
 
-/// A page's back button, to the overlay's home.
-private struct OverlayBackButton: View {
-    let action: () -> Void
-
-    var body: some View {
-        StorefrontGlassButton(systemName: "chevron.left", label: L10n.string("ui.overlay.back"),
-                              identifier: "game-overlay-back", action: action)
-    }
-}
-
 private struct OverlayAchievementsPage: View {
     let model: GameAchievementsModel
     let gameTitle: String
@@ -234,7 +226,8 @@ private struct OverlayAchievementsPage: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack(spacing: 14) {
-                OverlayBackButton(action: back)
+                StorefrontGlassButton(systemName: "chevron.left", label: L10n.string("ui.overlay.back"),
+                                      identifier: "game-overlay-back", action: back)
                 VStack(alignment: .leading, spacing: 4) {
                     Label(L10n.string("ui.game.achievements.title"), systemImage: "trophy")
                         .font(.title2.weight(.semibold))

@@ -50,11 +50,14 @@ import SwiftUI
     func downloadFromLibrary(_ game: Game)
     /// Whether the storefront may have a build of `game` to install.
     func canInstallFromLibrary(_ game: Game) -> Bool
+    /// The messages the account has not read, which its menu tells.
+    var unreadCount: Int { get }
 }
 
 extension LibraryStorefront {
     func syncCloud() { installations.syncCloud() }
     func canInstallFromLibrary(_ game: Game) -> Bool { true }
+    var unreadCount: Int { 0 }
     var filterRevision: Int { 0 }
 
     /// The games the search and the filter keep, in the library's order.
@@ -286,7 +289,7 @@ struct StorefrontLibraryPage<Model: LibraryStorefront, HeroArtwork: View, HeroLo
         let installations = model.installations
         let installed = Set(installations.receipts.map(\.gameID))
         let transferring = installations.activeTransferGame
-        let session = installations.sessions.active
+        let session = installations.sessions.activeGame
         let running = session.flatMap { $0.running ? $0.game : nil }
         let preparing = Set([
             session?.game,

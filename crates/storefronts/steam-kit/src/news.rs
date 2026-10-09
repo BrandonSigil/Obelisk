@@ -1,7 +1,8 @@
 //! Public news never require, receive or persist account credentials.
 use std::sync::OnceLock;
 
-use crate::client::{BodyError, ClientError, http_client, read_bounded};
+use crate::client::{ClientError, http_client, read_bounded};
+use obelisk_core::transfer::BodyError;
 use serde::Deserialize;
 
 const MAX_NEWS_BYTES: usize = 2 * 1024 * 1024;
@@ -38,19 +39,21 @@ pub async fn for_app(app_id: u32) -> Result<Vec<NewsItem>, ClientError> {
         ])
         .send()
         .await
-        .map_err(|_| ClientError("backend.steam.news.loadFailed".into()))?
+        .map_err(|_| ClientError::Failure("backend.steam.news.loadFailed".into()))?
         .error_for_status()
-        .map_err(|_| ClientError("backend.steam.news.unavailable".into()))?;
+        .map_err(|_| ClientError::Failure("backend.steam.news.unavailable".into()))?;
     let bytes = read_bounded(response, MAX_NEWS_BYTES)
         .await
         .map_err(|error| match error {
-            BodyError::Network => ClientError("backend.steam.news.incompleteResponse".into()),
-            BodyError::TooLarge => ClientError("backend.steam.news.responseTooLarge".into()),
+            BodyError::Size => ClientError::Failure("backend.steam.news.responseTooLarge".into()),
+            BodyError::Network | BodyError::Cancelled => {
+                ClientError::Failure("backend.steam.news.incompleteResponse".into())
+            }
         })?;
     let envelope: Envelope = serde_json::from_slice(&bytes)
-        .map_err(|_| ClientError("backend.steam.news.incompatibleFormat".into()))?;
+        .map_err(|_| ClientError::Failure("backend.steam.news.incompatibleFormat".into()))?;
     if envelope.appnews.appid != app_id {
-        return Err(ClientError("backend.steam.news.wrongGame".into()));
+        return Err(ClientError::Failure("backend.steam.news.wrongGame".into()));
     }
     let mut items: Vec<_> = envelope
         .appnews

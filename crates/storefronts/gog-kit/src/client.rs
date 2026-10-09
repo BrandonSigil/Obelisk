@@ -2,7 +2,8 @@
 //! release the session lock so disconnect can invalidate them promptly.
 use std::{future::Future, sync::Arc, time::Instant};
 
-use tokio::sync::{Mutex, watch};
+use obelisk_core::watch::Revisions;
+use tokio::sync::Mutex;
 
 use crate::{
     GogError,
@@ -67,11 +68,7 @@ impl Client {
             tokens: TokenSource {
                 api: Arc::new(api),
                 session: Arc::new(Mutex::new(Some(session))),
-                credential_events: watch::channel(CredentialRevision {
-                    revision: 1,
-                    stopped: false,
-                })
-                .0,
+                credential_events: Revisions::new(),
             },
             avatar_url: profile.avatar_url,
         })
@@ -139,25 +136,17 @@ impl Client {
 
     /// The revision of the credentials now, which grows with each rotation.
     pub fn credentials_revision(&self) -> u64 {
-        self.tokens.credential_events.borrow().revision
+        self.tokens.credential_events.current()
     }
 
     pub async fn next_credentials_revision(&self, after_revision: u64) -> Option<u64> {
-        obelisk_core::watch::next_matching(self.tokens.credential_events.subscribe(), |state| {
-            state.stopped || state.revision != after_revision
-        })
-        .await
-        .ok()
-        .filter(|state| !state.stopped)
-        .map(|state| state.revision)
+        self.tokens.credential_events.next(after_revision).await
     }
 
     /// Synchronous cancellation crosses UniFFI even when a Swift task is
     /// suspended. This affects no running content transfer.
     pub fn shutdown_observers(&self) {
-        self.tokens
-            .credential_events
-            .send_modify(|state| state.stopped = true);
+        self.tokens.credential_events.stop();
     }
 
     /// Forgets the session. GOG offers no revocation of a Galaxy token: it
@@ -186,19 +175,13 @@ impl Client {
     }
 }
 
-#[derive(Clone, Copy)]
-struct CredentialRevision {
-    revision: u64,
-    stopped: bool,
-}
-
 /// The account's access token, renewed as it lapses, for work that outlives
 /// one call, such as a Transfer's secure links.
 #[derive(Clone)]
 pub(crate) struct TokenSource {
     api: Arc<Api>,
     session: Arc<Mutex<Option<Session>>>,
-    credential_events: watch::Sender<CredentialRevision>,
+    credential_events: Revisions,
 }
 
 impl TokenSource {
@@ -231,9 +214,7 @@ impl TokenSource {
                 || rejected.as_deref() == Some(&session.access_token)
             {
                 *session = tokens.api.refresh(&session.credentials).await?;
-                tokens
-                    .credential_events
-                    .send_modify(|state| state.revision = state.revision.wrapping_add(1));
+                tokens.credential_events.advance();
             }
             Ok(session.access_token.clone())
         })

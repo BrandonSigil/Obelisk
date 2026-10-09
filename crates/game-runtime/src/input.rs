@@ -84,10 +84,7 @@ impl Drop for Service {
 /// service, and short enough for a socket path.
 fn directory(prefix: &Path) -> PathBuf {
     let digest = Sha256::digest(prefix.as_os_str().as_encoded_bytes());
-    let name: String = digest[..8]
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect();
+    let name = obelisk_core::install::hex(&digest[..8]);
     std::env::temp_dir().join(format!("obelisk-input-{name}"))
 }
 

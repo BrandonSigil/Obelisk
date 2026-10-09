@@ -263,40 +263,30 @@ impl<P: Provider> Client<P> {
     /// Ends the game, which gets a few seconds to quit before it is killed;
     /// its exit Cloud sync still runs. Before spawn it cancels preparation.
     pub fn stop(&self) -> Result<(), P::Error> {
-        self.command(
-            None,
-            Command::<P>::Stop {
-                id: self.id.clone(),
-            },
-            false,
-        )?;
-        Ok(())
+        self.end(Command::<P>::Stop {
+            id: self.id.clone(),
+        })
     }
 
     /// The player's Quit: the game is asked to close its windows, and nothing
     /// is killed. Before spawn it cancels preparation.
     pub fn quit(&self) -> Result<(), P::Error> {
-        self.command(
-            None,
-            Command::<P>::Quit {
-                id: self.id.clone(),
-            },
-            false,
-        )?;
-        Ok(())
+        self.end(Command::<P>::Quit {
+            id: self.id.clone(),
+        })
     }
 
     /// The player's Force Quit: the game ends now, with whatever still runs
     /// for its installation; its exit Cloud sync still runs. Before spawn it
     /// cancels preparation.
     pub fn force_quit(&self) -> Result<(), P::Error> {
-        self.command(
-            None,
-            Command::<P>::ForceQuit {
-                id: self.id.clone(),
-            },
-            false,
-        )?;
+        self.end(Command::<P>::ForceQuit {
+            id: self.id.clone(),
+        })
+    }
+
+    fn end(&self, command: Command<P>) -> Result<(), P::Error> {
+        self.command(None, command, false)?;
         Ok(())
     }
 

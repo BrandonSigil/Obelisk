@@ -191,14 +191,17 @@ fn decrypts_all_three_steam_chunk_compression_envelopes_and_rejects_corruption()
     for compressed in [zip(bytes), vzip(bytes), vzstd(bytes)] {
         let encrypted = encrypt(&compressed);
         let expected = chunk(bytes, 0, encrypted.len());
-        assert_eq!(decode_chunk(&encrypted, &expected, &KEY).unwrap(), bytes);
+        assert_eq!(
+            decode_chunk(&mut encrypted.clone(), &expected, &KEY).unwrap(),
+            bytes
+        );
         let mut wrong = expected.clone();
         wrong.sha[0] ^= 1;
-        assert!(decode_chunk(&encrypted, &wrong, &KEY).is_err());
+        assert!(decode_chunk(&mut encrypted.clone(), &wrong, &KEY).is_err());
         wrong = expected.clone();
         wrong.adler ^= 1;
-        assert!(decode_chunk(&encrypted, &wrong, &KEY).is_err());
-        assert!(decode_chunk(&encrypted, &expected, &[9; 32]).is_err());
+        assert!(decode_chunk(&mut encrypted.clone(), &wrong, &KEY).is_err());
+        assert!(decode_chunk(&mut encrypted.clone(), &expected, &[9; 32]).is_err());
     }
     // zlib's standard Adler value for this input would be 0x024d0127.
     assert_eq!(steam_adler(b"abc"), 0x024a0126);
@@ -325,7 +328,7 @@ fn decodes_upstream_reference_manifest_and_three_real_chunk_fixtures() {
             156,
         ),
     ] {
-        let input = fs::read(files.join(format!("depot_{depot}_chunk_{sha}.bin"))).unwrap();
+        let mut input = fs::read(files.join(format!("depot_{depot}_chunk_{sha}.bin"))).unwrap();
         let chunk = Chunk {
             sha: decode_hex(sha),
             adler,
@@ -334,7 +337,7 @@ fn decodes_upstream_reference_manifest_and_three_real_chunk_fixtures() {
             original_size,
         };
         let key: [u8; 32] = decode_hex(key).try_into().unwrap();
-        let bytes = decode_chunk(&input, &chunk, &key).unwrap();
+        let bytes = decode_chunk(&mut input, &chunk, &key).unwrap();
         assert_eq!(bytes.len(), original_size as usize);
         assert_eq!(hex(&Sha1::digest(&bytes)), sha);
     }
@@ -545,15 +548,12 @@ async fn an_installed_depot_names_the_install_scripts_its_manifest_flags() {
     item.flags = 256;
     let fixture = CdnFixture::new(routes(item, pieces));
     let client = fixture.client();
-    client
+    let installed = client
         .download_depot(&plan(directory.path()), &CancelToken::new(), |_| {})
         .await
         .unwrap();
     assert_eq!(
-        client
-            .install_scripts(directory.path(), 42, 99, &KEY)
-            .await
-            .unwrap(),
+        installed.install_scripts,
         ["_CommonRedist/vcredist/2022/installscript.vdf"]
     );
 }
@@ -572,7 +572,8 @@ async fn an_empty_file_listed_with_a_zero_checksum_installs_and_verifies() {
         let result = client
             .download_depot(&plan(directory.path()), &CancelToken::new(), |_| {})
             .await
-            .unwrap();
+            .unwrap()
+            .summary;
         assert_eq!(result.completed_files, 1);
         assert_eq!(fs::read(directory.path().join("empty.dat")).unwrap(), b"");
     }
@@ -593,7 +594,8 @@ async fn downloads_atomically_and_reuses_verified_files_on_next_invocation() {
             move |p| events.lock().unwrap().push(p)
         })
         .await
-        .unwrap();
+        .unwrap()
+        .summary;
     assert_eq!(
         fs::read(directory.path().join("bin/game.exe")).unwrap(),
         pieces.concat()
@@ -615,7 +617,8 @@ async fn downloads_atomically_and_reuses_verified_files_on_next_invocation() {
             move |event| check_events.lock().unwrap().push(event)
         })
         .await
-        .unwrap();
+        .unwrap()
+        .summary;
     assert_eq!(resumed.reused_bytes, pieces.concat().len() as u64);
     assert_eq!(resumed.content_bytes, 0);
     let requests = fixture.requests.lock().unwrap();
@@ -706,7 +709,8 @@ async fn invalid_cache_is_refetched_and_a_new_manifest_installs_its_new_content(
     let repaired = client
         .download_depot(&plan(directory.path()), &cancel, |_| {})
         .await
-        .unwrap();
+        .unwrap()
+        .summary;
     assert_eq!(repaired.content_bytes, 0);
     assert!(repaired.downloaded_bytes > 0);
     assert_eq!(
@@ -726,7 +730,8 @@ async fn invalid_cache_is_refetched_and_a_new_manifest_installs_its_new_content(
     let updated = client
         .download_depot(&updated_plan, &cancel, |_| {})
         .await
-        .unwrap();
+        .unwrap()
+        .summary;
     assert!(updated.content_bytes > 0);
     assert_eq!(fs::read(directory.path().join("game.exe")).unwrap(), new);
     assert_eq!(
@@ -796,7 +801,8 @@ async fn cached_manifest_still_hashes_and_repairs_corrupt_or_missing_files() {
             move |event| events.lock().unwrap().push(event)
         })
         .await
-        .unwrap();
+        .unwrap()
+        .summary;
     let requests = fixture.requests.lock().unwrap();
     let requested = &requests[before..];
     assert_eq!(requested.len(), 2);
@@ -850,7 +856,8 @@ async fn missing_or_corrupt_files_report_downloads_only_when_fetching_game_chunk
                 move |event| events.lock().unwrap().push(event)
             })
             .await
-            .unwrap();
+            .unwrap()
+            .summary;
         assert_eq!(fs::read(target).unwrap(), bytes);
         assert_eq!(result.content_bytes, chunk_bytes);
         assert_eq!(result.downloaded_bytes, manifest_bytes + chunk_bytes);
@@ -915,7 +922,8 @@ async fn cancellation_keeps_original_and_resumes_verified_partial_chunks() {
         .client()
         .download_depot(&plan(directory.path()), &CancelToken::new(), |_| {})
         .await
-        .unwrap();
+        .unwrap()
+        .summary;
     // Chunks reach the writer as fetched, so whichever arrived first is the
     // one kept in the partial; the pieces differ in length to tell them apart.
     let kept = pieces
@@ -1007,7 +1015,7 @@ async fn abandoned_account_transfer_keeps_disk_admission_until_worker_exits() {
                         }
                     })
                     .await
-                    .map_err(|error| ClientError(error.to_string()))
+                    .map_err(ClientError::from)
             })
             .await
     });
@@ -1042,8 +1050,7 @@ async fn abandoned_account_transfer_keeps_disk_admission_until_worker_exits() {
             fixture
                 .client()
                 .download_depot(&plan(directory.path()), transfer.cancel_token(), |_| {})
-                .await
-                .map_err(|error| ClientError(error.to_string()))?;
+                .await?;
             assert_eq!(fs::read(directory.path().join("game.exe")).unwrap(), bytes);
             Ok::<_, ClientError>(())
         })

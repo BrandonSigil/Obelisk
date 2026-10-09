@@ -15,7 +15,7 @@ use std::{
 };
 
 use crate::{
-    install::{self, FileDigest, InstallError},
+    install::{self, FileDigest, InstallError, Matched},
     transfer::{CancelToken, Cancelled, Reporter},
 };
 
@@ -65,6 +65,9 @@ impl From<InstallError> for VerificationError {
 pub struct Verified {
     /// One flag per manifest entry. Directory entries are always `false`.
     pub valid: Vec<bool>,
+    /// One count per manifest entry: its leading digest parts that matched,
+    /// such as the chunks of a GOG file a repair can keep.
+    pub matched_parts: Vec<usize>,
     /// Bytes already on disk and verified whole: what this installation reuses.
     pub reused_bytes: u64,
 }
@@ -127,7 +130,7 @@ where
                     status.current_file.replace_range(.., file.name());
                 });
             };
-            let valid = install::verify_file_with_progress(
+            let matched = install::verify_file_with_progress(
                 path,
                 file.size(),
                 file.digest(),
@@ -148,7 +151,7 @@ where
                     status.current_file.replace_range(.., file.name());
                 });
             }
-            Ok(valid)
+            Ok(matched)
         },
         |bytes, files, name| {
             reporter.update(|status| {
@@ -195,6 +198,7 @@ impl<E> From<Cancelled> for ScheduleError<E> {
 
 struct CheckedFiles {
     valid: Vec<bool>,
+    matched_parts: Vec<usize>,
     bytes: u64,
     files: u32,
 }
@@ -206,7 +210,7 @@ fn schedule<T, P, E>(
     files: &[T],
     cancel: &CancelToken,
     prepare: impl Fn(&T) -> Result<P, E> + Sync,
-    verify: impl Fn(&P, &T, &CancelToken) -> Result<bool, E> + Sync,
+    verify: impl Fn(&P, &T, &CancelToken) -> Result<Matched, E> + Sync,
     progress: impl Fn(u64, u32, &str) + Sync,
     workers: usize,
 ) -> Result<Verified, ScheduleError<E>>
@@ -222,6 +226,7 @@ where
         .collect();
     let state = Mutex::new(CheckedFiles {
         valid: vec![false; files.len()],
+        matched_parts: vec![0; files.len()],
         bytes: 0,
         files: 0,
     });
@@ -250,11 +255,13 @@ where
                             progress(checked.bytes, checked.files, file.name());
                         }
                         cancel.check()?;
-                        let valid = verify(&prepared, file, cancel).map_err(ScheduleError::File)?;
+                        let matched =
+                            verify(&prepared, file, cancel).map_err(ScheduleError::File)?;
                         cancel.check()?;
                         let mut checked = state.lock().map_err(|_| ScheduleError::WorkerFailed)?;
-                        checked.valid[index] = valid;
-                        if valid {
+                        checked.valid[index] = matched.whole;
+                        checked.matched_parts[index] = matched.parts;
+                        if matched.whole {
                             checked.bytes = checked
                                 .bytes
                                 .checked_add(file.size())
@@ -292,6 +299,7 @@ where
         .map_err(|_| ScheduleError::WorkerFailed)?;
     Ok(Verified {
         valid: checked.valid,
+        matched_parts: checked.matched_parts,
         reused_bytes: checked.bytes,
     })
 }
@@ -547,7 +555,7 @@ mod tests {
                 let _reader = Reader(&active);
                 peak.fetch_max(running, Ordering::AcqRel);
                 overlap.wait();
-                install::verify_sha1_file(path, file.size(), &file.sha, cancel)
+                install::verify_file_with_progress(path, file.size(), file.digest(), cancel, |_| {})
             },
             |_, _, _| {},
             count,
@@ -581,11 +589,17 @@ mod tests {
                 active.fetch_add(1, Ordering::AcqRel);
                 let _reader = Reader(&active);
                 started.fetch_add(1, Ordering::AcqRel);
-                let valid = install::verify_sha1_file(path, file.size(), &file.sha, inner)?;
+                let matched = install::verify_file_with_progress(
+                    path,
+                    file.size(),
+                    file.digest(),
+                    inner,
+                    |_| {},
+                )?;
                 // Cancelled once this file is read: the scheduler must stop
                 // before handing the next one to a reader.
                 cancel.cancel();
-                Ok(valid)
+                Ok(matched)
             },
             |_, _, _| {},
             1,
@@ -641,7 +655,12 @@ mod tests {
             &[Sized(u64::MAX), Sized(1)],
             &CancelToken::new(),
             |_| Ok::<_, ()>(()),
-            |_, _, _| Ok(true),
+            |_, _, _| {
+                Ok(Matched {
+                    whole: true,
+                    parts: 1,
+                })
+            },
             |_, _, _| {},
             1,
         );
@@ -650,7 +669,12 @@ mod tests {
             &[Sized(1)],
             &CancelToken::new(),
             |_| Ok::<_, ()>(()),
-            |_, _, _| Ok(true),
+            |_, _, _| {
+                Ok(Matched {
+                    whole: true,
+                    parts: 1,
+                })
+            },
             |_, _, _| panic!("fixture callback failed"),
             1,
         );

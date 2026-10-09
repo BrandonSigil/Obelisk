@@ -88,7 +88,7 @@ final class FriendsPresentationTests: XCTestCase {
     @MainActor
     func testAvatarCacheReusesImageAndDropsLateImagesFromPreviousAccount() async throws {
         let requests = AvatarRequests()
-        let cache = FriendsAvatarCache(load: { await requests.load($0) })
+        let cache = FriendsAvatarCache(load: { ImageDecoding.thumbnail(from: await requests.load($0), maxPixelSize: 96) })
         cache.activate(account: account)
         let url = try XCTUnwrap(URL(string: "https://example.invalid/avatar.png"))
         let imageTask = Task { await cache.image(for: FriendIdentity(account: account, friendID: "1"), url: url) }

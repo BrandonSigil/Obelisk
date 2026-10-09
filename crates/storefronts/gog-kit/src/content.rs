@@ -25,7 +25,7 @@ use obelisk_core::{
         self, BodyError, BodySize, CancelToken, Chunks, Delivery, DownloadPhase, DownloadProgress,
         DownloadSummary, Interrupted, Pipeline, Reporter,
     },
-    verification::{VerificationError, VerificationFile},
+    verification::{self, VerificationError, VerificationFile},
 };
 use reqwest::Url;
 use serde::Deserialize;
@@ -436,17 +436,12 @@ impl DiskInstall {
                 })
             })
             .collect::<Result<Vec<_>, GogError>>()?;
-        let verified = obelisk_core::verification::verify_files(
-            &root,
-            &checked,
-            &self.cancel,
-            &self.reporter,
-        )?;
+        let verified = verification::verify_files(&root, &checked, &self.cancel, &self.reporter)?;
         let mut reused_bytes = verified.reused_bytes;
         for directory in &installed.directories {
             ensure_directory(&root, &safe_relative_path(directory)?)?;
         }
-        self.plan_ahead(&verified.valid, &checked, &partial_root, &root)?;
+        self.plan_ahead(&verified, &checked, &partial_root, &root)?;
         let mut ensured_parents: HashSet<PathBuf> = HashSet::new();
         for (index, (file, valid)) in checked.iter().zip(&verified.valid).enumerate() {
             self.cancel.check()?;
@@ -469,7 +464,7 @@ impl DiskInstall {
             }
             reused_bytes += self.assemble(file, &plan, &partial_root, &target)?;
             self.reporter.update(|status| status.completed_files += 1);
-            self.plan_ahead(&verified.valid, &checked, &partial_root, &root)?;
+            self.plan_ahead(&verified, &checked, &partial_root, &root)?;
         }
         self.cancel.check()?;
         for link in &installed.links {
@@ -482,9 +477,10 @@ impl DiskInstall {
 
     /// Plans the next few files to repair: which chunks a copy on disk
     /// already holds, and requests the rest, in the order they are written.
+    /// The target's leading chunks that `verified` matched are not read again.
     fn plan_ahead(
         &mut self,
-        valid: &[bool],
+        verified: &verification::Verified,
         files: &[Verified<'_>],
         partial_root: &Path,
         root: &Path,
@@ -496,20 +492,25 @@ impl DiskInstall {
             self.cancel.check()?;
             let index = self.next_file;
             self.next_file += 1;
-            if valid[index] {
+            if verified.valid[index] {
                 continue;
             }
             let file = &files[index].installed;
             let partial = checked_file_path(partial_root, Path::new(&partial_name(&file.path)))?;
             let target = checked_file_path(root, &safe_relative_path(&file.path)?)?;
-            let copies = [partial, target];
             let mut sources = Vec::with_capacity(file.file.chunks.len());
             let mut offset = 0;
-            for chunk in &file.file.chunks {
+            for (part, chunk) in file.file.chunks.iter().enumerate() {
                 self.cancel.check()?;
-                let reused = copies
-                    .iter()
-                    .find(|copy| copy_chunk(copy, offset, chunk, &mut io::sink()).unwrap_or(false));
+                let holds =
+                    |copy: &Path| copy_chunk(copy, offset, chunk, &mut io::sink()).unwrap_or(false);
+                let reused = if holds(&partial) {
+                    Some(&partial)
+                } else if part < verified.matched_parts[index] || holds(&target) {
+                    Some(&target)
+                } else {
+                    None
+                };
                 if let Some(copy) = reused {
                     sources.push(Source::Reused(copy.clone()));
                 } else if self.chunks.request(Request {

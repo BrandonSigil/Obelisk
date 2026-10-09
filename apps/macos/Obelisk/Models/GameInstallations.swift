@@ -192,10 +192,27 @@ final class GameInstallations<Store: InstallationStorefront> {
     @ObservationIgnored private var report: InstallationReport?
     @ObservationIgnored private var warning: InstallationWarning?
     @ObservationIgnored private var observation: Task<Void, Never>?
+    /// Whether a Game session was active, and its game running, when last seen.
+    @ObservationIgnored private var observedSession: (busy: Bool, running: Bool)?
 
     init(sessions: GameSessions<Store>, cloud: CloudModel<Store>) {
         self.sessions = sessions
         self.cloud = cloud
+        if Store.syncsCloud { observeSessions() }
+    }
+
+    /// The game on screen's Cloud indicator is read again once a Game
+    /// session ends, and once its game runs: the game's guard and launch
+    /// sync are on disk then.
+    private func observeSessions() {
+        let observed = withObservationTracking {
+            (busy: sessions.isBusy, running: sessions.activeGame?.running == true)
+        } onChange: { [weak self] in
+            Task { @MainActor [weak self] in self?.observeSessions() }
+        }
+        defer { observedSession = observed }
+        guard let previous = observedSession else { return }
+        if (previous.busy && !observed.busy) || (!previous.running && observed.running) { refreshCloudIndicator() }
     }
 
     func connect(account: Store.AccountID, backend: any InstallationsBackend<Store>, port: InstallationPort<Store>) {
@@ -376,7 +393,7 @@ final class GameInstallations<Store: InstallationStorefront> {
     /// The game on screen's Cloud indicator, or nil when it is hidden.
     var cloudIndicator: CloudIndicatorPresentation? {
         guard Store.syncsCloud, let game = selection()?.game, account != nil else { return nil }
-        let playing = sessions.active.map { $0.game == game && $0.account == account } ?? false
+        let playing = sessions.activeGame.map { $0.game == game && $0.account == account } ?? false
         return CloudIndicatorPresentation.make(saved: cloud.indicator(for: game), isSyncing: isSynchronizingSaves,
                                                isPlaying: playing, isInstalled: selectedReceipt != nil)
     }

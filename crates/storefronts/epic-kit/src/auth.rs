@@ -2,6 +2,7 @@
 //! documented by Legendary's `legendary/api/egs.py`.
 use std::time::{Duration, Instant};
 
+use obelisk_core::transfer::{BodySize, CancelToken, read_body};
 use reqwest::{StatusCode, Url};
 use serde::Deserialize;
 
@@ -332,23 +333,17 @@ pub(crate) async fn bounded_json<T: serde::de::DeserializeOwned>(
 }
 
 pub(crate) async fn bounded_bytes(
-    mut response: reqwest::Response,
+    response: reqwest::Response,
     limit: usize,
 ) -> Result<Vec<u8>, EpicError> {
-    if response
-        .content_length()
-        .is_some_and(|length| length > limit as u64)
-    {
-        return Err(EpicError::Protocol);
-    }
-    let mut body = Vec::new();
-    while let Some(chunk) = response.chunk().await.map_err(|_| EpicError::Network)? {
-        if chunk.len() > limit.saturating_sub(body.len()) {
-            return Err(EpicError::Protocol);
-        }
-        body.extend_from_slice(&chunk);
-    }
-    Ok(body)
+    Ok(read_body(
+        response.content_length(),
+        response.bytes_stream(),
+        BodySize::AtMost(limit as u64),
+        &CancelToken::new(),
+        |_| {},
+    )
+    .await?)
 }
 
 fn valid_secret(value: &str) -> bool {

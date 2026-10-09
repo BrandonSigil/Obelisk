@@ -327,30 +327,40 @@ fn a_steam_store_keeps_what_the_host_told_and_reads_records_without_it() {
         lobby_id: 109_775_244_421_126_053,
     };
     let store = Store {
-        invite: Some(crate::InviteRequest {
-            sequence: 1,
-            target: lobby.clone(),
-        }),
-        overlay: Some(crate::OverlayRequest {
-            sequence: 1,
-            dialog: crate::protocol::OverlayDialog::LobbyInvite {
-                lobby_id: 109_775_244_421_126_053,
-            },
-        }),
-        lobby: Some(109_775_244_421_126_053),
-        invites: vec![crate::ReceivedInvite {
-            friend: FRIEND,
-            target: lobby,
-            received_at: 1_790_000_000,
-        }],
-        microtxn: Some(crate::MicroTxn {
-            order_id: 7,
-            app_id: 42,
-        }),
+        requests: crate::GameRequests {
+            overlay: Some(crate::OverlayRequest {
+                sequence: 1,
+                dialog: crate::protocol::OverlayDialog::LobbyInvite {
+                    lobby_id: 109_775_244_421_126_053,
+                },
+            }),
+            lobby: Some(109_775_244_421_126_053),
+            invites: vec![crate::ReceivedInvite {
+                friend: FRIEND,
+                target: lobby.clone(),
+                received_at: 1_790_000_000,
+            }],
+            microtxn: Some(crate::MicroTxn {
+                order_id: 7,
+                app_id: 42,
+            }),
+        },
         ..old
     };
     let json = serde_json::to_string(&store).unwrap();
+    assert!(json.starts_with(r#"{"app_id":42,"host":"online","overlay":"#));
     assert_eq!(serde_json::from_str::<Store>(&json).unwrap(), store);
+    assert_eq!(
+        store.requests.invite(),
+        Some(crate::InviteRequest {
+            sequence: 1,
+            target: lobby,
+        })
+    );
+    // A record that still carries the invite beside its overlay reads alike.
+    let mut value: serde_json::Value = serde_json::from_str(&json).unwrap();
+    value["invite"] = serde_json::to_value(store.requests.invite()).unwrap();
+    assert_eq!(serde_json::from_value::<Store>(value).unwrap(), store);
     let mut terminal = store.clone();
     terminal.apply(&crate::HostUpdate::new(HostState::Stopped));
     assert_eq!(

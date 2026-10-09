@@ -41,7 +41,7 @@ impl lifecycle::Launch for Launch {
             store: Store {
                 product_id: request.config.product_id.clone(),
             },
-            helpers: helpers(&request.config)?,
+            helpers: helpers(&request.config)?.into(),
         };
         Ok((opening, Self { request }))
     }
@@ -99,13 +99,12 @@ impl lifecycle::Launch for Launch {
 
 /// `config.helper` is `Helpers/SteamNative/obelisk-steam-host`; the Rosetta
 /// helper app sits beside `SteamNative`, as for Steam.
-fn helpers(config: &Configuration) -> Result<PathBuf> {
-    Ok(config
+fn helpers(config: &Configuration) -> Result<&Path> {
+    config
         .helper
         .parent()
-        .and_then(Path::parent)
-        .ok_or(Error::Session)?
-        .into())
+        .and_then(crate::supervisor::rosetta::helpers)
+        .ok_or(Error::Session)
 }
 
 /// A Windows build, which Wine starts in its prefix.
@@ -124,19 +123,12 @@ fn native_target(
     config: &Configuration,
     environment: &std::collections::HashMap<String, String>,
 ) -> Result<(Target, Architecture)> {
-    let (executable, architecture) = crate::native::executable(&config.install, launched)?;
-    Ok((
-        Target {
-            executable,
-            arguments: launched.arguments.clone(),
-            working_directory: launched.working_directory.clone().into(),
-            environment: environment.clone(),
-            log: None,
-            installation: Some(config.install.clone()),
-            program: None,
-        },
-        architecture,
-    ))
+    Ok(crate::native::target(
+        &config.install,
+        launched,
+        launched.arguments.clone(),
+        environment.clone(),
+    )?)
 }
 
 /// The `obelisk-steam-host gog-supervise` entry point.

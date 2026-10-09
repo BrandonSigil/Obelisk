@@ -4,7 +4,6 @@ use crate::kv::{self, Kv};
 use std::{
     collections::{BTreeMap, BTreeSet},
     fs,
-    io::Write,
     os::unix::fs::MetadataExt,
     path::PathBuf,
 };
@@ -205,23 +204,12 @@ impl SdkCloudPaths {
                 .map_err(|_| CloudError::Storage)?
                 .mtime();
             let name = file.name.replace('"', "\\\"");
-            index.push_str(&format!("\"{name}\"\n{{\n\"root\" \"0\"\n\"size\" \"{}\"\n\"localtime\" \"{time}\"\n\"time\" \"{time}\"\n\"remotetime\" \"0\"\n\"sha\" \"{}\"\n\"syncstate\" \"3\"\n\"persiststate\" \"0\"\n\"platformstosync2\" \"{}\"\n}}\n", data.len(), Sha1::digest(&data).iter().map(|b| format!("{b:02x}")).collect::<String>(), file.platforms as i32));
+            index.push_str(&format!("\"{name}\"\n{{\n\"root\" \"0\"\n\"size\" \"{}\"\n\"localtime\" \"{time}\"\n\"time\" \"{time}\"\n\"remotetime\" \"0\"\n\"sha\" \"{}\"\n\"syncstate\" \"3\"\n\"persiststate\" \"0\"\n\"platformstosync2\" \"{}\"\n}}\n", data.len(), crate::content::hex(&Sha1::digest(&data)), file.platforms as i32));
         }
         index.push_str("}\n");
         fs::create_dir_all(&self.directory).map_err(|_| CloudError::Storage)?;
-        let mut output =
-            tempfile::NamedTempFile::new_in(&self.directory).map_err(|_| CloudError::Storage)?;
-        output
-            .write_all(index.as_bytes())
-            .map_err(|_| CloudError::Storage)?;
-        output
-            .as_file()
-            .sync_all()
-            .map_err(|_| CloudError::Storage)?;
-        output
-            .persist(self.directory.join("remotecache.vdf"))
-            .map_err(|_| CloudError::Storage)?;
-        Ok(())
+        obelisk_core::write_atomic(&self.directory.join("remotecache.vdf"), index.as_bytes())
+            .map_err(|_| CloudError::Storage)
     }
 }
 

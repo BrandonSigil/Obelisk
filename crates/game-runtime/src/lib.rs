@@ -282,18 +282,13 @@ impl Launch {
             inner: Mutex::new(Inner {
                 host,
                 proof,
-                overlay: None,
-                requests: 0,
-                lobby: None,
-                invites: Vec::new(),
-                microtxn: None,
+                requests: GameRequests::default(),
+                sequence: 0,
                 stopped: false,
             }),
             wakeup,
-            adapter: prepared.directory.join(package::ADAPTER),
             service,
-            report: prepared.report.clone(),
-            _prepared: prepared,
+            prepared,
         };
         runtime.write_report()?;
         Ok(runtime)
@@ -415,32 +410,43 @@ pub struct MicroTxn {
 /// The most invitations a session keeps; the oldest goes first.
 pub const MAX_RECEIVED_INVITES: usize = 16;
 
-/// What the native host tells of the game's Steam session. Everything but
-/// the state only holds while the host is online: a host that lost Steam,
-/// or the game, is in no lobby anyone can join, and can answer nothing.
+/// What the running game asks of the player's Steam session, as its host
+/// tells it. A record from before any of it has none.
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct GameRequests {
+    /// The latest overlay the game asked Steam for, invite dialogs included.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub overlay: Option<OverlayRequest>,
+    /// The Steam lobby the game is in now, as the account's engine shows it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lobby: Option<u64>,
+    /// Invitations friends sent into the game, newest first.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub invites: Vec<ReceivedInvite>,
+    /// The purchase the game waits on the player to confirm.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub microtxn: Option<MicroTxn>,
+}
+impl GameRequests {
+    /// The overlay's invite request, while it asks for an invite dialog.
+    pub fn invite(&self) -> Option<InviteRequest> {
+        self.overlay.as_ref().and_then(OverlayRequest::invite)
+    }
+}
+
+/// What the native host tells of the game's Steam session. The requests
+/// only hold while the host is online: a host that lost Steam, or the game,
+/// is in no lobby anyone can join, and can answer nothing.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct HostUpdate {
     pub state: HostState,
-    /// The overlay's invite request, while it asks for an invite dialog.
-    pub invite: Option<InviteRequest>,
-    /// The latest overlay the game asked for.
-    pub overlay: Option<OverlayRequest>,
-    /// The Steam lobby the game is in now, as the engine shows it.
-    pub lobby: Option<u64>,
-    /// Invitations into the game, newest first.
-    pub invites: Vec<ReceivedInvite>,
-    /// The purchase waiting for the player's answer.
-    pub microtxn: Option<MicroTxn>,
+    pub requests: GameRequests,
 }
 impl HostUpdate {
     pub fn new(state: HostState) -> Self {
         Self {
             state,
-            invite: None,
-            overlay: None,
-            lobby: None,
-            invites: Vec::new(),
-            microtxn: None,
+            requests: GameRequests::default(),
         }
     }
 }
@@ -448,13 +454,11 @@ impl HostUpdate {
 struct Inner {
     host: process::Child,
     proof: Proof,
-    overlay: Option<OverlayRequest>,
+    /// Its invitations are kept across a disconnection: Steam still holds
+    /// them.
+    requests: GameRequests,
     /// Overlay requests of the session so far, the last one's sequence.
-    requests: u64,
-    lobby: Option<u64>,
-    /// Kept across a disconnection: Steam still holds them.
-    invites: Vec<ReceivedInvite>,
-    microtxn: Option<MicroTxn>,
+    sequence: u64,
     stopped: bool,
 }
 impl Inner {
@@ -465,11 +469,7 @@ impl Inner {
         }
         HostUpdate {
             state,
-            invite: self.overlay.as_ref().and_then(OverlayRequest::invite),
-            overlay: self.overlay.clone(),
-            lobby: self.lobby,
-            invites: self.invites.clone(),
-            microtxn: self.microtxn.clone(),
+            requests: self.requests.clone(),
         }
     }
     /// Keeps `target` from `friend` first, once.
@@ -477,9 +477,9 @@ impl Inner {
         if !protocol::individual(friend) || !target.valid() {
             return;
         }
-        self.invites
-            .retain(|invite| invite.friend != friend || invite.target != target);
-        self.invites.insert(
+        let invites = &mut self.requests.invites;
+        invites.retain(|invite| invite.friend != friend || invite.target != target);
+        invites.insert(
             0,
             ReceivedInvite {
                 friend,
@@ -487,29 +487,18 @@ impl Inner {
                 received_at: unix_now(),
             },
         );
-        self.invites.truncate(MAX_RECEIVED_INVITES);
+        invites.truncate(MAX_RECEIVED_INVITES);
     }
 }
 pub struct Runtime {
     inner: Mutex<Inner>,
     wakeup: Arc<process::Wake>,
-    adapter: PathBuf,
     service: String,
-    report: PathBuf,
-    _prepared: files::Prepared,
+    prepared: files::Prepared,
 }
 impl Runtime {
     pub fn environment(&self) -> std::collections::HashMap<String, String> {
-        self._prepared.consumer_environment(&self.service)
-    }
-    pub fn adapter(&self) -> String {
-        self.adapter.to_string_lossy().into_owned()
-    }
-    pub fn service(&self) -> String {
-        self.service.clone()
-    }
-    pub fn diagnostic_path(&self) -> String {
-        self.report.to_string_lossy().into_owned()
+        self.prepared.consumer_environment(&self.service)
     }
     pub(crate) fn set_presence(&self, online: bool) -> Result<(), Error> {
         let mut inner = self.inner.lock().map_err(|_| Error::StartFailed)?;
@@ -574,6 +563,7 @@ impl Runtime {
         };
         self.control(&command, |inner| {
             inner
+                .requests
                 .invites
                 .retain(|invite| invite.friend != friend || invite.target != target);
             Ok(())
@@ -583,9 +573,9 @@ impl Runtime {
     pub fn authorize_microtxn(&self, order_id: u64, approve: bool) -> Result<(), Error> {
         self.control(
             &protocol::HostCommand::AuthorizeMicroTxn { order_id, approve },
-            |inner| match &inner.microtxn {
+            |inner| match &inner.requests.microtxn {
                 Some(pending) if pending.order_id == order_id => {
-                    inner.microtxn = None;
+                    inner.requests.microtxn = None;
                     Ok(())
                 }
                 _ => Err(Error::InvalidSession),
@@ -602,7 +592,7 @@ impl Runtime {
         Self::drain(&mut inner);
         inner.proof.game_pid = Some(pid);
         inner.proof.state = "game_started".into();
-        files::report(&self.report, &inner.proof)
+        files::report(&self.prepared.report, &inner.proof)
     }
     /// Wait on the private event pipe, independently of the UI, until the
     /// host's state, the game's invite request or its lobby differs from
@@ -632,7 +622,7 @@ impl Runtime {
                 }
             }
             if before != (inner.proof.host_state, inner.proof.discovery_paths) {
-                let _ = files::report(&self.report, &inner.proof);
+                let _ = files::report(&self.prepared.report, &inner.proof);
             }
             let update = inner.update();
             if update != *previous {
@@ -658,7 +648,7 @@ impl Runtime {
                 "stopped"
             }
             .into();
-            let _ = files::report(&self.report, &inner.proof);
+            let _ = files::report(&self.prepared.report, &inner.proof);
             self.wakeup.notify();
         }
     }
@@ -676,23 +666,23 @@ impl Runtime {
             // its lobby again.
             Event::Disconnected {} if inner.proof.host_state != HostState::Lost => {
                 inner.proof.host_state = HostState::Disconnected;
-                inner.overlay = None;
-                inner.lobby = None;
-                inner.microtxn = None;
+                inner.requests.overlay = None;
+                inner.requests.lobby = None;
+                inner.requests.microtxn = None;
             }
             Event::Reconnected {} if inner.proof.host_state != HostState::Lost => {
                 inner.proof.host_state = HostState::Online;
             }
             // Only the game this host serves, and only what Steam accepts.
             Event::OverlayRequested { app_id, request } if app_id == app && request.valid() => {
-                inner.requests += 1;
-                inner.overlay = Some(OverlayRequest {
-                    sequence: inner.requests,
+                inner.sequence += 1;
+                inner.requests.overlay = Some(OverlayRequest {
+                    sequence: inner.sequence,
                     dialog: request,
                 });
             }
             Event::GameLobby { app_id, lobby_id } if app_id == app => {
-                inner.lobby = lobby_id.filter(|lobby| protocol::lobby(*lobby));
+                inner.requests.lobby = lobby_id.filter(|lobby| protocol::lobby(*lobby));
             }
             Event::LobbyInviteReceived {
                 inviter,
@@ -709,22 +699,23 @@ impl Runtime {
                 inner.received(friend, protocol::InviteTarget::Connect { connect });
             }
             Event::MicroTxnRequested { order_id, app_id } if app_id == app && order_id != 0 => {
-                inner.microtxn = Some(MicroTxn { order_id, app_id });
+                inner.requests.microtxn = Some(MicroTxn { order_id, app_id });
             }
             Event::MicroTxnDismissed { order_id }
                 if inner
+                    .requests
                     .microtxn
                     .as_ref()
                     .is_some_and(|pending| pending.order_id == order_id) =>
             {
-                inner.microtxn = None;
+                inner.requests.microtxn = None;
             }
             _ => {}
         }
     }
     fn write_report(&self) -> Result<(), Error> {
         files::report(
-            &self.report,
+            &self.prepared.report,
             &self.inner.lock().map_err(|_| Error::StartFailed)?.proof,
         )
     }
@@ -808,18 +799,13 @@ mod tests {
                     state: "ready".into(),
                 },
                 host,
-                overlay: None,
-                requests: 0,
-                lobby: None,
-                invites: Vec::new(),
-                microtxn: None,
+                requests: GameRequests::default(),
+                sequence: 0,
                 stopped: false,
             }),
             wakeup,
-            adapter: root.join("adapter"),
             service: "fixture".into(),
-            report: root.join("report.json"),
-            _prepared: prepared(root),
+            prepared: prepared(root),
         }
     }
     fn signal(runtime: &Runtime) {
@@ -930,21 +916,21 @@ mod tests {
         signal(&runtime);
         let first = updated(&runtime, &state(HostState::Online));
         assert_eq!(first.state, HostState::Online);
-        assert_eq!(first.overlay, Some(request(1, &dialog)));
-        assert_eq!(first.invite, Some(invite(1, &target)));
+        assert_eq!(first.requests.overlay, Some(request(1, &dialog)));
+        assert_eq!(first.requests.invite(), Some(invite(1, &target)));
         signal(&runtime);
         let second = updated(&runtime, &first);
-        assert_eq!(second.invite, Some(invite(2, &target)));
+        assert_eq!(second.requests.invite(), Some(invite(2, &target)));
         signal(&runtime);
         let third = updated(&runtime, &second);
         let connect = protocol::InviteTarget::Connect {
             connect: "+connect 10.0.0.1".into(),
         };
-        assert_eq!(third.invite, Some(invite(3, &connect)));
+        assert_eq!(third.requests.invite(), Some(invite(3, &connect)));
         signal(&runtime);
         let store = updated(&runtime, &third);
         assert_eq!(
-            store.overlay,
+            store.requests.overlay,
             Some(request(
                 4,
                 &protocol::OverlayDialog::Store {
@@ -954,7 +940,11 @@ mod tests {
             )),
             "a file URL is no web page"
         );
-        assert_eq!(store.invite, None, "the store is no invite dialog");
+        assert_eq!(
+            store.requests.invite(),
+            None,
+            "the store is no invite dialog"
+        );
         signal(&runtime);
         let disconnected = updated(&runtime, &store);
         assert_eq!(
@@ -968,7 +958,7 @@ mod tests {
         signal(&runtime);
         let again = updated(&runtime, &reconnected);
         assert_eq!(
-            again.invite,
+            again.requests.invite(),
             Some(invite(5, &target)),
             "the session's sequence keeps growing"
         );
@@ -1021,6 +1011,7 @@ mod tests {
     }
     fn invites(update: &HostUpdate) -> Vec<(u64, protocol::InviteTarget)> {
         update
+            .requests
             .invites
             .iter()
             .map(|invite| received(invite.friend, invite.target.clone()))
@@ -1073,7 +1064,7 @@ mod tests {
         };
         signal(&runtime);
         let first = until(&runtime, &state(HostState::Online), |update| {
-            update.invites.len() == 2
+            update.requests.invites.len() == 2
         });
         assert_eq!(invites(&first), [rich(), lobby()]);
         signal(&runtime);
@@ -1091,11 +1082,15 @@ mod tests {
         assert_eq!(invites(&back), [lobby(), rich()], "Steam still holds them");
         signal(&runtime);
         let many = until(&runtime, &back, |update| {
-            update.invites.first().map(|invite| invite.friend) == Some(FRIEND + 20)
+            update.requests.invites.first().map(|invite| invite.friend) == Some(FRIEND + 20)
         });
-        assert_eq!(many.invites.len(), MAX_RECEIVED_INVITES);
-        assert_eq!(many.invites[0].friend, FRIEND + 20);
-        assert_eq!(many.invites[15].friend, FRIEND + 5, "the oldest go");
+        assert_eq!(many.requests.invites.len(), MAX_RECEIVED_INVITES);
+        assert_eq!(many.requests.invites[0].friend, FRIEND + 20);
+        assert_eq!(
+            many.requests.invites[15].friend,
+            FRIEND + 5,
+            "the oldest go"
+        );
         // Accepting one hands it to the game and takes it off the list.
         runtime
             .accept_invite(
@@ -1106,8 +1101,8 @@ mod tests {
             )
             .unwrap();
         let accepted = updated(&runtime, &many);
-        assert_eq!(accepted.invites.len(), MAX_RECEIVED_INVITES - 1);
-        assert_eq!(accepted.invites[0].friend, FRIEND + 19);
+        assert_eq!(accepted.requests.invites.len(), MAX_RECEIVED_INVITES - 1);
+        assert_eq!(accepted.requests.invites[0].friend, FRIEND + 19);
         // An invitation from Steam's chat, never told by the host.
         runtime
             .accept_invite(FRIEND, protocol::InviteTarget::Lobby { lobby_id: LOBBY })
@@ -1156,27 +1151,31 @@ mod tests {
         };
         signal(&runtime);
         let first = updated(&runtime, &state(HostState::Online));
-        assert_eq!(first.microtxn, pending(11), "only the game's own");
+        assert_eq!(first.requests.microtxn, pending(11), "only the game's own");
         signal(&runtime);
         let second = updated(&runtime, &first);
-        assert_eq!(second.microtxn, pending(12), "the latest replaces it");
+        assert_eq!(
+            second.requests.microtxn,
+            pending(12),
+            "the latest replaces it"
+        );
         signal(&runtime);
         let dismissed = updated(&runtime, &second);
-        assert_eq!(dismissed.microtxn, None);
+        assert_eq!(dismissed.requests.microtxn, None);
         assert!(matches!(
             runtime.authorize_microtxn(12, true),
             Err(Error::InvalidSession)
         ));
         signal(&runtime);
         let third = updated(&runtime, &dismissed);
-        assert_eq!(third.microtxn, pending(13));
+        assert_eq!(third.requests.microtxn, pending(13));
         assert!(matches!(
             runtime.authorize_microtxn(11, true),
             Err(Error::InvalidSession)
         ));
         runtime.authorize_microtxn(13, false).unwrap();
         let answered = updated(&runtime, &third);
-        assert_eq!(answered.microtxn, None, "answered once");
+        assert_eq!(answered.requests.microtxn, None, "answered once");
         assert!(matches!(
             runtime.authorize_microtxn(13, true),
             Err(Error::InvalidSession)
@@ -1217,7 +1216,10 @@ mod tests {
         let runtime = Arc::new(runtime(&script, root.path()));
         runtime.started(1234).unwrap();
         let lobby = |lobby| HostUpdate {
-            lobby,
+            requests: GameRequests {
+                lobby,
+                ..GameRequests::default()
+            },
             ..state(HostState::Online)
         };
         signal(&runtime);

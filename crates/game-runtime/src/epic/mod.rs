@@ -280,6 +280,16 @@ pub struct Offer {
     pub platform: String,
 }
 
+impl crate::sessions::Storefront for Epic {
+    type Game = Store;
+    const BEGINS: bool = true;
+    const INVALID_SESSION: &'static str = "backend.epic.cloud.invalidSession";
+    const SESSION_FAILED: &'static str = "backend.epic.cloud.failed";
+    fn game(store: &Store) -> Store {
+        store.clone()
+    }
+}
+
 impl crate::installations::Storefront for Epic {
     type Receipt = Receipt;
     type Request = Download;

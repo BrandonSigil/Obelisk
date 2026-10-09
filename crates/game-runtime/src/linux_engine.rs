@@ -297,17 +297,14 @@ pub(crate) fn private_file(
     name: &str,
     bytes: &[u8],
 ) -> Result<(tempfile::TempDir, String), Error> {
-    use std::{io::Write, os::unix::fs::PermissionsExt};
+    use std::os::unix::fs::PermissionsExt;
     let drive = config.prefix.join("drive_c");
     let directory = tempfile::Builder::new()
         .prefix(".obelisk-")
         .permissions(fs::Permissions::from_mode(0o700))
         .tempdir_in(&drive)?;
     let path = directory.path().join(name);
-    crate::files::atomic_write(&path, crate::files::Durability::FileSync, |file| {
-        file.write_all(bytes)?;
-        Ok(())
-    })?;
+    obelisk_core::write_atomic(&path, bytes)?;
     let folder = directory
         .path()
         .file_name()

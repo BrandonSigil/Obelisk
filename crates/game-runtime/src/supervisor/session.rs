@@ -322,10 +322,7 @@ impl<P: Provider> Session<P> {
         if let Some(wine) = &wine {
             crate::wine::stop(wine);
         }
-        let deadline = Instant::now() + STOP_GRACE;
-        while self.state.lock().unwrap().game == Some(pid) && Instant::now() < deadline {
-            std::thread::sleep(Duration::from_millis(100));
-        }
+        self.wait_reaped(pid, STOP_GRACE);
         self.signal(pid, "-KILL");
     }
 

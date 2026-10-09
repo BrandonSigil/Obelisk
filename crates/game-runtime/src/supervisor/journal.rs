@@ -8,7 +8,7 @@ use super::Error;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::{
     fs::{self, File},
-    io::{Read, Write},
+    io::Read,
     os::unix::fs::{MetadataExt, PermissionsExt},
     path::Path,
 };
@@ -128,10 +128,8 @@ fn replace(path: &Path, value: &impl Serialize) -> Result<(), Error> {
         return Err(Error::Storage);
     }
     let directory = path.parent().ok_or(Error::Storage)?;
-    let mut temporary = tempfile::NamedTempFile::new_in(directory).map_err(|_| Error::Storage)?;
-    temporary.write_all(&bytes).map_err(|_| Error::Storage)?;
-    temporary.as_file().sync_all().map_err(|_| Error::Storage)?;
-    temporary.persist(path).map_err(|_| Error::Storage)?;
+    obelisk_core::write_atomic(path, &bytes).map_err(|_| Error::Storage)?;
+    // Unlike write_atomic, recovery needs the rename itself durable.
     File::open(directory)
         .and_then(|directory| directory.sync_all())
         .map_err(|_| Error::Storage)

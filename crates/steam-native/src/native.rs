@@ -199,11 +199,6 @@ pub fn translated() -> bool {
     value != 0
 }
 
-pub fn parent_pid() -> i32 {
-    // SAFETY: getppid takes no pointers and cannot fail.
-    unsafe { libc::getppid() }
-}
-
 /// Kernel birth time prevents adopting a different process after PID reuse.
 pub fn process_identity(pid: u32) -> Option<game_runtime::supervisor::Identity> {
     let pid = i32::try_from(pid).ok()?;

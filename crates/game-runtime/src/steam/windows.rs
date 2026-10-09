@@ -5,6 +5,7 @@ use crate::{Error, supervisor::Target, wine};
 use obelisk_core::launch::LaunchTarget;
 use std::{
     fs,
+    io::Read,
     path::{Path, PathBuf},
 };
 
@@ -15,6 +16,8 @@ const HELPER: &str = r"C:\windows\system32\steam.exe";
 const CLIENTS: [&str; 2] = ["steamclient.dll", "steamclient64.dll"];
 /// The largest install script read.
 const MAX_SCRIPT_BYTES: usize = 1024 * 1024;
+/// How much of each library is compared at a time.
+const BLOCK: u64 = 64 * 1024;
 
 /// What Steam adds to the prefix of the installation in `install`.
 pub(super) struct Prefix<'a> {
@@ -66,11 +69,33 @@ impl wine::Storefront for Prefix<'_> {
         for name in CLIENTS {
             let source = config.runtime.join("steam").join(name);
             let destination = steam.join(name);
-            if !destination.is_file() || crate::sha(&destination)? != crate::sha(&source)? {
+            if !destination.is_file() || !same_contents(&destination, &source)? {
                 fs::copy(&source, &destination)?;
             }
         }
         Ok(())
+    }
+}
+
+/// Whether the files at `a` and `b` hold the same bytes. Reading stops at
+/// their first difference.
+fn same_contents(a: &Path, b: &Path) -> std::io::Result<bool> {
+    let (mut a, mut b) = (fs::File::open(a)?, fs::File::open(b)?);
+    if a.metadata()?.len() != b.metadata()?.len() {
+        return Ok(false);
+    }
+    let (mut left, mut right) = (Vec::new(), Vec::new());
+    loop {
+        left.clear();
+        right.clear();
+        let read = (&mut a).take(BLOCK).read_to_end(&mut left)?;
+        (&mut b).take(BLOCK).read_to_end(&mut right)?;
+        if left != right {
+            return Ok(false);
+        }
+        if read == 0 {
+            return Ok(true);
+        }
     }
 }
 

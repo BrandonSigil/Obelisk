@@ -7,11 +7,12 @@ use std::{
     time::{Duration, Instant},
 };
 
-use futures_util::future::BoxFuture;
+use futures_util::{StreamExt, TryStreamExt, future::BoxFuture};
 use obelisk_core::{
     installation::{self, Destination, InstallFailure, InstalledFiles, TransferError},
     transfer::{
-        Cancelled, DownloadProgress, DownloadSummary, TransferBusy, TransferContext, Transfers,
+        self, BodyError, BodySize, Cancelled, DownloadProgress, TransferBusy, TransferContext,
+        Transfers,
     },
 };
 use serde::{Deserialize, Serialize};
@@ -20,10 +21,13 @@ use tokio::sync::Mutex as AsyncMutex;
 use crate::{
     chat::{self, ChatEventSource},
     cm::{
-        AppInfo, ChatMode, ContentLicenses, ContentServer, DepotInfo, PICS_BATCH, SteamConnection,
-        supports_platform,
+        AppInfo, CONCURRENT_REQUESTS, ChatMode, ContentLicenses, ContentServer, DepotInfo,
+        SteamConnection, supports_platform,
     },
-    content::{CancelToken, CdnAuthorization, ContentClient, ContentError, DepotDownload},
+    content::{
+        CancelToken, CdnAuthorization, ContentClient, ContentError, DepotDownload,
+        DepotInstallation,
+    },
     own_game::{GameInvite, OwnGame, OwnGameSource},
 };
 mod cloud;
@@ -51,9 +55,15 @@ pub struct GamePlatforms {
     pub pics: Option<serde_json::Value>,
 }
 
+/// A message key for the host. A stopped download keeps its own variant so
+/// its Transfer ends cancelled rather than failed.
 #[derive(Debug, thiserror::Error)]
-#[error("{0}")]
-pub struct ClientError(pub String);
+pub enum ClientError {
+    #[error("{0}")]
+    Failure(String),
+    #[error("{0}")]
+    Cancelled(String),
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum ClientConnectError {
@@ -66,9 +76,9 @@ pub enum ClientConnectError {
 impl From<crate::cm::CmError> for ClientConnectError {
     fn from(error: crate::cm::CmError) -> Self {
         if error.authentication_required() {
-            Self::AuthenticationRequired(client_error(error))
+            Self::AuthenticationRequired(error.into())
         } else {
-            Self::Other(client_error(error))
+            Self::Other(error.into())
         }
     }
 }
@@ -84,33 +94,24 @@ pub fn http_client() -> Result<reqwest::Client, ClientError> {
         // stops using close soon rather than hold descriptors.
         .pool_idle_timeout(Duration::from_secs(20))
         .build()
-        .map_err(|_| ClientError("backend.steam.client.connectionInitFailed".into()))
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum BodyError {
-    Network,
-    TooLarge,
+        .map_err(|_| ClientError::Failure("backend.steam.client.connectionInitFailed".into()))
 }
 
 /// Reads a response body while refusing anything above `limit` bytes, whether
-/// advertised up front or discovered while streaming.
+/// advertised up front or discovered while streaming. Nothing cancels it, so
+/// it fails only with `Network` or `Size`.
 pub(crate) async fn read_bounded(
-    mut response: reqwest::Response,
+    response: reqwest::Response,
     limit: usize,
 ) -> Result<Vec<u8>, BodyError> {
-    let advertised = response.content_length();
-    if advertised.is_some_and(|length| length > limit as u64) {
-        return Err(BodyError::TooLarge);
-    }
-    let mut body = Vec::with_capacity(advertised.map_or(0, |length| length as usize));
-    while let Some(chunk) = response.chunk().await.map_err(|_| BodyError::Network)? {
-        if body.len().saturating_add(chunk.len()) > limit {
-            return Err(BodyError::TooLarge);
-        }
-        body.extend_from_slice(&chunk);
-    }
-    Ok(body)
+    transfer::read_body(
+        response.content_length(),
+        response.bytes_stream(),
+        BodySize::AtMost(limit as u64),
+        &CancelToken::new(),
+        |_| {},
+    )
+    .await
 }
 
 #[derive(Clone, Debug)]
@@ -208,22 +209,18 @@ impl Client {
         app_id: u32,
         language: &str,
     ) -> Result<Vec<Achievement>, ClientError> {
-        let schema = self
-            .cm
-            .game_achievements(app_id, language)
-            .await
-            .map_err(client_error)?;
-        let user = self
-            .cm
-            .user_achievements(app_id)
-            .await
-            .map_err(client_error)?;
-        crate::cm::achievements::combine(app_id, schema, user).map_err(client_error)
+        let schema = self.cm.game_achievements(app_id, language).await?;
+        let user = self.cm.user_achievements(app_id).await?;
+        crate::cm::achievements::combine(app_id, schema, user).map_err(Into::into)
     }
     #[cfg(test)]
     pub(crate) fn with_test_connection(cm: SteamConnection) -> Self {
+        Self::from_connection(http_client().unwrap(), cm, String::new())
+    }
+
+    fn from_connection(http: reqwest::Client, cm: SteamConnection, refresh_token: String) -> Self {
         Self {
-            http: http_client().unwrap(),
+            http,
             friends: cm.friends_source(),
             chat: cm.chat_source(),
             own_game: cm.own_game_source(),
@@ -235,7 +232,7 @@ impl Client {
             app_infos: Mutex::new(HashMap::new()),
             downloads: Transfers::default(),
             picking: Mutex::new(None),
-            refresh_token: String::new(),
+            refresh_token,
         }
     }
 
@@ -257,35 +254,17 @@ impl Client {
         cm.refresh_own_game()
             .await
             .map_err(ClientConnectError::from)?;
-        Ok(Self {
-            http,
-            friends: cm.friends_source(),
-            chat: cm.chat_source(),
-            own_game: cm.own_game_source(),
-            typing: Mutex::new(HashMap::new()),
-            connection_abort: cm.abort_handle(),
-            cloud_authorized: std::sync::atomic::AtomicBool::new(true),
-            cm,
-            catalog: AsyncMutex::new(None),
-            app_infos: Mutex::new(HashMap::new()),
-            downloads: Transfers::default(),
-            picking: Mutex::new(None),
-            refresh_token: refresh_token.into(),
-        })
+        Ok(Self::from_connection(http, cm, refresh_token.into()))
     }
 
     /// Cookies that sign Steam's sites in as the account, through a web
     /// access token this session asks for.
     pub async fn web_cookies(&self) -> Result<Vec<crate::auth::WebCookie>, ClientError> {
-        let (steam_id, token) = self
-            .cm
-            .web_access_token(&self.refresh_token)
-            .await
-            .map_err(client_error)?;
+        let (steam_id, token) = self.cm.web_access_token(&self.refresh_token).await?;
         if crate::auth::steam_id_from_refresh_token(&token).ok() != Some(steam_id) {
-            return Err(client_error(crate::cm::CmError::Protocol(
-                "backend.steam.cm.invalidSession".into(),
-            )));
+            return Err(
+                crate::cm::CmError::Protocol("backend.steam.cm.invalidSession".into()).into(),
+            );
         }
         Ok(crate::auth::web_cookies(steam_id, &token))
     }
@@ -323,7 +302,7 @@ impl Client {
     /// Shows the account Online again, for instance after a game's own Steam
     /// session changed its status.
     pub async fn set_online(&self) -> Result<(), ClientError> {
-        self.cm.set_online().await.map_err(client_error)
+        self.cm.set_online().await.map_err(Into::into)
     }
 
     /// Chat events after `after_sequence`; waits until there are some or the
@@ -333,11 +312,7 @@ impl Client {
     }
 
     pub async fn send_message(&self, friend: u64, text: &str) -> Result<SentMessage, ClientError> {
-        let sent = self
-            .cm
-            .send_friend_message(friend, text)
-            .await
-            .map_err(client_error)?;
+        let sent = self.cm.send_friend_message(friend, text).await?;
         // The message ends the typing; the next keystroke may say so again.
         self.typing
             .lock()
@@ -365,7 +340,7 @@ impl Client {
                 .unwrap_or_else(PoisonError::into_inner)
                 .remove(&friend);
         }
-        sent.map_err(client_error)
+        sent.map_err(Into::into)
     }
 
     /// Up to `count` (at most 50) messages before `before`, a (timestamp,
@@ -379,16 +354,16 @@ impl Client {
         self.cm
             .recent_messages(friend, before, count)
             .await
-            .map_err(client_error)
+            .map_err(Into::into)
     }
 
     /// Conversations with messages, with their unread counts.
     pub async fn active_sessions(&self) -> Result<Vec<MessageSession>, ClientError> {
-        self.cm.active_sessions().await.map_err(client_error)
+        self.cm.active_sessions().await.map_err(Into::into)
     }
 
     pub async fn ack(&self, friend: u64, timestamp: u32) -> Result<(), ClientError> {
-        self.cm.ack(friend, timestamp).await.map_err(client_error)
+        self.cm.ack(friend, timestamp).await.map_err(Into::into)
     }
 
     pub async fn next_own_game(&self, after_revision: u64) -> OwnGame {
@@ -396,7 +371,7 @@ impl Client {
     }
 
     pub async fn refresh_own_game(&self) -> Result<(), ClientError> {
-        self.cm.refresh_own_game().await.map_err(client_error)
+        self.cm.refresh_own_game().await.map_err(Into::into)
     }
 
     /// Invites `friend` into the account's current game, `app_id`, the way
@@ -407,18 +382,18 @@ impl Client {
         app_id: u32,
     ) -> Result<GameInviteKind, ClientError> {
         let received = self.own_game.received();
-        self.cm.refresh_own_game().await.map_err(client_error)?;
+        self.cm.refresh_own_game().await?;
         let game = self.own_game.fresh(received, OWN_GAME_FRESHNESS).await;
         if !game.connected {
-            return Err(client_error(crate::cm::CmError::Disconnected));
+            return Err(crate::cm::CmError::Disconnected.into());
         }
         if app_id == 0 || game.app_id != app_id {
-            return Err(client_error(crate::cm::SocialError::InviteUnavailable));
+            return Err(crate::cm::SocialError::InviteUnavailable.into());
         }
         self.cm
-            .invite(friend, app_id, &game.invite)
+            .invite(friend, app_id, &game.invite())
             .await
-            .map_err(client_error)
+            .map_err(Into::into)
     }
 
     /// Invites `friend` into `invite`, which the account's running game of
@@ -433,15 +408,15 @@ impl Client {
     ) -> Result<GameInviteKind, ClientError> {
         let game = self.own_game.snapshot();
         if !game.connected {
-            return Err(client_error(crate::cm::CmError::Disconnected));
+            return Err(crate::cm::CmError::Disconnected.into());
         }
         if app_id == 0 || !invite.sendable() || (game.app_id != 0 && game.app_id != app_id) {
-            return Err(client_error(crate::cm::SocialError::InviteUnavailable));
+            return Err(crate::cm::SocialError::InviteUnavailable.into());
         }
         self.cm
             .invite(friend, app_id, invite)
             .await
-            .map_err(client_error)
+            .map_err(Into::into)
     }
 
     /// Works even while a download owns the CM query mutex. Observers wake
@@ -459,8 +434,8 @@ impl Client {
     pub async fn profile(&self) -> Result<crate::cm::AccountProfile, ClientError> {
         // Include any wait for a content query in the optional profile's budget.
         let fresh = tokio::time::timeout(crate::cm::PROFILE_TIMEOUT, async {
-            let request = self.cm.request_profile().await.map_err(client_error)?;
-            request.receive().await.map_err(client_error)
+            let request = self.cm.request_profile().await?;
+            request.receive().await.map_err(Into::into)
         })
         .await;
         match fresh {
@@ -469,13 +444,13 @@ impl Client {
             Err(_) => self
                 .cm
                 .received_profile()
-                .ok_or_else(|| client_error(crate::cm::CmError::Timeout)),
+                .ok_or_else(|| crate::cm::CmError::Timeout.into()),
         }
     }
 
     /// Ordered by the CM layer: most recently played first, then name.
     pub async fn games(&self) -> Result<Vec<OwnedGame>, ClientError> {
-        let games = self.cm.owned_games().await.map_err(client_error)?;
+        let games = self.cm.owned_games().await?;
         // Rendering the library does not require expanding every license through
         // PICS. Refresh license-derived download rights only when next needed.
         *self.catalog.lock().await = None;
@@ -495,7 +470,7 @@ impl Client {
         if let Some(app) = self.cached_app(app_id) {
             return Ok(app);
         }
-        let app = Arc::new(cm.app_info(app_id).await.map_err(client_error)?);
+        let app = Arc::new(cm.app_info(app_id).await?);
         self.remember_app(&app);
         Ok(app)
     }
@@ -507,24 +482,27 @@ impl Client {
         app_ids: &[u32],
     ) -> Result<HashMap<u32, Arc<AppInfo>>, ClientError> {
         let mut apps = HashMap::with_capacity(app_ids.len());
-        for batch in app_ids.chunks(PICS_BATCH) {
-            let mut missing = Vec::new();
-            for id in batch {
-                if let Some(app) = self.cached_app(*id) {
-                    apps.insert(*id, app);
-                } else {
-                    missing.push(*id);
-                }
+        let mut missing = HashSet::new();
+        for id in app_ids {
+            if let Some(app) = self.cached_app(*id) {
+                apps.insert(*id, app);
+            } else {
+                missing.insert(*id);
             }
-            if missing.is_empty() {
-                continue;
-            }
-            for app in self.cm.app_infos(&missing).await.map_err(client_error)? {
-                if missing.contains(&app.app_id) {
-                    let app = Arc::new(app);
-                    self.remember_app(&app);
-                    apps.insert(app.app_id, app);
-                }
+        }
+        if missing.is_empty() {
+            return Ok(apps);
+        }
+        let requested: Vec<_> = app_ids
+            .iter()
+            .copied()
+            .filter(|id| missing.contains(id))
+            .collect();
+        for app in self.cm.app_infos(&requested).await? {
+            if missing.contains(&app.app_id) {
+                let app = Arc::new(app);
+                self.remember_app(&app);
+                apps.insert(app.app_id, app);
             }
         }
         Ok(apps)
@@ -556,7 +534,7 @@ impl Client {
         if let Some(owned) = catalog.as_ref() {
             return Ok(Arc::clone(owned));
         }
-        let owned = Arc::new(cm.content_licenses().await.map_err(client_error)?);
+        let owned = Arc::new(cm.content_licenses().await?);
         *catalog = Some(Arc::clone(&owned));
         Ok(owned)
     }
@@ -625,7 +603,9 @@ impl Client {
         directory: &Path,
     ) -> Result<crate::launch::LaunchPlan, ClientError> {
         if !directory.is_absolute() || !directory.is_dir() {
-            return Err(ClientError("backend.steam.launch.directoryMissing".into()));
+            return Err(ClientError::Failure(
+                "backend.steam.launch.directoryMissing".into(),
+            ));
         }
         // No Transfer of this installation can start until the plan returns.
         let installed = installation::open::<Installation>(directory)?;
@@ -633,15 +613,19 @@ impl Client {
             .receipt
             .as_ref()
             .filter(|receipt| receipt.app_id == app_id && receipt.platform == platform)
-            .ok_or_else(|| ClientError("backend.steam.client.incompleteInstallation".into()))?;
+            .ok_or_else(|| {
+                ClientError::Failure("backend.steam.client.incompleteInstallation".into())
+            })?;
         let cm = &self.cm;
         let owned = self.licensed_content(cm).await?;
         if !owned.apps.contains(&receipt.app_id) {
-            return Err(ClientError("backend.steam.client.gameNotOwned".into()));
+            return Err(ClientError::Failure(
+                "backend.steam.client.gameNotOwned".into(),
+            ));
         }
-        let app = Arc::new(cm.app_info(app_id).await.map_err(client_error)?);
+        let app = Arc::new(cm.app_info(app_id).await?);
         self.remember_app(&app);
-        crate::launch::plan(&app, platform, directory).map_err(client_error)
+        crate::launch::plan(&app, platform, directory).map_err(Into::into)
     }
 
     /// Installs the game's build for `platform` under `parent`. Without a
@@ -676,7 +660,7 @@ impl Client {
         picking: &CancelToken,
     ) -> Result<Installation, ClientError> {
         let unsupported =
-            || ClientError("backend.steam.client.unsupportedPlatformOrLanguage".into());
+            || ClientError::Failure("backend.steam.client.unsupportedPlatformOrLanguage".into());
         if !crate::language::is_supported(language) {
             return Err(unsupported());
         }
@@ -726,11 +710,13 @@ impl Client {
     ) -> Result<&'static str, ClientError> {
         let owned = self.licensed_content(&self.cm).await?;
         if !owned.apps.contains(&app_id) {
-            return Err(ClientError("backend.steam.client.gameNotOwned".into()));
+            return Err(ClientError::Failure(
+                "backend.steam.client.gameNotOwned".into(),
+            ));
         }
         let app = self.app_info(&self.cm, app_id).await?;
         installable_platform(&app, &owned, language)
-            .ok_or_else(|| ClientError("backend.steam.client.noCompatibleDepot".into()))
+            .ok_or_else(|| ClientError::Failure("backend.steam.client.noCompatibleDepot".into()))
     }
 
     /// Installs every prepared depot under the installation lock, including
@@ -756,10 +742,14 @@ impl Client {
             content_bytes: 0,
         };
         let mut manifests = Vec::new();
+        let mut scripts = Vec::new();
         let content = ContentClient::new(self.http.clone());
         for depot in &prepared.depots {
             cancel.check()?;
-            let summary = self
+            let DepotInstallation {
+                summary,
+                install_scripts,
+            } = self
                 .install_depot(
                     &content,
                     depot,
@@ -778,15 +768,7 @@ impl Client {
                 depot_id: depot.depot_id,
                 manifest_id: depot.manifest_id,
             });
-        }
-        let mut scripts = Vec::new();
-        for depot in &prepared.depots {
-            scripts.extend(
-                content
-                    .install_scripts(destination, depot.depot_id, depot.manifest_id, &depot.key)
-                    .await
-                    .map_err(client_error)?,
-            );
+            scripts.extend(install_scripts);
         }
         scripts.sort();
         obelisk_core::install::write_cached_file(
@@ -794,7 +776,7 @@ impl Client {
             Path::new(crate::install_script::LIST),
             scripts.join("\n").as_bytes(),
         )
-        .map_err(|error| client_error(ContentError::from(error)))?;
+        .map_err(ContentError::from)?;
         Ok(InstalledFiles {
             receipt: Installation {
                 app_id,
@@ -823,78 +805,119 @@ impl Client {
         let cm = &self.cm;
         let owned = self.licensed_content(cm).await?;
         if !owned.apps.contains(&app_id) {
-            return Err(ClientError("backend.steam.client.gameNotOwned".into()));
+            return Err(ClientError::Failure(
+                "backend.steam.client.gameNotOwned".into(),
+            ));
         }
         let app = self.app_info(cm, app_id).await?;
         let selected = select_depots(&app, &owned, platform, language);
         if selected.is_empty() {
-            return Err(ClientError("backend.steam.client.noCompatibleDepot".into()));
+            return Err(ClientError::Failure(
+                "backend.steam.client.noCompatibleDepot".into(),
+            ));
         }
         // The CM layer already keeps only validated HTTPS CDN/SteamCache hosts.
         // Every one is kept: Steam's first servers are often its busiest, and a
         // depot spreads over the fastest ones it measures.
-        let servers: Vec<ContentServer> = cm
-            .content_servers()
-            .await
-            .map_err(client_error)?
-            .into_iter()
-            .filter(|server| {
-                server.allowed_app_ids.is_empty() || server.allowed_app_ids.contains(&app_id)
-            })
-            .collect();
-        if servers.is_empty() {
-            return Err(ClientError("backend.steam.client.noContentServer".into()));
-        }
-        let mut depots = Vec::new();
-        for depot in selected {
+        let servers = async {
+            let servers: Vec<ContentServer> = cm
+                .content_servers()
+                .await?
+                .into_iter()
+                .filter(|server| {
+                    server.allowed_app_ids.is_empty() || server.allowed_app_ids.contains(&app_id)
+                })
+                .collect();
+            if servers.is_empty() {
+                return Err(ClientError::Failure(
+                    "backend.steam.client.noContentServer".into(),
+                ));
+            }
+            Ok(servers)
+        };
+        let depots = async {
             cancel.check()?;
-            let manifest_app = depot.shared_from_app.unwrap_or(app_id);
-            let authorizing_app = content_authorizing_app(&app, depot);
-            let manifest_id = match depot.public_manifest {
-                Some(id) => id,
-                None if manifest_app != app_id => self
-                    .app_info(cm, manifest_app)
-                    .await?
-                    .depots
-                    .iter()
-                    .find(|other| other.depot_id == depot.depot_id)
-                    .and_then(|other| other.public_manifest)
-                    .ok_or_else(|| {
-                        ClientError(crate::message::format(
-                            "backend.steam.client.sharedManifestMissing",
-                            &[depot.depot_id.to_string()],
-                        ))
-                    })?,
-                None => continue,
-            };
-            let key_app = if depot.shared_from_app == Some(COMMON_REDISTRIBUTABLES) {
-                COMMON_REDISTRIBUTABLES
-            } else {
-                app_id
-            };
-            let key = cm
-                .depot_key(depot.depot_id, key_app)
-                .await
-                .map_err(client_error)?;
-            let key: [u8; 32] = key
-                .try_into()
-                .map_err(|_| ClientError("backend.steam.client.invalidDepotKey".into()))?;
-            depots.push(PreparedDepot {
-                depot_id: depot.depot_id,
-                manifest_id,
-                authorizing_app,
-                key,
-                estimated_bytes: depot.size_bytes.unwrap_or(0),
-            });
-        }
-        if depots.is_empty() {
-            return Err(ClientError("backend.steam.client.noPublicManifest".into()));
-        }
+            // A shared depot without its own manifest takes it from its source
+            // app; one PICS query covers every such app.
+            let sources: Vec<u32> = selected
+                .iter()
+                .filter(|depot| depot.public_manifest.is_none())
+                .filter_map(|depot| depot.shared_from_app)
+                .filter(|source| *source != app_id)
+                .collect::<HashSet<_>>()
+                .into_iter()
+                .collect();
+            let sources = self.cached_app_infos(&sources).await?;
+            let lookups: Vec<_> = selected
+                .iter()
+                .map(|depot| self.prepare_depot(&app, depot, &sources, cancel))
+                .collect();
+            let depots: Vec<Option<PreparedDepot>> = futures_util::stream::iter(lookups)
+                .buffered(CONCURRENT_REQUESTS)
+                .try_collect()
+                .await?;
+            let depots: Vec<_> = depots.into_iter().flatten().collect();
+            if depots.is_empty() {
+                return Err(ClientError::Failure(
+                    "backend.steam.client.noPublicManifest".into(),
+                ));
+            }
+            Ok(depots)
+        };
+        let (servers, depots) = tokio::try_join!(servers, depots)?;
         Ok(PreparedInstall {
             name: app.name.clone(),
             servers,
             depots,
         })
+    }
+
+    /// One selected depot's manifest ID and key, or `None` when it has no
+    /// public manifest. `sources` holds the apps shared depots come from.
+    async fn prepare_depot(
+        &self,
+        app: &AppInfo,
+        depot: &DepotInfo,
+        sources: &HashMap<u32, Arc<AppInfo>>,
+        cancel: &CancelToken,
+    ) -> Result<Option<PreparedDepot>, ClientError> {
+        cancel.check()?;
+        let manifest_app = depot.shared_from_app.unwrap_or(app.app_id);
+        let manifest_id = match depot.public_manifest {
+            Some(id) => id,
+            None if manifest_app != app.app_id => sources
+                .get(&manifest_app)
+                .ok_or(crate::cm::CmError::MissingApp(manifest_app))?
+                .depots
+                .iter()
+                .find(|other| other.depot_id == depot.depot_id)
+                .and_then(|other| other.public_manifest)
+                .ok_or_else(|| {
+                    ClientError::Failure(crate::message::format(
+                        "backend.steam.client.sharedManifestMissing",
+                        &[depot.depot_id.to_string()],
+                    ))
+                })?,
+            None => return Ok(None),
+        };
+        let key_app = if depot.shared_from_app == Some(COMMON_REDISTRIBUTABLES) {
+            COMMON_REDISTRIBUTABLES
+        } else {
+            app.app_id
+        };
+        let key: [u8; 32] = self
+            .cm
+            .depot_key(depot.depot_id, key_app)
+            .await?
+            .try_into()
+            .map_err(|_| ClientError::Failure("backend.steam.client.invalidDepotKey".into()))?;
+        Ok(Some(PreparedDepot {
+            depot_id: depot.depot_id,
+            manifest_id,
+            authorizing_app: content_authorizing_app(app, depot),
+            key,
+            estimated_bytes: depot.size_bytes.unwrap_or(0),
+        }))
     }
 
     /// Installs one depot from every server allowed to serve it. A server that
@@ -907,14 +930,13 @@ impl Client {
         destination: &Path,
         transfer: &TransferContext<TransferProgress>,
         base: ProgressBase,
-    ) -> Result<DownloadSummary, ClientError> {
+    ) -> Result<DepotInstallation, ClientError> {
         let cancel = transfer.cancel_token();
         // The current manifest ID and depot key came from authorized Steam
         // metadata above. Keep one validated snapshot across all CDN requests.
         let cached_manifest = content
             .cached_manifest(destination, depot.depot_id, depot.manifest_id, &depot.key)
-            .await
-            .map_err(client_error)?;
+            .await?;
         cancel.check()?;
         // No request code is needed for an already validated cached archive. A
         // miss always gets a fresh code just before the CDN.
@@ -923,8 +945,7 @@ impl Client {
         } else {
             self.cm
                 .manifest_request_code(depot.depot_id, depot.authorizing_app, depot.manifest_id)
-                .await
-                .map_err(client_error)?
+                .await?
         };
         let authorization = DepotAuthorization {
             cm: &self.cm,
@@ -959,7 +980,7 @@ impl Client {
                 });
             })
             .await
-            .map_err(client_error)
+            .map_err(Into::into)
     }
 }
 
@@ -1069,22 +1090,47 @@ fn content_authorizing_app(app: &AppInfo, depot: &DepotInfo) -> u32 {
 /// Lower layers keep typed errors; the client passes message keys to the host.
 impl From<Cancelled> for ClientError {
     fn from(_: Cancelled) -> Self {
-        ClientError("backend.steam.client.downloadStopped".into())
+        ClientError::Cancelled("backend.steam.client.downloadStopped".into())
     }
 }
 
-fn client_error(error: impl std::fmt::Display) -> ClientError {
-    ClientError(error.to_string())
+impl From<ContentError> for ClientError {
+    fn from(error: ContentError) -> Self {
+        if matches!(error, ContentError::Cancelled) {
+            ClientError::Cancelled(error.to_string())
+        } else {
+            ClientError::Failure(error.to_string())
+        }
+    }
 }
+
+impl From<crate::cm::CmError> for ClientError {
+    fn from(error: crate::cm::CmError) -> Self {
+        ClientError::Failure(error.to_string())
+    }
+}
+
+impl From<crate::cm::SocialError> for ClientError {
+    fn from(error: crate::cm::SocialError) -> Self {
+        ClientError::Failure(error.to_string())
+    }
+}
+
+impl From<crate::launch::LaunchError> for ClientError {
+    fn from(error: crate::launch::LaunchError) -> Self {
+        ClientError::Failure(error.to_string())
+    }
+}
+
 impl From<TransferBusy> for ClientError {
     fn from(_: TransferBusy) -> Self {
-        ClientError("backend.steam.client.downloadInProgress".into())
+        ClientError::Failure("backend.steam.client.downloadInProgress".into())
     }
 }
 
 impl From<InstallFailure> for ClientError {
     fn from(failure: InstallFailure) -> Self {
-        ClientError(
+        ClientError::Failure(
             match failure {
                 InstallFailure::ParentMissing => "backend.steam.client.chooseExistingFolder",
                 InstallFailure::UnsafeDirectory(_) => {
@@ -1108,8 +1154,7 @@ impl From<InstallFailure> for ClientError {
 
 impl TransferError for ClientError {
     fn is_cancellation(&self) -> bool {
-        self.0 == "backend.steam.client.downloadStopped"
-            || self.0 == "backend.steam.content.cancelled"
+        matches!(self, Self::Cancelled(_))
     }
 }
 

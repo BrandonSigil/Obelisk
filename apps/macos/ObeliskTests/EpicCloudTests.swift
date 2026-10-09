@@ -81,13 +81,12 @@ final class EpicCloudTests: XCTestCase {
     func testRecoveryReservesEveryGameUntilItFindsTheSession() async throws {
         let sessions = EpicGameSessions(FakeSessions(recovering: true), history: .temporary())
         XCTAssertTrue(sessions.isRecovering)
-        XCTAssertTrue(sessions.protects("sandbox:unknown"))
+        XCTAssertTrue(sessions.isBusy, "Recovery reserves every game")
 
         sessions.fake.show(.epic(account: "account", namespace: "sandbox", appName: "game"))
 
         try await eventually { !sessions.isRecovering }
-        XCTAssertTrue(sessions.protects("sandbox:game"))
-        XCTAssertFalse(sessions.protects("sandbox:unknown"))
+        XCTAssertEqual(sessions.active?.game, "sandbox:game", "Then only the session's game")
         sessions.fake.show(nil)
         try await eventually { !sessions.isBusy }
     }
@@ -140,7 +139,7 @@ final class EpicCloudTests: XCTestCase {
         model.installations.downloadSelected()
         XCTAssertEqual(backend.actions, [], "A running game's files stay untouched")
         model.signOut()
-        XCTAssertTrue(sessions.protects(owned.libraryID))
+        XCTAssertEqual(sessions.active?.game, owned.libraryID, "The running game stays reserved")
         XCTAssertEqual(sessions.fake.revocations, [.epic(accountId: "account")])
     }
 

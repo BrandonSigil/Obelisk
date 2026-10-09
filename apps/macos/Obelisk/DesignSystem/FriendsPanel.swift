@@ -632,7 +632,7 @@ final class FriendsAvatarCache {
     private var images: [Key: NSImage] = [:]
     private var order: [Key] = []
     private var pending: [Key: Task<NSImage?, Never>] = [:]
-    private let load: @Sendable (URL) async throws -> Data
+    private let load: @Sendable (URL) async -> CGImage?
     private nonisolated static let session: URLSession = {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.urlCache = nil
@@ -640,20 +640,18 @@ final class FriendsAvatarCache {
         return URLSession(configuration: configuration)
     }()
 
-    init(load: @escaping @Sendable (URL) async throws -> Data = FriendsAvatarCache.fetch) {
+    init(load: @escaping @Sendable (URL) async -> CGImage? = FriendsAvatarCache.fetch) {
         self.load = load
     }
 
-    private nonisolated static func fetch(_ url: URL) async throws -> Data {
-        let (bytes, response) = try await session.bytes(for: URLRequest(url: url, timeoutInterval: 20))
-        guard let response = response as? HTTPURLResponse, response.statusCode == 200,
-              response.expectedContentLength <= 2_097_152 else { return Data() }
-        var data = Data()
-        for try await byte in bytes {
-            guard data.count < 2_097_152, !Task.isCancelled else { return Data() }
-            data.append(byte)
-        }
-        return data
+    /// Downloads and decodes the avatar off the main actor.
+    private nonisolated static func fetch(_ url: URL) async -> CGImage? {
+        do {
+            let (data, response) = try await session.data(for: URLRequest(url: url, timeoutInterval: 20))
+            guard let response = response as? HTTPURLResponse, response.statusCode == 200,
+                  data.count <= 2_097_152, !Task.isCancelled else { return nil }
+            return ImageDecoding.thumbnail(from: data, maxPixelSize: 96)
+        } catch { return nil }
     }
     private var generation = UUID()
 
@@ -687,11 +685,8 @@ final class FriendsAvatarCache {
             return generation == requestGeneration && account == identity.account ? image : nil
         }
         let task = Task<NSImage?, Never> { [load] in
-            do {
-                let data = try await load(url)
-                guard !Task.isCancelled, let image = ImageDecoding.thumbnail(from: data, maxPixelSize: 96) else { return nil }
-                return NSImage(cgImage: image, size: NSSize(width: image.width, height: image.height))
-            } catch { return nil }
+            guard let image = await load(url), !Task.isCancelled else { return nil }
+            return NSImage(cgImage: image, size: NSSize(width: image.width, height: image.height))
         }
         pending[key] = task
         let image = await task.value

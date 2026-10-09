@@ -38,12 +38,28 @@ extension OverlayRequest {
             return .webPage(url)
         case .store(let appId, _):
             // Obelisk has no cart: the page lets the player add it there.
-            return .store(appId: appId)
+            return .webPage(GameOverlayController.storeURL(appId: appId))
         case .lobbyInvite, .connectInvite:
             return nil
         case .remotePlayTogetherInvite, .remotePlayTogether:
             return .friends
         }
+    }
+}
+
+/// Follows the latest request a running Steam game's session shows, by its
+/// sequence, which only grows within a session.
+struct SessionSequence {
+    private var followed: (session: String, sequence: UInt64)?
+
+    /// Whether `session`'s request `sequence` is new. A request the session
+    /// already showed when first seen is not; a request that went (nil)
+    /// keeps its sequence.
+    mutating func advance(session: String, sequence: UInt64?) -> Bool {
+        let previous = followed?.session == session ? followed : nil
+        followed = (session, sequence ?? previous?.sequence ?? 0)
+        guard let previous, let sequence else { return false }
+        return sequence > previous.sequence
     }
 }
 

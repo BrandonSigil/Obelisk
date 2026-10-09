@@ -189,25 +189,35 @@ impl Bridged for steam::Steam {
         Some(store.host.into())
     }
     fn invite_request(store: &steam::Store) -> Option<SteamInviteRequest> {
-        store.invite.clone().map(|request| SteamInviteRequest {
+        store.requests.invite().map(|request| SteamInviteRequest {
             sequence: request.sequence,
             invite: request.target.into(),
         })
     }
     fn lobby(store: &steam::Store) -> Option<u64> {
-        store.lobby
+        store.requests.lobby
     }
     fn overlay_request(store: &steam::Store) -> Option<SteamOverlayRequest> {
-        store.overlay.clone().map(Into::into)
+        store.requests.overlay.clone().map(Into::into)
     }
     fn received_invites(store: &steam::Store) -> Vec<SteamReceivedInvite> {
-        store.invites.iter().cloned().map(Into::into).collect()
+        store
+            .requests
+            .invites
+            .iter()
+            .cloned()
+            .map(Into::into)
+            .collect()
     }
     fn micro_txn(store: &steam::Store) -> Option<SteamMicroTxn> {
-        store.microtxn.as_ref().map(|pending| SteamMicroTxn {
-            order_id: pending.order_id,
-            app_id: pending.app_id,
-        })
+        store
+            .requests
+            .microtxn
+            .as_ref()
+            .map(|pending| SteamMicroTxn {
+                order_id: pending.order_id,
+                app_id: pending.app_id,
+            })
     }
 }
 
@@ -771,11 +781,11 @@ mod tests {
         let mut store = steam::Store::new(3527290);
         assert_eq!(steam::Steam::invite_request(&store), None);
         assert_eq!(steam::Steam::lobby(&store), None);
-        store.lobby = Some(LOBBY);
+        store.requests.lobby = Some(LOBBY);
         assert_eq!(steam::Steam::lobby(&store), Some(LOBBY));
-        store.invite = Some(game_runtime::InviteRequest {
+        store.requests.overlay = Some(game_runtime::OverlayRequest {
             sequence: 2,
-            target: protocol::InviteTarget::Lobby { lobby_id: LOBBY },
+            dialog: protocol::OverlayDialog::LobbyInvite { lobby_id: LOBBY },
         });
         assert_eq!(
             steam::Steam::invite_request(&store),
@@ -784,9 +794,9 @@ mod tests {
                 invite: SteamGameInvite::Lobby { lobby_id: LOBBY },
             })
         );
-        store.invite = Some(game_runtime::InviteRequest {
+        store.requests.overlay = Some(game_runtime::OverlayRequest {
             sequence: 3,
-            target: protocol::InviteTarget::Connect {
+            dialog: protocol::OverlayDialog::ConnectInvite {
                 connect: "+connect_lobby 1".into(),
             },
         });
@@ -888,10 +898,13 @@ mod tests {
             ),
         ] {
             let store = steam::Store {
-                overlay: Some(game_runtime::OverlayRequest {
-                    sequence: 9,
-                    dialog,
-                }),
+                requests: game_runtime::GameRequests {
+                    overlay: Some(game_runtime::OverlayRequest {
+                        sequence: 9,
+                        dialog,
+                    }),
+                    ..Default::default()
+                },
                 ..steam::Store::new(620)
             };
             assert_eq!(
@@ -904,24 +917,27 @@ mod tests {
     #[test]
     fn received_invites_and_the_pending_purchase_reach_swift() {
         let store = steam::Store {
-            invites: vec![
-                game_runtime::ReceivedInvite {
-                    friend: FRIEND,
-                    target: protocol::InviteTarget::Connect {
-                        connect: "+connect 10.0.0.1".into(),
+            requests: game_runtime::GameRequests {
+                invites: vec![
+                    game_runtime::ReceivedInvite {
+                        friend: FRIEND,
+                        target: protocol::InviteTarget::Connect {
+                            connect: "+connect 10.0.0.1".into(),
+                        },
+                        received_at: 1_790_000_100,
                     },
-                    received_at: 1_790_000_100,
-                },
-                game_runtime::ReceivedInvite {
-                    friend: FRIEND + 1,
-                    target: protocol::InviteTarget::Lobby { lobby_id: LOBBY },
-                    received_at: 1_790_000_000,
-                },
-            ],
-            microtxn: Some(game_runtime::MicroTxn {
-                order_id: 4242,
-                app_id: 620,
-            }),
+                    game_runtime::ReceivedInvite {
+                        friend: FRIEND + 1,
+                        target: protocol::InviteTarget::Lobby { lobby_id: LOBBY },
+                        received_at: 1_790_000_000,
+                    },
+                ],
+                microtxn: Some(game_runtime::MicroTxn {
+                    order_id: 4242,
+                    app_id: 620,
+                }),
+                ..Default::default()
+            },
             ..steam::Store::new(620)
         };
         assert_eq!(

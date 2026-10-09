@@ -145,11 +145,19 @@ async fn messages_are_sent_as_valves_web_chat_sends_them() {
         }
     );
     assert_eq!(
-        client.send_message(FRIEND, "  ").await.unwrap_err().0,
+        client
+            .send_message(FRIEND, "  ")
+            .await
+            .unwrap_err()
+            .to_string(),
         "backend.steam.chat.emptyMessage"
     );
     assert_eq!(
-        client.send_message(ACCOUNT, "me").await.unwrap_err().0,
+        client
+            .send_message(ACCOUNT, "me")
+            .await
+            .unwrap_err()
+            .to_string(),
         "backend.steam.chat.invalidRecipient"
     );
 }
@@ -174,7 +182,7 @@ async fn rate_limits_and_strangers_are_distinct_errors() {
                 &[],
             )
             .await;
-        assert_eq!(sending.await.unwrap().unwrap_err().0, key);
+        assert_eq!(sending.await.unwrap().unwrap_err().to_string(), key);
     }
 }
 
@@ -388,7 +396,7 @@ fn invite(client: &Arc<Client>) -> tokio::task::JoinHandle<Result<GameInviteKind
         client
             .invite_to_game(FRIEND, 620)
             .await
-            .map_err(|error| error.0)
+            .map_err(|error| error.to_string())
     })
 }
 
@@ -508,7 +516,7 @@ async fn a_reported_invitation_is_refused_for_another_game_or_target() {
                 .invite_into_game(FRIEND, app_id, &invite)
                 .await
                 .unwrap_err()
-                .0
+                .to_string()
         }
     };
     let unavailable = "backend.steam.invite.unavailable";
@@ -556,7 +564,7 @@ async fn a_reported_invitation_is_refused_for_another_game_or_target() {
             )
             .await
             .unwrap_err()
-            .0,
+            .to_string(),
         "backend.steam.chat.invalidRecipient"
     );
     assert!(server.quiet().await);

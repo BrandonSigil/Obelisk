@@ -41,8 +41,8 @@ extension EpicGames: WebStorefront {
     }
     static func disconnect(_ session: Session) async throws { try await session.disconnect() }
     /// Each address spends a new exchange code of the session.
-    static func webSignInURL(session: Session, page: URL) async throws -> URL? {
-        URL(string: try await session.webSignInUrl(redirectUrl: page.absoluteString))
+    static func webSignInURL(session: Session) async throws -> URL? {
+        URL(string: try await session.webSignInUrl(redirectUrl: storeURL.absoluteString))
     }
 
     static func games(of session: Session) async throws -> [EpicGame] { try await session.games() }
@@ -176,7 +176,10 @@ final class EpicFriends: AccountPresence {
                     guard let self, !Task.isCancelled, snapshot.accountId == account else { return }
                     revision = snapshot.revision
                     if snapshot.connection == .stopped { return }
-                    self.state?.apply(snapshot)
+                    var state = self.state
+                    state?.apply(snapshot)
+                    // Repeated snapshots do not invalidate unchanged presentation.
+                    if state != self.state { self.state = state }
                 }
             } onCancel: { session.stopFriends() }
         }

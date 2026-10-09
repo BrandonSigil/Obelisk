@@ -156,7 +156,7 @@ final class SteamRosettaTests: XCTestCase {
         fixture.model.install()
         try await eventually { await installation.requests == 1 }
         XCTAssertTrue(fixture.model.isInstalling)
-        XCTAssertTrue(fixture.sessions.protects(42))
+        XCTAssertEqual(fixture.sessions.active?.game, 42)
         let before = fixture.sessions.fake.rosettaResumes
         XCTAssertTrue(before.isEmpty)
         fixture.sessions.fake.failRosetta(nil)
@@ -220,7 +220,7 @@ final class SteamRosettaTests: XCTestCase {
         try await eventually { fixture.sessions.fake.declines.count == 1 }
         XCTAssertNil(fixture.model.prompt)
         XCTAssertTrue(fixture.sessions.isBusy)
-        XCTAssertTrue(fixture.sessions.protects(42))
+        XCTAssertEqual(fixture.sessions.active?.game, 42)
         await installation.resolve(())
         try await eventually { installerReturned }
         let resumed = fixture.sessions.fake.rosettaResumes

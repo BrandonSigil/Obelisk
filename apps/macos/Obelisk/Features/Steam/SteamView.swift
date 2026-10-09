@@ -13,13 +13,6 @@ struct SteamView: View {
             }
         }
         .task { await model.start() }
-        .onChange(of: model.gameSessions.isBusy) { _, isBusy in
-            if !isBusy { model.installations.refreshCloudIndicator() }
-        }
-        // The game's guard and launch sync are on disk once it runs.
-        .onChange(of: model.gameSessions.active?.running == true) { _, running in
-            if running { model.installations.refreshCloudIndicator() }
-        }
         .errorAlert(L10n.string("ui.store.steam"), message: $model.errorMessage)
     }
 
@@ -31,7 +24,6 @@ struct SteamView: View {
             libraryTitle: L10n.string("ui.steam.library"),
             accountName: model.displayName,
             avatarURL: model.avatarURL,
-            unreadCount: model.chat.totalUnread,
             storePage: model.storePage,
             scrollMemory: libraryScroll
         ) { game in
@@ -51,15 +43,25 @@ struct SteamView: View {
         Text(model.displayName ?? L10n.string("ui.steam.account"))
         Text(L10n.string("ui.library.account_game_count", Int64(model.games.count)))
         Divider()
-        Button(friendsMenuTitle, systemImage: "person.2", action: model.openFriends)
-            .accessibilityIdentifier("steam-friends-menu")
+        SteamFriendsMenuButton(model: model)
         Divider()
         Button(L10n.string("ui.library.refresh"), systemImage: "arrow.clockwise", action: model.refresh)
         Divider()
         Button(L10n.string("ui.account.sign_out"), systemImage: "rectangle.portrait.and.arrow.right", action: model.signOut)
     }
+}
 
-    private var friendsMenuTitle: String {
+/// Reads the friends and the unread messages in its own body: their every
+/// change redraws the button alone, not the library.
+private struct SteamFriendsMenuButton: View {
+    let model: SteamModel
+
+    var body: some View {
+        Button(title, systemImage: "person.2", action: model.openFriends)
+            .accessibilityIdentifier("steam-friends-menu")
+    }
+
+    private var title: String {
         let title = model.friends?.menuTitle ?? L10n.string("ui.friends.menuLoading")
         let unread = model.chat.totalUnread
         return unread > 0 ? [title, L10n.string("ui.chat.unreadCount", Int64(unread))].joined(separator: " · ") : title

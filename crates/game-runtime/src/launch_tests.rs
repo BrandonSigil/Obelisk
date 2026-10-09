@@ -97,9 +97,9 @@ fn local_storage_is_validated_before_host_start_without_an_sdk_consumer() {
         )
         .unwrap();
     // The host ran against the prepared projection, not a scratch home.
-    assert_eq!(runtime._prepared.home(), storage.home);
+    assert_eq!(runtime.prepared.home(), storage.home);
     assert!(
-        process::Child::host_command(&runtime._prepared, &config, "fixture")
+        process::Child::host_command(&runtime.prepared, &config, "fixture")
             .get_envs()
             .any(|(key, value)| key == "OBELISK_STORAGE_METADATA"
                 && value == Some(std::ffi::OsStr::new("2")))

@@ -22,13 +22,6 @@ struct EpicView: View {
             }
         }
         .task { await model.start() }
-        .onChange(of: model.gameSessions.isBusy) { _, isBusy in
-            if !isBusy { model.installations.refreshCloudIndicator() }
-        }
-        // The game's guard and launch sync are on disk once it runs.
-        .onChange(of: model.gameSessions.active?.phase == .running) { _, running in
-            if running { model.installations.refreshCloudIndicator() }
-        }
         .errorAlert(L10n.string("ui.store.epic"), message: $model.errorMessage)
     }
 
@@ -60,13 +53,23 @@ struct EpicView: View {
         Text(model.accountName ?? L10n.string("ui.epic.account"))
         Text(L10n.string("ui.library.account_game_count", Int64(model.games.count)))
         Divider()
-        Button(model.friends?.menuTitle ?? L10n.string("ui.friends.menuLoading"), systemImage: "person.2", action: model.openFriends)
-            .disabled(model.friends == nil)
-            .accessibilityIdentifier("epic-friends-menu")
+        EpicFriendsMenuButton(model: model)
         Button(L10n.string("ui.library.refresh"), systemImage: "arrow.clockwise", action: model.refresh)
             .disabled(model.isLoadingGames)
         Toggle(L10n.string("ui.account.remember_me"), isOn: $model.rememberSession)
         Divider()
         Button(L10n.string("ui.account.sign_out"), systemImage: "rectangle.portrait.and.arrow.right", action: model.signOut)
+    }
+}
+
+/// Reads the friends in its own body: their every change redraws the button
+/// alone, not the library.
+private struct EpicFriendsMenuButton: View {
+    let model: EpicModel
+
+    var body: some View {
+        Button(model.friends?.menuTitle ?? L10n.string("ui.friends.menuLoading"), systemImage: "person.2", action: model.openFriends)
+            .disabled(model.friends == nil)
+            .accessibilityIdentifier("epic-friends-menu")
     }
 }

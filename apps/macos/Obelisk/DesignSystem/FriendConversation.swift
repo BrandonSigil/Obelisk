@@ -117,7 +117,7 @@ struct FriendConversationView: View {
                     case .separator(_, let date, let showsDay):
                         ChatSeparator(date: date, showsDay: showsDay)
                     case .line(let line):
-                        ChatLineView(line: line, friendName: friend.displayName, gameName: chat.gameName)
+                        ChatLineView(line: line, friendName: friend.displayName, gameNames: gameNames(of: line))
                     }
                 }
                 if conversation.isFriendTyping {
@@ -152,6 +152,13 @@ struct FriendConversationView: View {
             if let previous, !isAtBottom { position.scrollTo(id: ConversationItem.ID.line(previous), anchor: .top) }
         }
         .accessibilityIdentifier("friends-conversation-messages")
+    }
+
+    /// The names of the games `line` names, so that the line redraws only
+    /// when they change.
+    private func gameNames(of line: SteamChatLine) -> [UInt32: String] {
+        Dictionary(line.appIds.compactMap { appId in chat.gameName(appId).map { (appId, $0) } },
+                   uniquingKeysWith: { first, _ in first })
     }
 
     private func banner(_ message: String, dismiss: (() -> Void)?) -> some View {
@@ -298,15 +305,16 @@ private struct ChatSeparator: View {
 private struct ChatLineView: View {
     let line: SteamChatLine
     let friendName: String
-    let gameName: @MainActor (UInt32) -> String?
+    /// The games the line names, when known.
+    let gameNames: [UInt32: String]
 
     var body: some View {
         switch line.content {
-        case .message(let fromMe, let bbcode):
+        case .message(let fromMe, _):
             HStack(spacing: 0) {
                 if fromMe { Spacer(minLength: 64) }
                 VStack(alignment: fromMe ? .trailing : .leading, spacing: 4) {
-                    ForEach(Array(SteamBBCode.render(bbcode).enumerated()), id: \.offset) { _, content in
+                    ForEach(Array(line.contents.enumerated()), id: \.offset) { _, content in
                         switch content {
                         case .text(let text):
                             ChatBubble(text: text, fromMe: fromMe)
@@ -318,7 +326,7 @@ private struct ChatLineView: View {
                                                                                          locale: L10n.locale)))
                         case .invitation(let invitation):
                             ChatInvitationCard(invitation: invitation, fromMe: fromMe, friendName: friendName,
-                                               gameName: invitation.appId.flatMap(gameName))
+                                               gameName: invitation.appId.flatMap { gameNames[$0] })
                         }
                     }
                 }
@@ -326,7 +334,7 @@ private struct ChatLineView: View {
                 if !fromMe { Spacer(minLength: 64) }
             }
         case .invitationSent(let appId):
-            Label(gameName(appId).map { L10n.string("ui.chat.invite.sent", friendName, $0) }
+            Label(gameNames[appId].map { L10n.string("ui.chat.invite.sent", friendName, $0) }
                       ?? L10n.string("ui.chat.invite.sentUnknown", friendName),
                   systemImage: "paperplane")
                 .font(.system(size: 11, weight: .medium)).foregroundStyle(.secondary)

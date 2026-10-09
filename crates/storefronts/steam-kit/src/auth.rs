@@ -12,6 +12,7 @@ mod tests;
 use std::time::Duration;
 
 use base64::{Engine as _, engine::general_purpose};
+use obelisk_core::transfer::BodyError;
 use prost::Message;
 use reqwest::{Client, Method};
 use rsa::{
@@ -219,7 +220,7 @@ pub fn web_cookies(steam_id: u64, access_token: &str) -> Vec<WebCookie> {
 fn random_hex<const BYTES: usize>() -> String {
     let mut bytes = [0u8; BYTES];
     OsRng.fill_bytes(&mut bytes);
-    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+    crate::content::hex(&bytes)
 }
 
 /// A cookie that signs Steam's sites in. Its value is a secret: no `Debug`.
@@ -429,8 +430,8 @@ impl AuthClient {
         let body = crate::client::read_bounded(response, MAX_RESPONSE_BYTES)
             .await
             .map_err(|error| match error {
-                crate::client::BodyError::Network => AuthError::Network,
-                crate::client::BodyError::TooLarge => AuthError::Protocol,
+                BodyError::Size => AuthError::Protocol,
+                BodyError::Network | BodyError::Cancelled => AuthError::Network,
             })?;
         Response::decode(body.as_slice()).map_err(|_| AuthError::Protocol)
     }
