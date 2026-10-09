@@ -86,6 +86,26 @@ struct StorefrontGlassIcon: View {
     }
 }
 
+/// A round storefront control, named by its label for VoiceOver and its tooltip.
+struct StorefrontGlassButton: View {
+    let systemName: String
+    var size: CGFloat = 14
+    let label: String
+    let identifier: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            StorefrontGlassIcon(systemName: systemName, size: size)
+                .foregroundStyle(.primary)
+        }
+        .obeliskButtonStyle(.plain)
+        .accessibilityLabel(label)
+        .accessibilityIdentifier(identifier)
+        .help(label)
+    }
+}
+
 /// A storefront control's glass capsule, solid while transparency is reduced.
 struct StorefrontControlGlass: ViewModifier {
     /// Whether the glass reacts to the pointer, as a button's does.

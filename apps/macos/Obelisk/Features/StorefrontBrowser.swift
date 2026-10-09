@@ -170,19 +170,19 @@ private struct StorefrontStoreModal: View {
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
     var body: some View {
+        let title = L10n.string("ui.store.openStore", storeTitle)
         ZStack {
             Color.black.opacity(reduceTransparency ? 0.45 : 0.28)
                 .ignoresSafeArea()
                 .contentShape(Rectangle())
                 .onTapGesture(perform: close)
                 .accessibilityHidden(true)
-            WebPagePanel(url: URL(string: "about:blank")!, start: start, close: close, showsCloseButton: true,
-                         placeholderTitle: L10n.string("ui.store.openStore", storeTitle),
+            WebPagePanel(start: start, close: close, showsCloseButton: true, placeholderTitle: title,
                          identifier: "\(storeID)-store")
                 .padding(.horizontal, 32)
                 .padding(.top, ObeliskStyle.titleBarHeight)
                 .padding(.bottom, 28)
-                .accessibilityLabel(L10n.string("ui.store.openStore", storeTitle))
+                .accessibilityLabel(title)
                 .accessibilityAddTraits(.isModal)
         }
     }

@@ -16,8 +16,6 @@ struct WebPageStart {
 /// in the browser. Back leaves the page once its history is empty, unless a
 /// close button ends it.
 struct WebPagePanel: View {
-    /// What the toolbar names while the page loads.
-    let url: URL
     let start: @MainActor () async -> WebPageStart
     let close: () -> Void
     var showsCloseButton = false
@@ -30,31 +28,34 @@ struct WebPagePanel: View {
         VStack(spacing: 0) {
             HStack(spacing: 10) {
                 if !showsCloseButton || browser?.canGoBack == true {
-                    toolbarButton("chevron.left", size: 14, label: L10n.string("ui.overlay.back"),
-                                  identifier: "\(identifier)-back") {
+                    StorefrontGlassButton(systemName: "chevron.left", label: L10n.string("ui.overlay.back"),
+                                          identifier: "\(identifier)-back") {
                         if browser?.canGoBack == true { browser?.webView.goBack() } else { close() }
                     }
                 }
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(browser?.title ?? placeholderTitle ?? url.host() ?? url.absoluteString)
+                    Text(browser?.title ?? placeholderTitle ?? "")
                         .font(.system(size: 13, weight: .semibold))
-                    Text((browser?.url ?? url).host() ?? "")
+                    Text(browser?.url?.host() ?? "")
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                 }
                 .lineLimit(1)
                 Spacer(minLength: 12)
                 if browser?.isLoading != false { ProgressView().controlSize(.small) }
-                toolbarButton("arrow.clockwise", size: 13, label: L10n.string("ui.overlay.web.reload")) {
+                StorefrontGlassButton(systemName: "arrow.clockwise", size: 13,
+                                      label: L10n.string("ui.overlay.web.reload"), identifier: "\(identifier)-reload") {
                     browser?.webView.reload()
                 }
-                toolbarButton("safari", size: 14, label: L10n.string("ui.overlay.web.openInBrowser")) {
+                StorefrontGlassButton(systemName: "safari", label: L10n.string("ui.overlay.web.openInBrowser"),
+                                      identifier: "\(identifier)-open-in-browser") {
                     // The page's own address: the one that signed it in spent its code.
-                    NSWorkspace.shared.open(browser?.url ?? url)
+                    if let url = browser?.url { NSWorkspace.shared.open(url) }
                 }
+                .disabled(browser?.url == nil)
                 if showsCloseButton {
-                    toolbarButton("xmark", size: 13, label: L10n.string("ui.web.close"),
-                                  identifier: "\(identifier)-close", action: close)
+                    StorefrontGlassButton(systemName: "xmark", size: 13, label: L10n.string("ui.common.close"),
+                                          identifier: "\(identifier)-close", action: close)
                         .keyboardShortcut(.cancelAction)
                 }
             }
@@ -66,19 +67,13 @@ struct WebPagePanel: View {
             .clipShape(UnevenRoundedRectangle(bottomLeadingRadius: 24, bottomTrailingRadius: 24))
         }
         .modifier(StorefrontPanelGlass(cornerRadius: 24))
-        .task(id: url) { browser = WebPageBrowser(await start()) }
-        .accessibilityIdentifier(identifier)
-    }
-
-    private func toolbarButton(_ symbol: String, size: CGFloat, label: String, identifier: String? = nil,
-                               action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            StorefrontGlassIcon(systemName: symbol, size: size).foregroundStyle(.primary)
+        .task {
+            let page = await start()
+            // Closed while it signed in: a code it spent would load nowhere.
+            guard !Task.isCancelled else { return }
+            browser = WebPageBrowser(page)
         }
-        .obeliskButtonStyle(.plain)
-        .accessibilityLabel(label)
-        .accessibilityIdentifier(identifier ?? "")
-        .help(label)
+        .accessibilityIdentifier(identifier)
     }
 }
 
@@ -109,25 +104,22 @@ final class WebPageBrowser: NSObject, WKNavigationDelegate, WKUIDelegate, NSWind
     }
 
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
-        if webView === self.webView { isLoading = true }
+        isLoading = true
     }
 
-    func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
-        if webView === self.webView { update() }
-    }
+    func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) { update() }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        guard webView === self.webView else { return }
         update()
         isLoading = false
     }
 
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
-        if webView === self.webView { isLoading = false }
+        isLoading = false
     }
 
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
-        if webView === self.webView { isLoading = false }
+        isLoading = false
     }
 
     /// A link that opens a new window opens in the page instead; a script's
@@ -144,7 +136,6 @@ final class WebPageBrowser: NSObject, WKNavigationDelegate, WKUIDelegate, NSWind
         let popup = NSWindow(contentRect: NSRect(origin: .zero, size: size),
                              styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
         let content = WKWebView(frame: NSRect(origin: .zero, size: size), configuration: configuration)
-        content.navigationDelegate = self
         content.uiDelegate = self
         popup.contentView = content
         popup.isReleasedWhenClosed = false

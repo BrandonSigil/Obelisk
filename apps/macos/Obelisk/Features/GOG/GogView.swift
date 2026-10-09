@@ -33,7 +33,7 @@ struct GogView: View {
             libraryTitle: L10n.string("ui.gog.library"),
             accountName: model.accountName,
             avatarURL: model.avatarURL,
-            storePage: { WebPageStart(url: GogGames.storeURL, dataStore: WebSignInStore.gog.dataStore) },
+            storePage: model.storePage,
             scrollMemory: libraryScroll
         ) { game in
             StorefrontArtwork(imageURL: game.headerImageUrl ?? game.imageUrl, maxPixelSize: 2048)

@@ -32,9 +32,7 @@ struct SteamView: View {
             accountName: model.displayName,
             avatarURL: model.avatarURL,
             unreadCount: model.chat.totalUnread,
-            storePage: { [model] in
-                WebPageStart(url: GameOverlayController.storeURL(appId: 0), cookies: await model.webCookies())
-            },
+            storePage: model.storePage,
             scrollMemory: libraryScroll
         ) { game in
             SteamArtwork(appId: game.appId, portrait: false, iconHash: game.iconHash)

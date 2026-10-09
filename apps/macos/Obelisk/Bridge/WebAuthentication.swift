@@ -33,24 +33,21 @@ extension WebSignInStore {
     /// Where its sign-in page keeps its cookies. GOG's site cannot be signed
     /// in from the app's token: its sign-in keeps them for its store pages,
     /// until the account signs out. Epic's sign-in keeps nothing.
-    @MainActor var dataStore: WKWebsiteDataStore {
+    @MainActor var dataStore: WKWebsiteDataStore { site ?? .nonPersistent() }
+
+    @MainActor func forgetSite() {
+        site?.removeData(ofTypes: WKWebsiteDataStore.allWebsiteDataTypes(), modifiedSince: .distantPast) {}
+    }
+
+    @MainActor private var site: WKWebsiteDataStore? {
         switch self {
-        case .epic: .nonPersistent()
+        case .epic: nil
         case .gog: Self.gogSite
         }
     }
 
     @MainActor private static let gogSite = WKWebsiteDataStore(
         forIdentifier: UUID(uuidString: "5C6F6B0E-3E0B-4C55-9B57-0D5B9E2A4F61")!)
-
-    @MainActor func forgetSite() {
-        guard case .gog = self else { return }
-        Self.gogSite.removeData(ofTypes: WKWebsiteDataStore.allWebsiteDataTypes(), modifiedSince: .distantPast) {}
-    }
-}
-
-extension GogGames {
-    @MainActor static func forgetWebSignIn() { WebSignInStore.gog.forgetSite() }
 }
 
 enum WebAuthenticationError: LocalizedError {

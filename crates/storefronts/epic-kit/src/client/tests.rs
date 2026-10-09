@@ -193,6 +193,7 @@ async fn web_sign_in_spends_an_exchange_code_on_epics_site_only() {
         "http://store.epicgames.com/",
         "https://example.com/",
         "https://epicgames.com.example.com/",
+        "https://user@store.epicgames.com/",
     ] {
         assert!(matches!(
             client.web_sign_in_url(elsewhere).await,

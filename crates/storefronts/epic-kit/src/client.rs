@@ -112,6 +112,7 @@ impl Client {
     pub async fn web_sign_in_url(&self, redirect: &str) -> Result<String, EpicError> {
         let redirect = Url::parse(redirect).map_err(|_| EpicError::Protocol)?;
         if redirect.scheme() != "https"
+            || !auth::credential_free(&redirect)
             || !redirect
                 .host_str()
                 .is_some_and(|host| host == "epicgames.com" || host.ends_with(".epicgames.com"))

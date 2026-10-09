@@ -1,5 +1,4 @@
 import SwiftUI
-import WebKit
 
 /// The overlay over the dimmed game: its bar on top, the friends of the
 /// game's storefront on the leading side, and the page it shows.
@@ -64,8 +63,9 @@ struct GameOverlayView: View {
                                         back: { overlay.back() }, retry: overlay.retryAchievements)
             }
         case .webPage(let url):
-            WebPagePanel(url: url, start: { WebPageStart(url: url, cookies: await overlay.webCookies(for: url)) },
-                         close: { overlay.back() }, identifier: "game-overlay-web-page")
+            WebPagePanel(start: { WebPageStart(url: url, cookies: await overlay.webCookies(for: url)) },
+                         close: { overlay.back() }, placeholderTitle: url.host() ?? url.absoluteString,
+                         identifier: "game-overlay-web-page")
                 .id(url)
         case .home, .friends, .invite, .user, .store, .microTxn:
             OverlayHome(overlay: overlay)
@@ -118,14 +118,8 @@ private struct OverlayTopBar: View {
                 .padding(.horizontal, 10)
                 .frame(height: 26)
                 .background(.primary.opacity(0.08), in: Capsule())
-            Button(action: overlay.hide) {
-                StorefrontGlassIcon(systemName: "xmark", size: 13)
-                    .foregroundStyle(.primary)
-            }
-            .obeliskButtonStyle(.plain)
-            .accessibilityLabel(L10n.string("ui.overlay.close"))
-            .accessibilityIdentifier("game-overlay-close")
-            .help(L10n.string("ui.overlay.close"))
+            StorefrontGlassButton(systemName: "xmark", size: 13, label: L10n.string("ui.overlay.close"),
+                                  identifier: "game-overlay-close", action: overlay.hide)
         }
         .padding(.leading, 12)
         .padding(.trailing, 14)
@@ -226,14 +220,8 @@ private struct OverlayBackButton: View {
     let action: () -> Void
 
     var body: some View {
-        Button(action: action) {
-            StorefrontGlassIcon(systemName: "chevron.left", size: 14)
-                .foregroundStyle(.primary)
-        }
-        .obeliskButtonStyle(.plain)
-        .accessibilityLabel(L10n.string("ui.overlay.back"))
-        .accessibilityIdentifier("game-overlay-back")
-        .help(L10n.string("ui.overlay.back"))
+        StorefrontGlassButton(systemName: "chevron.left", label: L10n.string("ui.overlay.back"),
+                              identifier: "game-overlay-back", action: action)
     }
 }
 

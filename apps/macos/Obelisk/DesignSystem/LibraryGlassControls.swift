@@ -34,7 +34,10 @@ struct LibraryGlassBar<AccountMenu: View>: View {
         GlassEffectContainer(spacing: 6) {
             HStack(spacing: 10) {
                 if let game {
-                    LibraryBackButton(libraryTitle: game.libraryTitle, action: game.back)
+                    // Back to the library, also with Command-[.
+                    StorefrontGlassButton(systemName: "chevron.left", label: game.libraryTitle,
+                                          identifier: "storefront-back", action: game.back)
+                        .keyboardShortcut("[", modifiers: .command)
                         .transition(.scale(scale: 0.4).combined(with: .opacity))
                 }
 
@@ -44,7 +47,8 @@ struct LibraryGlassBar<AccountMenu: View>: View {
                 }
 
                 if let openStore {
-                    LibraryStoreButton(storeTitle: storeTitle, action: openStore)
+                    StorefrontGlassButton(systemName: "storefront", label: L10n.string("ui.store.openStore", storeTitle),
+                                          identifier: "storefront-store", action: openStore)
                 }
 
                 Spacer(minLength: 12)
@@ -80,42 +84,6 @@ struct LibraryGlassBar<AccountMenu: View>: View {
                 .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: showsBackdrop)
                 .allowsHitTesting(false)
         }
-    }
-}
-
-/// Opens the storefront's store in Obelisk.
-struct LibraryStoreButton: View {
-    let storeTitle: String
-    let action: () -> Void
-
-    var body: some View {
-        let label = L10n.string("ui.store.openStore", storeTitle)
-        Button(action: action) {
-            StorefrontGlassIcon(systemName: "storefront", size: 14)
-                .foregroundStyle(.primary)
-        }
-        .obeliskButtonStyle(.plain)
-        .accessibilityLabel(label)
-        .accessibilityIdentifier("storefront-store")
-        .help(label)
-    }
-}
-
-/// Returns from a game's page to its library, also with Command-[.
-struct LibraryBackButton: View {
-    let libraryTitle: String
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            StorefrontGlassIcon(systemName: "chevron.left", size: 14)
-                .foregroundStyle(.primary)
-        }
-        .obeliskButtonStyle(.plain)
-        .keyboardShortcut("[", modifiers: .command)
-        .accessibilityLabel(libraryTitle)
-        .accessibilityIdentifier("storefront-back")
-        .help(libraryTitle)
     }
 }
 

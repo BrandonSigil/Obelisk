@@ -39,7 +39,7 @@ struct EpicView: View {
             storeTitle: L10n.string("ui.store.epic"),
             libraryTitle: L10n.string("ui.epic.library"),
             accountName: model.accountName,
-            storePage: { [model] in WebPageStart(url: await model.webPage(EpicGames.storeURL)) },
+            storePage: model.storePage,
             scrollMemory: libraryScroll
         ) { game in
             StorefrontArtwork(imageURL: game.headerImageUrl ?? game.imageUrl, maxPixelSize: 2048)
