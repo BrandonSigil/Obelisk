@@ -1807,6 +1807,20 @@ async fn achievements_distinguish_no_support_from_graphql_and_incomplete_respons
             .is_empty()
     );
     assert_eq!(mock.requests().len(), 1);
+    let mock = Mock::new(vec![reply(
+        "/graphql",
+        200,
+        json!({"data":{"Achievement":{"productAchievementsRecordBySandbox":
+            {"sandboxId":null,"totalAchievements":null,"achievements":null}}}}),
+    )]);
+    assert!(
+        mock.client(false)
+            .achievements("space", "fr")
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(mock.requests().len(), 1);
     for response in [
         json!({"errors":[{"message":"denied"}],"data":null}),
         json!({"data":{}}),

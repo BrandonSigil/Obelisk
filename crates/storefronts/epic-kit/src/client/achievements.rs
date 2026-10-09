@@ -135,7 +135,8 @@ fn product(mut value: Value, namespace: &str) -> Result<Option<Product>, EpicErr
     let record = value
         .pointer_mut("/data/Achievement/productAchievementsRecordBySandbox")
         .ok_or(EpicError::Protocol)?;
-    if record.is_null() {
+    // A game without achievements has a record whose fields are all null.
+    if record.is_null() || record.get("achievements").is_some_and(Value::is_null) {
         return Ok(None);
     }
     let product: Product =
