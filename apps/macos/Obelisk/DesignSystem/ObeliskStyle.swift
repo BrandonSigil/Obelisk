@@ -3,7 +3,8 @@ import SwiftUI
 
 /// Shared colors and spacing for the native macOS interface.
 enum ObeliskStyle {
-    static let accent = Color(red: 1.0, green: 0.22, blue: 0.38)
+    /// The violet of Obelisk's icon.
+    static let accent = Color(red: 0.77, green: 0.235, blue: 1.0)
     static let sidebarWidth: CGFloat = 216
     static let contentPadding: CGFloat = 32
     /// The floating glass bar's height; a storefront's pages reserve the same space.
