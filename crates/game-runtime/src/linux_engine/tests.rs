@@ -457,6 +457,93 @@ fn the_launcher_refuses_an_option_it_does_not_know_or_a_variable_name_that_is_no
     assert!(!root.join("engine.txt").exists());
 }
 
+/// A release whose Intel render servers and Obelisk's Intel helper only
+/// record that they ran, into `calls`; the helper succeeds unless `failing`.
+fn translating_release(root: &Path, failing: bool) -> (wine::Config, PathBuf) {
+    use std::os::unix::fs::PermissionsExt;
+    let config = wine::Config {
+        runtime: root.join("release/linux"),
+        graphics: wine::Graphics::D3DMetal,
+        ..linux_config(root)
+    };
+    let helpers = root.join("Helpers");
+    let calls = root.join("calls");
+    let script = |path: PathBuf, body: String| {
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+    };
+    let record = format!(r#"echo "$(basename "$0") $*" >> "{}""#, calls.display());
+    let server = config.runtime.join("graphics/x86_64");
+    script(server.join("bin/virgl_test_server"), record.clone());
+    script(server.join("libexec/virgl_render_server"), record.clone());
+    let exit = if failing { "exit 1" } else { "exit 0" };
+    script(
+        helpers.join(crate::package::SDK_INTEL),
+        format!("{record}\n{exit}"),
+    );
+    (config, calls)
+}
+
+#[test]
+fn d3dmetal_is_translated_once_per_runtime_and_macos_build_before_its_first_game() {
+    let (_directory, root) = installation();
+    let (config, calls) = translating_release(&root, false);
+    let helpers = root.join("Helpers");
+
+    translate_d3dmetal(&config, &helpers);
+
+    let server = config.runtime.join("graphics/x86_64");
+    assert_eq!(
+        fs::read_to_string(&calls)
+            .unwrap()
+            .lines()
+            .collect::<Vec<_>>(),
+        [
+            "virgl_test_server --obelisk-translate".to_owned(),
+            "virgl_render_server --obelisk-translate".to_owned(),
+            format!(
+                "{} warm-d3dmetal {} {}",
+                crate::package::SDK_INTEL,
+                server.join("lib/libd3dmetal-native.dylib").display(),
+                root.join("release/lib/external/D3DMetal.framework")
+                    .display()
+            ),
+        ]
+    );
+    let record = config.runtime.join(TRANSLATED);
+    assert_eq!(fs::read_to_string(&record).ok(), macos_build());
+
+    fs::remove_file(&calls).unwrap();
+    translate_d3dmetal(&config, &helpers);
+    assert!(!calls.exists(), "already translated");
+
+    // A macOS update drops Rosetta's translations.
+    fs::write(&record, "an older build").unwrap();
+    translate_d3dmetal(&config, &helpers);
+    assert_eq!(fs::read_to_string(&calls).unwrap().lines().count(), 3);
+}
+
+#[test]
+fn a_failed_translation_is_tried_again_and_a_dxmt_game_needs_none() {
+    let (_directory, root) = installation();
+    let (config, calls) = translating_release(&root, true);
+    let helpers = root.join("Helpers");
+
+    translate_d3dmetal(&config, &helpers);
+    assert!(!config.runtime.join(TRANSLATED).exists());
+    translate_d3dmetal(&config, &helpers);
+    assert_eq!(fs::read_to_string(&calls).unwrap().lines().count(), 6);
+
+    fs::remove_file(&calls).unwrap();
+    let dxmt = wine::Config {
+        graphics: wine::Graphics::Dxmt,
+        ..config
+    };
+    translate_d3dmetal(&dxmt, &helpers);
+    assert!(!calls.exists());
+}
+
 /// End to end on an installed engine runtime, through `prepare` and the
 /// launcher as a launch runs them: `OBELISK_LINUX_ENGINE_RUNTIME` names the
 /// runtime, `OBELISK_LINUX_ENGINE_PROGRAM` a Windows program that exits by

@@ -58,6 +58,7 @@ pub fn prepare_windows(
     // that program must be the one readied.
     let target = config.profile().target(&config.install, &installed.target);
     wine::prepare(&wine, &config.home, &config.install, &target, &prefix)?;
+    crate::linux_engine::translate_d3dmetal(&wine, &locations.helpers);
     Ok(wine)
 }
 

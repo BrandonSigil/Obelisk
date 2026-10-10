@@ -35,6 +35,7 @@ pub fn prepare_windows(
         &installed.target,
         &prefix,
     )?;
+    crate::linux_engine::translate_d3dmetal(&wine, &locations.helpers);
     Ok(wine)
 }
 

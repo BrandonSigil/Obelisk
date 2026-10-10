@@ -64,6 +64,11 @@ const PREFIX: &str = "prefix";
 const DIRECT3D: [&str; 3] = ["d3d11.dll", "dxgi.dll", "d3d12.dll"];
 /// Creating a prefix through the engine takes about a minute.
 const BOOT_TIMEOUT: Duration = Duration::from_secs(10 * 60);
+/// Records, in a runtime, the macOS build Rosetta translated its D3DMetal for.
+const TRANSLATED: &str = ".obelisk-d3dmetal-translated";
+/// Translating D3DMetal takes about 8 seconds; one still running after this
+/// long is abandoned, and the game pays for the rest.
+const TRANSLATION_TIMEOUT: Duration = Duration::from_secs(2 * 60);
 
 /// The engine's prefix of the installation whose Rosetta prefix is
 /// `rosetta`: its own folder beside it, the prefix inside, since the guest
@@ -192,6 +197,65 @@ fn binds(config: &wine::Config, install: Option<&Path>) -> Result<String, Error>
         binds.push(format!("{GAME}={}", install.display()));
     }
     Ok(binds.join(";"))
+}
+
+/// Has Rosetta translate D3DMetal and the Intel render server before the
+/// first game of `config` that renders with D3DMetal. The render server
+/// loads D3DMetal when its game first asks for Direct3D, and translating it
+/// then holds the game about 7 seconds, long enough for Easy Anti-Cheat to
+/// give up. Rosetta keeps a translation per file until macOS updates, so it
+/// runs once per runtime and macOS build, through Obelisk's Intel helper in
+/// `helpers`. A failure only leaves the cost to the game.
+pub(crate) fn translate_d3dmetal(config: &wine::Config, helpers: &Path) {
+    if config.engine != wine::Engine::Linux || config.graphics != wine::Graphics::D3DMetal {
+        return;
+    }
+    let (Some(system), Some(release)) = (macos_build(), config.runtime.parent()) else {
+        return;
+    };
+    let record = config.runtime.join(TRANSLATED);
+    if fs::read_to_string(&record).is_ok_and(|translated| translated == system) {
+        return;
+    }
+    let server = config.runtime.join("graphics/x86_64");
+    // Each server is translated as it starts, and stops at an unknown option.
+    for program in ["bin/virgl_test_server", "libexec/virgl_render_server"] {
+        let mut command = Command::new(server.join(program));
+        command.arg("--obelisk-translate");
+        quietly(command);
+    }
+    let mut command = Command::new(helpers.join(crate::package::SDK_INTEL));
+    command
+        .arg("warm-d3dmetal")
+        .arg(server.join("lib/libd3dmetal-native.dylib"))
+        .arg(release.join("lib/external/D3DMetal.framework"));
+    if quietly(command) == Some(0) {
+        let _ = obelisk_core::write_atomic(&record, system.as_bytes());
+    }
+}
+
+/// The exit code of `command`, run without input or output, or `None` when
+/// it could not start or outlasted `TRANSLATION_TIMEOUT`.
+fn quietly(mut command: Command) -> Option<i32> {
+    let child = command
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .ok()?;
+    wine::wait(child, TRANSLATION_TIMEOUT).ok().flatten()
+}
+
+/// The running macOS build, such as `25A354`.
+fn macos_build() -> Option<String> {
+    let output = Command::new("/usr/sbin/sysctl")
+        .args(["-n", "kern.osversion"])
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .output()
+        .ok()?;
+    let build = String::from_utf8(output.stdout).ok()?.trim().to_owned();
+    (output.status.success() && !build.is_empty()).then_some(build)
 }
 
 /// Leads lsteamclient to Valve's Linux steamclient: it loads the library the

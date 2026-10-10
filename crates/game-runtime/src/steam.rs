@@ -122,6 +122,7 @@ pub fn prepare(
     let (target, steam_api) = match &wine {
         Some(wine) => {
             crate::wine::prepare(wine, home, install, target, &windows::Prefix { install })?;
+            crate::linux_engine::translate_d3dmetal(wine, &locations.helpers);
             windows::target(install, target, home, wine)?
         }
         None => native_target(install, target, home)?,

@@ -45,6 +45,47 @@ pub fn exec_game() -> std::io::Result<()> {
     })
 }
 
+/// d3dmetal-native's `dmn_options`.
+#[repr(C)]
+struct D3DMetalOptions {
+    struct_size: usize,
+    framework_path: *const c_char,
+    log_callback: Option<extern "C" fn(i32, *const c_char, *mut c_void)>,
+    log_context: *mut c_void,
+}
+
+/// Loads d3dmetal-native from `library` and the D3DMetal of `framework`
+/// through it, as a render server does when its game first asks for
+/// Direct3D. Under Rosetta this translates both ahead of the game, which
+/// would otherwise wait for it. Whether D3DMetal initialized.
+pub fn warm_d3dmetal(library: &std::ffi::OsStr, framework: &std::ffi::OsStr) -> bool {
+    let (Ok(library), Ok(framework)) = (
+        CString::new(library.as_bytes()),
+        CString::new(framework.as_bytes()),
+    ) else {
+        return false;
+    };
+    // SAFETY: a NUL-terminated path; the library stays loaded until exit.
+    let handle = unsafe { libc::dlopen(library.as_ptr(), libc::RTLD_NOW | libc::RTLD_LOCAL) };
+    if handle.is_null() {
+        return false;
+    }
+    // SAFETY: a live handle and a NUL-terminated symbol name.
+    let symbol = unsafe { libc::dlsym(handle, c"dmn_init".as_ptr()) };
+    if symbol.is_null() {
+        return false;
+    }
+    // SAFETY: d3dmetal-native exports `dmn_result dmn_init(const dmn_options*)`.
+    let init: extern "C" fn(*const D3DMetalOptions) -> i32 = unsafe { std::mem::transmute(symbol) };
+    let options = D3DMetalOptions {
+        struct_size: std::mem::size_of::<D3DMetalOptions>(),
+        framework_path: framework.as_ptr(),
+        log_callback: None,
+        log_context: std::ptr::null_mut(),
+    };
+    init(&options) == 0
+}
+
 fn exec_game_inner(arguments: &[std::ffi::OsString]) -> std::io::Result<()> {
     let strings = arguments
         .iter()

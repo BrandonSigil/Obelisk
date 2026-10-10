@@ -1,4 +1,5 @@
 //! Intel game exec handoff. Steamworks initialization belongs to the game.
+//! Also translates D3DMetal ahead of the Linux engine's games.
 use obelisk_steam_native::native;
 
 fn main() {
@@ -15,6 +16,13 @@ fn run() -> i32 {
         // the supervisor spawned this helper with.
         let _ = native::exec_game();
         return 1;
+    }
+    if arguments.len() == 4 && arguments[1] == "warm-d3dmetal" {
+        return if native::warm_d3dmetal(&arguments[2], &arguments[3]) {
+            0
+        } else {
+            1
+        };
     }
     2
 }
