@@ -375,6 +375,35 @@ fn a_steam_store_keeps_what_the_host_told_and_reads_records_without_it() {
 const FRIEND: u64 = 76_561_197_960_265_729;
 
 #[test]
+fn a_windows_game_starts_as_its_engine_runs_rosetta_s_wine_intel_and_the_linux_engine_arm64() {
+    let directory = tempfile::tempdir().unwrap();
+    let target = Target {
+        executable: "/bin/bash".into(),
+        arguments: Vec::new(),
+        working_directory: directory.path().into(),
+        environment: Default::default(),
+        log: None,
+        installation: None,
+        program: None,
+    };
+    let mut config = config(directory.path());
+    let wine = crate::wine::tests::config(directory.path());
+    config.wine = Some(wine.clone());
+    assert_eq!(
+        Mac::select(&target, &config).unwrap(),
+        Some(Architecture::Intel)
+    );
+    config.wine = Some(crate::wine::Config {
+        engine: crate::wine::Engine::Linux,
+        ..wine
+    });
+    assert_eq!(
+        Mac::select(&target, &config).unwrap(),
+        Some(Architecture::Arm64)
+    );
+}
+
+#[test]
 fn only_a_game_in_wine_is_told_steams_overlay_is_enabled() {
     let mut native = std::collections::HashMap::new();
     game_environment(&mut native, 42, false, Path::new("/runtime"));

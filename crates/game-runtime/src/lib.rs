@@ -13,6 +13,7 @@ pub mod package;
 #[cfg(feature = "packaging")]
 pub mod packaging;
 mod process;
+pub mod profile;
 pub mod protocol;
 pub mod sessions;
 pub mod steam;

@@ -51,6 +51,8 @@ pub struct Config {
     pub log: PathBuf,
     #[serde(default)]
     pub engine: Engine,
+    #[serde(default)]
+    pub graphics: Graphics,
 }
 
 /// What runs a Windows game's Wine.
@@ -60,8 +62,20 @@ pub enum Engine {
     #[default]
     Rosetta,
     /// Voile's Wine for Linux, which voile-lkd's engine runs natively; for the
-    /// games `linux_engine` names.
+    /// games whose `profile` names it.
     Linux,
+}
+
+/// What renders a Windows game's Direct3D on the Linux engine. Rosetta's
+/// Wine picks its own.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Graphics {
+    /// DXMT, in Neptune's arm64 render server: Direct3D 11.
+    #[default]
+    Dxmt,
+    /// D3DMetal, in Neptune's Intel render server under Rosetta: Direct3D 11
+    /// and 12.
+    D3DMetal,
 }
 
 /// The Wine prefix of the Windows installation in `install`, named after the
@@ -81,18 +95,25 @@ impl Config {
             prefix,
             log,
             engine: Engine::Rosetta,
+            graphics: Graphics::default(),
         })
     }
 
-    /// The Linux engine's runtime installed in `voile` running `prefix`, or
-    /// `WineUnavailable` while it is not installed.
-    pub fn locate_linux(voile: &Path, prefix: PathBuf, log: PathBuf) -> Result<Self, Error> {
+    /// The Linux engine's runtime installed in `voile` running `prefix` with
+    /// `graphics`, or `WineUnavailable` while it is not installed.
+    pub fn locate_linux(
+        voile: &Path,
+        prefix: PathBuf,
+        log: PathBuf,
+        graphics: Graphics,
+    ) -> Result<Self, Error> {
         let runtime = crate::voile::linux_runtime(voile).ok_or(Error::WineUnavailable)?;
         Ok(Self {
             runtime,
             prefix,
             log,
             engine: Engine::Linux,
+            graphics,
         })
     }
 
@@ -211,7 +232,7 @@ pub fn prepare(
     storefront: &impl Storefront,
 ) -> Result<(), Error> {
     if config.engine == Engine::Linux {
-        return crate::linux_engine::prepare(config, install, target);
+        return crate::linux_engine::prepare(config, install, target, storefront);
     }
     program(install, target)?;
     boot(config, home)?;
@@ -357,30 +378,41 @@ pub(crate) fn windows_path(path: &Path) -> String {
 pub struct Installation {
     prefix: PathBuf,
     engine: Engine,
+    graphics: Graphics,
 }
 
 impl Installation {
-    /// The installation in `install`, when `platform` names a Windows build as
-    /// either storefront spells it.
+    /// The installation of `game` in `install`, when `platform` names a
+    /// Windows build as a storefront spells it, run as the game's profile
+    /// says.
     pub fn of(
         locations: &crate::Locations,
+        game: crate::profile::Game<'_>,
         platform: &str,
         install: &Path,
     ) -> Result<Option<Self>, Error> {
         if !platform.eq_ignore_ascii_case("windows") {
             return Ok(None);
         }
-        Ok(Some(Self {
+        let windows = Self {
             prefix: prefix(&locations.wine_prefixes, install)?,
             engine: Engine::Rosetta,
+            graphics: Graphics::default(),
+        };
+        let profile = crate::profile::of(game);
+        Ok(Some(match profile.engine {
+            Engine::Rosetta => windows,
+            Engine::Linux => windows.on_linux_engine(profile.graphics)?,
         }))
     }
 
-    /// The same installation run by the Linux engine, in its own prefix.
-    pub fn on_linux_engine(self) -> Result<Self, Error> {
+    /// The same installation run by the Linux engine with `graphics`, in its
+    /// own prefix.
+    pub fn on_linux_engine(self, graphics: Graphics) -> Result<Self, Error> {
         Ok(Self {
             prefix: crate::linux_engine::prefix(&self.prefix)?,
             engine: Engine::Linux,
+            graphics,
         })
     }
 
@@ -393,7 +425,9 @@ impl Installation {
     pub fn runtime(&self, locations: &crate::Locations, log: PathBuf) -> Result<Config, Error> {
         match self.engine {
             Engine::Rosetta => Config::locate(&locations.voile, self.prefix.clone(), log),
-            Engine::Linux => Config::locate_linux(&locations.voile, self.prefix.clone(), log),
+            Engine::Linux => {
+                Config::locate_linux(&locations.voile, self.prefix.clone(), log, self.graphics)
+            }
         }
     }
 

@@ -11,7 +11,10 @@ pub fn prepare_windows(
 ) -> Result<wine::Config> {
     // The configuration may come from a saved journal: its prefix must be the
     // one of the installation it names.
-    let windows = wine::Installation::of(locations, &config.platform, &config.install)?
+    let game = crate::profile::Game::Gog {
+        product_id: &config.product_id,
+    };
+    let windows = wine::Installation::of(locations, game, &config.platform, &config.install)?
         .filter(|windows| config.prefix.as_deref() == Some(windows.prefix()))
         .ok_or(Error::Unsupported)?;
     let wine = windows.runtime(

@@ -141,8 +141,12 @@ impl<N: Network> Content<N> {
 
     /// The build's Wine prefix, when it is a Windows one.
     fn windows(&self, receipt: &Receipt) -> Option<crate::wine::Installation> {
+        let game = crate::profile::Game::Gog {
+            product_id: &receipt.product_id,
+        };
         crate::wine::Installation::of(
             &self.locations,
+            game,
             &receipt.platform,
             Path::new(&receipt.directory),
         )

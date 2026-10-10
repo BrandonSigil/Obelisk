@@ -154,6 +154,80 @@ fn a_windows_launch_readies_the_installation_prefix_and_names_it_once() {
 }
 
 #[test]
+fn a_game_whose_profile_names_the_linux_engine_readies_the_engine_s_prefix_with_valve_s_clients() {
+    let (_directory, root) = installation();
+    let locations = locations(&root);
+    let runtime = locations.voile.join("current/linux");
+    for file in ["engine/fexdarwin-run", "wine/bin/wine"] {
+        fs::create_dir_all(runtime.join(file).parent().unwrap()).unwrap();
+        fs::write(runtime.join(file), "").unwrap();
+    }
+    fs::create_dir_all(runtime.join("windows")).unwrap();
+    for library in ["d3d11.dll", "dxgi.dll", "d3d12.dll"] {
+        fs::write(runtime.join("windows").join(library), library).unwrap();
+    }
+    fs::create_dir_all(runtime.join("steam")).unwrap();
+    for name in CLIENTS {
+        fs::write(runtime.join("steam").join(name), name).unwrap();
+    }
+    let games = root.join("library/Games/Steam");
+    let install = steam_game(&games);
+    let install = {
+        let named = games.join("steam-1245620-windows");
+        fs::rename(&install, &named).unwrap();
+        named
+    };
+    // A prefix the engine already created.
+    let prefix = root.join("library/Prefixes/steam-1245620-windows-linux/prefix");
+    fs::create_dir_all(prefix.join("drive_c/windows/system32")).unwrap();
+    fs::write(prefix.join("system.reg"), "registry").unwrap();
+
+    let request = crate::steam::prepare(
+        &locations,
+        1245620,
+        "windows",
+        &install,
+        &target(&install.join("Game.exe"), &[]),
+    )
+    .unwrap();
+
+    let wine = request.config.wine.as_ref().unwrap();
+    assert_eq!(wine.engine, wine::Engine::Linux);
+    assert_eq!(wine.graphics, wine::Graphics::D3DMetal);
+    assert_eq!(wine.runtime, runtime);
+    assert_eq!(wine.prefix, prefix);
+    assert_eq!(
+        request.cloud.as_ref().unwrap().prefix.as_ref(),
+        Some(&prefix)
+    );
+    assert_eq!(request.target.executable, Path::new("/bin/bash"));
+    let separator = request
+        .target
+        .arguments
+        .iter()
+        .position(|argument| argument == "--")
+        .unwrap();
+    assert_eq!(
+        request.target.arguments[separator + 1..],
+        [HELPER, "/opt/game/Game.exe"]
+    );
+    assert_eq!(
+        fs::read(prefix.join("drive_c/Program Files (x86)/Steam/steamclient64.dll")).unwrap(),
+        b"steamclient64.dll"
+    );
+    assert_eq!(
+        fs::read_link(prefix.with_file_name(".steam").join("sdk64")).unwrap(),
+        Path::new("/opt/steam/linux64")
+    );
+    assert_eq!(
+        fs::read(prefix.join("drive_c/windows/system32/d3d12.dll")).unwrap(),
+        b"d3d12.dll"
+    );
+    // The Rosetta prefix is never made, and no prerequisite runs.
+    assert!(!root.join("library/Prefixes/steam-1245620-windows").exists());
+}
+
+#[test]
 fn a_windows_launch_waits_for_voile_and_a_mac_one_never_does() {
     let (_directory, root) = installation();
     let locations = locations(&root);

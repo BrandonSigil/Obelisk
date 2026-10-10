@@ -77,6 +77,7 @@ fn each_engine_scopes_the_sweep_to_the_game_and_spares_obelisk() {
         prefix: "/lib/Prefixes/Peak".into(),
         log: "/logs/wine-Peak.log".into(),
         engine: wine::Engine::Rosetta,
+        graphics: wine::Graphics::Dxmt,
     };
     let windows = Scope::of(&game, Some(&rosetta), Some(7), own);
     assert_eq!(

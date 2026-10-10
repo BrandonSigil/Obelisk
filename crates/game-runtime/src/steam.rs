@@ -112,7 +112,10 @@ pub fn prepare(
     let log = locations
         .steam_diagnostics
         .join(format!("wine-{app_id}.log"));
-    let wine = match crate::wine::Installation::of(locations, platform, install)? {
+    let game = crate::profile::Game::Steam { app_id };
+    // The game's profile may start another program than Steam's launch.
+    let target = &crate::profile::of(game).target(install, target);
+    let wine = match crate::wine::Installation::of(locations, game, platform, install)? {
         Some(windows) => Some(windows.runtime(locations, log)?),
         None => None,
     };

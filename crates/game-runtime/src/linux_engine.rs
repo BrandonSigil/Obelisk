@@ -1,8 +1,8 @@
 //! Voile's Linux engine. A Windows game whose anti-cheat supports Linux, such
 //! as Rocket League's Easy Anti-Cheat, runs in voile-wine built for x86-64
 //! Linux, which voile-lkd's engine executes in native macOS processes: the
-//! anti-cheat then loads its Linux module. Only the games this list names run
-//! there; every other Windows game keeps Rosetta's Wine.
+//! anti-cheat then loads its Linux module. Only the games whose profile names
+//! the engine run there; every other Windows game keeps Rosetta's Wine.
 use crate::{Error, supervisor::Target, wine};
 use obelisk_core::launch::LaunchTarget;
 use std::{
@@ -12,62 +12,6 @@ use std::{
     process::{Command, Stdio},
     time::Duration,
 };
-
-/// An Epic build that runs through the engine.
-struct EpicGame {
-    namespace: &'static str,
-    app_name: &'static str,
-    /// The program the engine starts instead of the publisher's executable,
-    /// relative to the installation, when that executable cannot run there.
-    executable: Option<&'static str>,
-}
-
-const EPIC: &[EpicGame] = &[
-    // Rocket League: its Easy Anti-Cheat refuses Rosetta's Wine (code 206).
-    // Its publisher executable, Launcher.exe, is a .NET program and the
-    // engine's Wine has no Mono: the engine starts the Easy Anti-Cheat
-    // bootstrapper Launcher.exe would start, with the same arguments.
-    EpicGame {
-        namespace: "9773aa1aa54f4f7b80e44bef04986cea",
-        app_name: "Sugar",
-        executable: Some("Binaries/Win64/RocketLeague_EAC.exe"),
-    },
-];
-
-fn epic_game(namespace: &str, app_name: &str) -> Option<&'static EpicGame> {
-    EPIC.iter()
-        .find(|game| game.namespace == namespace && game.app_name == app_name)
-}
-
-/// Whether the Epic build `app_name` of `namespace` runs through the engine.
-pub fn runs_epic(namespace: &str, app_name: &str) -> bool {
-    epic_game(namespace, app_name).is_some()
-}
-
-/// What the engine starts for the Epic build `app_name` of `namespace`
-/// installed in `install`: `target`, or the program the list names instead,
-/// with the same arguments, in that program's folder.
-pub(crate) fn epic_target(
-    namespace: &str,
-    app_name: &str,
-    install: &Path,
-    target: &LaunchTarget,
-) -> LaunchTarget {
-    let Some(executable) = epic_game(namespace, app_name).and_then(|game| game.executable) else {
-        return target.clone();
-    };
-    let executable = install.join(executable);
-    LaunchTarget {
-        working_directory: executable
-            .parent()
-            .unwrap_or(install)
-            .to_string_lossy()
-            .into_owned(),
-        executable: executable.to_string_lossy().into_owned(),
-        arguments: target.arguments.clone(),
-        is_application_bundle: false,
-    }
-}
 
 /// Starts the window server and Neptune's render server, then the game, and
 /// ends them with it (see the script).
@@ -101,9 +45,19 @@ fn app_name(title: &str) -> String {
         .to_owned()
 }
 
-/// The guest sees the installation here, and the prefix in its home.
-const GAME: &str = "/games/game";
+/// The guest sees the installation here, and the prefix in its home. Every
+/// folder above a mount must exist in the engine's root: Wine's CreateProcess
+/// lists each folder of the program's path, and a folder the engine makes up
+/// for a mount, such as /games for /games/game, cannot be handed to the Wine
+/// server, which then ends the game.
+const GAME: &str = "/opt/game";
 const HOME: &str = "/home/user";
+/// The runtime's Steam folder, where linux64 holds Valve's Linux steamclient.
+const STEAM: &str = "/opt/steam";
+/// The runtime's guest libraries.
+const LIBRARIES: &str = "/opt/obelisk";
+/// The library that gives Valve's steamclient the macOS pid of its process.
+const HOST_PID: &str = "steam-hostpid.so";
 /// The prefix's folder in the guest's home.
 const PREFIX: &str = "prefix";
 /// Neptune's Direct3D, which replaces Wine's in the prefix.
@@ -165,12 +119,13 @@ fn guest_path(install: &Path, path: &Path) -> Option<String> {
 
 /// Readies the engine's prefix to start `target`: the game must be a Windows
 /// program inside the installation, the prefix is created through the engine
-/// on first use, and Neptune's Direct3D goes into it before each launch.
-/// Storefront prerequisites do not run there.
+/// on first use, the storefront furnishes it, and Neptune's Direct3D goes
+/// into it before each launch. Storefront prerequisites do not run there.
 pub(crate) fn prepare(
     config: &wine::Config,
     install: &Path,
     target: &LaunchTarget,
+    storefront: &impl wine::Storefront,
 ) -> Result<(), Error> {
     guest_program(install, target)?;
     if !config.installed() {
@@ -180,6 +135,7 @@ pub(crate) fn prepare(
     if !config.prefix.join("system.reg").is_file() {
         boot(config)?;
     }
+    storefront.furnish(config)?;
     let system32 = config.prefix.join("drive_c/windows/system32");
     for library in DIRECT3D {
         fs::copy(
@@ -238,6 +194,68 @@ fn binds(config: &wine::Config, install: Option<&Path>) -> Result<String, Error>
     Ok(binds.join(";"))
 }
 
+/// Leads lsteamclient to Valve's Linux steamclient: it loads the library the
+/// guest home's .steam/sdk64 leads to, here the runtime's, which the guest
+/// sees in /opt/steam.
+pub(crate) fn link_steam_client(config: &wine::Config) -> Result<(), Error> {
+    let steam = home(&config.prefix)?.join(".steam");
+    crate::files::private_directory(&steam)?;
+    let link = steam.join("sdk64");
+    let client = Path::new(STEAM).join("linux64");
+    match fs::read_link(&link) {
+        Ok(current) if current == client => return Ok(()),
+        Ok(_) => fs::remove_file(&link)?,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        // Something that is not a link stands there.
+        Err(_) => return Err(Error::Storage),
+    }
+    std::os::unix::fs::symlink(client, link)?;
+    Ok(())
+}
+
+/// What a storefront adds to the guest its game runs in.
+#[derive(Debug, Default)]
+pub(crate) struct Guest {
+    /// The Windows program that starts the game, given the game's guest path
+    /// and arguments, such as Steam's steam.exe.
+    helper: Option<&'static str>,
+    /// Runtime folders the guest sees, read-only, by their guest path.
+    binds: Vec<(&'static str, PathBuf)>,
+    environment: Vec<(&'static str, String)>,
+    /// Variables the launcher hands the guest from its own environment, which
+    /// exist only once the game starts, such as the Steam host's ports.
+    passed: &'static [&'static str],
+}
+
+impl Guest {
+    /// A Steam game's: it starts behind `helper`, Steam's steam.exe, and
+    /// receives `passed` from its session. lsteamclient finds Valve's Linux
+    /// steamclient in the runtime. Steam's engine drops a client whose pid
+    /// is not a live macOS process: a runtime that carries steam-hostpid.so
+    /// has it preloaded in every guest process, where it gives that pid to
+    /// Valve's steamclient alone.
+    pub(crate) fn steam(
+        config: &wine::Config,
+        helper: &'static str,
+        passed: &'static [&'static str],
+    ) -> Self {
+        let mut guest = Self {
+            helper: Some(helper),
+            binds: vec![(STEAM, config.runtime.join("steam"))],
+            environment: Vec::new(),
+            passed,
+        };
+        let libraries = config.runtime.join("guest");
+        if libraries.join(HOST_PID).is_file() {
+            guest.binds.push((LIBRARIES, libraries));
+            guest
+                .environment
+                .push(("LD_PRELOAD", format!("{LIBRARIES}/{HOST_PID}")));
+        }
+        guest
+    }
+}
+
 /// The game `target` names inside `install`, started through the engine's
 /// launcher with `environment`, logging to the installation's log. The
 /// launcher is a native program: no Rosetta.
@@ -246,6 +264,18 @@ pub(crate) fn target(
     target: &LaunchTarget,
     environment: HashMap<String, String>,
     config: &wine::Config,
+) -> Result<Target, Error> {
+    target_in(install, target, environment, config, &Guest::default())
+}
+
+/// The game `target` names inside `install`, in a guest its storefront
+/// completes with `guest`.
+pub(crate) fn target_in(
+    install: &Path,
+    target: &LaunchTarget,
+    environment: HashMap<String, String>,
+    config: &wine::Config,
+    guest: &Guest,
 ) -> Result<Target, Error> {
     let program = wine::program(install, target)?;
     let executable = guest_path(install, &program).ok_or(Error::NotExecutable)?;
@@ -270,12 +300,30 @@ pub(crate) fn target(
         home(&config.prefix)?.to_string_lossy().into_owned(),
         install.to_string_lossy().into_owned(),
         working_directory,
+        "--graphics".to_owned(),
+        match config.graphics {
+            wine::Graphics::Dxmt => "dxmt",
+            wine::Graphics::D3DMetal => "d3dmetal",
+        }
+        .to_owned(),
     ];
-    for (name, value) in guest_environment(config) {
+    for (path, folder) in &guest.binds {
+        arguments.push("--bind".to_owned());
+        arguments.push(format!("{path}={}:ro", folder.display()));
+    }
+    let variables = guest_environment(config)
+        .into_iter()
+        .chain(guest.environment.iter().cloned());
+    for (name, value) in variables {
         arguments.push("--env".to_owned());
         arguments.push(format!("{name}={value}"));
     }
+    for name in guest.passed {
+        arguments.push("--pass".to_owned());
+        arguments.push((*name).to_owned());
+    }
     arguments.push("--".to_owned());
+    arguments.extend(guest.helper.map(str::to_owned));
     arguments.push(executable);
     arguments.extend(target.arguments.iter().cloned());
     Ok(Target {

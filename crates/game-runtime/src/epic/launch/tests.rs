@@ -390,6 +390,7 @@ fn a_build_on_the_linux_engine_starts_natively_with_its_token_in_the_prefix() {
         prefix: directory.join("game-linux/prefix"),
         log: directory.join("logs/wine-game.log"),
         engine: crate::wine::Engine::Linux,
+        graphics: crate::wine::Graphics::Dxmt,
     };
     fs::create_dir_all(wine.prefix.join("drive_c")).unwrap();
 

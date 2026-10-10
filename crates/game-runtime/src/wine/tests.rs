@@ -28,12 +28,16 @@ pub(crate) fn target(executable: &Path, arguments: &[&str]) -> LaunchTarget {
     }
 }
 
+/// A game no profile names.
+const OTHER: crate::profile::Game<'static> = crate::profile::Game::Steam { app_id: 42 };
+
 pub(crate) fn config(root: &Path) -> Config {
     Config {
         runtime: root.join("runtime"),
         prefix: root.join("prefix"),
         log: root.join("logs/wine-game.log"),
         engine: Engine::Rosetta,
+        graphics: Graphics::Dxmt,
     }
 }
 
@@ -405,7 +409,7 @@ fn a_windows_installation_runs_in_the_prefix_named_after_its_folder_whatever_the
         ("windows", "/library/Games/Steam/steam-42-windows"),
         ("Windows", "/library/Games/Epic/epic-hash-Windows"),
     ] {
-        let windows = Installation::of(&locations, platform, Path::new(install))
+        let windows = Installation::of(&locations, OTHER, platform, Path::new(install))
             .unwrap()
             .expect("a Windows build");
         let folder = Path::new(install).file_name().unwrap();
@@ -415,12 +419,70 @@ fn a_windows_installation_runs_in_the_prefix_named_after_its_folder_whatever_the
         );
     }
     for platform in ["macos", "Mac"] {
-        let native = Installation::of(&locations, platform, Path::new("/library/Games/native"));
+        let native = Installation::of(
+            &locations,
+            OTHER,
+            platform,
+            Path::new("/library/Games/native"),
+        );
         assert_eq!(native.unwrap(), None, "a Mac build runs outside Wine");
     }
     assert!(
-        Installation::of(&locations, "windows", Path::new("/")).is_err(),
+        Installation::of(&locations, OTHER, "windows", Path::new("/")).is_err(),
         "no folder names no prefix"
+    );
+}
+
+#[test]
+fn a_saved_configuration_from_before_engines_and_graphics_runs_rosetta_s_wine() {
+    let saved = r#"{"runtime":"/Voile/v1","prefix":"/Prefixes/game","log":"/logs/game.log"}"#;
+    let config: Config = serde_json::from_str(saved).unwrap();
+    assert_eq!(config.engine, Engine::Rosetta);
+    assert_eq!(config.graphics, Graphics::Dxmt);
+
+    let saved = r#"{"runtime":"/Voile/v1/linux","prefix":"/Prefixes/game-linux/prefix","log":"/logs/game.log","engine":"Linux"}"#;
+    let config: Config = serde_json::from_str(saved).unwrap();
+    assert_eq!(config.engine, Engine::Linux);
+    assert_eq!(config.graphics, Graphics::Dxmt);
+    let config = Config {
+        graphics: Graphics::D3DMetal,
+        ..config
+    };
+    let again: Config = serde_json::from_str(&serde_json::to_string(&config).unwrap()).unwrap();
+    assert_eq!(again, config);
+}
+
+#[test]
+fn a_game_whose_profile_names_the_linux_engine_runs_there_in_its_own_prefix_with_its_graphics() {
+    let (_directory, root) = installation();
+    let library = root.join("library");
+    let locations = crate::Locations::new(&library, Path::new("/Obelisk.app"), Path::new("/home"));
+    let runtime = locations.voile.join("current/linux");
+    for file in ["engine/fexdarwin-run", "wine/bin/wine"] {
+        fs::create_dir_all(runtime.join(file).parent().unwrap()).unwrap();
+        fs::write(runtime.join(file), "").unwrap();
+    }
+    let install = library.join("Games/Steam/steam-1245620-windows");
+    let elden_ring = crate::profile::Game::Steam { app_id: 1245620 };
+
+    let windows = Installation::of(&locations, elden_ring, "windows", &install)
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(
+        windows.prefix(),
+        library.join("Prefixes/steam-1245620-windows-linux/prefix")
+    );
+    let config = windows.runtime(&locations, root.join("game.log")).unwrap();
+    assert_eq!(config.engine, Engine::Linux);
+    assert_eq!(config.graphics, Graphics::D3DMetal);
+    assert_eq!(config.runtime, runtime);
+    let other = Installation::of(&locations, OTHER, "windows", &install)
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        other.prefix(),
+        library.join("Prefixes/steam-1245620-windows")
     );
 }
 
@@ -433,6 +495,7 @@ fn an_uninstalled_windows_game_loses_its_prefix_but_never_what_a_link_points_to(
     let windows = |name: &str| {
         Installation::of(
             &locations,
+            OTHER,
             "windows",
             &library.join("Games/Steam").join(name),
         )

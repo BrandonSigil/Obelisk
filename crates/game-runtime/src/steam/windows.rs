@@ -14,6 +14,16 @@ const HELPER: &str = r"C:\windows\system32\steam.exe";
 /// Valve's Windows libraries that steam_api loads through the ActiveProcess
 /// registry keys. The runtime's ntdll redirects their exports to lsteamclient.
 const CLIENTS: [&str; 2] = ["steamclient.dll", "steamclient64.dll"];
+/// What the game's steam_api and lsteamclient read, which its session sets
+/// as it starts the game (see `launch::game_environment` and the host's
+/// ports). The Linux engine's guest receives them from its launcher.
+const GAME_ENVIRONMENT: &[&str] = &[
+    "SteamAppId",
+    "SteamGameId",
+    "SteamOS",
+    "Steam3Master",
+    "SteamClientService",
+];
 /// The largest install script read.
 const MAX_SCRIPT_BYTES: usize = 1024 * 1024;
 /// How much of each library is compared at a time.
@@ -62,8 +72,12 @@ impl wine::Storefront for Prefix<'_> {
     }
 
     /// Places Valve's steamclient libraries where the prefix's registry
-    /// points steam_api.
+    /// points steam_api, and on the Linux engine leads lsteamclient to
+    /// Valve's Linux steamclient.
     fn furnish(&self, config: &wine::Config) -> Result<(), Error> {
+        if config.engine == wine::Engine::Linux {
+            crate::linux_engine::link_steam_client(config)?;
+        }
         let steam = config.prefix.join("drive_c/Program Files (x86)/Steam");
         fs::create_dir_all(&steam)?;
         for name in CLIENTS {
@@ -107,9 +121,19 @@ pub(super) fn target(
     home: &Path,
     config: &wine::Config,
 ) -> Result<(Target, PathBuf), Error> {
-    let mut game = wine::target(install, target, crate::native::environment(home), config)?;
+    let environment = crate::native::environment(home);
+    let game = match config.engine {
+        wine::Engine::Rosetta => {
+            let mut game = wine::target(install, target, environment, config)?;
+            game.arguments.insert(0, HELPER.to_owned());
+            game
+        }
+        wine::Engine::Linux => {
+            let guest = crate::linux_engine::Guest::steam(config, HELPER, GAME_ENVIRONMENT);
+            crate::linux_engine::target_in(install, target, environment, config, &guest)?
+        }
+    };
     let steam_api = super::launch::library(target, &["steam_api64.dll", "steam_api.dll"])?;
-    game.arguments.insert(0, HELPER.to_owned());
     Ok((game, steam_api))
 }
 

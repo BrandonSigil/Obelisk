@@ -4,8 +4,7 @@ use super::{Configuration, Error, Result};
 use crate::wine;
 use std::path::Path;
 
-/// The Wine installation of an Epic build: a Windows one, run by the Linux
-/// engine when `linux_engine` names the game, else by Rosetta's Wine.
+/// The Wine installation of an Epic build, when it is a Windows one.
 pub(crate) fn installation(
     locations: &crate::Locations,
     namespace: &str,
@@ -13,13 +12,11 @@ pub(crate) fn installation(
     platform: &str,
     install: &Path,
 ) -> std::result::Result<Option<wine::Installation>, crate::Error> {
-    let Some(windows) = wine::Installation::of(locations, platform, install)? else {
-        return Ok(None);
+    let game = crate::profile::Game::Epic {
+        namespace,
+        app_name,
     };
-    if crate::linux_engine::runs_epic(namespace, app_name) {
-        return windows.on_linux_engine().map(Some);
-    }
-    Ok(Some(windows))
+    wine::Installation::of(locations, game, platform, install)
 }
 
 /// Readies a Windows build for its Game session: its prefix, the prerequisite
@@ -57,17 +54,9 @@ pub fn prepare_windows(
         install: &config.install,
         prerequisite: installed.prerequisite.as_ref(),
     };
-    // The engine may start another program than the publisher's (see
-    // linux_engine): that program must be the one readied.
-    let target = match wine.engine {
-        wine::Engine::Linux => crate::linux_engine::epic_target(
-            &config.namespace,
-            &config.app_name,
-            &config.install,
-            &installed.target,
-        ),
-        wine::Engine::Rosetta => installed.target.clone(),
-    };
+    // The game's profile may start another program than the publisher's:
+    // that program must be the one readied.
+    let target = config.profile().target(&config.install, &installed.target);
     wine::prepare(&wine, &config.home, &config.install, &target, &prefix)?;
     Ok(wine)
 }

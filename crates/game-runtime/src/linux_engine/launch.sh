@@ -4,22 +4,43 @@
 # service, then the game, and ends them when the game ends or this script is stopped. Every guest process follows
 # this script (FEXDARWIN_SUPERVISOR_PID) and ends within half a second once it is gone.
 #
-# Usage: launch.sh RUNTIME HOME INSTALL CWD [--env NAME=VALUE]... -- EXECUTABLE [ARGUMENT]...
+# Usage: launch.sh RUNTIME HOME INSTALL CWD [OPTION]... -- EXECUTABLE [ARGUMENT]...
 #   RUNTIME     the Linux engine runtime (engine/, graphics/, wine/, root/)
 #   HOME        the guest's /home/user; the prefix is its prefix folder
-#   INSTALL     the game's installation, seen as /games/game
+#   INSTALL     the game's installation, seen as /opt/game
 #   CWD         the guest working directory
-#   EXECUTABLE  the guest path of the Windows program
+#   EXECUTABLE  the guest path of the Windows program, which Wine starts with its arguments
+# Options:
+#   --graphics dxmt|d3dmetal  what renders the game's Direct3D (default dxmt)
+#   --bind GUEST=HOST[:ro]    a folder the guest also sees, at GUEST, whose parent exists in the root
+#   --env NAME=VALUE          a variable of the guest
+#   --pass NAME               this script's variable NAME, when set, as a variable of the guest
 # OBELISK_APP_NAME names the game in the menu bar, the Dock and Cmd-Tab.
 set -u
 runtime=$1 home=$2 install=$3 cwd=$4
 shift 4
-guest_env=()
+graphics=dxmt binds= guest_env=()
 while [ $# -gt 0 ] && [ "$1" != "--" ]; do
-    guest_env+=("$1" "$2")
+    [ $# -ge 2 ] || exit 2
+    case $1 in
+    --graphics) graphics=$2 ;;
+    --bind) binds="$binds;$2" ;;
+    --env) guest_env+=(--env "$2") ;;
+    --pass)
+        [[ $2 =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || exit 2
+        [ -n "${!2+set}" ] && guest_env+=(--env "$2=${!2}")
+        ;;
+    *) exit 2 ;;
+    esac
     shift 2
 done
 shift
+
+# Wine, the render server and D3DMetal keep a file open for each mapped resource. An app the Finder starts gets 256,
+# which Wine outgrows: take up to 65536, as far as the hard limit and macOS allow.
+files=$(ulimit -H -n)
+{ [ "$files" = unlimited ] || [ "$files" -gt 65536 ]; } && files=65536
+ulimit -S -n "$files" 2>/dev/null || ulimit -S -n 10240 2>/dev/null
 
 # wsd and the render server bind UNIX sockets in a private folder; a relative path keeps them inside sun_path.
 sockets_root=${TMPDIR:-/tmp}
@@ -73,10 +94,21 @@ PLIST
 
 "$app/Contents/MacOS/wsd" --dir "$sockets" &
 helpers+=($!)
-dxmt="$runtime/graphics/dxmt-native.framework/Versions/A/dxmt-native"
-RENDER_SERVER_EXEC_PATH="$runtime/graphics/libexec/virgl_render_server" NPT_BACKEND=dxmt \
-    NPT_D3D11_LIBRARY_PATH="$dxmt" NPT_DXGI_LIBRARY_PATH="$dxmt" NPT_D3D12_LIBRARY_PATH="$dxmt" \
-    "$runtime/graphics/bin/virgl_test_server" --no-virgl --no-fork --socket-path "$sockets/vtest.sock" &
+if [ "$graphics" = d3dmetal ]; then
+    # D3DMetal is an Intel library: the Intel render server runs it under Rosetta. d3dmetal-native loads the
+    # runtime's D3DMetal, unmodified, from its absolute path.
+    server="$runtime/graphics/x86_64"
+    d3dmetal="$server/lib/libd3dmetal-native.dylib"
+    RENDER_SERVER_EXEC_PATH="$server/libexec/virgl_render_server" NPT_BACKEND=d3dmetal \
+        NPT_D3D11_LIBRARY_PATH="$d3dmetal" NPT_DXGI_LIBRARY_PATH="$d3dmetal" NPT_D3D12_LIBRARY_PATH="$d3dmetal" \
+        D3DMETAL_FRAMEWORK_PATH="$runtime/../lib/external/D3DMetal.framework" \
+        "$server/bin/virgl_test_server" --no-virgl --no-fork --socket-path "$sockets/vtest.sock" &
+else
+    dxmt="$runtime/graphics/dxmt-native.framework/Versions/A/dxmt-native"
+    RENDER_SERVER_EXEC_PATH="$runtime/graphics/libexec/virgl_render_server" NPT_BACKEND=dxmt \
+        NPT_D3D11_LIBRARY_PATH="$dxmt" NPT_DXGI_LIBRARY_PATH="$dxmt" NPT_D3D12_LIBRARY_PATH="$dxmt" \
+        "$runtime/graphics/bin/virgl_test_server" --no-virgl --no-fork --socket-path "$sockets/vtest.sock" &
+fi
 helpers+=($!)
 # The input service gives the Mac's gamepads to Wine's Obelisk bus. A runtime without it starts the game without
 # gamepads.
@@ -93,7 +125,7 @@ for _ in $(seq 1 100); do
 done
 
 export FEXDARWIN_LKD=1 FEXDARWIN_ROOT="$runtime/root" FEXDARWIN_ROOT_RO=1 FEXDARWIN_SUPERVISOR_PID=$$
-export FEXDARWIN_BIND="/opt/wine=$runtime/wine:ro;/home/user=$home;/games/game=$install;/run/obelisk=$sockets_root/$sockets"
+export FEXDARWIN_BIND="/opt/wine=$runtime/wine:ro;/home/user=$home;/opt/game=$install;/run/obelisk=$sockets_root/$sockets$binds"
 # wineserver writes the registry only when it exits: wait for it inside the guest before the game ends. Started
 # with -p0, it stops Wine's own processes as soon as the game's last process ends, instead of 3 seconds later.
 "$runtime/engine/fexdarwin-run" --cwd "$cwd" ${guest_env[@]+"${guest_env[@]}"} \

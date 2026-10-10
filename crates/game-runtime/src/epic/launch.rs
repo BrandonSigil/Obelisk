@@ -258,15 +258,7 @@ pub(super) fn windows_target(
     wine: &crate::wine::Config,
     environment: &std::collections::HashMap<String, String>,
 ) -> Result<(Target, Architecture, Option<tempfile::TempDir>)> {
-    let launched = match wine.engine {
-        crate::wine::Engine::Linux => crate::linux_engine::epic_target(
-            &config.namespace,
-            &config.app_name,
-            &config.install,
-            &plan.target,
-        ),
-        crate::wine::Engine::Rosetta => plan.target.clone(),
-    };
+    let launched = config.profile().target(&config.install, &plan.target);
     let mut environment = environment.clone();
     if wine.engine == crate::wine::Engine::Linux && !config.title.is_empty() {
         environment.insert(

@@ -144,7 +144,10 @@ impl<N: Network> Content<N> {
     /// The installation's Wine prefix, when it is a Windows one.
     fn windows(&self, receipt: &Receipt) -> Option<crate::wine::Installation> {
         let install = Path::new(&receipt.directory);
-        crate::wine::Installation::of(&self.locations, &receipt.platform, install)
+        let game = crate::profile::Game::Steam {
+            app_id: receipt.app_id,
+        };
+        crate::wine::Installation::of(&self.locations, game, &receipt.platform, install)
             .ok()
             .flatten()
     }
@@ -304,7 +307,11 @@ struct Handover {
 impl sessions::Handover<Steam> for Handover {
     type Prepared = super::Request;
     fn voile(&self) -> Option<PathBuf> {
-        let windows = crate::wine::Installation::of(&self.locations, &self.platform, &self.install);
+        let game = crate::profile::Game::Steam {
+            app_id: self.app_id,
+        };
+        let windows =
+            crate::wine::Installation::of(&self.locations, game, &self.platform, &self.install);
         matches!(windows, Ok(Some(_))).then(|| self.locations.voile.clone())
     }
     fn prepare(&self) -> BoxFuture<'_, Result<super::Request, Failure>> {

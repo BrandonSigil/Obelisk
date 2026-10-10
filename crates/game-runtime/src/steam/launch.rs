@@ -46,8 +46,8 @@ pub(crate) trait Machine: Send + Sync + 'static {
 pub(crate) struct Mac;
 impl Machine for Mac {
     fn select(target: &Target, config: &Config) -> Result<Option<Architecture>, Error> {
-        if config.wine.is_some() {
-            return Ok(Some(crate::wine::ARCHITECTURE));
+        if let Some(wine) = &config.wine {
+            return Ok(Some(wine.architecture()));
         }
         Architecture::select(&target.executable, &config.steam_api).map(Some)
     }

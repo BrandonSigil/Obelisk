@@ -113,6 +113,13 @@ pub struct Configuration {
     pub prefix: Option<PathBuf>,
 }
 impl Configuration {
+    /// How Obelisk runs the game.
+    pub(crate) fn profile(&self) -> crate::profile::Profile {
+        crate::profile::of(crate::profile::Game::Epic {
+            namespace: &self.namespace,
+            app_name: &self.app_name,
+        })
+    }
     fn scope(&self, account: &str) -> cloud_vault::EpicScope {
         cloud_vault::EpicScope {
             account_id: account.into(),
