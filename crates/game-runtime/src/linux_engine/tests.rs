@@ -415,7 +415,7 @@ fn the_launcher_hands_the_guest_its_binds_its_variables_and_the_session_s_values
     assert!(files >= 10240, "{files}");
     let variables: Vec<&str> = lines
         .windows(2)
-        .filter(|pair| pair[0] == "--env")
+        .filter(|pair| pair[0] == "--env" && !pair[1].starts_with("TZ="))
         .map(|pair| pair[1])
         .collect();
     assert_eq!(
@@ -431,6 +431,41 @@ fn the_launcher_hands_the_guest_its_binds_its_variables_and_the_session_s_values
         server.lines().next().unwrap(),
         format!("dxmt {}", dxmt.display())
     );
+}
+
+#[test]
+fn the_guest_gets_the_mac_s_time_zone_unless_the_caller_passes_one() {
+    // The guest root has no zone file: without TZ, every program ran in UTC.
+    let mac = fs::read("/etc/localtime").ok().and_then(|zone| {
+        let text = String::from_utf8_lossy(&zone).into_owned();
+        let rule: String = text
+            .trim_end()
+            .rsplit('\n')
+            .next()?
+            .chars()
+            .filter(|c| c.is_ascii_graphic() || *c == ' ')
+            .collect();
+        (!rule.is_empty()).then(|| format!("TZ={rule}"))
+    });
+    for (options, expected) in [
+        (&[][..], mac.clone()),
+        (&["--env", "TZ=UTC0"][..], Some("TZ=UTC0".to_owned())),
+    ] {
+        let (_directory, root) = installation();
+
+        let (engine, _) = run_launcher(&root, options, &[]);
+
+        let lines: Vec<&str> = engine.lines().collect();
+        let zones: Vec<&str> = lines
+            .windows(2)
+            .filter(|pair| pair[0] == "--env" && pair[1].starts_with("TZ="))
+            .map(|pair| pair[1])
+            .collect();
+        assert_eq!(
+            zones,
+            expected.iter().map(String::as_str).collect::<Vec<_>>()
+        );
+    }
 }
 
 #[test]

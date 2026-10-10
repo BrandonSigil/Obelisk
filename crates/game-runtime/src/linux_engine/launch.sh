@@ -36,6 +36,17 @@ while [ $# -gt 0 ] && [ "$1" != "--" ]; do
 done
 shift
 
+# The guest root has no time zone file: every program ran in UTC, and glibc looked for /etc/localtime again at each
+# localtime() (about 80 times a second in ELDEN RING, 1.9 us each instead of 0.04). The rule that ends the Mac's zone
+# file gives the guest the Mac's zone, unless the caller passed one.
+case " ${guest_env[*]-} " in
+*" TZ="*) ;;
+*)
+    tz=$(tail -n 1 /etc/localtime 2>/dev/null | LC_ALL=C tr -cd '[:print:]')
+    [ -n "$tz" ] && guest_env+=(--env "TZ=$tz")
+    ;;
+esac
+
 # Wine, the render server and D3DMetal keep a file open for each mapped resource. An app the Finder starts gets 256,
 # which Wine outgrows: take up to 65536, as far as the hard limit and macOS allow.
 files=$(ulimit -H -n)
