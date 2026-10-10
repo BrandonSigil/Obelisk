@@ -92,6 +92,47 @@ cat > "$app/Contents/Info.plist" <<PLIST
 </plist>
 PLIST
 
+# The render server runs from a helper bundle inside the game's, one per graphics backend: Metal keeps its compiled
+# shaders per bundle identifier. Outside a bundle every render server shared one cache, and each start of DXMT's arm64
+# server emptied what D3DMetal's Intel server had compiled there: ELDEN RING compiled its 7,500 Metal functions again,
+# about 4 minutes, after every Rocket League start. The helper is in place before wsd starts: for a moment after an
+# executable of the bundle starts, macOS refuses any new file in it (EPERM). Prints the path to run.
+render_server() {
+    local helper="$app/Contents/Helpers/$2.app"
+    local server="$helper/Contents/MacOS/virgl_render_server"
+    mkdir -p "$helper/Contents/MacOS" || return 1
+    # A copy kept from one launch to the next keeps its Rosetta translation.
+    if ! cmp -s "$1" "$server"; then
+        rm -f "$server"
+        cp -c "$1" "$server" 2>/dev/null || cp "$1" "$server" || return 1
+    fi
+    cat > "$helper/Contents/Info.plist" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleExecutable</key><string>virgl_render_server</string>
+  <key>CFBundleIdentifier</key><string>com.zagrios.obelisk.game.$app_id.$2</string>
+  <key>CFBundleName</key><string>$xml_name</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>LSBackgroundOnly</key><true/>
+</dict>
+</plist>
+PLIST
+    # The Intel server starts at the game's first Direct3D call, inside Easy Anti-Cheat's window, and Rosetta
+    # translates a new copy then: half a second. Have it translated now; it stops at the unknown option (9 ms once
+    # translated).
+    if [ "$2" = d3dmetal ]; then
+        "$server" --obelisk-translate </dev/null >/dev/null 2>&1
+    fi
+    printf '%s\n' "$server"
+}
+if [ "$graphics" = d3dmetal ]; then
+    render=$(render_server "$runtime/graphics/x86_64/libexec/virgl_render_server" d3dmetal) || exit 1
+else
+    render=$(render_server "$runtime/graphics/libexec/virgl_render_server" dxmt) || exit 1
+fi
+
 "$app/Contents/MacOS/wsd" --dir "$sockets" &
 helpers+=($!)
 if [ "$graphics" = d3dmetal ]; then
@@ -99,13 +140,13 @@ if [ "$graphics" = d3dmetal ]; then
     # runtime's D3DMetal, unmodified, from its absolute path.
     server="$runtime/graphics/x86_64"
     d3dmetal="$server/lib/libd3dmetal-native.dylib"
-    RENDER_SERVER_EXEC_PATH="$server/libexec/virgl_render_server" NPT_BACKEND=d3dmetal \
+    RENDER_SERVER_EXEC_PATH="$render" NPT_BACKEND=d3dmetal \
         NPT_D3D11_LIBRARY_PATH="$d3dmetal" NPT_DXGI_LIBRARY_PATH="$d3dmetal" NPT_D3D12_LIBRARY_PATH="$d3dmetal" \
         D3DMETAL_FRAMEWORK_PATH="$runtime/../lib/external/D3DMetal.framework" \
         "$server/bin/virgl_test_server" --no-virgl --no-fork --socket-path "$sockets/vtest.sock" &
 else
     dxmt="$runtime/graphics/dxmt-native.framework/Versions/A/dxmt-native"
-    RENDER_SERVER_EXEC_PATH="$runtime/graphics/libexec/virgl_render_server" NPT_BACKEND=dxmt \
+    RENDER_SERVER_EXEC_PATH="$render" NPT_BACKEND=dxmt \
         NPT_D3D11_LIBRARY_PATH="$dxmt" NPT_DXGI_LIBRARY_PATH="$dxmt" NPT_D3D12_LIBRARY_PATH="$dxmt" \
         "$runtime/graphics/bin/virgl_test_server" --no-virgl --no-fork --socket-path "$sockets/vtest.sock" &
 fi

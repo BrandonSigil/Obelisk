@@ -324,10 +324,18 @@ fn recording_runtime(root: &Path) -> PathBuf {
         fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
     };
     script("engine/wsd", r#"exec /usr/bin/nc -lU "$2/wsd.sock""#);
-    let server = r#"echo "$NPT_BACKEND $NPT_D3D12_LIBRARY_PATH" > "$OBELISK_TEST_ROOT/server.txt"
+    let server = r#"printf '%s\n' "$NPT_BACKEND $NPT_D3D12_LIBRARY_PATH" "$RENDER_SERVER_EXEC_PATH" > "$OBELISK_TEST_ROOT/server.txt"
 exec /usr/bin/nc -lU "$4""#;
     script("graphics/bin/virgl_test_server", server);
     script("graphics/x86_64/bin/virgl_test_server", server);
+    script(
+        "graphics/libexec/virgl_render_server",
+        r#"echo "arm64 $*" >> "$OBELISK_TEST_ROOT/servers.txt""#,
+    );
+    script(
+        "graphics/x86_64/libexec/virgl_render_server",
+        r#"echo "Intel $*" >> "$OBELISK_TEST_ROOT/servers.txt""#,
+    );
     script(
         "engine/fexdarwin-run",
         r#"{ printf '%s\n' "$FEXDARWIN_BIND" "files $(ulimit -S -n)"; printf '%s\n' "$@"; } > "$OBELISK_TEST_ROOT/engine.txt""#,
@@ -419,7 +427,10 @@ fn the_launcher_hands_the_guest_its_binds_its_variables_and_the_session_s_values
     );
     assert!(lines.ends_with(&["sh", "/opt/game/Game.exe", "-flag"]));
     let dxmt = runtime.join("graphics/dxmt-native.framework/Versions/A/dxmt-native");
-    assert_eq!(server.trim(), format!("dxmt {}", dxmt.display()));
+    assert_eq!(
+        server.lines().next().unwrap(),
+        format!("dxmt {}", dxmt.display())
+    );
 }
 
 #[test]
@@ -429,7 +440,59 @@ fn the_launcher_runs_d3dmetal_in_the_intel_render_server() {
     let (_, server) = run_launcher(&root, &["--graphics", "d3dmetal"], &[]);
 
     let library = root.join("runtime/graphics/x86_64/lib/libd3dmetal-native.dylib");
-    assert_eq!(server.trim(), format!("d3dmetal {}", library.display()));
+    assert_eq!(
+        server.lines().next().unwrap(),
+        format!("d3dmetal {}", library.display())
+    );
+}
+
+#[test]
+fn each_backend_s_render_server_runs_from_its_own_bundle_inside_the_game_s() {
+    use std::os::unix::fs::MetadataExt;
+    // Metal keeps compiled shaders per bundle identifier: a server outside any
+    // bundle shared one cache with every other, which DXMT's emptied.
+    for (backend, source, translated) in [
+        ("dxmt", "graphics/libexec/virgl_render_server", ""),
+        (
+            "d3dmetal",
+            "graphics/x86_64/libexec/virgl_render_server",
+            "Intel --obelisk-translate\nIntel --obelisk-translate\n",
+        ),
+    ] {
+        let (_directory, root) = installation();
+        let helper = root.join(format!(
+            "obelisk-apps/My-Game/My Game.app/Contents/Helpers/{backend}.app"
+        ));
+        let executable = helper.join("Contents/MacOS/virgl_render_server");
+        let mut copies = Vec::new();
+
+        for _ in 0..2 {
+            let (_, server) = run_launcher(
+                &root,
+                &["--graphics", backend],
+                &[("OBELISK_APP_NAME", "My Game")],
+            );
+            assert_eq!(server.lines().nth(1).unwrap(), executable.to_str().unwrap());
+            copies.push(fs::metadata(&executable).unwrap().ino());
+        }
+
+        assert_eq!(
+            fs::read(&executable).unwrap(),
+            fs::read(root.join("runtime").join(source)).unwrap()
+        );
+        // The copy stays from one launch to the next, with its Rosetta
+        // translation, and the Intel one is translated before the game.
+        assert_eq!(copies[0], copies[1]);
+        let runs = fs::read_to_string(root.join("servers.txt")).unwrap_or_default();
+        assert_eq!(runs, translated);
+        let plist = fs::read_to_string(helper.join("Contents/Info.plist")).unwrap();
+        assert!(
+            plist.contains(&format!(
+                "<string>com.zagrios.obelisk.game.My-Game.{backend}</string>"
+            )),
+            "{plist}"
+        );
+    }
 }
 
 #[test]
