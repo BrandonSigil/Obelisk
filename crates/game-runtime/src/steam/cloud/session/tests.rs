@@ -332,6 +332,57 @@ async fn a_windows_game_reads_its_sdk_saves_from_the_same_native_storage() {
     );
 }
 
+/// Saves in the Windows profile's roaming AppData, as ELDEN RING's.
+fn roaming_rule() -> CloudMetadata {
+    let rule = CloudMetadata::Object(
+        [
+            ("root", "WinAppDataRoaming"),
+            ("path", "Game"),
+            ("pattern", "*.sav"),
+            ("recursive", "0"),
+        ]
+        .into_iter()
+        .map(|(key, value)| (key.into(), CloudMetadata::Value(value.into())))
+        .collect(),
+    );
+    CloudMetadata::Object(vec![(
+        "savefiles".into(),
+        CloudMetadata::Object(vec![("0".into(), rule)]),
+    )])
+}
+
+#[tokio::test]
+async fn a_game_whose_engine_moved_its_prefix_finds_its_saves_there_and_keeps_them_in_the_cloud() {
+    const ROAMING: &str = "%WinAppDataRoaming%Game/slot.sav";
+    let save = |prefix: &Path| crate::wine::profile(prefix).join("AppData/Roaming/Game/slot.sav");
+    let mut game = SteamGame::game();
+    let rosetta = game.config.root.with_file_name("Prefixes/game");
+    game.config.prefix = Some(rosetta.clone());
+    game.cloud.set_metadata(Some(roaming_rule()));
+    fs::create_dir_all(save(&rosetta).parent().unwrap()).unwrap();
+    fs::write(save(&rosetta), b"progress").unwrap();
+    game.cloud.publish_for(ROAMING, b"progress", 1);
+    game.open().prepare(&no_other_session).await.unwrap();
+    let uploads = game.uploads();
+
+    // The Linux engine runs the game in a prefix of its own, still empty.
+    let linux = game
+        .config
+        .root
+        .with_file_name("Prefixes/game-linux/prefix");
+    game.config.prefix = Some(linux.clone());
+    let mut sync = game.open();
+    sync.prepare(&no_other_session).await.unwrap();
+
+    assert_eq!(fs::read(save(&linux)).unwrap(), b"progress");
+    sync.started().unwrap();
+    sync.finished(true).await;
+    assert_eq!(game.cloud.file(ROAMING).as_deref(), Some(&b"progress"[..]));
+    assert_eq!(game.uploads(), uploads);
+    assert_eq!(game.work().unwrap().pending, None);
+    assert_eq!(fs::read(save(&rosetta)).unwrap(), b"progress");
+}
+
 #[tokio::test]
 async fn launching_anyway_past_rules_obelisk_cannot_follow_starts_the_game() {
     let game = SteamGame::game();

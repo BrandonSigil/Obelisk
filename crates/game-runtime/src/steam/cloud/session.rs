@@ -265,6 +265,13 @@ impl<R: CloudRemote> Storefront for Adapter<R> {
                 });
             }
             Some(context) => {
+                // A game a new engine runs saves in that engine's prefix,
+                // still without the saves of the old one. As after a
+                // reinstall, a save missing there keeps its archived version
+                // and is restored, never sent as deleted.
+                if context.config.prefix != self.config.prefix {
+                    context.installation_removed = true;
+                }
                 context.config = self.config.clone();
                 context.metadata = metadata;
             }
