@@ -34,6 +34,8 @@ pub use social::{
     GameInviteKind, History, HistoryMessage, MessageSession, SentMessage, SocialError,
 };
 #[cfg(test)]
+mod connect_tests;
+#[cfg(test)]
 mod login_tests;
 #[cfg(test)]
 mod platforms_tests;
@@ -47,6 +49,8 @@ const PROTO_MASK: u32 = 0x8000_0000;
 const MAX_PACKET: usize = 32 * 1024 * 1024;
 const QUERY_TIMEOUT: Duration = Duration::from_secs(45);
 const IO_TIMEOUT: Duration = Duration::from_secs(15);
+/// How long a connection manager may take to answer before the next one is tried alongside it.
+const CONNECT_STAGGER: Duration = Duration::from_secs(1);
 pub(crate) const PROFILE_TIMEOUT: Duration = Duration::from_secs(5);
 /// Apps and packages PICS accepts in one access-token and product request.
 pub(crate) const PICS_BATCH: usize = 50;
@@ -414,40 +418,41 @@ impl SteamConnection {
                 "backend.steam.cm.directoryUnavailable".into(),
             ));
         }
-        for server in directory
+        let urls = directory
             .response
             .serverlist
             .into_iter()
             .filter(|server| server.kind == "websockets")
             .take(8)
-        {
-            let Some(url) = cm_url(&server.endpoint) else {
-                continue;
-            };
+            .filter_map(|server| cm_url(&server.endpoint))
+            .collect();
+        let socket = first_to_answer(urls, CONNECT_STAGGER, |url| async move {
             let config = WebSocketConfig::default()
                 .max_message_size(Some(MAX_PACKET))
                 .max_frame_size(Some(MAX_PACKET));
-            let connected = timeout(
+            match timeout(
                 IO_TIMEOUT,
                 tokio_tungstenite::connect_async_with_config(url, Some(config), true),
             )
-            .await;
-            let Ok(Ok((socket, _))) = connected else {
-                continue;
-            };
-            let connection = Self::start(socket, 0, false);
-            connection
-                .send(
-                    HELLO,
-                    &proto::Hello {
-                        protocol_version: PROTOCOL,
-                    },
-                    None,
-                )
-                .await?;
-            return Ok(connection);
-        }
-        Err(CmError::Disconnected)
+            .await
+            {
+                Ok(Ok((socket, _))) => Some(socket),
+                _ => None,
+            }
+        })
+        .await
+        .ok_or(CmError::Disconnected)?;
+        let connection = Self::start(socket, 0, false);
+        connection
+            .send(
+                HELLO,
+                &proto::Hello {
+                    protocol_version: PROTOCOL,
+                },
+                None,
+            )
+            .await?;
+        Ok(connection)
     }
 
     /// Runs the worker on an open socket. Responses reach their requests from here.
@@ -1107,6 +1112,45 @@ fn valid_host(host: &str) -> bool {
 
 type Socket =
     tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
+
+/// Opens the first of `servers` that answers. The next server is tried alongside the ones still pending when they
+/// have not answered within `stagger`, and at once when one fails; the attempts left over are dropped. Tried one after
+/// the other, a server that accepted the TCP connection and never completed the handshake cost its whole timeout:
+/// 15 s of every Cloud sync over one VPN.
+async fn first_to_answer<T, F, Fut>(
+    servers: Vec<String>,
+    stagger: Duration,
+    mut open: F,
+) -> Option<T>
+where
+    T: Send + 'static,
+    F: FnMut(String) -> Fut,
+    Fut: std::future::Future<Output = Option<T>> + Send + 'static,
+{
+    let mut servers = servers.into_iter();
+    let mut attempts = tokio::task::JoinSet::new();
+    loop {
+        if attempts.is_empty() {
+            attempts.spawn(open(servers.next()?));
+            continue;
+        }
+        tokio::select! {
+            joined = attempts.join_next() => {
+                if let Some(Ok(Some(answer))) = joined {
+                    return Some(answer);
+                }
+                if let Some(server) = servers.next() {
+                    attempts.spawn(open(server));
+                }
+            }
+            () = tokio::time::sleep(stagger) => {
+                if let Some(server) = servers.next() {
+                    attempts.spawn(open(server));
+                }
+            }
+        }
+    }
+}
 
 /// One bounded frame write; a stalled socket times out and a closed one disconnects.
 async fn send_message(socket: &mut Socket, message: WsMessage) -> Result<(), CmError> {
