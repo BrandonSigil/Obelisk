@@ -1,8 +1,8 @@
 import AppKit
 import SwiftUI
 
-/// An in-window modal, centered over the entire root including its sidebar.
-/// The native container traps Tab/Escape and restores the previous responder.
+/// The friends panel, as the window's sheet shows it. The native container
+/// takes Tab, Return and Escape and restores the previous responder.
 struct FriendsModal: NSViewRepresentable {
     let state: FriendsPresentationState
     let avatars: FriendsAvatarCache
@@ -10,9 +10,6 @@ struct FriendsModal: NSViewRepresentable {
     let dismiss: @MainActor () -> Void
     let retry: @MainActor () -> Void
     let signIn: @MainActor () -> Void
-    @Environment(\.colorScheme) private var colorScheme
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
-
     func makeNSView(context: Context) -> FriendsModalContainer {
         avatars.activate(account: state.account)
         return FriendsModalContainer()
@@ -20,7 +17,6 @@ struct FriendsModal: NSViewRepresentable {
 
     func updateNSView(_ container: FriendsModalContainer, context: Context) {
         container.dismiss = dismiss
-        container.layer?.backgroundColor = NSColor.black.withAlphaComponent(reduceTransparency ? 0.45 : 0.28).cgColor
         container.host.rootView = AnyView(FriendsPanel(state: state, avatars: avatars, chat: chat, focus: container.focus,
                                                       dismiss: dismiss, retry: retry, signIn: signIn)
             .environment(\.self, context.environment)
@@ -52,15 +48,11 @@ final class FriendsModalContainer: NSView {
         host.setAccessibilitySubrole(.dialog)
         host.setAccessibilityModal(true)
         addSubview(host)
-        let idealHeight = host.heightAnchor.constraint(equalToConstant: 550)
-        idealHeight.priority = .defaultHigh
         NSLayoutConstraint.activate([
-            host.centerXAnchor.constraint(equalTo: centerXAnchor),
-            host.centerYAnchor.constraint(equalTo: centerYAnchor),
-            host.widthAnchor.constraint(equalToConstant: 520),
-            host.widthAnchor.constraint(lessThanOrEqualTo: widthAnchor, constant: -48),
-            host.heightAnchor.constraint(lessThanOrEqualTo: heightAnchor, constant: -48),
-            idealHeight,
+            host.leadingAnchor.constraint(equalTo: leadingAnchor),
+            host.trailingAnchor.constraint(equalTo: trailingAnchor),
+            host.topAnchor.constraint(equalTo: topAnchor),
+            host.bottomAnchor.constraint(equalTo: bottomAnchor),
         ])
     }
 
@@ -84,12 +76,6 @@ final class FriendsModalContainer: NSView {
         NSAccessibility.post(element: host, notification: .layoutChanged)
     }
 
-    override func hitTest(_ point: NSPoint) -> NSView? {
-        super.hitTest(point) ?? (bounds.contains(point) ? self : nil)
-    }
-
-    override func mouseDown(with event: NSEvent) {}
-
     func finish() {
         if let keyMonitor { NSEvent.removeMonitor(keyMonitor) }
         keyMonitor = nil
@@ -97,7 +83,7 @@ final class FriendsModalContainer: NSView {
         let previous = previousResponder
         previousResponder = nil
         modalWindow = nil
-        // SwiftUI re-enables the underlying content in the same update.
+        // Once SwiftUI has taken the modal away.
         DispatchQueue.main.async { [weak window, weak previous] in
             guard let window, let previous else { return }
             if let view = previous as? NSView, view.window !== window { return }

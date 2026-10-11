@@ -107,18 +107,17 @@ final class FriendsPresentationTests: XCTestCase {
     }
 
     @MainActor
-    func testModalCentersAtMinimumWindowAndConsumesBackgroundClicks() async throws {
+    func testModalKeepsItsSizeAtMinimumWindowAndTakesTabAndEscape() async throws {
         let fixture = FriendsModalFixture(state: fixtureState(sampleFriends))
         defer { fixture.close() }
         await fixture.settle()
         let modal = try XCTUnwrap(fixture.modal)
-        XCTAssertEqual(modal.host.frame.width, 520, accuracy: 1)
-        XCTAssertEqual(modal.host.frame.midX, fixture.host.bounds.midX, accuracy: 1)
-        XCTAssertEqual(modal.host.frame.midY, fixture.host.bounds.midY, accuracy: 1)
-        XCTAssertGreaterThanOrEqual(modal.host.frame.minY, 24)
-        XCTAssertLessThanOrEqual(modal.host.frame.maxY, 576)
-        let target = fixture.host.hitTest(NSPoint(x: 20, y: 20))
-        XCTAssertTrue(target === modal, "The scrim must consume hits outside the panel")
+        let frame = modal.host.convert(modal.host.bounds, to: fixture.host)
+        XCTAssertEqual(frame.width, 520, accuracy: 1)
+        XCTAssertEqual(frame.midX, fixture.host.bounds.midX, accuracy: 1)
+        XCTAssertEqual(frame.midY, fixture.host.bounds.midY, accuracy: 1)
+        XCTAssertGreaterThanOrEqual(frame.minY, 24)
+        XCTAssertLessThanOrEqual(frame.maxY, 576)
         XCTAssertEqual(modal.focus.target, .search)
         fixture.press(keyCode: 48, characters: "\t")
         await fixture.settle()
@@ -202,24 +201,33 @@ final class FriendsPresentationTests: XCTestCase {
         func modal(_ view: NSView) -> FriendsModalContainer? {
             (view as? FriendsModalContainer) ?? view.subviews.compactMap(modal).first
         }
+        // The window presents the friends in a sheet.
+        func modal() -> FriendsModalContainer? { window.sheets.first?.contentView.flatMap(modal) }
+        func presented() async throws {
+            try await eventually { modal() != nil }
+        }
+        func dismissed() async throws {
+            try await eventually { window.sheets.isEmpty }
+        }
         steam.openFriends()
         await settle()
-        let panel = try XCTUnwrap(modal(host))
-        XCTAssertEqual(panel.host.frame.midX, 430, accuracy: 1)
+        try await presented()
+        let panel = try XCTUnwrap(modal())
+        XCTAssertEqual(panel.host.frame.width, 520, accuracy: 1)
         model.selection = .settings
         session.fixture.receive(kind: 766, body: FriendsWireFixture.playing)
         await session.settle()
         await settle()
         XCTAssertTrue(steam.isFriendsPresented)
-        XCTAssertNotNil(modal(host))
+        XCTAssertNotNil(modal())
         XCTAssertEqual(steam.friends?.friends.first?.activity?.name, "Portal 2")
         XCTAssertEqual(session.maximumSimultaneousWaits, 1)
         steam.closeFriends()
         await settle()
-        XCTAssertNil(modal(host))
+        try await dismissed()
         steam.openFriends()
         await settle()
-        XCTAssertNotNil(modal(host))
+        try await presented()
         XCTAssertEqual(session.maximumSimultaneousWaits, 1)
     }
 
@@ -384,7 +392,9 @@ private struct FriendsFixtureView: View {
             .accessibilityHidden(state.isPresented)
             .overlay {
                 if state.isPresented {
+                    // At the size of the window's sheet.
                     FriendsModal(state: state.friends, avatars: avatars, dismiss: { state.isPresented = false }, retry: {}, signIn: {})
+                        .frame(width: 520, height: 550)
                 }
             }
     }

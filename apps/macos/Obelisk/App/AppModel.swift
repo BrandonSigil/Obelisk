@@ -28,6 +28,8 @@ final class AppModel {
     let overlay: GameOverlayController
     /// Every storefront's Transfers, in their one queue.
     let downloads: DownloadsModel
+    /// The storefront's store, open over the whole window.
+    var presentedStore: StorePresentation?
     private(set) var activeFriendsAccount: FriendsAccountIdentity?
     /// The game whose page Home opened, while its storefront still shows it.
     var homeGame: HomeGame.ID?

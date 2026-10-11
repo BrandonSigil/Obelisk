@@ -182,11 +182,13 @@ final class EpicFriendsIntegrationTests: XCTestCase {
         func modals(_ view: NSView) -> [FriendsModalContainer] {
             (view as? FriendsModalContainer).map { [$0] } ?? view.subviews.flatMap(modals)
         }
+        // The window presents the friends in a sheet.
+        func modals() -> [FriendsModalContainer] { window.sheets.compactMap(\.contentView).flatMap(modals) }
         epic.openFriends()
         await settle()
         XCTAssertEqual(model.activeFriendsAccount?.storeID, "epic")
-        XCTAssertEqual(modals(host).count, 1)
-        XCTAssertEqual(modals(host).first?.host.frame.midX ?? 0, 430, accuracy: 1)
+        try await eventually { modals().count == 1 }
+        XCTAssertEqual(modals().first?.host.frame.width ?? 0, 520, accuracy: 1)
         model.selection = .settings
         epicSession.publish(presence: .online, game: "New game")
         await epicSession.settled()
@@ -196,7 +198,7 @@ final class EpicFriendsIntegrationTests: XCTestCase {
         await settle()
         XCTAssertEqual(model.activeFriendsAccount?.storeID, "steam")
         XCTAssertFalse(epic.isFriendsPresented)
-        XCTAssertEqual(modals(host).count, 1)
+        try await eventually { modals().count == 1 }
         epic.signOut()
         await settle()
         XCTAssertEqual(model.presentedFriends?.account.storeID, "steam")

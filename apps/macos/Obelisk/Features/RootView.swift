@@ -4,6 +4,8 @@ struct RootView: View {
     @Bindable var model: AppModel
     @Environment(\.colorScheme) private var colorScheme
     @State private var friendsAvatars = FriendsAvatarCache()
+    @State private var shownFriends: FriendsPresentationState?
+    @State private var windowSize = CGSize(width: 1120, height: 760)
 
     var body: some View {
         NavigationSplitView {
@@ -24,19 +26,28 @@ struct RootView: View {
         }
         .frame(minWidth: 860, minHeight: 600)
         .tint(ObeliskStyle.accent)
-        .disabled(model.presentedFriends != nil)
-        .allowsHitTesting(model.presentedFriends == nil)
-        .accessibilityHidden(model.presentedFriends != nil)
-        .overlay {
-            if let friends = model.presentedFriends {
+        .onGeometryChange(for: CGSize.self) { $0.size } action: { windowSize = $0 }
+        .sheet(isPresented: Binding(get: { model.presentedFriends != nil }, set: { if !$0 { model.closeFriends() } })) {
+            // The last friends shown, while the sheet goes away.
+            if let friends = model.presentedFriends ?? shownFriends {
                 FriendsModal(state: friends, avatars: friendsAvatars,
                              chat: friends.store.id == "steam" ? model.steam.chat : nil,
                              dismiss: { model.closeFriends() },
                              retry: model.retryPresentedFriends, signIn: model.signInPresentedFriends)
-                    .ignoresSafeArea(.container, edges: .top)
+                    .frame(width: 520, height: 550)
                     .id(friends.account)
             }
         }
+        .sheet(item: $model.presentedStore) { store in
+            // As large as the window leaves room for: a sheet does not keep
+            // within it.
+            StorefrontStoreModal(store: store) { model.presentedStore = nil }
+                .frame(width: min(1100, max(640, windowSize.width - 120)),
+                       height: max(460, windowSize.height - 50))
+        }
+        .environment(\.presentStore) { model.presentedStore = $0 }
+        // A store belongs to the library it opened from.
+        .onChange(of: model.selection) { model.presentedStore = nil }
         .onChange(of: model.steam.isFriendsPresented, initial: true) { _, presented in
             if presented { model.presentFriends(storeID: "steam") }
             else { model.closeFriends(storeID: "steam") }
@@ -49,6 +60,7 @@ struct RootView: View {
         .onChange(of: model.epic.friends?.account) { _, _ in model.validateFriendsAccount() }
         .onChange(of: model.presentedFriends?.account, initial: true) { _, account in
             friendsAvatars.activate(account: account)
+            if let friends = model.presentedFriends { shownFriends = friends }
         }
         .sheet(isPresented: Binding(get: { model.presentedPrompt != nil }, set: { _ in })) {
             prompt.interactiveDismissDisabled()

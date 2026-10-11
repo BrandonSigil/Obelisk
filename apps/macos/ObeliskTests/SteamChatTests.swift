@@ -933,8 +933,10 @@ private struct ChatModalHost: View {
     var body: some View {
         Color.clear.overlay {
             if presentation.isPresented {
+                // At the size of the window's sheet.
                 FriendsModal(state: state, avatars: avatars, chat: chat, dismiss: { presentation.isPresented = false },
                              retry: {}, signIn: {})
+                    .frame(width: 520, height: 550)
             }
         }
     }

@@ -22,6 +22,8 @@ struct WebPagePanel: View {
     /// What the toolbar names before the page tells its title.
     var placeholderTitle: String?
     var identifier = "web-page"
+    /// Whether the panel draws its own glass; a sheet draws its own instead.
+    var isPanel = true
     @State private var browser: WebPageBrowser?
 
     var body: some View {
@@ -64,9 +66,10 @@ struct WebPagePanel: View {
             Group {
                 if let browser { WebPageView(webView: browser.webView) } else { Color.clear }
             }
-            .clipShape(UnevenRoundedRectangle(bottomLeadingRadius: 24, bottomTrailingRadius: 24))
+            .clipShape(UnevenRoundedRectangle(bottomLeadingRadius: isPanel ? 24 : 0,
+                                              bottomTrailingRadius: isPanel ? 24 : 0))
         }
-        .modifier(StorefrontPanelGlass(cornerRadius: 24))
+        .modifier(PanelGlass(isPanel: isPanel))
         .task {
             let page = await start()
             // Closed while it signed in: a code it spent would load nowhere.
@@ -74,6 +77,14 @@ struct WebPagePanel: View {
             browser = WebPageBrowser(page)
         }
         .accessibilityIdentifier(identifier)
+    }
+}
+
+private struct PanelGlass: ViewModifier {
+    let isPanel: Bool
+
+    func body(content: Content) -> some View {
+        if isPanel { content.modifier(StorefrontPanelGlass(cornerRadius: 24)) } else { content }
     }
 }
 

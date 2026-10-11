@@ -24,8 +24,8 @@ struct StorefrontBrowser<Model: LibraryStorefront, HeroArtwork: View, HeroLogo: 
     @State private var bar = StorefrontBarState()
     /// Where the open game came from, once a game opened with motion.
     @State private var source: GameOpeningSource?
-    @State private var showsStore = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.presentStore) private var presentStore
 
     init(
         model: Model,
@@ -93,24 +93,22 @@ struct StorefrontBrowser<Model: LibraryStorefront, HeroArtwork: View, HeroLogo: 
                 libraryTitle: libraryTitle,
                 accountName: accountName,
                 avatarURL: avatarURL,
-                openStore: storePage.map { _ in { showsStore = true } },
+                openStore: openStore,
                 back: back
             ) {
                 accountMenu
             }
         }
-        .overlay {
-            if showsStore, let storePage {
-                StorefrontStoreModal(storeTitle: storeTitle, storeID: storeID, start: storePage) {
-                    showsStore = false
-                }
-                .transition(.opacity)
-            }
-        }
-        .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: showsStore)
         .environment(\.storefrontBar, bar)
         .environment(\.gameTransition, GameTransition(namespace: namespace, source: source))
         .ignoresSafeArea(.container, edges: .top)
+    }
+
+    /// Opens the store over the whole window, when the storefront has one.
+    private var openStore: (() -> Void)? {
+        guard let storePage, let presentStore else { return nil }
+        let store = StorePresentation(storeID: storeID, storeTitle: storeTitle, start: storePage)
+        return { presentStore(store) }
     }
 
     private func open(_ game: Model.Game, from source: GameOpeningSource) {
@@ -158,31 +156,27 @@ private struct StorefrontBrowserBar<Model: LibraryStorefront, AccountMenu: View>
     }
 }
 
-/// The storefront's store over its library, in a web page signed in as the
-/// account. Clicking beside it or Escape closes it.
-private struct StorefrontStoreModal: View {
-    let storeTitle: String
+/// A storefront's store, as the window presents it in a sheet.
+struct StorePresentation: Identifiable {
     let storeID: String
+    let storeTitle: String
     let start: @MainActor () async -> WebPageStart
+
+    var id: String { storeID }
+}
+
+/// The storefront's store in a sheet, in a web page signed in as the
+/// account. Its close button or Escape closes it.
+struct StorefrontStoreModal: View {
+    let store: StorePresentation
     let close: () -> Void
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
     var body: some View {
-        let title = L10n.string("ui.store.openStore", storeTitle)
-        ZStack {
-            Color.black.opacity(reduceTransparency ? 0.45 : 0.28)
-                .ignoresSafeArea()
-                .contentShape(Rectangle())
-                .onTapGesture(perform: close)
-                .accessibilityHidden(true)
-            WebPagePanel(start: start, close: close, showsCloseButton: true, placeholderTitle: title,
-                         identifier: "\(storeID)-store")
-                .padding(.horizontal, 32)
-                .padding(.top, ObeliskStyle.titleBarHeight)
-                .padding(.bottom, 28)
-                .accessibilityLabel(title)
-                .accessibilityAddTraits(.isModal)
-        }
+        let title = L10n.string("ui.store.openStore", store.storeTitle)
+        WebPagePanel(start: store.start, close: close, showsCloseButton: true, placeholderTitle: title,
+                     identifier: "\(store.storeID)-store", isPanel: false)
+            .presentationSizing(.fitted)
+            .accessibilityLabel(title)
     }
 }
 
@@ -226,6 +220,8 @@ struct GameTransition {
 extension EnvironmentValues {
     @Entry var gameTransition: GameTransition?
     @Entry var storefrontBar: StorefrontBarState?
+    /// Opens a storefront's store above the whole window.
+    @Entry var presentStore: (@MainActor (StorePresentation) -> Void)?
 }
 
 /// Matches a game's cover in the library with its cover on the game's page.
