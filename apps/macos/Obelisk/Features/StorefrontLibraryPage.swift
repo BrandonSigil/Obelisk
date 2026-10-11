@@ -203,18 +203,19 @@ struct StorefrontLibraryPage<Model: LibraryStorefront, HeroArtwork: View, HeroLo
 
     var body: some View {
         let heroGame = heroGame
+        let actions = LibraryCardActions(model)
         let backdropOffset = heroGame == nil ? 0 : ObeliskStyle.libraryHeroHeight
         return StorefrontScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 if let heroGame {
-                    hero(heroGame)
+                    hero(heroGame, action: actions(heroGame))
                 }
                 VStack(alignment: .leading, spacing: 22) {
                     StorefrontWarningBanner(message: $model.storageWarning)
                     if model.cloud.failurePresented {
                         SteamCloudFailureView(model: model, storefront: storeID)
                     }
-                    library
+                    library(actions)
                 }
                 .padding(.horizontal, ObeliskStyle.contentPadding)
                 .padding(.top, heroGame == nil ? 12 : 30)
@@ -233,15 +234,27 @@ struct StorefrontLibraryPage<Model: LibraryStorefront, HeroArtwork: View, HeroLo
             bar?.showsGameTitle = false
         }
         .ignoresSafeArea(.container, edges: .top)
+        .forceQuitConfirmation(forceQuitting ?? "", isPresented: Binding(
+            get: { forceQuitting != nil },
+            set: { if !$0 { forceQuitting = nil } }
+        )) {
+            model.installations.forceQuitRunningGame()
+        }
     }
 
-    private func hero(_ game: Model.Game) -> some View {
-        LibraryHero(
-            title: model.title(of: game),
+    private func hero(_ game: Model.Game, action: LibraryCardAction) -> some View {
+        let installations = model.installations
+        let title = model.title(of: game)
+        return LibraryHero(
+            title: title,
             details: [
                 model.lastPlayed(of: game).map { .init(symbol: "calendar", text: GameFormatting.lastPlayed($0)) },
                 model.playtime(of: game).map { .init(symbol: "clock", text: GameFormatting.playtime($0)) },
             ].compactMap { $0 },
+            action: action,
+            transfer: { installations.transfer(for: game.id) },
+            cancelTransfer: { installations.cancel(game.id) },
+            perform: { model.performCardAction(action, for: game) { forceQuitting = title } },
             open: { open(game, .hero) }
         ) {
             heroArtwork(game)
@@ -250,7 +263,7 @@ struct StorefrontLibraryPage<Model: LibraryStorefront, HeroArtwork: View, HeroLo
         }
     }
 
-    private var library: some View {
+    private func library(_ actions: LibraryCardActions<Model>) -> some View {
         let filtered = model.filteredGames
         return VStack(alignment: .leading, spacing: 22) {
             header(count: filtered.count)
@@ -275,7 +288,7 @@ struct StorefrontLibraryPage<Model: LibraryStorefront, HeroArtwork: View, HeroLo
             } else if filtered.isEmpty {
                 StorefrontEmptyLibrary(searchText: $model.searchText, filter: $model.filter, refresh: model.refresh)
             } else {
-                grid(filtered)
+                grid(filtered, actions: actions)
                 if model.isLoadingGames || model.pendingMetadata != nil {
                     ProgressView().controlSize(.small).frame(maxWidth: .infinity)
                 }
@@ -330,9 +343,8 @@ struct StorefrontLibraryPage<Model: LibraryStorefront, HeroArtwork: View, HeroLo
         }
     }
 
-    private func grid(_ games: [Model.Game]) -> some View {
+    private func grid(_ games: [Model.Game], actions: LibraryCardActions<Model>) -> some View {
         let installations = model.installations
-        let actions = LibraryCardActions(model)
         return LazyVGrid(columns: Self.columns, alignment: .leading, spacing: 18) {
             ForEach(games) { game in
                 let action = actions(game)
@@ -353,12 +365,6 @@ struct StorefrontLibraryPage<Model: LibraryStorefront, HeroArtwork: View, HeroLo
                     artwork(game)
                 }
             }
-        }
-        .forceQuitConfirmation(forceQuitting ?? "", isPresented: Binding(
-            get: { forceQuitting != nil },
-            set: { if !$0 { forceQuitting = nil } }
-        )) {
-            installations.forceQuitRunningGame()
         }
     }
 }

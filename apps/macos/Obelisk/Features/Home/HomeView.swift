@@ -304,14 +304,16 @@ private struct HomePage: View {
                 section.logoAssetName.map { LibraryHeroDetail(logo: $0, text: section.storeName ?? section.title) },
                 game.lastPlayed.map { LibraryHeroDetail(symbol: "calendar", text: GameFormatting.lastPlayed($0)) },
                 game.playtime.map { LibraryHeroDetail(symbol: "clock", text: GameFormatting.playtime($0)) },
-            ].compactMap { $0 }
+            ].compactMap { $0 },
+            action: game.action,
+            transfer: game.transfer,
+            cancelTransfer: game.cancelTransfer,
+            perform: { perform(game) },
+            open: { open(game, .hero, nil) }
         ) {
             game.hero.artwork()
         } logo: {
             game.hero.logo()
-        } actions: {
-            HomeHeroAction(game: game) { perform(game) }
-            LibraryHeroOpenButton(prominent: false) { open(game, .hero, nil) }
         }
     }
 
@@ -411,48 +413,6 @@ private struct HomePage: View {
             }
         }
         .padding(.horizontal, ObeliskStyle.contentPadding)
-    }
-}
-
-/// The hero's main button: plays its game, or downloads or ends it, as the
-/// game's page does. It reads the Transfer in its own body, so a progress
-/// tick redraws the button alone.
-private struct HomeHeroAction: View {
-    let game: HomeGame
-    let perform: () -> Void
-
-    var body: some View {
-        let action = game.action
-        GameActionButton(
-            title: title,
-            launches: !isDownload,
-            transfer: game.transfer(),
-            isTransferring: action == .transferring,
-            isAvailable: action.isEnabled,
-            action: perform,
-            cancel: game.cancelTransfer,
-            isStep: action == .busy,
-            quitStage: quitStage
-        )
-    }
-
-    private var isDownload: Bool {
-        if case .download = game.action { true } else { false }
-    }
-
-    private var quitStage: GameQuitStage? {
-        if case let .running(stage) = game.action { stage } else { nil }
-    }
-
-    private var title: String {
-        switch game.action {
-        case .launch: L10n.string("ui.game.play")
-        case .download: L10n.string("model.game.download")
-        case .busy: L10n.string("ui.transfer.preparing_short")
-        case .queued: L10n.string("model.game.queued")
-        case .transferring: L10n.string("ui.transfer.downloading_short")
-        case let .running(stage): stage?.title ?? L10n.string("model.game.running")
-        }
     }
 }
 

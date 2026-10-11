@@ -1,17 +1,24 @@
 import SwiftUI
 
 /// A game shown wide at the top of a library, its artwork reaching under the
-/// library's floating bar. Its text stays light, with its own shadow, in both
-/// appearances.
-struct LibraryHero<Artwork: View, Logo: View, Actions: View>: View {
+/// library's floating bar: Home's and each storefront's. Its text stays light,
+/// with its own shadow, in both appearances.
+struct LibraryHero<Artwork: View, Logo: View>: View {
     /// The game's name, read aloud as the hero's heading.
     let title: String
     let details: [Detail]
+    /// What the game's button shows and does, as on its cover.
+    let action: LibraryCardAction
+    /// The game's Transfer, read only by the button showing its progress.
+    let transfer: @MainActor () -> GameTransfer?
+    let cancelTransfer: () -> Void
+    /// Runs the game's button.
+    let perform: () -> Void
+    /// Opens the game's page.
+    let open: () -> Void
     @ViewBuilder let artwork: Artwork
     /// What shows the game's name over its artwork, if the artwork does not.
     @ViewBuilder let logo: Logo
-    /// The hero's buttons, such as `LibraryHeroOpenButton`.
-    @ViewBuilder let actions: Actions
 
     typealias Detail = LibraryHeroDetail
 
@@ -45,7 +52,9 @@ struct LibraryHero<Artwork: View, Logo: View, Actions: View>: View {
                     .foregroundStyle(.white)
                     .shadow(color: .black.opacity(0.6), radius: 6)
                     HStack(spacing: 12) {
-                        actions
+                        LibraryHeroAction(action: action, transfer: transfer, cancel: cancelTransfer,
+                                          perform: perform)
+                        LibraryHeroOpenButton(open: open)
                     }
                     .padding(.top, 4)
                 }
@@ -131,45 +140,66 @@ private struct OpenTopRectangle: Shape {
     }
 }
 
-extension LibraryHero where Actions == LibraryHeroOpenButton {
-    /// A library's hero, whose button opens the game's page.
-    init(title: String, details: [Detail], open: @escaping () -> Void,
-         @ViewBuilder artwork: () -> Artwork, @ViewBuilder logo: () -> Logo) {
-        self.init(title: title, details: details, artwork: artwork, logo: logo) {
-            LibraryHeroOpenButton(prominent: true, open: open)
+/// The hero's main button: plays its game, or downloads or ends it, as the
+/// game's page does. It reads the Transfer in its own body, so a progress
+/// tick redraws the button alone.
+private struct LibraryHeroAction: View {
+    let action: LibraryCardAction
+    let transfer: @MainActor () -> GameTransfer?
+    let cancel: () -> Void
+    let perform: () -> Void
+
+    var body: some View {
+        GameActionButton(
+            title: title,
+            launches: !isDownload,
+            transfer: transfer(),
+            isTransferring: action == .transferring,
+            isAvailable: action.isEnabled,
+            action: perform,
+            cancel: cancel,
+            isStep: action == .busy,
+            quitStage: quitStage
+        )
+    }
+
+    private var isDownload: Bool {
+        if case .download = action { true } else { false }
+    }
+
+    private var quitStage: GameQuitStage? {
+        if case let .running(stage) = action { stage } else { nil }
+    }
+
+    private var title: String {
+        switch action {
+        case .launch: L10n.string("ui.game.play")
+        case .download: L10n.string("model.game.download")
+        case .busy: L10n.string("ui.transfer.preparing_short")
+        case .queued: L10n.string("model.game.queued")
+        case .transferring: L10n.string("ui.transfer.downloading_short")
+        case let .running(stage): stage?.title ?? L10n.string("model.game.running")
         }
     }
 }
 
-/// Opens the hero's game page: the hero's main button, or plain glass as tall
-/// as the game's action button beside it.
-struct LibraryHeroOpenButton: View {
-    let prominent: Bool
+/// Opens the hero's game page: plain glass as tall as the game's button
+/// beside it.
+private struct LibraryHeroOpenButton: View {
     let open: () -> Void
 
     var body: some View {
-        let label = Label(L10n.string("ui.library.hero.open"), systemImage: "arrow.right")
-            .labelStyle(TrailingIconLabelStyle())
-        if prominent {
-            Button(action: open) {
-                label
-                    .font(.system(size: 13, weight: .semibold))
-                    .padding(.horizontal, 6)
-            }
-            .obeliskButtonStyle(.glassProminent)
-            .controlSize(.large)
-        } else {
-            Button(action: open) {
-                label
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 20)
-                    .frame(height: 44)
-                    .modifier(StorefrontControlGlass())
-                    .contentShape(.capsule)
-            }
-            .obeliskButtonStyle(.plain)
+        Button(action: open) {
+            Label(L10n.string("ui.library.hero.open"), systemImage: "arrow.right")
+                .labelStyle(TrailingIconLabelStyle())
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 20)
+                .frame(height: 44)
+                .modifier(StorefrontControlGlass())
+                .contentShape(.capsule)
         }
+        .obeliskButtonStyle(.plain)
     }
 }
 
