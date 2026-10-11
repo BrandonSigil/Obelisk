@@ -324,7 +324,7 @@ fn recording_runtime(root: &Path) -> PathBuf {
         fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
     };
     script("engine/wsd", r#"exec /usr/bin/nc -lU "$2/wsd.sock""#);
-    let server = r#"printf '%s\n' "$NPT_BACKEND $NPT_D3D12_LIBRARY_PATH" "$RENDER_SERVER_EXEC_PATH" > "$OBELISK_TEST_ROOT/server.txt"
+    let server = r#"printf '%s\n' "$NPT_BACKEND $NPT_D3D12_LIBRARY_PATH" "$RENDER_SERVER_EXEC_PATH" "residency set ${DMN_RESIDENCY_SET-default}" > "$OBELISK_TEST_ROOT/server.txt"
 exec /usr/bin/nc -lU "$4""#;
     script("graphics/bin/virgl_test_server", server);
     script("graphics/x86_64/bin/virgl_test_server", server);
@@ -431,6 +431,7 @@ fn the_launcher_hands_the_guest_its_binds_its_variables_and_the_session_s_values
         server.lines().next().unwrap(),
         format!("dxmt {}", dxmt.display())
     );
+    assert_eq!(server.lines().nth(2).unwrap(), "residency set default");
 }
 
 #[test]
@@ -479,6 +480,8 @@ fn the_launcher_runs_d3dmetal_in_the_intel_render_server() {
         server.lines().next().unwrap(),
         format!("d3dmetal {}", library.display())
     );
+    // Buffers are resident per command buffer, not pinned in a residency set.
+    assert_eq!(server.lines().nth(2).unwrap(), "residency set 0");
 }
 
 #[test]

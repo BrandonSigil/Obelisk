@@ -148,10 +148,13 @@ fi
 helpers+=($!)
 if [ "$graphics" = d3dmetal ]; then
     # D3DMetal is an Intel library: the Intel render server runs it under Rosetta. d3dmetal-native loads the
-    # runtime's D3DMetal, unmodified, from its absolute path.
+    # runtime's D3DMetal, unmodified, from its absolute path. DMN_RESIDENCY_SET=0: the game's buffers are made
+    # resident by each command buffer that uses them instead of being pinned for good in a residency set. ELDEN
+    # RING's three 4 GiB upload buffers then no longer count as GPU memory (14.6 GB instead of 26.3 on average), the
+    # pinned memory no longer peaks at 24 GB while it loads, and the frame rate and hitches stay the same.
     server="$runtime/graphics/x86_64"
     d3dmetal="$server/lib/libd3dmetal-native.dylib"
-    RENDER_SERVER_EXEC_PATH="$render" NPT_BACKEND=d3dmetal \
+    RENDER_SERVER_EXEC_PATH="$render" NPT_BACKEND=d3dmetal DMN_RESIDENCY_SET=0 \
         NPT_D3D11_LIBRARY_PATH="$d3dmetal" NPT_DXGI_LIBRARY_PATH="$d3dmetal" NPT_D3D12_LIBRARY_PATH="$d3dmetal" \
         D3DMETAL_FRAMEWORK_PATH="$runtime/../lib/external/D3DMetal.framework" \
         "$server/bin/virgl_test_server" --no-virgl --no-fork --socket-path "$sockets/vtest.sock" &
