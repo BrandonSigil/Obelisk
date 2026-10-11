@@ -10,8 +10,10 @@ final class FakeInstallations<Store: InstallationStorefront>: InstallationsBacke
         case diagnostic(Bool)
         case install(GameOffer)
         case update(InstallationReceipt<Store.GameID>)
-        case cancel
-        case launch(InstallationReceipt<Store.GameID>, verify: Bool)
+        case cancel(Store.GameID)
+        case checkUpdates
+        case automaticUpdates(Bool)
+        case launch(InstallationReceipt<Store.GameID>)
         case uninstall(InstallationReceipt<Store.GameID>)
         case signedOut
         case maintain(Store.GameID, installed: InstallationReceipt<Store.GameID>?)
@@ -64,8 +66,10 @@ final class FakeInstallations<Store: InstallationStorefront>: InstallationsBacke
     func setDiagnostic(_ running: Bool) { record(.diagnostic(running)) }
     func install(_ offer: GameOffer) { record(.install(offer)) }
     func update(_ receipt: InstallationReceipt<Store.GameID>) { record(.update(receipt)) }
-    func cancel() { record(.cancel) }
-    func launch(_ receipt: InstallationReceipt<Store.GameID>, verify: Bool) { record(.launch(receipt, verify: verify)) }
+    func cancel(_ game: Store.GameID) { record(.cancel(game)) }
+    func checkUpdates() { record(.checkUpdates) }
+    func setAutomaticUpdates(_ enabled: Bool) { record(.automaticUpdates(enabled)) }
+    func launch(_ receipt: InstallationReceipt<Store.GameID>) { record(.launch(receipt)) }
     func uninstall(_ receipt: InstallationReceipt<Store.GameID>) { record(.uninstall(receipt)) }
     func signedOut() { record(.signedOut) }
     func maintainCloud(_ game: Store.GameID, installed: InstallationReceipt<Store.GameID>?) {
@@ -80,9 +84,15 @@ final class FakeInstallations<Store: InstallationStorefront>: InstallationsBacke
         return indicators
     }
 
-    /// The actions Swift forwarded, without diagnostics.
+    /// The actions Swift forwarded, without diagnostics or update settings
+    /// and checks.
     var actions: [Call] {
-        calls.filter { if case .diagnostic = $0 { false } else { true } }
+        calls.filter {
+            switch $0 {
+            case .diagnostic, .checkUpdates, .automaticUpdates: false
+            default: true
+            }
+        }
     }
 }
 
@@ -152,18 +162,28 @@ extension CloudQuestion {
 /// Gates Rust publishes, as a test shows them.
 extension InstallationsGate {
     /// Nothing holds the storefront.
-    static var open: Self { Self(modify: .open(except: []), launch: true, maintain: .open(except: [])) }
+    static var open: Self {
+        Self(modify: .open(except: []), uninstall: .open(except: []), launch: .open(except: []),
+             maintain: .open(except: []))
+    }
 
     /// A Game session runs `game`: its files, every launch and every Cloud
     /// operation wait.
     static func session(_ game: GameID) -> Self {
-        Self(modify: .open(except: [game]), launch: false, maintain: .closed)
+        Self(modify: .open(except: [game]), uninstall: .open(except: [game]), launch: .closed, maintain: .closed)
     }
 
-    /// A Transfer, launch or uninstall of `game` runs: every installation
-    /// waits, and so does the game's own Cloud maintenance.
+    /// A launch or uninstall of `game` runs: every installation and every
+    /// launch wait, and so does the game's own Cloud maintenance.
     static func action(_ game: GameID) -> Self {
-        Self(modify: .closed, launch: false, maintain: .open(except: [game]))
+        Self(modify: .closed, uninstall: .closed, launch: .closed, maintain: .open(except: [game]))
+    }
+
+    /// A Transfer of `game` runs: other games may queue theirs and launch,
+    /// none may be uninstalled.
+    static func transfer(_ game: GameID) -> Self {
+        Self(modify: .open(except: [game]), uninstall: .closed, launch: .open(except: [game]),
+             maintain: .open(except: [game]))
     }
 }
 

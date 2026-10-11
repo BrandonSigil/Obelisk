@@ -117,7 +117,9 @@ struct GameDetailPage<Model: LibraryStorefront, HeroArtwork: View, Cover: View, 
                     if let receipt = installations.selectedReceipt {
                         GameManagementButton(
                             gameName: name,
-                            isAvailable: installations.canUninstallSelectedGame,
+                            canVerify: installations.canVerifySelectedGame,
+                            canUninstall: installations.canUninstallSelectedGame,
+                            verify: { installations.verify(receipt) },
                             uninstall: { installations.uninstall(receipt) },
                             directory: receipt.directory
                         )
@@ -226,10 +228,11 @@ private struct GamePrimaryAction<Store: InstallationStorefront>: View {
             },
             cancel: {
                 if cancelsSynchronization { installations.cloud.cancelSynchronization(for: game) }
-                else { installations.cancelDownload() }
+                else { installations.cancel(game) }
             },
             isCancellable: cancelsSynchronization
-                || (installations.isLaunching && installations.launchGame == game),
+                || (installations.isLaunching && installations.launchGame == game)
+                || installations.isQueued(game),
             isStep: installations.isSynchronizingSaves || installations.runtimeInstallFraction != nil,
             stepFraction: installations.runtimeInstallFraction,
             quitStage: installations.primaryQuitStage
@@ -254,7 +257,9 @@ struct GameOperationStatus<Store: InstallationStorefront>: View {
         if let transfer = installations.transfer(for: game), transfer.state == .failed || transfer.state == .cancelled {
             return transfer.message.isEmpty ? transfer.activityTitle : L10n.message(transfer.message)
         }
-        if let activeGame = installations.activeTransferGame ?? installations.launchGame, activeGame != game {
+        // Another game's operation matters only when it keeps this one waiting.
+        if let activeGame = installations.activeTransferGame ?? installations.launchGame, activeGame != game,
+           !installations.primaryActionAvailable {
             return L10n.string(Store.otherGameOperation)
         }
         return nil

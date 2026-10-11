@@ -208,7 +208,7 @@ private final class Fixture {
         }
         backend = FakeInstallations(receipts: receipt.map { [$0] } ?? [])
         installations.connect(account: account, backend: backend, port: InstallationPort(
-            verifiesBeforeLaunch: { false }, report: { _ in }, warn: { _ in }
+            report: { _ in }, warn: { _ in }
         ))
     }
 

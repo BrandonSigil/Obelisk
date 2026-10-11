@@ -83,6 +83,43 @@ impl Client {
         self.downloads.cancel();
     }
 
+    /// Whether Epic's live build of the game differs from the one installed
+    /// in `directory`, as the launcher service names its version. An
+    /// installation whose receipt is gone needs its Transfer too.
+    pub async fn update_available(
+        &self,
+        namespace: &str,
+        catalog_item_id: &str,
+        app_name: &str,
+        platform: &str,
+        directory: &Path,
+    ) -> Result<bool, EpicError> {
+        validate_identity(namespace, catalog_item_id, app_name, platform)?;
+        let Some(installed) =
+            installation::read_receipt::<Installation>(directory)?.filter(|receipt| {
+                receipt.namespace == namespace
+                    && receipt.app_name == app_name
+                    && receipt.platform == platform
+            })
+        else {
+            return Ok(true);
+        };
+        let live = self
+            .with_access_token(|token| async move {
+                details::live_build_version(
+                    &self.api,
+                    &token,
+                    namespace,
+                    catalog_item_id,
+                    app_name,
+                    platform,
+                )
+                .await
+            })
+            .await?;
+        Ok(live != installed.build_version)
+    }
+
     pub async fn download(
         &self,
         namespace: &str,

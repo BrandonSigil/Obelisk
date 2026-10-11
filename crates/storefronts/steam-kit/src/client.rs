@@ -719,6 +719,47 @@ impl Client {
             .ok_or_else(|| ClientError::Failure("backend.steam.client.noCompatibleDepot".into()))
     }
 
+    /// Whether Steam offers a newer build than the one installed in
+    /// `directory`: the public manifests of the depots a download would pick
+    /// differ from those it installed. An installation whose receipt is gone
+    /// needs its Transfer too. It reads PICS only, never the game's files.
+    pub async fn update_available(
+        &self,
+        app_id: u32,
+        platform: &str,
+        language: &str,
+        directory: &Path,
+    ) -> Result<bool, ClientError> {
+        let Some(installed) = installation::read_receipt::<Installation>(directory)?
+            .filter(|receipt| receipt.app_id == app_id && receipt.platform == platform)
+        else {
+            return Ok(true);
+        };
+        let cm = &self.cm;
+        let owned = self.licensed_content(cm).await?;
+        let app = self.app_info(cm, app_id).await?;
+        let selected = select_depots(&app, &owned, platform, language);
+        let sources = self
+            .cached_app_infos(&shared_sources(&app, &selected))
+            .await?;
+        let mut latest = HashSet::new();
+        for depot in selected {
+            if let Some(manifest_id) = public_manifest(&app, depot, &sources)? {
+                latest.insert((depot.depot_id, manifest_id));
+            }
+        }
+        // A build Steam would not install is no update.
+        if latest.is_empty() {
+            return Ok(false);
+        }
+        let installed: HashSet<_> = installed
+            .manifests
+            .iter()
+            .map(|depot| (depot.depot_id, depot.manifest_id))
+            .collect();
+        Ok(latest != installed)
+    }
+
     /// Installs every prepared depot under the installation lock, including
     /// waits for refreshed request codes.
     async fn install_depots(
@@ -837,17 +878,9 @@ impl Client {
         };
         let depots = async {
             cancel.check()?;
-            // A shared depot without its own manifest takes it from its source
-            // app; one PICS query covers every such app.
-            let sources: Vec<u32> = selected
-                .iter()
-                .filter(|depot| depot.public_manifest.is_none())
-                .filter_map(|depot| depot.shared_from_app)
-                .filter(|source| *source != app_id)
-                .collect::<HashSet<_>>()
-                .into_iter()
-                .collect();
-            let sources = self.cached_app_infos(&sources).await?;
+            let sources = self
+                .cached_app_infos(&shared_sources(&app, &selected))
+                .await?;
             let lookups: Vec<_> = selected
                 .iter()
                 .map(|depot| self.prepare_depot(&app, depot, &sources, cancel))
@@ -882,23 +915,8 @@ impl Client {
         cancel: &CancelToken,
     ) -> Result<Option<PreparedDepot>, ClientError> {
         cancel.check()?;
-        let manifest_app = depot.shared_from_app.unwrap_or(app.app_id);
-        let manifest_id = match depot.public_manifest {
-            Some(id) => id,
-            None if manifest_app != app.app_id => sources
-                .get(&manifest_app)
-                .ok_or(crate::cm::CmError::MissingApp(manifest_app))?
-                .depots
-                .iter()
-                .find(|other| other.depot_id == depot.depot_id)
-                .and_then(|other| other.public_manifest)
-                .ok_or_else(|| {
-                    ClientError::Failure(crate::message::format(
-                        "backend.steam.client.sharedManifestMissing",
-                        &[depot.depot_id.to_string()],
-                    ))
-                })?,
-            None => return Ok(None),
+        let Some(manifest_id) = public_manifest(app, depot, sources)? else {
+            return Ok(None);
         };
         let key_app = if depot.shared_from_app == Some(COMMON_REDISTRIBUTABLES) {
             COMMON_REDISTRIBUTABLES
@@ -999,6 +1017,47 @@ impl CdnAuthorization for DepotAuthorization<'_> {
                 .await
                 .ok()
         })
+    }
+}
+
+/// The apps whose PICS metadata names the manifests of `selected`'s shared
+/// depots that have none of their own; one PICS query covers them all.
+fn shared_sources(app: &AppInfo, selected: &[&DepotInfo]) -> Vec<u32> {
+    selected
+        .iter()
+        .filter(|depot| depot.public_manifest.is_none())
+        .filter_map(|depot| depot.shared_from_app)
+        .filter(|source| *source != app.app_id)
+        .collect::<HashSet<_>>()
+        .into_iter()
+        .collect()
+}
+
+/// The depot's public manifest ID, taken from its source app for a shared
+/// depot without its own. `None` when it has no public manifest.
+fn public_manifest(
+    app: &AppInfo,
+    depot: &DepotInfo,
+    sources: &HashMap<u32, Arc<AppInfo>>,
+) -> Result<Option<u64>, ClientError> {
+    let manifest_app = depot.shared_from_app.unwrap_or(app.app_id);
+    match depot.public_manifest {
+        Some(id) => Ok(Some(id)),
+        None if manifest_app != app.app_id => sources
+            .get(&manifest_app)
+            .ok_or(crate::cm::CmError::MissingApp(manifest_app))?
+            .depots
+            .iter()
+            .find(|other| other.depot_id == depot.depot_id)
+            .and_then(|other| other.public_manifest)
+            .map(Some)
+            .ok_or_else(|| {
+                ClientError::Failure(crate::message::format(
+                    "backend.steam.client.sharedManifestMissing",
+                    &[depot.depot_id.to_string()],
+                ))
+            }),
+        None => Ok(None),
     }
 }
 

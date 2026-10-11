@@ -48,6 +48,9 @@ impl Network for Fake {
         None
     }
     fn cancel(&self) {}
+    fn update_available<'a>(&'a self, _: &'a Receipt) -> BoxFuture<'a, Result<bool, Failure>> {
+        Box::pin(async { Ok(false) })
+    }
     fn launch_target<'a>(
         &'a self,
         _: u32,

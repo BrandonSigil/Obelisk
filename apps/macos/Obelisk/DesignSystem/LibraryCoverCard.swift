@@ -100,6 +100,8 @@ enum LibraryCardAction: Equatable {
     case busy
     /// A Transfer runs for the game.
     case transferring
+    /// The game's Transfer waits in the download queue.
+    case queued
     /// The game runs: the button ends it, as on the game's page, unless its
     /// session cannot be asked anything, such as while it reconnects.
     case running(GameQuitStage?)
@@ -111,7 +113,7 @@ enum LibraryCardAction: Equatable {
         case .launch: L10n.string("ui.game.launch_named", title)
         case .download: L10n.string("ui.game.download_named", title)
         case let .running(stage): stage?.label(title: title)
-        case .busy, .transferring: nil
+        case .busy, .transferring, .queued: nil
         }
     }
 
@@ -119,7 +121,7 @@ enum LibraryCardAction: Equatable {
         switch self {
         case let .launch(enabled), let .download(enabled): enabled
         case let .running(stage): stage == .quit || stage == .forceQuit
-        case .busy, .transferring: false
+        case .busy, .transferring, .queued: false
         }
     }
 }
@@ -181,6 +183,14 @@ private struct LibraryCardButton: View {
                 .accessibilityLabel(L10n.string("ui.transfer.preparing_accessibility"))
         case .transferring:
             LibraryCardProgress(progress: progress, diameter: Self.diameter)
+        case .queued:
+            Image(systemName: "clock")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.85))
+                .frame(width: Self.diameter, height: Self.diameter)
+                .background(.white.opacity(0.14), in: Circle())
+                .help(L10n.string("model.game.queued"))
+                .accessibilityLabel(L10n.string("model.game.queued"))
         case .running(.quit):
             button(symbol: "stop.fill", colors: ObeliskStyle.quitGradient)
         case .running(.closing):

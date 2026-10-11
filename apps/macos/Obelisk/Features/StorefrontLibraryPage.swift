@@ -93,12 +93,6 @@ extension LibraryStorefront {
         default: downloadFromLibrary(game)
         }
     }
-
-    /// The game a Transfer belongs to, also once it left the library.
-    func transferName(_ game: Store.GameID) -> String? {
-        games.first { $0.id == game }.map(title(of:))
-            ?? installations.receipts.first { $0.gameID == game }?.name
-    }
 }
 
 /// What each card's button shows and does, read once for a whole set of
@@ -108,6 +102,7 @@ struct LibraryCardActions<Model: LibraryStorefront> {
     private let model: Model
     private let installed: Set<Model.Store.GameID>
     private let transferring: Model.Store.GameID?
+    private let queued: Set<Model.Store.GameID>
     private let running: Model.Store.GameID?
     private let preparing: Set<Model.Store.GameID>
 
@@ -117,6 +112,7 @@ struct LibraryCardActions<Model: LibraryStorefront> {
         self.model = model
         installed = Set(installations.receipts.map(\.gameID))
         transferring = installations.activeTransferGame
+        queued = Set(installations.queuedGames)
         running = session.flatMap { $0.running ? $0.game : nil }
         preparing = Set([
             session?.game,
@@ -132,6 +128,7 @@ struct LibraryCardActions<Model: LibraryStorefront> {
         if game.id == running { return .running(installations.sessions.quitStage) }
         if game.id == transferring { return .transferring }
         if preparing.contains(game.id) { return .busy }
+        if queued.contains(game.id) { return .queued }
         if installed.contains(game.id) { return .launch(enabled: installations.canLaunch(game.id)) }
         return .download(enabled: installations.canModify(game.id) && model.canInstallFromLibrary(game))
     }
@@ -234,9 +231,6 @@ struct StorefrontLibraryPage<Model: LibraryStorefront, HeroArtwork: View, HeroLo
         .onScrollGeometryChange(for: Bool.self, of: { $0.contentOffset.y + $0.contentInsets.top > backdropOffset }) { _, under in
             bar?.showsBackdrop = under
             bar?.showsGameTitle = false
-        }
-        .safeAreaBar(edge: .bottom, spacing: 0) {
-            LibraryTransferBar(installations: model.installations, name: model.transferName)
         }
         .ignoresSafeArea(.container, edges: .top)
     }
@@ -365,25 +359,6 @@ struct StorefrontLibraryPage<Model: LibraryStorefront, HeroArtwork: View, HeroLo
             set: { if !$0 { forceQuitting = nil } }
         )) {
             installations.forceQuitRunningGame()
-        }
-    }
-}
-
-/// The storefront's running Transfer. It reads the Transfer in its own body,
-/// so a progress tick redraws the pill, not the library.
-struct LibraryTransferBar<Store: InstallationStorefront>: View {
-    let installations: GameInstallations<Store>
-    let name: (Store.GameID) -> String?
-
-    var body: some View {
-        if let transfer = installations.transfer, installations.isDownloading {
-            LibraryTransferPill(
-                gameName: installations.transferGame.flatMap(name),
-                transfer: transfer,
-                cancel: installations.cancelDownload
-            )
-            .padding(.bottom, 18)
-            .frame(maxWidth: .infinity)
         }
     }
 }

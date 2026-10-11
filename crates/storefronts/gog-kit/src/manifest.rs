@@ -18,6 +18,9 @@ pub(crate) const SUPPORT_DIRECTORY: &str = "gog-support";
 /// One build of a product, as `builds?generation=2` lists it.
 #[derive(Clone, Debug, Deserialize)]
 pub(crate) struct Build {
+    /// The build's identity, which its manifest records too.
+    #[serde(default)]
+    pub build_id: String,
     #[serde(default)]
     pub branch: Option<String>,
     #[serde(default)]

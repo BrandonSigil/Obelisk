@@ -29,6 +29,8 @@ pub struct Installation {
     pub total_bytes: u64,
     /// A Transfer started over it and has not succeeded since.
     pub needs_verification: bool,
+    /// The storefront offers a newer build than the installed one.
+    pub update_available: bool,
 }
 
 /// What a storefront offers to install of one game.
@@ -83,10 +85,14 @@ pub enum GameOpening {
 /// What the Reservation lets start now.
 #[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
 pub struct InstallationGate {
-    /// A Transfer or uninstall.
+    /// A Transfer, which waits in the download queue.
     pub modify: GameOpening,
-    /// A launch, of any game a Transfer may touch.
-    pub launch: bool,
+    /// An uninstall: no Transfer, launch or other uninstall of the storefront
+    /// runs.
+    pub uninstall: GameOpening,
+    /// A launch: a Transfer holds only its own game, and those whose launch
+    /// would need one.
+    pub launch: GameOpening,
     pub maintain: GameOpening,
 }
 
@@ -172,6 +178,8 @@ pub struct InstallationsState {
     pub warning: Option<InstallationWarning>,
     pub gate: InstallationGate,
     pub cloud_sync: Option<CloudSync>,
+    /// The games whose Transfer waits in the download queue.
+    pub queued: Vec<String>,
 }
 
 /// How a storefront's games, receipts and offers cross UniFFI.
@@ -215,6 +223,7 @@ impl Named for steam::Steam {
             platform: receipt.platform,
             total_bytes: receipt.total_bytes,
             needs_verification: receipt.needs_verification == Some(true),
+            update_available: false,
         }
     }
 }
@@ -258,6 +267,7 @@ impl Named for epic::Epic {
             platform: receipt.platform,
             total_bytes: receipt.total_bytes,
             needs_verification: receipt.needs_verification == Some(true),
+            update_available: false,
         }
     }
 }
@@ -292,6 +302,7 @@ impl Named for gog::Gog {
             platform: receipt.platform,
             total_bytes: receipt.total_bytes,
             needs_verification: receipt.needs_verification == Some(true),
+            update_available: false,
         }
     }
 }
@@ -319,7 +330,15 @@ fn state<S: Named>(state: installations::State<S>) -> InstallationsState {
     let name = |game: Option<S::Game>| game.as_ref().map(S::name);
     InstallationsState {
         revision: state.revision,
-        installations: state.receipts.into_iter().map(S::installation).collect(),
+        installations: state
+            .receipts
+            .into_iter()
+            .map(|receipt| {
+                let mut installation = S::installation(receipt);
+                installation.update_available = state.updates.contains(&installation.id);
+                installation
+            })
+            .collect(),
         transfer: state.transfer.map(Into::into),
         transfer_game: name(state.transfer_game),
         downloading: state.downloading,
@@ -335,7 +354,8 @@ fn state<S: Named>(state: installations::State<S>) -> InstallationsState {
             .map(|(id, key)| InstallationWarning { id, key }),
         gate: InstallationGate {
             modify: opening::<S>(state.gate.modify),
-            launch: state.gate.launch,
+            uninstall: opening::<S>(state.gate.uninstall),
+            launch: opening::<S>(state.gate.launch),
             maintain: opening::<S>(state.gate.maintain),
         },
         cloud_sync: state.cloud_sync.map(|sync| CloudSync {
@@ -359,6 +379,7 @@ fn state<S: Named>(state: installations::State<S>) -> InstallationsState {
                 choices: question.choices.into_iter().map(Into::into).collect(),
             }),
         }),
+        queued: state.queued.iter().map(S::name).collect(),
     }
 }
 
@@ -376,6 +397,12 @@ async fn call<T: Send + 'static>(
 fn install<S: Named>(installations: &Installations<S>, offer: GameOffer) {
     if let Some(offer) = S::offer(offer) {
         installations.install(offer);
+    }
+}
+
+fn cancel<S: Named>(installations: &Installations<S>, game: &str) {
+    if let Some(game) = S::named(game) {
+        installations.cancel(&game);
     }
 }
 
@@ -414,13 +441,23 @@ async fn indicators<S: Named>(
         .collect())
 }
 
-fn account<S: installations::Storefront>(
+fn account<S: Named>(
     content: impl installations::Content<S> + 'static,
     sessions: Arc<Sessions<S>>,
     account: S::Account,
     receipts: String,
     locations: &Locations,
-) -> Installations<S> {
+    storefront: game_runtime::queue::Storefront,
+) -> Installations<S>
+where
+    S::Account: std::fmt::Display,
+{
+    let queueing = installations::Queueing {
+        queue: crate::downloads::queue().clone(),
+        storefront,
+        account: account.to_string(),
+        name: <S as Named>::name,
+    };
     Installations::new(
         Arc::new(content),
         sessions,
@@ -428,6 +465,7 @@ fn account<S: installations::Storefront>(
         receipts.into(),
         locations.library.clone(),
         locations.home.clone(),
+        queueing,
     )
 }
 
@@ -481,7 +519,14 @@ impl AccountInstallations {
             },
             locations.clone(),
         );
-        let installations = account(content, sessions.clone(), steam_id, receipts, &locations);
+        let installations = account(
+            content,
+            sessions.clone(),
+            steam_id,
+            receipts,
+            &locations,
+            game_runtime::queue::Storefront::Steam,
+        );
         Ok(Arc::new(Self {
             account: Account::Steam(installations),
         }))
@@ -511,7 +556,14 @@ impl AccountInstallations {
             language,
             locations.clone(),
         );
-        let installations = account(content, sessions.clone(), account_id, receipts, &locations);
+        let installations = account(
+            content,
+            sessions.clone(),
+            account_id,
+            receipts,
+            &locations,
+            game_runtime::queue::Storefront::Epic,
+        );
         Ok(Arc::new(Self {
             account: Account::Epic(installations),
         }))
@@ -540,7 +592,14 @@ impl AccountInstallations {
             language,
             locations.clone(),
         );
-        let installations = account(content, sessions.clone(), user_id, receipts, &locations);
+        let installations = account(
+            content,
+            sessions.clone(),
+            user_id,
+            receipts,
+            &locations,
+            game_runtime::queue::Storefront::Gog,
+        );
         Ok(Arc::new(Self {
             account: Account::Gog(installations),
         }))
@@ -567,21 +626,32 @@ impl AccountInstallations {
         each!(self, installations => install(installations, offer))
     }
 
-    /// Updates `installation` in place; a Transfer of the game that stopped
-    /// resumes instead.
+    /// Verifies `installation`'s files and repairs or updates them in place;
+    /// a Transfer of the game that stopped resumes instead.
     pub fn update(&self, installation: String) {
         each!(self, installations => installations.update(&installation))
     }
 
-    /// Stops the Transfer, and a launch still preparing.
-    pub fn cancel(&self) {
-        each!(self, installations => installations.cancel())
+    /// Asks the storefront which installations have a newer build, unless it
+    /// was asked a short while ago.
+    pub fn check_updates(&self) {
+        each!(self, installations => installations.check_updates())
     }
 
-    /// Launches `installation`, verifying it first when `verify` asks for it
-    /// or it needs it.
-    pub fn launch(&self, installation: String, verify: bool) {
-        each!(self, installations => installations.launch(&installation, verify))
+    /// Whether each newer build installs as soon as it is known, rather
+    /// than at the game's next launch.
+    pub fn set_automatic_updates(&self, enabled: bool) {
+        each!(self, installations => installations.set_automatic_updates(enabled))
+    }
+
+    /// Stops `game`'s Transfer, or its launch still preparing.
+    pub fn cancel(&self, game: String) {
+        each!(self, installations => cancel(installations, &game))
+    }
+
+    /// Launches `installation`, verifying it first only when it needs it.
+    pub fn launch(&self, installation: String) {
+        each!(self, installations => installations.launch(&installation))
     }
 
     pub fn uninstall(&self, installation: String) {

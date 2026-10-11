@@ -28,6 +28,8 @@ mod locations;
 pub use locations::*;
 mod installations;
 pub use installations::*;
+mod downloads;
+pub use downloads::*;
 mod library_cache;
 pub use library_cache::{CachedEpicGame, CachedGogGame, CachedSteamGame, GameLaunch, LibraryCache};
 

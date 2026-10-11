@@ -36,15 +36,12 @@ struct SettingsView: View {
                     .padding(18)
                 }
 
-                settingsSection(L10n.string("ui.settings.steam_games")) {
-                    Toggle(isOn: Binding(
-                        get: { model.steam.verifyBeforeLaunch },
-                        set: { model.steam.verifyBeforeLaunch = $0 }
-                    )) {
+                settingsSection(L10n.string("ui.settings.games")) {
+                    Toggle(isOn: $model.updatesGamesAutomatically) {
                         VStack(alignment: .leading, spacing: 6) {
-                            Text(L10n.string("ui.settings.verify_before_launch"))
+                            Text(L10n.string("ui.settings.update_automatically"))
                                 .font(.system(size: 13, weight: .medium))
-                            Text(L10n.string("ui.settings.verify_before_launch_description"))
+                            Text(L10n.string("ui.settings.update_automatically_description"))
                                 .font(.system(size: 12))
                                 .foregroundStyle(.secondary)
                                 .fixedSize(horizontal: false, vertical: true)

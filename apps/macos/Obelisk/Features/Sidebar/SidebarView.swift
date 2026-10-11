@@ -17,15 +17,26 @@ struct SidebarView: View {
         .listStyle(.sidebar)
         .environment(\.sidebarRowSize, .large)
         .toolbar(removing: .sidebarToggle)
-        // Settings stays at the bottom of the sidebar, whatever its height.
+        // The download queue, then Settings, stay at the bottom of the
+        // sidebar, whatever its height.
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            List(selection: selection(where: { $0 == .settings })) {
-                row(.settings)
+            VStack(spacing: 0) {
+                if model.downloads.isVisible {
+                    DownloadsSidebarButton(downloads: model.downloads, game: model.downloadGame,
+                                           open: model.openDownload)
+                        .padding(.horizontal, 10)
+                        .padding(.top, 6)
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
+                List(selection: selection(where: { $0 == .settings })) {
+                    row(.settings)
+                }
+                .listStyle(.sidebar)
+                .environment(\.sidebarRowSize, .large)
+                .scrollDisabled(true)
+                .frame(height: 52)
             }
-            .listStyle(.sidebar)
-            .environment(\.sidebarRowSize, .large)
-            .scrollDisabled(true)
-            .frame(height: 52)
+            .animation(.spring(response: 0.35, dampingFraction: 0.85), value: model.downloads.isVisible)
         }
     }
 

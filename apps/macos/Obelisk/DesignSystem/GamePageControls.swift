@@ -3,22 +3,30 @@ import SwiftUI
 
 struct GameManagementButton: View {
     let gameName: String
-    let isAvailable: Bool
+    let canVerify: Bool
+    let canUninstall: Bool
+    /// Verifies the installed game's files, repairing or updating them.
+    let verify: () -> Void
     let uninstall: () -> Void
     /// The installed game's directory, revealed in Finder from the menu.
     let directory: String
     @State private var confirmsUninstall = false
+
+    /// The menu opens while either of its actions may start.
+    private var isAvailable: Bool { canVerify || canUninstall }
 
     var body: some View {
         Menu {
             Button(L10n.string("ui.game.show_files"), systemImage: "folder") {
                 NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: directory)
             }
+            Button(L10n.string("ui.game.verify_files"), systemImage: "checkmark.shield", action: verify)
+                .disabled(!canVerify)
             Divider()
             Button(L10n.string("ui.game.uninstall"), systemImage: "trash", role: .destructive) {
                 confirmsUninstall = true
             }
-            .disabled(!isAvailable)
+            .disabled(!canUninstall)
         } label: {
             StorefrontGlassIcon(systemName: "gearshape.fill", size: 15)
                 .foregroundStyle(.primary)
@@ -34,7 +42,7 @@ struct GameManagementButton: View {
         .alert(L10n.string("ui.game.uninstall_title", gameName), isPresented: $confirmsUninstall) {
             Button(L10n.string("ui.common.cancel"), role: .cancel) {}
             Button(L10n.string("ui.game.uninstall"), role: .destructive, action: uninstall)
-                .disabled(!isAvailable)
+                .disabled(!canUninstall)
         } message: {
             Text(L10n.string("ui.game.uninstall_message"))
         }

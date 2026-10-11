@@ -7,7 +7,7 @@ final class GameManagementButtonTests: XCTestCase {
     @MainActor
     func testManagementControlKeepsASquareFootprint() async {
         let fixture = ManagementButtonWindow(
-            GameManagementButton(gameName: "Portal 2", isAvailable: true, uninstall: {}, directory: "/Applications")
+            GameManagementButton(gameName: "Portal 2", canVerify: true, canUninstall: true, verify: {}, uninstall: {}, directory: "/Applications")
         )
         defer { fixture.close() }
         await fixture.prepare()
@@ -20,7 +20,7 @@ final class GameManagementButtonTests: XCTestCase {
     func testManagementAccessibilityNamesTheGameAndReflectsAvailability() async throws {
         for isAvailable in [true, false] {
             let fixture = ManagementButtonWindow(
-                GameManagementButton(gameName: "Portal 2", isAvailable: isAvailable, uninstall: {}, directory: "/Applications")
+                GameManagementButton(gameName: "Portal 2", canVerify: isAvailable, canUninstall: isAvailable, verify: {}, uninstall: {}, directory: "/Applications")
             )
             defer { fixture.close() }
             await fixture.prepare()
@@ -48,7 +48,7 @@ final class GameManagementButtonTests: XCTestCase {
                     title: L10n.string("model.game.launch"), launches: true, transfer: nil,
                     isTransferring: false, isAvailable: true, action: {}, cancel: {}
                 )
-                GameManagementButton(gameName: "Portal 2", isAvailable: true, uninstall: {}, directory: "/Applications")
+                GameManagementButton(gameName: "Portal 2", canVerify: true, canUninstall: true, verify: {}, uninstall: {}, directory: "/Applications")
             }
             .padding(18)
             .environment(\.colorScheme, .dark)

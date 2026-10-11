@@ -31,6 +31,15 @@ struct Script {
     /// Each Transfer's request, launches' verifications included.
     requests: Vec<Download>,
     progress: Option<TransferProgress>,
+    /// The games the storefront has a newer build of, until a Transfer
+    /// installs it.
+    newer: Vec<u32>,
+    /// Update checks cannot reach the storefront.
+    unreachable: bool,
+    /// The game each update check asked about.
+    checks: Vec<u32>,
+    /// Holding the storefront holds only its downloads: launches go on.
+    launches_free: bool,
 }
 
 struct Fake {
@@ -79,6 +88,8 @@ struct Content(Arc<Fake>);
 impl super::Content<Steam> for Content {
     fn download<'a>(&'a self, request: &'a Download) -> BoxFuture<'a, Result<Receipt, Failure>> {
         Box::pin(async move {
+            // Each Transfer starts uncancelled, as a storefront's does.
+            self.0.cancelled.store(false, Ordering::Release);
             self.0.with(|script| {
                 script.calls.push(format!("download:{}", request.app_id));
                 script.requests.push(request.clone());
@@ -114,6 +125,7 @@ impl super::Content<Steam> for Content {
                     progress.state = TransferState::Complete;
                     progress.completed_bytes = 100;
                 }
+                script.newer.retain(|app| *app != request.app_id);
             });
             Ok(Receipt {
                 app_id: request.app_id,
@@ -133,6 +145,20 @@ impl super::Content<Steam> for Content {
         self.0.cancelled.store(true, Ordering::Release);
         self.0.released.notify_all();
     }
+    fn update_available<'a>(
+        &'a self,
+        receipt: &'a Receipt,
+    ) -> BoxFuture<'a, Result<bool, Failure>> {
+        Box::pin(async move {
+            self.0.with(|script| {
+                script.checks.push(receipt.app_id);
+                if script.unreachable {
+                    return Err(Failure::Failed("backend.steam.content.network".into()));
+                }
+                Ok(script.newer.contains(&receipt.app_id))
+            })
+        })
+    }
     fn launch<'a>(
         &'a self,
         receipt: &'a Receipt,
@@ -140,9 +166,13 @@ impl super::Content<Steam> for Content {
         admission: Admission<Steam>,
     ) -> BoxFuture<'a, Result<(), Failure>> {
         Box::pin(async move {
-            self.0
-                .with(|script| script.calls.push(format!("launch:{}", receipt.app_id)));
-            self.0.wait().await;
+            let free = self.0.with(|script| {
+                script.calls.push(format!("launch:{}", receipt.app_id));
+                script.launches_free
+            });
+            if !free {
+                self.0.wait().await;
+            }
             let outcome = self
                 .0
                 .with(|script| script.launches.pop_front())
@@ -338,7 +368,27 @@ struct Fixture {
     root: PathBuf,
     fake: Arc<Fake>,
     sessions: Arc<Sessions<Steam>>,
+    queue: Arc<DownloadQueue>,
     installations: Installations<Steam>,
+}
+
+/// Waits until no Transfer of the account runs or waits in the queue.
+async fn idle(installations: &Installations<Steam>) {
+    eventually(|| {
+        let state = installations.state();
+        !state.downloading && state.queued.is_empty()
+    })
+    .await;
+}
+
+/// The account's place in `queue`, which names a game by its app id.
+fn queueing(queue: &Arc<DownloadQueue>) -> Queueing<Steam> {
+    Queueing {
+        queue: queue.clone(),
+        storefront: queue::Storefront::Steam,
+        account: "42".into(),
+        name: |game: &u32| game.to_string(),
+    }
 }
 
 impl Fixture {
@@ -358,6 +408,7 @@ impl Fixture {
         let sessions = Arc::new(Sessions::new(Box::new(|| Ok(None))));
         eventually(|| !sessions.state().recovering).await;
         let fake = Fake::new();
+        let queue = DownloadQueue::new();
         let installations = Installations::new(
             Arc::new(Content(fake.clone())),
             sessions.clone(),
@@ -365,12 +416,14 @@ impl Fixture {
             file,
             root.clone(),
             root.join("home"),
+            queueing(&queue),
         );
         Self {
             _root: directory,
             root,
             fake,
             sessions,
+            queue,
             installations,
         }
     }
@@ -447,6 +500,7 @@ async fn receipts_load_from_the_account_file_without_games_removed_outside_obeli
         file.clone(),
         fixture.root.clone(),
         fixture.root.join("home"),
+        queueing(&fixture.queue),
     );
     assert!(reloaded.state().receipts.is_empty());
 
@@ -458,6 +512,7 @@ async fn receipts_load_from_the_account_file_without_games_removed_outside_obeli
         file,
         fixture.root.clone(),
         fixture.root.join("home"),
+        queueing(&fixture.queue),
     );
     assert_eq!(
         unreadable.state().warning.map(|(_, key)| key).as_deref(),
@@ -485,7 +540,7 @@ async fn a_transfer_reports_its_progress_and_publishes_its_receipt_once_complete
     })
     .await;
     fixture.fake.release();
-    eventually(|| !fixture.installations.state().downloading).await;
+    idle(&fixture.installations).await;
 
     let state = fixture.installations.state();
     assert_eq!(state.transfer.unwrap().state, TransferState::Complete);
@@ -504,15 +559,16 @@ async fn an_offer_without_a_platform_shows_its_transfer_at_once_and_keeps_the_bu
         ..fixture.offer("macos")
     });
     let state = fixture.installations.state();
-    assert_eq!(
-        state.transfer_game,
-        Some(620),
-        "the game waits on its Transfer"
+    assert!(
+        state.queued == [620] || state.transfer_game == Some(620),
+        "the game waits on its Transfer at once"
     );
+    eventually(|| fixture.installations.state().transfer_game == Some(620)).await;
+    let state = fixture.installations.state();
     assert_eq!(state.transfer.unwrap().state, TransferState::Preparing);
 
     fixture.fake.release();
-    eventually(|| !fixture.installations.state().downloading).await;
+    idle(&fixture.installations).await;
     let receipt = fixture.receipt();
     assert_eq!(receipt.platform, "macos");
     assert!(receipt.directory.ends_with("steam-620-macos"));
@@ -527,7 +583,7 @@ async fn an_offer_without_a_platform_shows_its_transfer_at_once_and_keeps_the_bu
         "the installed build updates in place"
     );
     fixture.fake.release();
-    eventually(|| !fixture.installations.state().downloading).await;
+    idle(&fixture.installations).await;
     assert_eq!(fixture.installations.state().receipts.len(), 1);
 }
 
@@ -540,7 +596,7 @@ async fn a_failed_transfer_is_reported_and_stays_resumable_and_its_installation_
             .push_back(Err(Failure::Failed("backend.steam.content.network".into())))
     });
     fixture.installations.install(fixture.offer("macos"));
-    eventually(|| !fixture.installations.state().downloading).await;
+    idle(&fixture.installations).await;
 
     let state = fixture.installations.state();
     assert_eq!(
@@ -553,7 +609,7 @@ async fn a_failed_transfer_is_reported_and_stays_resumable_and_its_installation_
     assert_eq!(fixture.saved()[0].needs_verification, Some(true));
 
     fixture.installations.install(fixture.offer("macos"));
-    eventually(|| !fixture.installations.state().downloading).await;
+    idle(&fixture.installations).await;
     let state = fixture.installations.state();
     assert_eq!(state.report, None);
     assert_eq!(state.receipts[0].needs_verification, None);
@@ -566,8 +622,8 @@ async fn a_cancelled_transfer_ends_silently() {
     fixture.fake.hold();
     fixture.installations.install(fixture.offer("macos"));
     eventually(|| fixture.fake.calls().len() == 1).await;
-    fixture.installations.cancel();
-    eventually(|| !fixture.installations.state().downloading).await;
+    fixture.installations.cancel(&620);
+    idle(&fixture.installations).await;
 
     let state = fixture.installations.state();
     assert_eq!(state.report, None);
@@ -590,7 +646,7 @@ async fn a_folder_that_cannot_be_created_is_reported_before_any_transfer() {
 }
 
 #[tokio::test]
-async fn a_launch_verifies_first_when_asked_then_ends_its_preparation_once_the_game_runs() {
+async fn a_launch_goes_straight_to_its_game_then_ends_its_preparation_once_the_game_runs() {
     let fixture = Fixture::new(true).await;
     let game = Game::running();
     fixture.fake.with(|script| {
@@ -598,10 +654,10 @@ async fn a_launch_verifies_first_when_asked_then_ends_its_preparation_once_the_g
             .launches
             .push_back(Ok(Some(game.clone() as Arc<dyn Supervised<Steam>>)))
     });
-    fixture.installations.launch("620-macos", true);
+    fixture.installations.launch("620-macos");
     let state = fixture.installations.state();
     assert!(state.launching);
-    assert!(state.verifying_before_launch);
+    assert!(!state.verifying_before_launch);
     assert_eq!(state.launch_game, Some(620));
     assert!(
         fixture.sessions.state().busy(),
@@ -609,7 +665,7 @@ async fn a_launch_verifies_first_when_asked_then_ends_its_preparation_once_the_g
     );
 
     eventually(|| !fixture.installations.state().launching).await;
-    assert_eq!(fixture.fake.calls(), ["download:620", "launch:620"]);
+    assert_eq!(fixture.fake.calls(), ["launch:620"]);
     assert!(fixture.sessions.state().busy());
     assert!(!modifiable(&fixture.installations, 620));
 
@@ -628,9 +684,10 @@ async fn an_unverified_installation_is_verified_before_it_launches_and_a_failure
             .push_back(Err(Failure::Failed("backend.steam.content.network".into())))
     });
     fixture.installations.install(fixture.offer("macos"));
-    eventually(|| !fixture.installations.state().downloading).await;
+    idle(&fixture.installations).await;
 
-    fixture.installations.launch("620-macos", false);
+    fixture.installations.launch("620-macos");
+    assert!(fixture.installations.state().verifying_before_launch);
     eventually(|| !fixture.installations.state().launching).await;
     assert_eq!(
         fixture.fake.calls(),
@@ -646,6 +703,270 @@ async fn an_unverified_installation_is_verified_before_it_launches_and_a_failure
 }
 
 #[tokio::test]
+async fn a_launch_installs_the_newer_build_first_unless_the_storefront_cannot_tell() {
+    let fixture = Fixture::new(true).await;
+    fixture.fake.with(|script| script.newer.push(620));
+    fixture.installations.launch("620-macos");
+    eventually(|| !fixture.installations.state().launching).await;
+    assert_eq!(fixture.fake.calls(), ["download:620", "launch:620"]);
+    assert_eq!(
+        fixture.fake.with(|script| script.requests.clone()),
+        [fixture.request("macos")],
+        "the update stays where the game is"
+    );
+    assert!(fixture.installations.state().updates.is_empty());
+
+    // Offline, the installed build starts.
+    fixture.fake.with(|script| {
+        script.newer.push(620);
+        script.unreachable = true;
+    });
+    fixture.installations.launch("620-macos");
+    eventually(|| !fixture.installations.state().launching).await;
+    assert_eq!(
+        fixture.fake.calls(),
+        ["download:620", "launch:620", "launch:620"]
+    );
+    assert_eq!(
+        fixture.fake.with(|script| script.checks.clone()),
+        [620, 620]
+    );
+}
+
+#[tokio::test]
+async fn an_update_check_names_each_installation_with_a_newer_build_until_its_transfer() {
+    let fixture = Fixture::new(true).await;
+    fixture.fake.with(|script| script.newer.push(620));
+    fixture.installations.check_updates();
+    eventually(|| fixture.installations.state().updates == ["620-macos"]).await;
+
+    fixture.installations.check_updates();
+    assert_eq!(
+        fixture.fake.with(|script| script.checks.clone()),
+        [620],
+        "the storefront is asked again only after a while"
+    );
+    assert_eq!(fixture.fake.calls(), Vec::<String>::new());
+
+    fixture.installations.update("620-macos");
+    idle(&fixture.installations).await;
+    assert!(fixture.installations.state().updates.is_empty());
+}
+
+#[tokio::test]
+async fn another_games_transfer_leaves_this_launch_open_and_cancelling_it_stops_only_it() {
+    let fixture = Fixture::new(true).await;
+    let game = Game::running();
+    fixture.fake.with(|script| {
+        script
+            .launches
+            .push_back(Ok(Some(game.clone() as Arc<dyn Supervised<Steam>>)));
+        script.launches_free = true;
+    });
+    fixture.fake.hold();
+    fixture.installations.install(Offer {
+        app_id: 730,
+        ..fixture.offer("macos")
+    });
+    eventually(|| fixture.fake.calls() == ["download:730"]).await;
+    assert_eq!(
+        fixture.installations.state().gate.launch,
+        Opening::Open { except: vec![730] }
+    );
+
+    fixture.installations.launch("620-macos");
+    eventually(|| !fixture.installations.state().launching).await;
+    assert_eq!(fixture.fake.calls(), ["download:730", "launch:620"]);
+    assert_eq!(
+        fixture.fake.with(|script| script.checks.clone()),
+        [620],
+        "no newer build: it starts at once"
+    );
+
+    fixture.installations.cancel(&620);
+    assert!(fixture.installations.state().downloading);
+    fixture.installations.cancel(&730);
+    idle(&fixture.installations).await;
+    assert!(fixture.sessions.state().busy(), "the game keeps running");
+    assert_eq!(fixture.installations.state().report, None);
+    game.end(None);
+    eventually(|| !fixture.sessions.state().busy()).await;
+}
+
+#[tokio::test]
+async fn a_launch_that_needs_a_transfer_goes_first_and_pauses_the_one_under_way() {
+    let fixture = Fixture::new(true).await;
+    let game = Game::running();
+    fixture.fake.with(|script| {
+        script
+            .launches
+            .push_back(Ok(Some(game.clone() as Arc<dyn Supervised<Steam>>)));
+        script.launches_free = true;
+        script.newer.push(620);
+    });
+    fixture.fake.hold();
+    fixture.installations.install(Offer {
+        app_id: 730,
+        ..fixture.offer("macos")
+    });
+    eventually(|| fixture.fake.calls() == ["download:730"]).await;
+
+    fixture.installations.launch("620-macos");
+    eventually(|| fixture.fake.calls() == ["download:730", "download:620"]).await;
+    let view = fixture.queue.view();
+    assert!(
+        view.running
+            .is_some_and(|item| item.game == "620" && item.launching)
+    );
+    assert_eq!(
+        view.waiting
+            .iter()
+            .map(|item| item.game.as_str())
+            .collect::<Vec<_>>(),
+        ["730"],
+        "the download under way waits behind the launch"
+    );
+
+    fixture.fake.release();
+    eventually(|| fixture.fake.calls().len() == 4).await;
+    let calls = fixture.fake.calls();
+    assert!(calls[2..].contains(&"launch:620".to_string()));
+    assert!(
+        calls[2..].contains(&"download:730".to_string()),
+        "it resumes"
+    );
+    idle(&fixture.installations).await;
+    game.end(None);
+    eventually(|| !fixture.sessions.state().busy()).await;
+}
+
+#[tokio::test]
+async fn downloads_queue_behind_the_transfer_under_way_and_cancelling_one_takes_it_out() {
+    let fixture = Fixture::new(false).await;
+    fixture.fake.hold();
+    fixture.installations.install(fixture.offer("macos"));
+    eventually(|| fixture.fake.calls() == ["download:620"]).await;
+    for app_id in [730, 440] {
+        fixture.installations.install(Offer {
+            app_id,
+            ..fixture.offer("macos")
+        });
+    }
+    assert_eq!(fixture.installations.state().queued, [730, 440]);
+    assert_eq!(fixture.queue.view().waiting.len(), 2);
+
+    fixture.installations.cancel(&730);
+    eventually(|| fixture.installations.state().queued == [440]).await;
+    fixture.fake.release();
+    idle(&fixture.installations).await;
+    assert_eq!(fixture.fake.calls(), ["download:620", "download:440"]);
+    assert_eq!(fixture.installations.state().receipts.len(), 2);
+}
+
+#[tokio::test]
+async fn a_running_game_holds_the_queued_automatic_updates() {
+    let fixture = Fixture::new(true).await;
+    fixture.fake.with(|script| script.newer.push(620));
+    fixture.queue.set_held(true);
+    fixture.installations.set_automatic_updates(true);
+    fixture.installations.check_updates();
+    eventually(|| fixture.installations.state().queued == [620]).await;
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    assert_eq!(fixture.fake.calls(), Vec::<String>::new());
+    assert!(fixture.queue.view().waiting[0].automatic);
+
+    fixture.queue.set_held(false);
+    eventually(|| fixture.fake.calls() == ["download:620"]).await;
+    idle(&fixture.installations).await;
+    assert!(fixture.installations.state().updates.is_empty());
+}
+
+#[tokio::test]
+async fn automatic_updates_install_each_newer_build_once_a_game_no_longer_runs() {
+    let fixture = Fixture::new(true).await;
+    fixture.fake.with(|script| script.newer.push(620));
+    let admission = fixture.sessions.admit(620, 42).unwrap();
+    fixture.installations.set_automatic_updates(true);
+    fixture.installations.check_updates();
+    eventually(|| fixture.installations.state().updates == ["620-macos"]).await;
+    assert_eq!(fixture.fake.calls(), Vec::<String>::new(), "the game runs");
+
+    drop(admission);
+    eventually(|| fixture.fake.calls() == ["download:620"]).await;
+    eventually(|| fixture.installations.state().updates.is_empty()).await;
+    assert_eq!(
+        fixture.fake.with(|script| script.requests.clone()),
+        [fixture.request("macos")]
+    );
+}
+
+#[tokio::test]
+async fn an_automatic_update_pauses_while_they_are_off_then_resumes() {
+    let fixture = Fixture::new(true).await;
+    fixture.fake.with(|script| script.newer.push(620));
+    fixture.fake.hold();
+    fixture.installations.set_automatic_updates(true);
+    fixture.installations.check_updates();
+    eventually(|| fixture.fake.calls() == ["download:620"]).await;
+
+    // A game of any storefront starts.
+    fixture.installations.set_automatic_updates(false);
+    idle(&fixture.installations).await;
+    let state = fixture.installations.state();
+    assert_eq!(state.transfer.unwrap().state, TransferState::Cancelled);
+    assert_eq!(state.report, None);
+    assert_eq!(state.updates, ["620-macos"]);
+
+    fixture.fake.release();
+    fixture.fake.cancelled.store(false, Ordering::Release);
+    fixture.installations.set_automatic_updates(true);
+    eventually(|| fixture.fake.calls() == ["download:620", "download:620"]).await;
+    eventually(|| fixture.installations.state().updates.is_empty()).await;
+}
+
+#[tokio::test]
+async fn turning_automatic_updates_off_leaves_the_players_own_transfer_alone() {
+    let fixture = Fixture::new(true).await;
+    fixture.fake.hold();
+    fixture.installations.update("620-macos");
+    eventually(|| fixture.fake.calls() == ["download:620"]).await;
+    fixture.installations.set_automatic_updates(false);
+    assert!(fixture.installations.state().downloading);
+    fixture.fake.release();
+    idle(&fixture.installations).await;
+    assert_eq!(
+        fixture.installations.state().transfer.unwrap().state,
+        TransferState::Complete
+    );
+}
+
+#[tokio::test]
+async fn a_failed_automatic_update_shows_on_its_game_only_and_waits_for_the_next_check() {
+    let fixture = Fixture::new(true).await;
+    fixture.fake.with(|script| {
+        script.newer.push(620);
+        script
+            .downloads
+            .push_back(Err(Failure::Failed("backend.steam.content.network".into())));
+    });
+    fixture.installations.set_automatic_updates(true);
+    fixture.installations.check_updates();
+    eventually(|| fixture.fake.calls() == ["download:620"]).await;
+    idle(&fixture.installations).await;
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    let state = fixture.installations.state();
+    assert_eq!(
+        fixture.fake.calls(),
+        ["download:620"],
+        "not retried at once"
+    );
+    assert_eq!(state.report, None);
+    assert_eq!(state.transfer.unwrap().state, TransferState::Failed);
+    assert_eq!(state.updates, ["620-macos"]);
+}
+
+#[tokio::test]
 async fn cancelling_a_launch_still_preparing_never_hands_the_game_off() {
     let fixture = Fixture::new(true).await;
     let game = Game::running();
@@ -655,10 +976,10 @@ async fn cancelling_a_launch_still_preparing_never_hands_the_game_off() {
             .push_back(Ok(Some(game.clone() as Arc<dyn Supervised<Steam>>)))
     });
     fixture.fake.hold();
-    fixture.installations.launch("620-macos", false);
+    fixture.installations.launch("620-macos");
     eventually(|| fixture.fake.calls() == ["launch:620"]).await;
 
-    fixture.installations.cancel();
+    fixture.installations.cancel(&620);
     fixture.fake.release();
     eventually(|| !fixture.installations.state().launching).await;
     eventually(|| !fixture.sessions.state().busy()).await;
@@ -672,7 +993,7 @@ async fn nothing_touches_an_installation_its_game_session_or_another_action_hold
     let admission = fixture.sessions.admit(620, 42).unwrap();
     fixture.installations.install(fixture.offer("macos"));
     fixture.installations.uninstall("620-macos");
-    fixture.installations.launch("620-macos", false);
+    fixture.installations.launch("620-macos");
     let state = fixture.installations.state();
     assert!(!state.downloading && !state.uninstalling && !state.launching);
     drop(admission);
@@ -688,7 +1009,7 @@ async fn nothing_touches_an_installation_its_game_session_or_another_action_hold
 async fn an_uninstall_archives_removes_records_and_deletes_the_prefix_in_order() {
     let fixture = Fixture::new(false).await;
     fixture.installations.install(fixture.offer("windows"));
-    eventually(|| !fixture.installations.state().downloading).await;
+    idle(&fixture.installations).await;
     let receipt = fixture.receipt();
 
     fixture.installations.uninstall("620-windows");
@@ -726,7 +1047,7 @@ async fn a_failed_archive_keeps_the_game_and_a_lost_prefix_is_only_a_warning() {
 
     let fixture = Fixture::new(false).await;
     fixture.installations.install(fixture.offer("windows"));
-    eventually(|| !fixture.installations.state().downloading).await;
+    idle(&fixture.installations).await;
     fixture
         .fake
         .with(|script| script.prefix = Some(Err("busy".into())));
@@ -768,7 +1089,7 @@ async fn signing_out_stops_the_transfer_and_later_actions() {
     fixture.installations.install(fixture.offer("macos"));
     eventually(|| fixture.fake.calls().len() == 1).await;
     fixture.installations.signed_out();
-    eventually(|| !fixture.installations.state().downloading).await;
+    idle(&fixture.installations).await;
     assert_eq!(fixture.installations.state().report, None);
     fixture.installations.install(fixture.offer("macos"));
     assert!(!fixture.installations.state().downloading);
@@ -813,7 +1134,7 @@ async fn cloud_maintenance_holds_every_reservation_and_asks_its_question_until_i
         "one Cloud operation at a time"
     );
     installations.install(fixture.offer("macos"));
-    installations.launch("620-macos", false);
+    installations.launch("620-macos");
     assert!(!installations.state().downloading && !installations.state().launching);
 
     eventually(|| {
@@ -887,7 +1208,7 @@ async fn a_game_sessions_cloud_question_is_answered_through_the_same_call() {
             .launches
             .push_back(Ok(Some(game.clone() as Arc<dyn Supervised<Steam>>)))
     });
-    fixture.installations.launch("620-macos", false);
+    fixture.installations.launch("620-macos");
     eventually(|| !fixture.installations.state().launching).await;
     assert!(
         !maintainable(&fixture.installations, 730),
@@ -931,7 +1252,8 @@ async fn the_gate_shows_what_may_start_and_follows_every_game_session() {
     let fixture = Fixture::new(true).await;
     let open = Gate {
         modify: Opening::Open { except: vec![] },
-        launch: true,
+        uninstall: Opening::Open { except: vec![] },
+        launch: Opening::Open { except: vec![] },
         maintain: Opening::Open { except: vec![] },
     };
     assert_eq!(fixture.installations.state().gate, open);
@@ -940,21 +1262,24 @@ async fn the_gate_shows_what_may_start_and_follows_every_game_session() {
     let admission = fixture.sessions.admit(620, 42).unwrap();
     let held = Gate {
         modify: Opening::Open { except: vec![620] },
-        launch: false,
+        uninstall: Opening::Open { except: vec![620] },
+        launch: Opening::Closed,
         maintain: Opening::Closed,
     };
     eventually(|| fixture.installations.state().gate == held).await;
     drop(admission);
     eventually(|| fixture.installations.state().gate == open).await;
 
-    // A Transfer holds every installation, and only its own game's Cloud.
+    // A Transfer holds its own game and every uninstall: other games still
+    // queue and launch.
     fixture.fake.hold();
     fixture.installations.install(fixture.offer("windows"));
     assert_eq!(
         fixture.installations.state().gate,
         Gate {
-            modify: Opening::Closed,
-            launch: false,
+            modify: Opening::Open { except: vec![620] },
+            uninstall: Opening::Closed,
+            launch: Opening::Open { except: vec![620] },
             maintain: Opening::Open { except: vec![620] },
         }
     );
@@ -966,7 +1291,8 @@ async fn the_gate_shows_what_may_start_and_follows_every_game_session() {
         fixture.installations.state().gate,
         Gate {
             modify: Opening::Closed,
-            launch: false,
+            uninstall: Opening::Closed,
+            launch: Opening::Closed,
             maintain: Opening::Closed,
         }
     );
@@ -976,7 +1302,7 @@ async fn the_gate_shows_what_may_start_and_follows_every_game_session() {
 async fn a_new_installation_goes_to_the_library_and_an_update_or_launch_stays_where_it_is() {
     let fixture = Fixture::new(false).await;
     fixture.installations.install(fixture.offer("windows"));
-    eventually(|| !fixture.installations.state().downloading).await;
+    idle(&fixture.installations).await;
     let requests = fixture.fake.with(|script| script.requests.clone());
     assert_eq!(requests, [fixture.request("windows")]);
 
@@ -987,6 +1313,7 @@ async fn a_new_installation_goes_to_the_library_and_an_update_or_launch_stays_wh
     let file = fixture.root.join("steam-installations-43.json");
     let mut receipt = receipt(&installed, "macos");
     receipt.language = "english".into();
+    receipt.needs_verification = Some(true);
     save(&file, &[receipt]).unwrap();
     let fake = Fake::new();
     let moved = Installations::new(
@@ -996,11 +1323,12 @@ async fn a_new_installation_goes_to_the_library_and_an_update_or_launch_stays_wh
         file,
         fixture.root.clone(),
         fixture.root.join("home"),
+        queueing(&DownloadQueue::new()),
     );
-    moved.update("620-macos");
-    eventually(|| !moved.state().downloading).await;
-    moved.launch("620-macos", true);
+    moved.launch("620-macos");
     eventually(|| !moved.state().launching).await;
+    moved.update("620-macos");
+    idle(&moved).await;
     moved.install(Offer {
         platform: Some("macos".into()),
         ..fixture.offer("macos")
@@ -1014,7 +1342,7 @@ async fn a_new_installation_goes_to_the_library_and_an_update_or_launch_stays_wh
     assert_eq!(
         fake.with(|script| script.requests.clone()),
         [update.clone(), update.clone(), update],
-        "an update, a launch's verification and an offer of the installed build"
+        "a launch's verification, an update and an offer of the installed build"
     );
     moved.update("620-windows");
     assert_eq!(
@@ -1051,7 +1379,7 @@ async fn the_account_asks_one_cloud_question_whichever_sync_asks_it_until_it_is_
             .launches
             .push_back(Ok(Some(game.clone() as Arc<dyn Supervised<Steam>>)))
     });
-    installations.launch("620-macos", false);
+    installations.launch("620-macos");
     let checking = cloud::Status {
         phase: cloud::Phase::Checking,
         decision_id: 6,
@@ -1093,7 +1421,7 @@ async fn the_account_asks_one_cloud_question_whichever_sync_asks_it_until_it_is_
             .launches
             .push_back(Ok(Some(next.clone() as Arc<dyn Supervised<Steam>>)))
     });
-    installations.launch("620-macos", false);
+    installations.launch("620-macos");
     next.reach(Phase::Finalizing, conflict(7));
     eventually(|| sync().is_some_and(|sync| sync.question.is_some())).await;
 

@@ -74,6 +74,12 @@ impl Network for Fake {
     fn cancel(&self) {
         self.call("cancel");
     }
+    fn update_available<'a>(&'a self, _: &'a Receipt) -> BoxFuture<'a, Result<bool, Failure>> {
+        Box::pin(async move {
+            self.call("update");
+            Ok(false)
+        })
+    }
 }
 
 struct Fixture {

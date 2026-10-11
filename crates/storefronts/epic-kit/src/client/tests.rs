@@ -915,6 +915,36 @@ async fn download_checks_ownership_fetches_manifest_without_bearer_and_writes_re
 }
 
 #[tokio::test]
+async fn an_update_is_a_live_build_whose_version_differs_from_the_installed_one() {
+    let live = |version: &str| {
+        reply(
+            MANIFEST_PATH,
+            200,
+            json!({"elements":[{"buildVersion": version, "manifests":[{"uri":"FIXTURE_BASE/game.manifest"}]}]}),
+        )
+    };
+    let mut replies = download_replies("game");
+    replies.extend([live("1.0"), live("1.1")]);
+    let mock = Mock::new(replies);
+    let client = mock.client(false);
+    let parent = tempfile::tempdir().unwrap();
+    let installed = client
+        .download("space", "base", "game", "Mac", parent.path())
+        .await
+        .unwrap();
+    let directory = std::path::Path::new(&installed.directory);
+
+    let update = |platform| client.update_available("space", "base", "game", platform, directory);
+    assert!(!update("Mac").await.unwrap(), "the installed build is live");
+    assert!(update("Mac").await.unwrap(), "Epic published 1.1");
+    assert!(
+        update("Windows").await.unwrap(),
+        "no build of that platform is installed there"
+    );
+    assert_eq!(mock.requests().len(), 5, "only the live build is asked for");
+}
+
+#[tokio::test]
 async fn a_manifest_naming_another_app_still_installs() {
     let mock = Mock::new(download_replies("fd52e5b57c6d4468bfd6b39b5577436d"));
     let client = mock.client(false);

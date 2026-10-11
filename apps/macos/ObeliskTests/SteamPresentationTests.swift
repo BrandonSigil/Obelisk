@@ -404,7 +404,7 @@ final class SteamPresentationTests: XCTestCase {
 
         fixture.model.launchFromLibrary(fixtureGames[0])
 
-        XCTAssertEqual(fixture.backend.actions, [.launch(fixture.receipt, verify: true)])
+        XCTAssertEqual(fixture.backend.actions, [.launch(fixture.receipt)])
         XCTAssertNil(fixture.model.selectedGame)
         fixture.model.launchFromLibrary(fixtureGames[1])
         XCTAssertEqual(fixture.backend.actions.count, 1, "A game without an installation never launches")
@@ -508,15 +508,14 @@ final class SteamPresentationTests: XCTestCase {
     }
 
     @MainActor
-    func testLaunchVerifiesFirstWhenAskedAndKeepsItsGameAcrossSelectionChangeAndDoubleClick() async throws {
+    func testLaunchShowsItsVerificationAndKeepsItsGameAcrossSelectionChangeAndDoubleClick() async throws {
         let fixture = try await launchFixture()
         defer { fixture.cleanUp() }
-        XCTAssertTrue(fixture.model.verifyBeforeLaunch)
         XCTAssertEqual(fixture.model.installations.primaryActionTitle, L10n.string("model.game.launch"))
 
         fixture.model.installations.primaryAction()
 
-        XCTAssertEqual(fixture.backend.actions, [.launch(fixture.receipt, verify: true)])
+        XCTAssertEqual(fixture.backend.actions, [.launch(fixture.receipt)])
         fixture.preparing(verifying: true)
         try await eventually { fixture.model.installations.isVerifyingBeforeLaunch }
         XCTAssertEqual(fixture.model.installations.activeTransferGame, 620)
@@ -525,19 +524,6 @@ final class SteamPresentationTests: XCTestCase {
         fixture.model.open(fixtureGames[1])
         XCTAssertEqual(fixture.model.installations.activeTransferGame, 620)
         XCTAssertEqual(fixture.backend.actions.count, 1, "A double click starts one launch")
-    }
-
-    @MainActor
-    func testLaunchCanSkipVerificationAndSettingPersists() async throws {
-        let fixture = try await launchFixture(verify: false)
-        defer { fixture.cleanUp() }
-        fixture.model.installations.primaryAction()
-        XCTAssertEqual(fixture.backend.actions, [.launch(fixture.receipt, verify: false)])
-        let restarted = SteamModel(directory: fixture.root, preferences: fixture.preferences)
-        XCTAssertFalse(restarted.verifyBeforeLaunch)
-        restarted.verifyBeforeLaunch = true
-        let reloaded = SteamModel(directory: fixture.root, preferences: fixture.preferences)
-        XCTAssertTrue(reloaded.verifyBeforeLaunch)
     }
 
     @MainActor
@@ -627,7 +613,7 @@ final class SteamPresentationTests: XCTestCase {
 
     @MainActor
     func testCloudProgressUsesLaunchActionAndOnlyConflictPresentsSheet() async throws {
-        let fixture = try await launchFixture(verify: false)
+        let fixture = try await launchFixture()
         defer { fixture.cleanUp() }
         let model = fixture.model
         model.installations.primaryAction()
@@ -690,7 +676,7 @@ final class SteamPresentationTests: XCTestCase {
 
     @MainActor
     func testRosettaPromptSurvivesNavigationAndCancellationRestoresLaunchWithoutAnError() async throws {
-        let fixture = try await launchFixture(verify: false)
+        let fixture = try await launchFixture()
         defer { fixture.cleanUp() }
         let model = fixture.model
         model.installations.primaryAction()
@@ -718,7 +704,7 @@ final class SteamPresentationTests: XCTestCase {
 
     @MainActor
     func testSigningOutDismissesRosettaAndRetainsPreparationUntilSupervisorFinishes() async throws {
-        let fixture = try await launchFixture(verify: false)
+        let fixture = try await launchFixture()
         defer { fixture.cleanUp() }
         let model = fixture.model
         model.installations.primaryAction()
@@ -738,7 +724,7 @@ final class SteamPresentationTests: XCTestCase {
 
     @MainActor
     func testPostGameConflictPresentsImmediatelyWithoutInlineMessage() async throws {
-        let fixture = try await launchFixture(verify: false)
+        let fixture = try await launchFixture()
         defer { fixture.cleanUp() }
         let model = fixture.model
         model.installations.primaryAction()
@@ -766,7 +752,7 @@ final class SteamPresentationTests: XCTestCase {
 
     @MainActor
     func testCancellingAPreGameCloudConflictRestoresLaunchWithoutAnError() async throws {
-        let fixture = try await launchFixture(verify: false)
+        let fixture = try await launchFixture()
         defer { fixture.cleanUp() }
         let model = fixture.model
         model.installations.primaryAction()
@@ -787,7 +773,7 @@ final class SteamPresentationTests: XCTestCase {
 
     @MainActor
     func testCloudMaintenanceHoldsTheReservationAndTheSyncMenuFollowsItsRules() async throws {
-        let fixture = try await launchFixture(verify: false)
+        let fixture = try await launchFixture()
         defer { fixture.cleanUp() }
         let (model, backend) = (fixture.model, fixture.backend)
         backend.onCall = { call in
@@ -831,7 +817,7 @@ final class SteamPresentationTests: XCTestCase {
 
     @MainActor
     func testAFailedSyncShowsNoBannerAndSyncNowRetries() async throws {
-        let fixture = try await launchFixture(verify: false)
+        let fixture = try await launchFixture()
         defer { fixture.cleanUp() }
         let (model, backend) = (fixture.model, fixture.backend)
         model.syncCloud()
@@ -849,7 +835,7 @@ final class SteamPresentationTests: XCTestCase {
 
     @MainActor
     func testACloudQuestionAppearsOverTheWholeAppWhateverTabIsOpen() async throws {
-        let fixture = try await launchFixture(verify: false)
+        let fixture = try await launchFixture()
         defer { fixture.cleanUp() }
         let app = AppModel(directory: fixture.root, defaults: fixture.preferences, steam: fixture.model,
                            epic: EpicModel(directory: fixture.root, gameSessions: EpicGameSessions()))
@@ -870,7 +856,7 @@ final class SteamPresentationTests: XCTestCase {
 
     @MainActor
     func testRunningSessionBlocksRelaunchVerificationAndUninstallUntilActualExit() async throws {
-        let fixture = try await launchFixture(verify: false)
+        let fixture = try await launchFixture()
         defer { fixture.cleanUp() }
         fixture.model.installations.primaryAction()
         fixture.model.installations.primaryAction()
@@ -913,7 +899,7 @@ final class SteamPresentationTests: XCTestCase {
     func testReopenedModelRestoresRunningActionAndFileGuardsUntilRecoveredGameExits() async throws {
         let sessions = SteamGameSessions()
         sessions.fake.show(.steam(appID: 620))
-        let fixture = try await launchFixture(verify: false, sessions: sessions)
+        let fixture = try await launchFixture(sessions: sessions)
         defer { fixture.cleanUp() }
         fixture.backend.publish { $0.gate = .session(620) }
         try await eventually { sessions.active?.running == true && fixture.model.installations.gate == .session(620) }
@@ -934,7 +920,7 @@ final class SteamPresentationTests: XCTestCase {
 
     @MainActor
     func testSignOutWhileGameRunsKeepsGlobalReservationUntilExit() async throws {
-        let fixture = try await launchFixture(verify: false)
+        let fixture = try await launchFixture()
         defer { fixture.cleanUp() }
         fixture.model.installations.primaryAction()
         fixture.run(.steam(appID: 620))
@@ -942,7 +928,7 @@ final class SteamPresentationTests: XCTestCase {
         fixture.model.signOut()
         XCTAssertTrue(fixture.model.gameSessions.isBusy)
         XCTAssertEqual(fixture.sessions.fake.revocations, [.steam(steamId: 42)])
-        let replacement = SteamModel(directory: fixture.root, preferences: fixture.preferences, gameSessions: fixture.model.gameSessions)
+        let replacement = SteamModel(directory: fixture.root, gameSessions: fixture.model.gameSessions)
         XCTAssertEqual(replacement.gameSessions.active?.game, 620)
         XCTAssertTrue(replacement.gameSessions.isBusy)
         fixture.sessions.fake.show(nil)
@@ -953,7 +939,7 @@ final class SteamPresentationTests: XCTestCase {
 
     @MainActor
     func testAFailedLaunchIsReportedAndLeavesTheGameLaunchable() async throws {
-        let fixture = try await launchFixture(verify: false)
+        let fixture = try await launchFixture()
         defer { fixture.cleanUp() }
         fixture.model.installations.primaryAction()
         fixture.preparing()
@@ -1074,13 +1060,12 @@ final class SteamPresentationTests: XCTestCase {
     }
 
     @MainActor
-    private func launchFixture(verify: Bool? = nil, sessions: SteamGameSessions? = nil) async throws -> LaunchFixture {
+    private func launchFixture(sessions: SteamGameSessions? = nil) async throws -> LaunchFixture {
         let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         let installedDirectory = root.appending(path: "Installed games/steam-620-macos")
         let receipt = InstallationReceipt.steam(appId: 620, name: "Portal 2", directory: installedDirectory.path, platform: "macos", totalBytes: 100)
         let suite = "ObeliskLaunchFixture.\(UUID().uuidString)"
         let preferences = try XCTUnwrap(UserDefaults(suiteName: suite))
-        if let verify { preferences.set(verify, forKey: SteamModel.verifyBeforeLaunchPreferenceKey) }
         let details = FixtureResponses<DetailsRequest, SteamGameDetails>()
         await details.release(DetailsRequest(appId: 620, language: "french"), value: fixtureDetails(620))
         await details.release(DetailsRequest(appId: 570, language: "french"), value: fixtureDetails(570))
@@ -1089,16 +1074,15 @@ final class SteamPresentationTests: XCTestCase {
         backend.indicators = [(620, .neverSynced)]
         // Rust holds a launch from the call on.
         backend.onCall = { call in
-            guard case let .launch(_, verify) = call else { return }
+            guard case .launch = call else { return }
             backend.publish {
                 $0.launching = true
-                $0.verifyingBeforeLaunch = verify
                 $0.launchGame = 620
                 $0.gate = .action(620)
             }
         }
         let gameSessions = sessions ?? SteamGameSessions()
-        let model = SteamModel(directory: root, keychain: FixtureCredentialStore(), connect: { _ in session }, news: { _ in [] }, beginLogin: { _ in throw SteamError.Failure(reason: "Fixture: sign-in is offline in tests") }, localeIdentifier: "fr-FR", preferences: preferences, gameSessions: gameSessions, installations: SteamModel.installations(backend))
+        let model = SteamModel(directory: root, keychain: FixtureCredentialStore(), connect: { _ in session }, news: { _ in [] }, beginLogin: { _ in throw SteamError.Failure(reason: "Fixture: sign-in is offline in tests") }, localeIdentifier: "fr-FR", gameSessions: gameSessions, installations: SteamModel.installations(backend))
         await model.start()
         model.open(fixtureGames[0])
         return LaunchFixture(root: root, model: model, preferences: preferences, suite: suite, backend: backend,

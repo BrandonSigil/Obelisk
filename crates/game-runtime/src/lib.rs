@@ -15,6 +15,7 @@ pub mod packaging;
 mod process;
 pub mod profile;
 pub mod protocol;
+pub mod queue;
 pub mod sessions;
 pub mod steam;
 pub mod supervisor;

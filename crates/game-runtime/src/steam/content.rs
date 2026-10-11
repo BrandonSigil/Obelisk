@@ -27,6 +27,9 @@ pub trait Network: Send + Sync + 'static {
     ) -> BoxFuture<'a, Result<steam_kit::client::Installation, Failure>>;
     fn progress(&self) -> Option<TransferProgress>;
     fn cancel(&self);
+    /// Whether Steam offers a newer build than the one `receipt` installed.
+    fn update_available<'a>(&'a self, receipt: &'a Receipt)
+    -> BoxFuture<'a, Result<bool, Failure>>;
     /// What starts the game installed in `install`.
     fn launch_target<'a>(
         &'a self,
@@ -72,6 +75,22 @@ impl Network for steam_kit::client::Client {
     }
     fn cancel(&self) {
         self.cancel_download();
+    }
+    fn update_available<'a>(
+        &'a self,
+        receipt: &'a Receipt,
+    ) -> BoxFuture<'a, Result<bool, Failure>> {
+        Box::pin(async move {
+            steam_kit::client::Client::update_available(
+                self,
+                receipt.app_id,
+                &receipt.platform,
+                &receipt.language,
+                Path::new(&receipt.directory),
+            )
+            .await
+            .map_err(|error| Failure::Failed(error.to_string()))
+        })
     }
     fn launch_target<'a>(
         &'a self,
@@ -186,6 +205,12 @@ impl<N: Network> installations::Content<Steam> for Content<N> {
     }
     fn cancel(&self) {
         self.network.cancel();
+    }
+    fn update_available<'a>(
+        &'a self,
+        receipt: &'a Receipt,
+    ) -> BoxFuture<'a, Result<bool, Failure>> {
+        self.network.update_available(receipt)
     }
     fn launch<'a>(
         &'a self,

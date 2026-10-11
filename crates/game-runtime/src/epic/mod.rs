@@ -343,6 +343,9 @@ impl crate::installations::Storefront for Epic {
     fn transfer_name(request: &Download) -> String {
         request.app_name.clone()
     }
+    fn request_name(request: &Download) -> String {
+        request.title.clone()
+    }
     fn offer_game(offer: &Offer) -> Store {
         Store {
             namespace: offer.namespace.clone(),

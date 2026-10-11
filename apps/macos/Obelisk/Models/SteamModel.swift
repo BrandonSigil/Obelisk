@@ -13,7 +13,6 @@ enum SteamLoginStart: Sendable, Equatable {
 @MainActor
 @Observable
 final class SteamModel {
-    static let verifyBeforeLaunchPreferenceKey = "obelisk.steam.verifyBeforeLaunch"
     private(set) var displayName: String?
     private(set) var avatarURL: URL?
     private(set) var friends: FriendsPresentationState?
@@ -64,9 +63,6 @@ final class SteamModel {
             ? SteamGames.nativePlatform : "windows"
     }
     private(set) var language: String
-    var verifyBeforeLaunch: Bool {
-        didSet { preferences.set(verifyBeforeLaunch, forKey: Self.verifyBeforeLaunchPreferenceKey) }
-    }
     let installations: SteamInstallations
 
     @ObservationIgnored private let directory: URL
@@ -93,7 +89,6 @@ final class SteamModel {
     let invitations: SteamReceivedInvitations
     /// The in-game purchase the running game waits on.
     let purchase: SteamPurchaseAuthorization
-    @ObservationIgnored private let preferences: UserDefaults
     /// Where the account's last library is kept between launches. The
     /// account's session keeps every library it loads there.
     @ObservationIgnored private let libraryCache: LibraryCache?
@@ -147,7 +142,6 @@ final class SteamModel {
             }
         },
         localeIdentifier: String = Locale.preferredLanguages.first ?? Locale.current.identifier,
-        preferences: UserDefaults = .standard,
         reconnectDelay: @escaping @Sendable (Int) async throws -> Void = { attempt in
             try await Task.sleep(for: .seconds(1 << attempt))
         },
@@ -163,10 +157,7 @@ final class SteamModel {
         self.loadWebCookies = webCookies
         self.beginLogin = beginLogin
         self.language = steamLanguage(locale: localeIdentifier)
-        self.preferences = preferences
         self.reconnectDelay = reconnectDelay
-        self.verifyBeforeLaunch = preferences.object(forKey: Self.verifyBeforeLaunchPreferenceKey) == nil
-            ? true : preferences.bool(forKey: Self.verifyBeforeLaunchPreferenceKey)
         self.gameSessions = gameSessions
         self.libraryCache = libraryCache
         let locations = ObeliskLocations.of(library: directory)
@@ -499,7 +490,9 @@ final class SteamModel {
     #if DEBUG
     /// A Cloud diagnostic needs the storefront idle, and keeps it fenced.
     private func reserveCloudProbe() -> Bool {
-        guard installations.gate.launch, gameSessions.recoveryError == nil else { return false }
+        let idle = InstallationOpening<UInt32>.open(except: [])
+        guard installations.gate.launch == idle, installations.gate.modify == idle,
+              gameSessions.recoveryError == nil else { return false }
         installations.diagnosticReservation = true
         return true
     }
@@ -993,7 +986,6 @@ final class SteamModel {
     /// Steam's part of the installation actions.
     private func installationPort() -> InstallationPort<SteamGames> {
         InstallationPort(
-            verifiesBeforeLaunch: { [weak self] in self?.verifyBeforeLaunch ?? true },
             report: { [weak self] error in self?.errorMessage = error.map(Self.message) },
             warn: { [weak self] in self?.storageWarning = $0 },
             uninstalled: { [weak self] game in

@@ -142,6 +142,35 @@ pub(crate) async fn fetch_manifest(
     reported(&mut trace, result)
 }
 
+/// The version of the game's live build, as the launcher service names it.
+pub(crate) async fn live_build_version(
+    api: &Api,
+    access_token: &str,
+    namespace: &str,
+    catalog_item_id: &str,
+    app_name: &str,
+    platform: &str,
+) -> Result<String, EpicError> {
+    let mut trace = trace(namespace, catalog_item_id, app_name, platform);
+    let version = live_asset(
+        api,
+        access_token,
+        namespace,
+        catalog_item_id,
+        app_name,
+        platform,
+        &mut trace,
+    )
+    .await
+    .and_then(|asset| {
+        asset
+            .build_version
+            .filter(|version| !version.is_empty())
+            .ok_or(EpicError::Protocol)
+    });
+    reported(&mut trace, version)
+}
+
 fn trace(
     namespace: &str,
     catalog_item_id: &str,
@@ -359,6 +388,9 @@ struct AssetResponse {
 #[derive(Deserialize)]
 struct Asset {
     hash: Option<String>,
+    /// The build's version, as its manifest records it too.
+    #[serde(default, rename = "buildVersion")]
+    build_version: Option<String>,
     sidecar: Option<Sidecar>,
     manifests: Vec<ManifestLocation>,
 }

@@ -91,6 +91,12 @@ impl Network for Fake {
     fn cancel(&self) {
         self.call("cancel");
     }
+    fn update_available<'a>(&'a self, _: &'a Receipt) -> BoxFuture<'a, Result<bool, Failure>> {
+        Box::pin(async move {
+            self.call("update");
+            Ok(true)
+        })
+    }
     fn archive(&self, _: Configuration) -> BoxFuture<'_, Result<(), Error>> {
         Box::pin(async move {
             self.call("archive");
@@ -223,6 +229,11 @@ async fn every_account_call_renews_and_saves_the_credentials_first() {
         fixture.fake.calls()[4..],
         ["prepare", "saved", "archive", "saved"]
     );
+
+    // A short call renews the token itself, then its rotation is saved.
+    assert!(fixture.content.update_available(&receipt).await.unwrap());
+    eventually(|| fixture.fake.calls().len() == 10).await;
+    assert_eq!(fixture.fake.calls()[8..], ["update", "saved"]);
 }
 
 #[tokio::test]
@@ -385,6 +396,12 @@ async fn an_older_receipt_learns_its_catalog_item_from_the_installation_itself()
         file.clone(),
         fixture.locations.library.clone(),
         fixture.locations.home.clone(),
+        crate::installations::Queueing {
+            queue: crate::queue::DownloadQueue::new(),
+            storefront: crate::queue::Storefront::Epic,
+            account: ACCOUNT.into(),
+            name: |game: &Store| game.app_name.clone(),
+        },
     );
 
     assert_eq!(installations.state().receipts[0].catalog_item_id, "catalog");

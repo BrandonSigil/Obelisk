@@ -292,6 +292,9 @@ impl crate::installations::Storefront for Steam {
     fn transfer_name(request: &Download) -> String {
         request.app_id.to_string()
     }
+    fn request_name(request: &Download) -> String {
+        request.name.clone()
+    }
     fn offer_game(offer: &Offer) -> u32 {
         offer.app_id
     }

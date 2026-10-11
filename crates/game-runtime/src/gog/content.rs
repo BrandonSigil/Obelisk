@@ -33,6 +33,9 @@ pub trait Network: Send + Sync + 'static {
     ) -> BoxFuture<'a, Result<gog_kit::client::Installation, Failure>>;
     fn progress(&self) -> Option<TransferProgress>;
     fn cancel(&self);
+    /// Whether GOG's current build differs from the one `receipt` installed.
+    fn update_available<'a>(&'a self, receipt: &'a Receipt)
+    -> BoxFuture<'a, Result<bool, Failure>>;
 }
 
 fn failed(error: impl std::fmt::Display) -> Failure {
@@ -73,6 +76,21 @@ impl Network for GogClient {
     }
     fn cancel(&self) {
         self.cancel_download();
+    }
+    fn update_available<'a>(
+        &'a self,
+        receipt: &'a Receipt,
+    ) -> BoxFuture<'a, Result<bool, Failure>> {
+        Box::pin(async move {
+            GogClient::update_available(
+                self,
+                &receipt.product_id,
+                &receipt.platform,
+                Path::new(&receipt.directory),
+            )
+            .await
+            .map_err(failed)
+        })
     }
 }
 
@@ -178,6 +196,12 @@ impl<N: Network> installations::Content<Gog> for Content<N> {
     fn cancel(&self) {
         self.cancelled.store(true, Ordering::Release);
         self.network.cancel();
+    }
+    fn update_available<'a>(
+        &'a self,
+        receipt: &'a Receipt,
+    ) -> BoxFuture<'a, Result<bool, Failure>> {
+        self.network.update_available(receipt)
     }
     fn launch<'a>(
         &'a self,

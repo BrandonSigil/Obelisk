@@ -288,13 +288,27 @@ pub fn open<R: DeserializeOwned>(directory: &Path) -> Result<Installation<R>, In
     }
     let lock = lock(directory)?;
     let root = directory.canonicalize()?;
-    let receipt = read_file_bounded(&receipt_path(&root)?, MAX_RECEIPT_BYTES)?
-        .and_then(|bytes| serde_json::from_slice(&bytes).ok());
+    let receipt = receipt_in(&root)?;
     Ok(Installation {
         root,
         receipt,
         _lock: lock,
     })
+}
+
+/// Reads an installation folder's Installation receipt without its lock, as
+/// the game it holds may be running. `None` while a Transfer has withdrawn
+/// it, or when it is unreadable.
+pub fn read_receipt<R: DeserializeOwned>(directory: &Path) -> Result<Option<R>, InstallFailure> {
+    if !directory.is_dir() {
+        return Err(io::Error::from(io::ErrorKind::NotFound).into());
+    }
+    receipt_in(&directory.canonicalize()?)
+}
+
+fn receipt_in<R: DeserializeOwned>(root: &Path) -> Result<Option<R>, InstallFailure> {
+    Ok(read_file_bounded(&receipt_path(root)?, MAX_RECEIPT_BYTES)?
+        .and_then(|bytes| serde_json::from_slice(&bytes).ok()))
 }
 
 /// Why an installation was not removed.

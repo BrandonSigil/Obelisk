@@ -249,6 +249,9 @@ impl crate::installations::Storefront for Gog {
     fn transfer_name(request: &Download) -> String {
         request.product_id.clone()
     }
+    fn request_name(request: &Download) -> String {
+        request.title.clone()
+    }
     fn offer_game(offer: &Offer) -> String {
         offer.product_id.clone()
     }

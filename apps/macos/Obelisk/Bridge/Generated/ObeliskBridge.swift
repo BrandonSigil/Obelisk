@@ -635,14 +635,20 @@ public protocol AccountInstallationsProtocol: AnyObject, Sendable {
     func answerCloud(game: String, decisionId: UInt64, choice: CloudChoice) async throws 
     
     /**
-     * Stops the Transfer, and a launch still preparing.
+     * Stops `game`'s Transfer, or its launch still preparing.
      */
-    func cancel() 
+    func cancel(game: String) 
     
     /**
      * Waits for a revision newer than `after`, or returns at once.
      */
     func changed(after: UInt64) async  -> InstallationsState
+    
+    /**
+     * Asks the storefront which installations have a newer build, unless it
+     * was asked a short while ago.
+     */
+    func checkUpdates() 
     
     /**
      * The Cloud indicators of `games`, and of every other game of the
@@ -658,16 +664,21 @@ public protocol AccountInstallationsProtocol: AnyObject, Sendable {
     func install(offer: GameOffer) 
     
     /**
-     * Launches `installation`, verifying it first when `verify` asks for it
-     * or it needs it.
+     * Launches `installation`, verifying it first only when it needs it.
      */
-    func launch(installation: String, verify: Bool) 
+    func launch(installation: String) 
     
     /**
      * Syncs the game's Cloud saves: those of `installation`, or, when
      * `None`, those the uninstalled game's saved context names.
      */
     func maintainCloud(game: String, installation: String?) 
+    
+    /**
+     * Whether each newer build installs as soon as it is known, rather
+     * than at the game's next launch.
+     */
+    func setAutomaticUpdates(enabled: Bool) 
     
     /**
      * A DEBUG diagnostic holds the storefront while it runs.
@@ -685,8 +696,8 @@ public protocol AccountInstallationsProtocol: AnyObject, Sendable {
     func uninstall(installation: String) 
     
     /**
-     * Updates `installation` in place; a Transfer of the game that stopped
-     * resumes instead.
+     * Verifies `installation`'s files and repairs or updates them in place;
+     * a Transfer of the game that stopped resumes instead.
      */
     func update(installation: String) 
     
@@ -824,12 +835,13 @@ open func answerCloud(game: String, decisionId: UInt64, choice: CloudChoice)asyn
 }
     
     /**
-     * Stops the Transfer, and a launch still preparing.
+     * Stops `game`'s Transfer, or its launch still preparing.
      */
-open func cancel()  {try! rustCall() {
+open func cancel(game: String)  {try! rustCall() {
         uniffiCallStatus in
     uniffi_obelisk_bridge_fn_method_accountinstallations_cancel(
-            self.uniffiCloneHandle(),uniffiCallStatus
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(game),uniffiCallStatus
     )
 }
 }
@@ -852,6 +864,18 @@ open func changed(after: UInt64)async  -> InstallationsState  {
             errorHandler: nil
             
         )
+}
+    
+    /**
+     * Asks the storefront which installations have a newer build, unless it
+     * was asked a short while ago.
+     */
+open func checkUpdates()  {try! rustCall() {
+        uniffiCallStatus in
+    uniffi_obelisk_bridge_fn_method_accountinstallations_check_updates(
+            self.uniffiCloneHandle(),uniffiCallStatus
+    )
+}
 }
     
     /**
@@ -889,15 +913,13 @@ open func install(offer: GameOffer)  {try! rustCall() {
 }
     
     /**
-     * Launches `installation`, verifying it first when `verify` asks for it
-     * or it needs it.
+     * Launches `installation`, verifying it first only when it needs it.
      */
-open func launch(installation: String, verify: Bool)  {try! rustCall() {
+open func launch(installation: String)  {try! rustCall() {
         uniffiCallStatus in
     uniffi_obelisk_bridge_fn_method_accountinstallations_launch(
             self.uniffiCloneHandle(),
-        FfiConverterString.lower(installation),
-        FfiConverterBool.lower(verify),uniffiCallStatus
+        FfiConverterString.lower(installation),uniffiCallStatus
     )
 }
 }
@@ -912,6 +934,19 @@ open func maintainCloud(game: String, installation: String?)  {try! rustCall() {
             self.uniffiCloneHandle(),
         FfiConverterString.lower(game),
         FfiConverterOptionString.lower(installation),uniffiCallStatus
+    )
+}
+}
+    
+    /**
+     * Whether each newer build installs as soon as it is known, rather
+     * than at the game's next launch.
+     */
+open func setAutomaticUpdates(enabled: Bool)  {try! rustCall() {
+        uniffiCallStatus in
+    uniffi_obelisk_bridge_fn_method_accountinstallations_set_automatic_updates(
+            self.uniffiCloneHandle(),
+        FfiConverterBool.lower(enabled),uniffiCallStatus
     )
 }
 }
@@ -959,8 +994,8 @@ open func uninstall(installation: String)  {try! rustCall() {
 }
     
     /**
-     * Updates `installation` in place; a Transfer of the game that stopped
-     * resumes instead.
+     * Verifies `installation`'s files and repairs or updates them in place;
+     * a Transfer of the game that stopped resumes instead.
      */
 open func update(installation: String)  {try! rustCall() {
         uniffiCallStatus in
@@ -1217,6 +1252,241 @@ public func FfiConverterTypeCredentialSave_lift(_ handle: UInt64) throws -> Cred
 #endif
 public func FfiConverterTypeCredentialSave_lower(_ value: CredentialSave) -> UInt64 {
     return FfiConverterTypeCredentialSave.lower(value)
+}
+
+
+
+
+
+
+/**
+ * The process's download queue.
+ */
+public protocol DownloadsProtocol: AnyObject, Sendable {
+    
+    /**
+     * Waits for a revision newer than `after`.
+     */
+    func changed(after: UInt64) async  -> DownloadQueueState
+    
+    /**
+     * Moves the waiting Transfer first. The one under way goes on.
+     */
+    func moveToTop(id: UInt64) 
+    
+    /**
+     * Pauses the Transfer: the running one stops and waits first.
+     */
+    func pause(id: UInt64) 
+    
+    /**
+     * Takes the Transfer out of the queue, stopping it when it runs.
+     */
+    func remove(id: UInt64) 
+    
+    func resume(id: UInt64) 
+    
+    /**
+     * A game runs, whatever its storefront: automatic updates wait.
+     */
+    func setHeld(held: Bool) 
+    
+    func state()  -> DownloadQueueState
+    
+}
+/**
+ * The process's download queue.
+ */
+open class Downloads: DownloadsProtocol, @unchecked Sendable {
+    fileprivate let handle: UInt64
+
+    /// Used to instantiate a [FFIObject] without an actual handle, for fakes in tests, mostly.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public struct NoHandle {
+        public init() {}
+    }
+
+    // TODO: We'd like this to be `private` but for Swifty reasons,
+    // we can't implement `FfiConverter` without making this `required` and we can't
+    // make it `required` without making it `public`.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    required public init(unsafeFromHandle handle: UInt64) {
+        self.handle = handle
+    }
+
+    // This constructor can be used to instantiate a fake object.
+    // - Parameter noHandle: Placeholder value so we can have a constructor separate from the default empty one that may be implemented for classes extending [FFIObject].
+    //
+    // - Warning:
+    //     Any object instantiated with this constructor cannot be passed to an actual Rust-backed object. Since there isn't a backing handle the FFI lower functions will crash.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public init(noHandle: NoHandle) {
+        self.handle = 0
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public func uniffiCloneHandle() -> UInt64 {
+        return try! rustCall { uniffi_obelisk_bridge_fn_clone_downloads(self.handle, $0) }
+    }
+public convenience init() {
+    let handle =
+        try! rustCall() {
+        uniffiCallStatus in
+    uniffi_obelisk_bridge_fn_constructor_downloads_new(uniffiCallStatus
+    )
+}
+    self.init(unsafeFromHandle: handle)
+}
+
+    deinit {
+        if handle == 0 {
+            // Mock objects have handle=0 don't try to free them
+            return
+        }
+
+        try! rustCall { uniffi_obelisk_bridge_fn_free_downloads(handle, $0) }
+    }
+
+    
+
+    
+    /**
+     * Waits for a revision newer than `after`.
+     */
+open func changed(after: UInt64)async  -> DownloadQueueState  {
+    return
+        try!  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_obelisk_bridge_fn_method_downloads_changed(
+                        self.uniffiCloneHandle(),FfiConverterUInt64.lower(after)
+                )
+            },
+            pollFunc: ffi_obelisk_bridge_rust_future_poll_rust_buffer,
+            completeFunc: ffi_obelisk_bridge_rust_future_complete_rust_buffer,
+            freeFunc: ffi_obelisk_bridge_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterTypeDownloadQueueState_lift,
+            errorHandler: nil
+            
+        )
+}
+    
+    /**
+     * Moves the waiting Transfer first. The one under way goes on.
+     */
+open func moveToTop(id: UInt64)  {try! rustCall() {
+        uniffiCallStatus in
+    uniffi_obelisk_bridge_fn_method_downloads_move_to_top(
+            self.uniffiCloneHandle(),
+        FfiConverterUInt64.lower(id),uniffiCallStatus
+    )
+}
+}
+    
+    /**
+     * Pauses the Transfer: the running one stops and waits first.
+     */
+open func pause(id: UInt64)  {try! rustCall() {
+        uniffiCallStatus in
+    uniffi_obelisk_bridge_fn_method_downloads_pause(
+            self.uniffiCloneHandle(),
+        FfiConverterUInt64.lower(id),uniffiCallStatus
+    )
+}
+}
+    
+    /**
+     * Takes the Transfer out of the queue, stopping it when it runs.
+     */
+open func remove(id: UInt64)  {try! rustCall() {
+        uniffiCallStatus in
+    uniffi_obelisk_bridge_fn_method_downloads_remove(
+            self.uniffiCloneHandle(),
+        FfiConverterUInt64.lower(id),uniffiCallStatus
+    )
+}
+}
+    
+open func resume(id: UInt64)  {try! rustCall() {
+        uniffiCallStatus in
+    uniffi_obelisk_bridge_fn_method_downloads_resume(
+            self.uniffiCloneHandle(),
+        FfiConverterUInt64.lower(id),uniffiCallStatus
+    )
+}
+}
+    
+    /**
+     * A game runs, whatever its storefront: automatic updates wait.
+     */
+open func setHeld(held: Bool)  {try! rustCall() {
+        uniffiCallStatus in
+    uniffi_obelisk_bridge_fn_method_downloads_set_held(
+            self.uniffiCloneHandle(),
+        FfiConverterBool.lower(held),uniffiCallStatus
+    )
+}
+}
+    
+open func state() -> DownloadQueueState  {
+    return try!  FfiConverterTypeDownloadQueueState_lift(try! rustCall() {
+        uniffiCallStatus in
+    uniffi_obelisk_bridge_fn_method_downloads_state(
+            self.uniffiCloneHandle(),uniffiCallStatus
+    )
+})
+}
+    
+
+    
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeDownloads: FfiConverter {
+    typealias FfiType = UInt64
+    typealias SwiftType = Downloads
+
+    public static func lift(_ handle: UInt64) throws -> Downloads {
+        return Downloads(unsafeFromHandle: handle)
+    }
+
+    public static func lower(_ value: Downloads) -> UInt64 {
+        return value.uniffiCloneHandle()
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> Downloads {
+        let handle: UInt64 = try readInt(&buf)
+        return try lift(handle)
+    }
+
+    public static func write(_ value: Downloads, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeDownloads_lift(_ handle: UInt64) throws -> Downloads {
+    return try FfiConverterTypeDownloads.lift(handle)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeDownloads_lower(_ value: Downloads) -> UInt64 {
+    return FfiConverterTypeDownloads.lower(value)
 }
 
 
@@ -4664,6 +4934,186 @@ public func FfiConverterTypeCloudSync_lower(_ value: CloudSync) -> RustBuffer {
 }
 
 
+/**
+ * One Transfer in the queue.
+ */
+public struct DownloadItem: Equatable, Hashable {
+    public var id: UInt64
+    public var storefront: SessionStorefront
+    public var account: String
+    /**
+     * The game, as its storefront's installations name it.
+     */
+    public var game: String
+    public var name: String
+    public var kind: DownloadKind
+    /**
+     * Obelisk queued it for a newer build, not the player.
+     */
+    public var automatic: Bool
+    /**
+     * A launch waits for it: it goes first and cannot be paused.
+     */
+    public var launching: Bool
+    public var paused: Bool
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(id: UInt64, storefront: SessionStorefront, account: String, 
+        /**
+         * The game, as its storefront's installations name it.
+         */game: String, name: String, kind: DownloadKind, 
+        /**
+         * Obelisk queued it for a newer build, not the player.
+         */automatic: Bool, 
+        /**
+         * A launch waits for it: it goes first and cannot be paused.
+         */launching: Bool, paused: Bool) {
+        self.id = id
+        self.storefront = storefront
+        self.account = account
+        self.game = game
+        self.name = name
+        self.kind = kind
+        self.automatic = automatic
+        self.launching = launching
+        self.paused = paused
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension DownloadItem: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeDownloadItem: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> DownloadItem {
+        return
+            try DownloadItem(
+                id: FfiConverterUInt64.read(from: &buf), 
+                storefront: FfiConverterTypeSessionStorefront.read(from: &buf), 
+                account: FfiConverterString.read(from: &buf), 
+                game: FfiConverterString.read(from: &buf), 
+                name: FfiConverterString.read(from: &buf), 
+                kind: FfiConverterTypeDownloadKind.read(from: &buf), 
+                automatic: FfiConverterBool.read(from: &buf), 
+                launching: FfiConverterBool.read(from: &buf), 
+                paused: FfiConverterBool.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: DownloadItem, into buf: inout [UInt8]) {
+        FfiConverterUInt64.write(value.id, into: &buf)
+        FfiConverterTypeSessionStorefront.write(value.storefront, into: &buf)
+        FfiConverterString.write(value.account, into: &buf)
+        FfiConverterString.write(value.game, into: &buf)
+        FfiConverterString.write(value.name, into: &buf)
+        FfiConverterTypeDownloadKind.write(value.kind, into: &buf)
+        FfiConverterBool.write(value.automatic, into: &buf)
+        FfiConverterBool.write(value.launching, into: &buf)
+        FfiConverterBool.write(value.paused, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeDownloadItem_lift(_ buf: RustBuffer) throws -> DownloadItem {
+    return try FfiConverterTypeDownloadItem.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeDownloadItem_lower(_ value: DownloadItem) -> RustBuffer {
+    return FfiConverterTypeDownloadItem.lower(value)
+}
+
+
+/**
+ * Everything the queue presents. `revision` grows with every change.
+ */
+public struct DownloadQueueState: Equatable, Hashable {
+    public var revision: UInt64
+    public var running: DownloadItem?
+    /**
+     * In the order they will run.
+     */
+    public var waiting: [DownloadItem]
+    /**
+     * A game runs: automatic updates wait.
+     */
+    public var held: Bool
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(revision: UInt64, running: DownloadItem?, 
+        /**
+         * In the order they will run.
+         */waiting: [DownloadItem], 
+        /**
+         * A game runs: automatic updates wait.
+         */held: Bool) {
+        self.revision = revision
+        self.running = running
+        self.waiting = waiting
+        self.held = held
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension DownloadQueueState: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeDownloadQueueState: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> DownloadQueueState {
+        return
+            try DownloadQueueState(
+                revision: FfiConverterUInt64.read(from: &buf), 
+                running: FfiConverterOptionTypeDownloadItem.read(from: &buf), 
+                waiting: FfiConverterSequenceTypeDownloadItem.read(from: &buf), 
+                held: FfiConverterBool.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: DownloadQueueState, into buf: inout [UInt8]) {
+        FfiConverterUInt64.write(value.revision, into: &buf)
+        FfiConverterOptionTypeDownloadItem.write(value.running, into: &buf)
+        FfiConverterSequenceTypeDownloadItem.write(value.waiting, into: &buf)
+        FfiConverterBool.write(value.held, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeDownloadQueueState_lift(_ buf: RustBuffer) throws -> DownloadQueueState {
+    return try FfiConverterTypeDownloadQueueState.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeDownloadQueueState_lower(_ value: DownloadQueueState) -> RustBuffer {
+    return FfiConverterTypeDownloadQueueState.lower(value)
+}
+
+
 public struct EpicAchievement: Equatable, Hashable {
     public var id: String
     public var name: String
@@ -6150,6 +6600,10 @@ public struct Installation: Equatable, Hashable {
      * A Transfer started over it and has not succeeded since.
      */
     public var needsVerification: Bool
+    /**
+     * The storefront offers a newer build than the installed one.
+     */
+    public var updateAvailable: Bool
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
@@ -6159,7 +6613,10 @@ public struct Installation: Equatable, Hashable {
          */id: String, game: String, name: String, directory: String, platform: String, totalBytes: UInt64, 
         /**
          * A Transfer started over it and has not succeeded since.
-         */needsVerification: Bool) {
+         */needsVerification: Bool, 
+        /**
+         * The storefront offers a newer build than the installed one.
+         */updateAvailable: Bool) {
         self.id = id
         self.game = game
         self.name = name
@@ -6167,6 +6624,7 @@ public struct Installation: Equatable, Hashable {
         self.platform = platform
         self.totalBytes = totalBytes
         self.needsVerification = needsVerification
+        self.updateAvailable = updateAvailable
     }
 
     
@@ -6191,7 +6649,8 @@ public struct FfiConverterTypeInstallation: FfiConverterRustBuffer {
                 directory: FfiConverterString.read(from: &buf), 
                 platform: FfiConverterString.read(from: &buf), 
                 totalBytes: FfiConverterUInt64.read(from: &buf), 
-                needsVerification: FfiConverterBool.read(from: &buf)
+                needsVerification: FfiConverterBool.read(from: &buf), 
+                updateAvailable: FfiConverterBool.read(from: &buf)
         )
     }
 
@@ -6203,6 +6662,7 @@ public struct FfiConverterTypeInstallation: FfiConverterRustBuffer {
         FfiConverterString.write(value.platform, into: &buf)
         FfiConverterUInt64.write(value.totalBytes, into: &buf)
         FfiConverterBool.write(value.needsVerification, into: &buf)
+        FfiConverterBool.write(value.updateAvailable, into: &buf)
     }
 }
 
@@ -6227,25 +6687,37 @@ public func FfiConverterTypeInstallation_lower(_ value: Installation) -> RustBuf
  */
 public struct InstallationGate: Equatable, Hashable {
     /**
-     * A Transfer or uninstall.
+     * A Transfer, which waits in the download queue.
      */
     public var modify: GameOpening
     /**
-     * A launch, of any game a Transfer may touch.
+     * An uninstall: no Transfer, launch or other uninstall of the storefront
+     * runs.
      */
-    public var launch: Bool
+    public var uninstall: GameOpening
+    /**
+     * A launch: a Transfer holds only its own game, and those whose launch
+     * would need one.
+     */
+    public var launch: GameOpening
     public var maintain: GameOpening
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
     public init(
         /**
-         * A Transfer or uninstall.
+         * A Transfer, which waits in the download queue.
          */modify: GameOpening, 
         /**
-         * A launch, of any game a Transfer may touch.
-         */launch: Bool, maintain: GameOpening) {
+         * An uninstall: no Transfer, launch or other uninstall of the storefront
+         * runs.
+         */uninstall: GameOpening, 
+        /**
+         * A launch: a Transfer holds only its own game, and those whose launch
+         * would need one.
+         */launch: GameOpening, maintain: GameOpening) {
         self.modify = modify
+        self.uninstall = uninstall
         self.launch = launch
         self.maintain = maintain
     }
@@ -6267,14 +6739,16 @@ public struct FfiConverterTypeInstallationGate: FfiConverterRustBuffer {
         return
             try InstallationGate(
                 modify: FfiConverterTypeGameOpening.read(from: &buf), 
-                launch: FfiConverterBool.read(from: &buf), 
+                uninstall: FfiConverterTypeGameOpening.read(from: &buf), 
+                launch: FfiConverterTypeGameOpening.read(from: &buf), 
                 maintain: FfiConverterTypeGameOpening.read(from: &buf)
         )
     }
 
     public static func write(_ value: InstallationGate, into buf: inout [UInt8]) {
         FfiConverterTypeGameOpening.write(value.modify, into: &buf)
-        FfiConverterBool.write(value.launch, into: &buf)
+        FfiConverterTypeGameOpening.write(value.uninstall, into: &buf)
+        FfiConverterTypeGameOpening.write(value.launch, into: &buf)
         FfiConverterTypeGameOpening.write(value.maintain, into: &buf)
     }
 }
@@ -6381,6 +6855,10 @@ public struct InstallationsState: Equatable, Hashable {
     public var warning: InstallationWarning?
     public var gate: InstallationGate
     public var cloudSync: CloudSync?
+    /**
+     * The games whose Transfer waits in the download queue.
+     */
+    public var queued: [String]
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
@@ -6394,7 +6872,10 @@ public struct InstallationsState: Equatable, Hashable {
         /**
          * The game whose Transfer stopped before its receipt: the player can
          * resume it.
-         */resumable: String?, report: InstallationReport?, warning: InstallationWarning?, gate: InstallationGate, cloudSync: CloudSync?) {
+         */resumable: String?, report: InstallationReport?, warning: InstallationWarning?, gate: InstallationGate, cloudSync: CloudSync?, 
+        /**
+         * The games whose Transfer waits in the download queue.
+         */queued: [String]) {
         self.revision = revision
         self.installations = installations
         self.transfer = transfer
@@ -6410,6 +6891,7 @@ public struct InstallationsState: Equatable, Hashable {
         self.warning = warning
         self.gate = gate
         self.cloudSync = cloudSync
+        self.queued = queued
     }
 
     
@@ -6442,7 +6924,8 @@ public struct FfiConverterTypeInstallationsState: FfiConverterRustBuffer {
                 report: FfiConverterOptionTypeInstallationReport.read(from: &buf), 
                 warning: FfiConverterOptionTypeInstallationWarning.read(from: &buf), 
                 gate: FfiConverterTypeInstallationGate.read(from: &buf), 
-                cloudSync: FfiConverterOptionTypeCloudSync.read(from: &buf)
+                cloudSync: FfiConverterOptionTypeCloudSync.read(from: &buf), 
+                queued: FfiConverterSequenceString.read(from: &buf)
         )
     }
 
@@ -6462,6 +6945,7 @@ public struct FfiConverterTypeInstallationsState: FfiConverterRustBuffer {
         FfiConverterOptionTypeInstallationWarning.write(value.warning, into: &buf)
         FfiConverterTypeInstallationGate.write(value.gate, into: &buf)
         FfiConverterOptionTypeCloudSync.write(value.cloudSync, into: &buf)
+        FfiConverterSequenceString.write(value.queued, into: &buf)
     }
 }
 
@@ -8987,6 +9471,82 @@ public func FfiConverterTypeCoreError_lower(_ value: CoreError) -> RustBuffer {
 }
 
 
+/**
+ * What a queued Transfer does to its game.
+ */
+
+public enum DownloadKind: Equatable, Hashable {
+    
+    case install
+    case update
+    case repair
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension DownloadKind: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeDownloadKind: FfiConverterRustBuffer {
+    typealias SwiftType = DownloadKind
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> DownloadKind {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .install
+        
+        case 2: return .update
+        
+        case 3: return .repair
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: DownloadKind, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case .install:
+            writeInt(&buf, Int32(1))
+        
+        
+        case .update:
+            writeInt(&buf, Int32(2))
+        
+        
+        case .repair:
+            writeInt(&buf, Int32(3))
+        
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeDownloadKind_lift(_ buf: RustBuffer) throws -> DownloadKind {
+    return try FfiConverterTypeDownloadKind.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeDownloadKind_lower(_ value: DownloadKind) -> RustBuffer {
+    return FfiConverterTypeDownloadKind.lower(value)
+}
+
+
+
 public 
 enum EpicError: Swift.Error, Equatable, Hashable, Foundation.LocalizedError {
 
@@ -11373,6 +11933,30 @@ fileprivate struct FfiConverterOptionTypeCloudSync: FfiConverterRustBuffer {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterOptionTypeDownloadItem: FfiConverterRustBuffer {
+    typealias SwiftType = DownloadItem?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypeDownloadItem.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypeDownloadItem.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterOptionTypeEpicFriendActivity: FfiConverterRustBuffer {
     typealias SwiftType = EpicFriendActivity?
 
@@ -11826,6 +12410,31 @@ fileprivate struct FfiConverterSequenceTypeCachedSteamGame: FfiConverterRustBuff
         seq.reserveCapacity(Int(len))
         for _ in 0 ..< len {
             seq.append(try FfiConverterTypeCachedSteamGame.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeDownloadItem: FfiConverterRustBuffer {
+    typealias SwiftType = [DownloadItem]
+
+    public static func write(_ value: [DownloadItem], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeDownloadItem.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [DownloadItem] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [DownloadItem]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeDownloadItem.read(from: &buf))
         }
         return seq
     }
@@ -12656,6 +13265,27 @@ private let initializationResult: InitializationResult = {
     if (uniffi_obelisk_bridge_checksum_method_credentialsave_save() != 31513) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_obelisk_bridge_checksum_method_downloads_changed() != 19544) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_obelisk_bridge_checksum_method_downloads_move_to_top() != 44280) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_obelisk_bridge_checksum_method_downloads_pause() != 24714) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_obelisk_bridge_checksum_method_downloads_remove() != 60515) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_obelisk_bridge_checksum_method_downloads_resume() != 2894) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_obelisk_bridge_checksum_method_downloads_set_held() != 18736) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_obelisk_bridge_checksum_method_downloads_state() != 47105) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_obelisk_bridge_checksum_method_epicsession_achievements() != 19240) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -12764,10 +13394,13 @@ private let initializationResult: InitializationResult = {
     if (uniffi_obelisk_bridge_checksum_method_accountinstallations_answer_cloud() != 37495) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_obelisk_bridge_checksum_method_accountinstallations_cancel() != 59675) {
+    if (uniffi_obelisk_bridge_checksum_method_accountinstallations_cancel() != 28023) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_obelisk_bridge_checksum_method_accountinstallations_changed() != 14160) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_obelisk_bridge_checksum_method_accountinstallations_check_updates() != 24102) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_obelisk_bridge_checksum_method_accountinstallations_cloud_indicators() != 38851) {
@@ -12776,10 +13409,13 @@ private let initializationResult: InitializationResult = {
     if (uniffi_obelisk_bridge_checksum_method_accountinstallations_install() != 48233) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_obelisk_bridge_checksum_method_accountinstallations_launch() != 10461) {
+    if (uniffi_obelisk_bridge_checksum_method_accountinstallations_launch() != 1866) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_obelisk_bridge_checksum_method_accountinstallations_maintain_cloud() != 65363) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_obelisk_bridge_checksum_method_accountinstallations_set_automatic_updates() != 42470) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_obelisk_bridge_checksum_method_accountinstallations_set_diagnostic() != 46065) {
@@ -12794,7 +13430,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_obelisk_bridge_checksum_method_accountinstallations_uninstall() != 45481) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_obelisk_bridge_checksum_method_accountinstallations_update() != 2263) {
+    if (uniffi_obelisk_bridge_checksum_method_accountinstallations_update() != 64898) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_obelisk_bridge_checksum_method_librarycache_epic_library() != 25582) {
@@ -12939,6 +13575,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_obelisk_bridge_checksum_constructor_library_new() != 47156) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_obelisk_bridge_checksum_constructor_downloads_new() != 22984) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_obelisk_bridge_checksum_constructor_epicsession_restore() != 11917) {

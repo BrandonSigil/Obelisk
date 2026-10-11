@@ -72,7 +72,7 @@ extension LibraryStorefront {
                 cover: { AnyView(cover(game)) },
                 hero: HomeGame.Hero(artwork: { AnyView(heroArtwork(game)) }, logo: { AnyView(heroLogo(game)) }),
                 transfer: { installations.transfer(for: game.id) },
-                cancelTransfer: installations.cancelDownload,
+                cancelTransfer: { installations.cancel(game.id) },
                 open: { self.open(game) },
                 perform: {
                     self.performCardAction(action, for: game, confirmForceQuit: installations.forceQuitRunningGame)

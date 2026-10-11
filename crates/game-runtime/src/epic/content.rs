@@ -36,6 +36,9 @@ pub trait Network: Send + Sync + 'static {
     ) -> BoxFuture<'a, Result<epic_kit::client::Installation, Failure>>;
     fn progress(&self) -> Option<TransferProgress>;
     fn cancel(&self);
+    /// Whether Epic's live build differs from the one `receipt` installed.
+    fn update_available<'a>(&'a self, receipt: &'a Receipt)
+    -> BoxFuture<'a, Result<bool, Failure>>;
     /// Saves the build's Cloud archive before its files go.
     fn archive(&self, config: Configuration) -> BoxFuture<'_, Result<(), Error>>;
     /// Syncs Cloud saves on the player's request, while `idle` keeps every
@@ -89,6 +92,23 @@ impl Network for EpicClient {
     }
     fn cancel(&self) {
         self.cancel_download();
+    }
+    fn update_available<'a>(
+        &'a self,
+        receipt: &'a Receipt,
+    ) -> BoxFuture<'a, Result<bool, Failure>> {
+        Box::pin(async move {
+            EpicClient::update_available(
+                self,
+                &receipt.namespace,
+                &receipt.catalog_item_id,
+                &receipt.app_name,
+                &receipt.platform,
+                Path::new(&receipt.directory),
+            )
+            .await
+            .map_err(failed)
+        })
     }
     fn archive(&self, config: Configuration) -> BoxFuture<'_, Result<(), Error>> {
         Box::pin(super::archive(config, self))
@@ -251,6 +271,17 @@ impl<N: Network> installations::Content<Epic> for Content<N> {
     fn cancel(&self) {
         self.cancelled.store(true, Ordering::Release);
         self.network.cancel();
+    }
+    fn update_available<'a>(
+        &'a self,
+        receipt: &'a Receipt,
+    ) -> BoxFuture<'a, Result<bool, Failure>> {
+        Box::pin(async move {
+            let available = self.network.update_available(receipt).await;
+            // The call may have renewed the account's credentials.
+            self.save_later();
+            available
+        })
     }
     fn launch<'a>(
         &'a self,

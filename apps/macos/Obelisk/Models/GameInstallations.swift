@@ -34,6 +34,8 @@ struct InstallationReceipt<GameID: Hashable & Sendable>: Identifiable, Equatable
     let totalBytes: UInt64
     /// A Transfer started over it and has not succeeded since.
     var needsVerification = false
+    /// The storefront offers a newer build than the installed one.
+    var updateAvailable = false
 }
 
 /// The game on screen, as the storefront model sees it.
@@ -60,16 +62,20 @@ enum InstallationOpening<GameID: Hashable>: Equatable {
 
 /// What Rust's Reservation lets start now.
 struct InstallationsGate<GameID: Hashable>: Equatable {
-    /// A Transfer or uninstall.
+    /// A Transfer, which waits in the download queue.
     var modify: InstallationOpening<GameID>
-    /// A launch, of any game a Transfer may touch.
-    var launch: Bool
+    /// An uninstall: no Transfer, launch or other uninstall of the storefront runs.
+    var uninstall: InstallationOpening<GameID>
+    /// A launch: a Transfer holds only its own game.
+    var launch: InstallationOpening<GameID>
     var maintain: InstallationOpening<GameID>
 
-    static var closed: Self { Self(modify: .closed, launch: false, maintain: .closed) }
+    static var closed: Self { Self(modify: .closed, uninstall: .closed, launch: .closed, maintain: .closed) }
 
-    init(modify: InstallationOpening<GameID>, launch: Bool, maintain: InstallationOpening<GameID>) {
+    init(modify: InstallationOpening<GameID>, uninstall: InstallationOpening<GameID>,
+         launch: InstallationOpening<GameID>, maintain: InstallationOpening<GameID>) {
         self.modify = modify
+        self.uninstall = uninstall
         self.launch = launch
         self.maintain = maintain
     }
@@ -82,14 +88,14 @@ struct InstallationsGate<GameID: Hashable>: Equatable {
             case let .open(except): .open(except: except.compactMap(game))
             }
         }
-        self.init(modify: opening(gate.modify), launch: gate.launch, maintain: opening(gate.maintain))
+        self.init(modify: opening(gate.modify), uninstall: opening(gate.uninstall), launch: opening(gate.launch),
+                  maintain: opening(gate.maintain))
     }
 }
 
 /// A signed-in account's storefront operations. Every closure belongs to one
 /// connection; signing out drops them.
 struct InstallationPort<Store: InstallationStorefront> {
-    var verifiesBeforeLaunch: @MainActor () -> Bool
     /// Presents a failure; nil clears the last one.
     var report: @MainActor (Error?) -> Void
     var warn: @MainActor (String) -> Void
@@ -115,6 +121,8 @@ struct InstallationsSnapshot<Store: InstallationStorefront>: Equatable {
     var warning: InstallationWarning?
     var gate: InstallationsGate<Store.GameID>
     var cloudSync: GameCloudSync<Store.GameID>?
+    /// The games whose Transfer waits in the download queue.
+    var queued: [Store.GameID] = []
 }
 
 /// One account's installations of one storefront, in Rust. Each action
@@ -128,13 +136,20 @@ protocol InstallationsBackend<Store>: AnyObject {
     func setDiagnostic(_ running: Bool)
     /// Installs `offer`'s build, or resumes the game's interrupted Transfer.
     func install(_ offer: GameOffer)
-    /// Updates `receipt`'s installation in place, or resumes the game's
-    /// interrupted Transfer.
+    /// Verifies `receipt`'s files and repairs or updates them in place, or
+    /// resumes the game's interrupted Transfer.
     func update(_ receipt: InstallationReceipt<Store.GameID>)
-    func cancel()
-    /// Launches `receipt`'s installation, verifying it first when `verify`
-    /// asks for it or the installation needs it.
-    func launch(_ receipt: InstallationReceipt<Store.GameID>, verify: Bool)
+    /// Stops `game`'s Transfer, or its launch still preparing.
+    func cancel(_ game: Store.GameID)
+    /// Asks the storefronts which installations have a newer build, unless
+    /// they were asked a short while ago.
+    func checkUpdates()
+    /// Whether each newer build installs as soon as it is known, rather than
+    /// at the game's next launch.
+    func setAutomaticUpdates(_ enabled: Bool)
+    /// Launches `receipt`'s installation, updating or repairing it first
+    /// when it needs it.
+    func launch(_ receipt: InstallationReceipt<Store.GameID>)
     func uninstall(_ receipt: InstallationReceipt<Store.GameID>)
     func signedOut()
     /// Syncs the game's Cloud saves: those of `installed`, or an uninstalled
@@ -149,7 +164,7 @@ protocol InstallationsBackend<Store>: AnyObject {
 }
 
 /// One storefront's installed games and the actions on them, as Rust keeps
-/// them: Transfers, verified launches and uninstalls. This presents them for
+/// them: Transfers, launches and uninstalls. This presents them for
 /// the game on screen and forwards the player's actions.
 @MainActor @Observable
 final class GameInstallations<Store: InstallationStorefront> {
@@ -175,11 +190,18 @@ final class GameInstallations<Store: InstallationStorefront> {
     /// The game whose Transfer stopped before its receipt: the player can
     /// resume it.
     private(set) var resumableGame: Store.GameID?
+    /// The games whose Transfer waits in the download queue.
+    private(set) var queuedGames: [Store.GameID] = []
     /// What Rust's Reservation lets start now.
     private(set) var gate = InstallationsGate<Store.GameID>.closed
     /// A DEBUG diagnostic fences the storefront like a Game session would.
     var diagnosticReservation = false {
         didSet { backend?.setDiagnostic(diagnosticReservation) }
+    }
+    /// The player keeps games up to date: each newer build installs as soon
+    /// as it is known.
+    var updatesAutomatically = false {
+        didSet { if updatesAutomatically != oldValue { backend?.setAutomaticUpdates(updatesAutomatically) } }
     }
     @ObservationIgnored var selection: @MainActor () -> InstallationSelection<Store>? = { nil }
 
@@ -192,6 +214,8 @@ final class GameInstallations<Store: InstallationStorefront> {
     @ObservationIgnored private var report: InstallationReport?
     @ObservationIgnored private var warning: InstallationWarning?
     @ObservationIgnored private var observation: Task<Void, Never>?
+    /// Asks for newer builds each time Obelisk comes to the front.
+    @ObservationIgnored private var activity: ApplicationActivityObservation?
     /// Whether a Game session was active, and its game running, when last seen.
     @ObservationIgnored private var observedSession: (busy: Bool, running: Bool)?
 
@@ -222,7 +246,13 @@ final class GameInstallations<Store: InstallationStorefront> {
         self.port = port
         cloud.connect(account: account, backend: backend)
         backend.setDiagnostic(diagnosticReservation)
+        backend.setAutomaticUpdates(updatesAutomatically)
         apply(backend.snapshot())
+        backend.checkUpdates()
+        activity = ApplicationActivityObservation { [weak self] active in
+            guard active else { return }
+            Task { @MainActor in self?.backend?.checkUpdates() }
+        }
         observation = Task { [weak self, backend] in
             var after = self?.revision ?? 0
             while !Task.isCancelled {
@@ -243,6 +273,7 @@ final class GameInstallations<Store: InstallationStorefront> {
     private func reset() {
         observation?.cancel()
         observation = nil
+        activity = nil
         port = nil
         backend = nil
         account = nil
@@ -253,6 +284,7 @@ final class GameInstallations<Store: InstallationStorefront> {
         transfer = nil
         transferGame = nil
         resumableGame = nil
+        queuedGames = []
         gate = .closed
         isDownloading = false
         isLaunching = false
@@ -278,6 +310,7 @@ final class GameInstallations<Store: InstallationStorefront> {
         if isUninstalling != snapshot.uninstalling { isUninstalling = snapshot.uninstalling }
         if uninstallGame != snapshot.uninstallGame { uninstallGame = snapshot.uninstallGame }
         if resumableGame != snapshot.resumable { resumableGame = snapshot.resumable }
+        if queuedGames != snapshot.queued { queuedGames = snapshot.queued }
         if gate != snapshot.gate { gate = snapshot.gate }
         if cloud.sync != snapshot.cloudSync { cloud.sync = snapshot.cloudSync }
         if report != snapshot.report {
@@ -309,15 +342,23 @@ final class GameInstallations<Store: InstallationStorefront> {
 
     // MARK: Reservation gate
 
-    /// Whether a Transfer or uninstall of `game` may start, as Rust's
+    /// Whether a Transfer of `game` may join the download queue, as Rust's
     /// Reservation shows it.
     func canModify(_ game: Store.GameID?) -> Bool {
         game.map(gate.modify.allows) ?? false
     }
 
-    /// Whether `game` may launch: no Game session runs.
+    /// Whether `game`'s Transfer waits in the download queue.
+    func isQueued(_ game: Store.GameID) -> Bool { queuedGames.contains(game) }
+
+    /// The running Transfer's progress, when it belongs to the game Rust names `game`.
+    func transfer(named game: String) -> GameTransfer? {
+        Store.game(game).flatMap(transfer(for:))
+    }
+
+    /// Whether `game` may launch: no Game session runs, and no Transfer holds it.
     func canLaunch(_ game: Store.GameID) -> Bool {
-        gate.launch && gate.modify.allows(game)
+        gate.launch.allows(game)
     }
 
     /// Whether the player may sync `game`'s Cloud saves.
@@ -366,8 +407,15 @@ final class GameInstallations<Store: InstallationStorefront> {
         return canModify(resumableGame) && resumableGame == selection()?.game
     }
 
-    var canUninstallSelectedGame: Bool {
+    /// Whether the game on screen's installation may be verified.
+    var canVerifySelectedGame: Bool {
         account != nil && selectedReceipt != nil && canModify(selection()?.game)
+    }
+
+    /// Whether the game on screen's installation may be uninstalled.
+    var canUninstallSelectedGame: Bool {
+        guard account != nil, selectedReceipt != nil, let game = selection()?.game else { return false }
+        return gate.uninstall.allows(game)
     }
 
     var isSynchronizingSaves: Bool {
@@ -409,8 +457,11 @@ final class GameInstallations<Store: InstallationStorefront> {
             if runtimeInstallFraction != nil { return L10n.string("model.game.installingVoile") }
             return L10n.string(isVerifyingBeforeLaunch ? "model.game.verifying" : "model.game.launching")
         }
+        if let game, isQueued(game) { return L10n.string("model.game.queued") }
         if selectedSession != nil { return L10n.string("model.game.launching") }
-        if selectedReceipt != nil { return L10n.string("model.game.launch") }
+        if let selectedReceipt {
+            return L10n.string(selectedReceipt.updateAvailable ? "model.game.update" : "model.game.launch")
+        }
         return L10n.string(canResumeDownload ? "model.game.resume" : "model.game.download")
     }
 
@@ -421,8 +472,11 @@ final class GameInstallations<Store: InstallationStorefront> {
         return active.runtimeInstall
     }
 
-    /// Whether the primary action launches the game rather than installing it.
-    var primaryActionLaunches: Bool { selectedSession != nil || selectedReceipt != nil }
+    /// Whether the primary action launches the game rather than installing or
+    /// updating it.
+    var primaryActionLaunches: Bool {
+        selectedSession != nil || selectedReceipt.map { !$0.updateAvailable } ?? false
+    }
 
     /// While the game on screen runs, the primary action ends it instead.
     var primaryQuitStage: GameQuitStage? {
@@ -433,19 +487,22 @@ final class GameInstallations<Store: InstallationStorefront> {
     /// the storefront to know what it can install.
     var primaryActionAvailable: Bool {
         if let primaryQuitStage { return primaryQuitStage != .closing }
-        guard let selection = selection(), account != nil else { return false }
-        if selectedReceipt != nil { return canLaunch(selection.game) }
+        guard let selection = selection(), account != nil, !isQueued(selection.game) else { return false }
+        if let selectedReceipt {
+            return selectedReceipt.updateAvailable ? canModify(selection.game) : canLaunch(selection.game)
+        }
         return selection.offer != nil && canModify(selection.game)
     }
 
-    /// Launches the installed game, otherwise installs it. While the game
-    /// runs, it quits it, then forces it to quit once it may: the page asks
-    /// its player to confirm that first.
+    /// Launches the installed game, updates it when the storefront offers a
+    /// newer build, otherwise installs it. While the game runs, it quits it,
+    /// then forces it to quit once it may: the page asks its player to
+    /// confirm that first.
     func primaryAction() {
         guard primaryActionAvailable else { return }
         if primaryQuitStage != nil {
             endRunningGame()
-        } else if let receipt = selectedReceipt {
+        } else if let receipt = selectedReceipt, !receipt.updateAvailable {
             launch(receipt)
         } else {
             downloadSelected()
@@ -476,9 +533,8 @@ final class GameInstallations<Store: InstallationStorefront> {
 
     /// Launches an installation, from its game's page or from the library.
     func launch(_ receipt: Receipt) {
-        guard account != nil, canLaunch(receipt.gameID), receipts.contains(receipt), let port else { return }
-        let verify = port.verifiesBeforeLaunch()
-        act { $0.launch(receipt, verify: verify) }
+        guard account != nil, canLaunch(receipt.gameID), receipts.contains(receipt) else { return }
+        act { $0.launch(receipt) }
     }
 
     /// Whether the library may install `game`: no build of it is installed
@@ -508,19 +564,27 @@ final class GameInstallations<Store: InstallationStorefront> {
 
     // MARK: Transfers
 
-    /// Stops the Transfer, and a launch still preparing. A running game keeps
-    /// its Game session.
-    func cancelDownload() {
-        guard isDownloading || isLaunching, let backend else { return }
-        backend.cancel()
+    /// Stops `game`'s Transfer, or its launch still preparing. Another game's
+    /// operation goes on, and a running game keeps its Game session.
+    func cancel(_ game: Store.GameID) {
+        let transfers = isDownloading && transferGame == game
+        guard transfers || (isLaunching && launchGame == game) || isQueued(game), let backend else { return }
+        backend.cancel(game)
         apply(backend.snapshot())
         sessions.refresh()
     }
 
-    // MARK: Uninstall
+    // MARK: Verification and uninstall
+
+    /// Verifies an installation's files, from its game's page: the Transfer
+    /// repairs or updates them in place.
+    func verify(_ receipt: Receipt) {
+        guard account != nil, canModify(receipt.gameID), receipts.contains(receipt) else { return }
+        act { $0.update(receipt) }
+    }
 
     func uninstall(_ receipt: Receipt) {
-        guard account != nil, canModify(receipt.gameID), receipts.contains(receipt) else { return }
+        guard account != nil, gate.uninstall.allows(receipt.gameID), receipts.contains(receipt) else { return }
         act { $0.uninstall(receipt) }
     }
 }
@@ -580,8 +644,10 @@ final class NoInstallations<Store: InstallationStorefront>: InstallationsBackend
     func setDiagnostic(_ running: Bool) {}
     func install(_ offer: GameOffer) {}
     func update(_ receipt: InstallationReceipt<Store.GameID>) {}
-    func cancel() {}
-    func launch(_ receipt: InstallationReceipt<Store.GameID>, verify: Bool) {}
+    func cancel(_ game: Store.GameID) {}
+    func checkUpdates() {}
+    func setAutomaticUpdates(_ enabled: Bool) {}
+    func launch(_ receipt: InstallationReceipt<Store.GameID>) {}
     func uninstall(_ receipt: InstallationReceipt<Store.GameID>) {}
     func signedOut() {}
     func maintainCloud(_ game: Store.GameID, installed: InstallationReceipt<Store.GameID>?) {}
@@ -612,10 +678,10 @@ final class RustInstallations<Store: InstallationStorefront>: InstallationsBacke
     func setDiagnostic(_ running: Bool) { core.setDiagnostic(running: running) }
     func install(_ offer: GameOffer) { core.install(offer: offer) }
     func update(_ receipt: InstallationReceipt<Store.GameID>) { core.update(installation: receipt.id) }
-    func cancel() { core.cancel() }
-    func launch(_ receipt: InstallationReceipt<Store.GameID>, verify: Bool) {
-        core.launch(installation: receipt.id, verify: verify)
-    }
+    func cancel(_ game: Store.GameID) { core.cancel(game: Store.name(game)) }
+    func checkUpdates() { core.checkUpdates() }
+    func setAutomaticUpdates(_ enabled: Bool) { core.setAutomaticUpdates(enabled: enabled) }
+    func launch(_ receipt: InstallationReceipt<Store.GameID>) { core.launch(installation: receipt.id) }
     func uninstall(_ receipt: InstallationReceipt<Store.GameID>) { core.uninstall(installation: receipt.id) }
     func signedOut() { core.signedOut() }
     func maintainCloud(_ game: Store.GameID, installed: InstallationReceipt<Store.GameID>?) {
@@ -639,7 +705,8 @@ final class RustInstallations<Store: InstallationStorefront>: InstallationsBacke
                     InstallationReceipt(id: installation.id, gameID: $0, name: installation.name,
                                         directory: installation.directory, platform: installation.platform,
                                         totalBytes: installation.totalBytes,
-                                        needsVerification: installation.needsVerification)
+                                        needsVerification: installation.needsVerification,
+                                        updateAvailable: installation.updateAvailable)
                 }
             },
             transfer: state.transfer, transferGame: state.transferGame.flatMap(Store.game),
@@ -654,7 +721,8 @@ final class RustInstallations<Store: InstallationStorefront>: InstallationsBacke
                                   reconnecting: sync.reconnecting, cancellable: sync.cancellable,
                                   question: sync.question)
                 }
-            }
+            },
+            queued: state.queued.compactMap(Store.game)
         )
     }
 }

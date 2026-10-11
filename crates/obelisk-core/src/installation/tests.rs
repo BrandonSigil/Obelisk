@@ -74,7 +74,7 @@ async fn install_build(
     .await
 }
 
-fn read_receipt(root: &Path) -> Option<Receipt> {
+fn receipt_on_disk(root: &Path) -> Option<Receipt> {
     fs::read(root.join(RECEIPT_FILE))
         .ok()
         .map(|bytes| serde_json::from_slice(&bytes).unwrap())
@@ -95,7 +95,7 @@ async fn the_receipt_is_published_after_every_file_with_the_final_progress() {
     .await
     .unwrap();
     assert_eq!(receipt, Receipt { build: 1 });
-    assert_eq!(read_receipt(&root), Some(Receipt { build: 1 }));
+    assert_eq!(receipt_on_disk(&root), Some(Receipt { build: 1 }));
     let progress = transfers.snapshot().unwrap();
     assert_eq!(progress.game, "7");
     assert_eq!(progress.state, TransferState::Complete);
@@ -112,13 +112,13 @@ async fn a_failed_update_withdraws_the_old_receipt() {
     install_build(&transfers, parent.path(), 1, |_| Ok(()))
         .await
         .unwrap();
-    assert!(read_receipt(&root).is_some());
+    assert!(receipt_on_disk(&root).is_some());
 
     let failed = install_build(&transfers, parent.path(), 2, |_| Err(Failure::Engine)).await;
 
     assert!(matches!(failed, Err(Failure::Engine)));
     assert_eq!(
-        read_receipt(&root),
+        receipt_on_disk(&root),
         None,
         "a half-updated installation is not launchable"
     );
@@ -305,13 +305,18 @@ async fn an_installation_opens_with_its_receipt_under_the_lock() {
     assert_eq!(opened.root, root);
     assert_eq!(opened.receipt, Some(Receipt { build: 3 }));
     assert!(matches!(lock(&root), Err(InstallFailure::Locked)));
+    assert_eq!(
+        read_receipt::<Receipt>(&root).unwrap(),
+        Some(Receipt { build: 3 }),
+        "a held installation's receipt still reads"
+    );
     let busy = install_build(&transfers, parent.path(), 4, |_| Ok(())).await;
     assert!(matches!(
         busy,
         Err(Failure::Install(InstallFailure::Locked))
     ));
     assert_eq!(
-        read_receipt(&root),
+        receipt_on_disk(&root),
         Some(Receipt { build: 3 }),
         "a refused Transfer withdraws nothing"
     );
@@ -319,8 +324,13 @@ async fn an_installation_opens_with_its_receipt_under_the_lock() {
 
     fs::write(root.join(RECEIPT_FILE), b"not json").unwrap();
     assert_eq!(open::<Receipt>(&root).unwrap().receipt, None);
+    assert_eq!(read_receipt::<Receipt>(&root).unwrap(), None);
     assert!(matches!(
         open::<Receipt>(&parent.path().join("missing")),
+        Err(InstallFailure::Io(_))
+    ));
+    assert!(matches!(
+        read_receipt::<Receipt>(&parent.path().join("missing")),
         Err(InstallFailure::Io(_))
     ));
 }

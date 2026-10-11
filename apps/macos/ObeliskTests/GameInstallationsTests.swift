@@ -11,12 +11,11 @@ final class GameInstallationsTests: XCTestCase {
 
     func testThePrimaryActionLaunchesTheInstallationAndCancelReachesItsPreparation() async throws {
         let fixture = Fixture(game: game)
-        fixture.verifies = true
         let installations = fixture.connect()
 
         installations.primaryAction()
 
-        XCTAssertEqual(fixture.backend.actions, [.launch(fixture.receipt, verify: true)])
+        XCTAssertEqual(fixture.backend.actions, [.launch(fixture.receipt)])
         fixture.backend.publish {
             $0.launching = true
             $0.launchGame = 620
@@ -25,8 +24,8 @@ final class GameInstallationsTests: XCTestCase {
         try await eventually { installations.isLaunching }
         XCTAssertEqual(installations.primaryActionTitle, L10n.string("model.game.launching"))
         XCTAssertFalse(installations.primaryActionAvailable)
-        installations.cancelDownload()
-        XCTAssertEqual(fixture.backend.actions.last, .cancel)
+        installations.cancel(620)
+        XCTAssertEqual(fixture.backend.actions.last, .cancel(620))
     }
 
     func testAnInstallationLaunchesAndUpdatesBeforeTheStorefrontKnowsWhatItCanInstall() async throws {
@@ -92,9 +91,92 @@ final class GameInstallationsTests: XCTestCase {
         fixture.backend.publish { $0.gate = .action(730) }
         try await eventually { installations.canSyncCloud }
         XCTAssertFalse(installations.canUninstallSelectedGame)
+        installations.verify(fixture.receipt)
         installations.uninstall(fixture.receipt)
         installations.downloadSelected()
         XCTAssertEqual(fixture.backend.actions, [], "Swift forwards nothing the gate refuses")
+    }
+
+    func testANewerBuildTurnsThePrimaryActionIntoAnUpdate() async throws {
+        let fixture = Fixture(game: game)
+        let installations = fixture.connect()
+        XCTAssertEqual(fixture.backend.calls.filter { $0 == .checkUpdates }.count, 1, "Connecting asks for newer builds")
+        XCTAssertTrue(installations.primaryActionLaunches)
+
+        var updated = fixture.receipt
+        updated.updateAvailable = true
+        fixture.backend.publish { $0.receipts = [updated] }
+        try await eventually { installations.selectedReceipt?.updateAvailable == true }
+
+        XCTAssertEqual(installations.primaryActionTitle, L10n.string("model.game.update"))
+        XCTAssertFalse(installations.primaryActionLaunches)
+        XCTAssertTrue(installations.primaryActionAvailable)
+        installations.primaryAction()
+        XCTAssertEqual(fixture.backend.actions, [.update(updated)], "The update replaces the launch")
+
+        // The game runs: its files stay as they are.
+        fixture.backend.publish { $0.gate = .session(620) }
+        try await eventually { !installations.primaryActionAvailable }
+    }
+
+    func testAnotherGamesTransferLeavesThisGameLaunchableAndItsCancelAlone() async throws {
+        let fixture = Fixture(game: game)
+        let installations = fixture.connect()
+        fixture.backend.publish {
+            $0.downloading = true
+            $0.transferGame = 730
+            $0.gate = .transfer(730)
+        }
+        try await eventually { installations.isDownloading }
+
+        XCTAssertTrue(installations.primaryActionAvailable)
+        XCTAssertEqual(installations.primaryActionTitle, L10n.string("model.game.launch"))
+        installations.primaryAction()
+        XCTAssertEqual(fixture.backend.actions, [.launch(fixture.receipt)])
+        installations.cancel(620)
+        XCTAssertEqual(fixture.backend.actions.count, 1, "this game has nothing to stop")
+        installations.cancel(730)
+        XCTAssertEqual(fixture.backend.actions.last, .cancel(730))
+    }
+
+    func testTheAutomaticUpdatesSettingReachesEachConnectionBeforeItsFirstCheck() throws {
+        let fixture = Fixture(game: game)
+        let installations = fixture.connect()
+        installations.updatesAutomatically = true
+        XCTAssertEqual(fixture.backend.calls.last, .automaticUpdates(true))
+
+        _ = fixture.connect()
+        let calls = fixture.backend.calls
+        let setting = try XCTUnwrap(calls.firstIndex(of: .automaticUpdates(true)))
+        XCTAssertLessThan(setting, try XCTUnwrap(calls.firstIndex(of: .checkUpdates)))
+    }
+
+    func testAQueuedGameWaitsAndItsCancelTakesItOutOfTheQueue() async throws {
+        let fixture = Fixture(game: game, installed: false)
+        let installations = fixture.connect()
+        fixture.backend.publish {
+            $0.downloading = true
+            $0.transferGame = 730
+            $0.queued = [620]
+            $0.gate = .transfer(730)
+        }
+        try await eventually { installations.isQueued(620) }
+
+        XCTAssertEqual(installations.primaryActionTitle, L10n.string("model.game.queued"))
+        XCTAssertFalse(installations.primaryActionAvailable)
+        installations.primaryAction()
+        XCTAssertEqual(fixture.backend.actions, [], "a queued game waits")
+        installations.cancel(620)
+        XCTAssertEqual(fixture.backend.actions, [.cancel(620)])
+    }
+
+    func testVerifyingAnInstallationRunsItsTransferInPlace() async throws {
+        let fixture = Fixture(game: game)
+        let installations = fixture.connect()
+
+        installations.verify(fixture.receipt)
+
+        XCTAssertEqual(fixture.backend.actions, [.update(fixture.receipt)], "Rust repairs or updates the installed build")
     }
 
     // MARK: Quitting the running game
@@ -231,7 +313,6 @@ private final class Fixture {
     let sessions: SteamGameSessions
     let receipt: InstallationReceipt<UInt32>
     private(set) var backend = FakeInstallations<SteamGames>()
-    var verifies = false
     private(set) var reported: [String] = []
     private let game: SteamGame
     private let installed: Bool
@@ -256,7 +337,6 @@ private final class Fixture {
         installations.selection = { InstallationSelection(game: 620, platform: platform, offer: offer) }
         backend = FakeInstallations(receipts: installed ? [receipt] : [])
         installations.connect(account: 42, backend: backend, port: InstallationPort(
-            verifiesBeforeLaunch: { [unowned self] in verifies },
             report: { [unowned self] error in if let error { reported.append(SteamModel.message(error)) } },
             warn: { _ in }
         ))

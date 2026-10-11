@@ -26,6 +26,8 @@ final class AppModel {
     let gog: GogModel
     /// The in-game overlay, over whichever storefront's game runs.
     let overlay: GameOverlayController
+    /// Every storefront's Transfers, in their one queue.
+    let downloads: DownloadsModel
     private(set) var activeFriendsAccount: FriendsAccountIdentity?
     /// The game whose page Home opened, while its storefront still shows it.
     var homeGame: HomeGame.ID?
@@ -35,6 +37,15 @@ final class AppModel {
     var appearance: AppAppearance {
         didSet { defaults.set(appearance.rawValue, forKey: "appearance") }
     }
+    /// Whether every storefront installs a game's newer build as soon as it
+    /// is published, rather than at the game's next launch.
+    var updatesGamesAutomatically: Bool {
+        didSet {
+            defaults.set(updatesGamesAutomatically, forKey: Self.automaticUpdatesKey)
+            applyAutomaticUpdates()
+        }
+    }
+    static let automaticUpdatesKey = "obelisk.games.updateAutomatically"
 
     /// The last library of every storefront account.
     @ObservationIgnored let libraryCache: LibraryCache
@@ -42,20 +53,77 @@ final class AppModel {
 
     /// The test host's models register no Shift-Tab and open no overlay.
     init(directory: URL = AppIdentity.libraryDirectory, defaults: UserDefaults = .standard, steam: SteamModel? = nil,
-         epic: EpicModel? = nil, gog: GogModel? = nil,
+         epic: EpicModel? = nil, gog: GogModel? = nil, downloads: DownloadsModel? = nil,
          overlay: GameOverlayEnvironment = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil
             ? .live : .inert) {
         libraryDirectory = directory.path
         self.defaults = defaults
         appearance = AppAppearance(rawValue: defaults.string(forKey: "appearance") ?? "system") ?? .system
+        updatesGamesAutomatically = defaults.object(forKey: Self.automaticUpdatesKey) as? Bool ?? true
         // Every storefront's library shares one cache, as every cache of the
         // directory does, `LaunchHistory.live`'s included.
         libraryCache = LibraryCache(directory: directory.path)
-        self.steam = steam ?? SteamModel(directory: directory, preferences: defaults, libraryCache: libraryCache)
+        self.steam = steam ?? SteamModel(directory: directory, libraryCache: libraryCache)
         self.epic = epic ?? EpicModel(directory: directory, libraryCache: libraryCache)
         self.gog = gog ?? GogModel(directory: directory, libraryCache: libraryCache)
         self.overlay = GameOverlayController(steam: self.steam, epic: self.epic, gog: self.gog, environment: overlay)
         self.steam.overlay = self.overlay
+        self.downloads = downloads ?? DownloadsModel()
+        self.downloads.progress = { [weak self] item in self?.downloadTransfer(item) }
+        applyAutomaticUpdates()
+        holdUpdatesWhileAGameRuns()
+    }
+
+    /// A queued Transfer's progress, from its storefront's installations.
+    func downloadTransfer(_ item: DownloadItem) -> GameTransfer? {
+        switch item.storefront {
+        case .steam: steam.installations.transfer(named: item.game)
+        case .epic: epic.installations.transfer(named: item.game)
+        case .gog: gog.installations.transfer(named: item.game)
+        }
+    }
+
+    /// What the download queue shows of a queued Transfer's game.
+    func downloadGame(_ item: DownloadItem) -> DownloadGame {
+        switch item.storefront {
+        case .steam: steam.downloadGame(item, cover: SteamView.cover, artwork: SteamView.heroArtwork)
+        case .epic: epic.downloadGame(item, cover: EpicView.cover, artwork: EpicView.heroArtwork)
+        case .gog: gog.downloadGame(item, cover: GogView.cover, artwork: GogView.heroArtwork)
+        }
+    }
+
+    /// Opens a queued Transfer's game page, in its storefront's library.
+    func openDownload(_ item: DownloadItem) {
+        downloads.isPresented = false
+        switch item.storefront {
+        case .steam: open(item, in: steam, section: .steam)
+        case .epic: open(item, in: epic, section: .epic)
+        case .gog: open(item, in: gog, section: .gog)
+        }
+    }
+
+    private func open<Model: LibraryStorefront>(_ item: DownloadItem, in model: Model, section: LibrarySection) {
+        guard let id = Model.Store.game(item.game), let game = model.games.first(where: { $0.id == id }) else { return }
+        selection = section
+        model.open(game)
+    }
+
+    private func applyAutomaticUpdates() {
+        steam.installations.updatesAutomatically = updatesGamesAutomatically
+        epic.installations.updatesAutomatically = updatesGamesAutomatically
+        gog.installations.updatesAutomatically = updatesGamesAutomatically
+    }
+
+    /// The queue's automatic updates wait while a game of any storefront
+    /// runs or launches.
+    private func holdUpdatesWhileAGameRuns() {
+        let running = withObservationTracking {
+            steam.installations.sessions.isBusy || epic.installations.sessions.isBusy
+                || gog.installations.sessions.isBusy
+        } onChange: { [weak self] in
+            Task { @MainActor [weak self] in self?.holdUpdatesWhileAGameRuns() }
+        }
+        if downloads.held != running { downloads.setHeld(running) }
     }
 
     /// The Cloud or Rosetta question shown over the whole app, whichever tab is

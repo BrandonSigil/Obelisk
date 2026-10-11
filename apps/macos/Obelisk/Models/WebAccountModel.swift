@@ -607,11 +607,9 @@ final class WebAccountModel<Store: WebStorefront> {
         return InstallationSelection(game: game.id, platform: game.preferredPlatform, offer: game.offer)
     }
 
-    /// The account's part of the installation actions. Every launch verifies
-    /// its installation first.
+    /// The account's part of the installation actions.
     private func installationPort() -> InstallationPort<Store> {
         InstallationPort(
-            verifiesBeforeLaunch: { true },
             report: { [weak self] error in
                 guard let self else { return }
                 guard let error else { return errorMessage = nil }

@@ -32,7 +32,12 @@ fn the_current_build_is_the_newest_of_the_default_branch() {
         {"build_id": "1", "branch": null, "generation": 2, "version_name": "1.1", "link": "https://a/1"},
     ]}))
     .unwrap();
-    assert_eq!(builds.current().unwrap().version_name, "1.2");
+    let current = builds.current().unwrap();
+    assert_eq!(current.version_name, "1.2");
+    assert_eq!(
+        current.build_id, "2",
+        "an installation compares its build to it"
+    );
     let legacy: Builds = serde_json::from_value(json!({"items": [
         {"build_id": "1", "branch": null, "generation": 1, "legacy_build_id": 7, "link": "https://a/1"},
     ]}))

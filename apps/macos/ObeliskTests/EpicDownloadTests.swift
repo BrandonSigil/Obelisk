@@ -108,13 +108,13 @@ final class EpicDownloadTests: XCTestCase {
         XCTAssertEqual(transfer.downloadedGameDataText, L10n.string("ui.transfer.no_downloaded_data"))
     }
 
-    func testAnInstalledBuildAlwaysVerifiesBeforeItLaunchesAndShowsEachStep() async throws {
+    func testAnInstalledBuildShowsEachStepOfItsLaunch() async throws {
         let fixture = try await fixture(game: game("native", macos: true), installed: "Mac")
         let receipt = try XCTUnwrap(fixture.model.installations.selectedReceipt)
 
         fixture.model.installations.primaryAction()
 
-        XCTAssertEqual(fixture.backend.actions, [.launch(receipt, verify: true)])
+        XCTAssertEqual(fixture.backend.actions, [.launch(receipt)])
         fixture.backend.publish {
             $0.launching = true
             $0.gate = .action(fixture.game.libraryID)
@@ -239,7 +239,7 @@ final class EpicDownloadTests: XCTestCase {
 
         fixture.model.launchFromLibrary(fixture.game)
 
-        XCTAssertEqual(fixture.backend.actions, [.launch(fixture.receipt("native", platform: "Mac"), verify: true)])
+        XCTAssertEqual(fixture.backend.actions, [.launch(fixture.receipt("native", platform: "Mac"))])
         XCTAssertNil(fixture.model.selectedGame)
     }
 

@@ -20,8 +20,8 @@ use crate::{
     http::{bounded_bytes, inflate_json, send},
     library::endpoint,
     manifest::{
-        self, BuildManifest, Builds, DEPENDENCIES, DependencyDepot, DependencyRepository, Depot,
-        DepotManifest, Installed, Product, galaxy_path,
+        self, Build, BuildManifest, Builds, DEPENDENCIES, DependencyDepot, DependencyRepository,
+        Depot, DepotManifest, Installed, Product, galaxy_path,
     },
 };
 
@@ -119,19 +119,25 @@ async fn current_build(
     product_id: &str,
     platform: &str,
 ) -> Result<(BuildManifest, String), GogError> {
-    let mut url = endpoint(
-        &api.content,
-        &["products", product_id, "os", platform, "builds"],
-    )?;
-    url.query_pairs_mut().append_pair("generation", "2");
-    let builds: Builds = api.get_public(url).await?;
-    let build = builds.current().ok_or(GogError::NoBuild)?;
+    let build = listed_build(api, product_id, platform).await?;
     let link = content::checked_url(&build.link)?;
     let manifest: BuildManifest = document(api, link).await?;
     if manifest.base_product_id != product_id {
         return Err(GogError::Protocol);
     }
     Ok((manifest, build.version_name))
+}
+
+/// The build Obelisk installs of `product_id` for `platform`, as GOG lists
+/// it, before its manifest is read.
+async fn listed_build(api: &Api, product_id: &str, platform: &str) -> Result<Build, GogError> {
+    let mut url = endpoint(
+        &api.content,
+        &["products", product_id, "os", platform, "builds"],
+    )?;
+    url.query_pairs_mut().append_pair("generation", "2");
+    let builds: Builds = api.get_public(url).await?;
+    builds.current().ok_or(GogError::NoBuild)
 }
 
 /// A content-system document, without any account credential, inflated and
@@ -284,6 +290,31 @@ impl Client {
         )?;
         let (_, depots) = owned_depots(&manifest, &owned, language)?;
         Ok(depots.iter().map(|depot| depot.size).sum())
+    }
+
+    /// Whether GOG's current build of the game differs from the one installed
+    /// in `directory`. An installation whose receipt is gone needs its
+    /// Transfer too. It reads GOG's public build list only.
+    pub async fn update_available(
+        &self,
+        product_id: &str,
+        platform: &str,
+        directory: &Path,
+    ) -> Result<bool, GogError> {
+        if !valid_product_id(product_id) {
+            return Err(GogError::Protocol);
+        }
+        let content_platform = content_platform(platform)?;
+        let Some(installed) = installation::read_receipt::<Installation>(directory)?
+            .filter(|receipt| receipt.product_id == product_id && receipt.platform == platform)
+        else {
+            return Ok(true);
+        };
+        let current = listed_build(&self.tokens.api, product_id, content_platform).await?;
+        // A build without its identity cannot be compared.
+        Ok(!current.build_id.is_empty()
+            && !installed.build_id.is_empty()
+            && current.build_id != installed.build_id)
     }
 
     /// Installs `product_id`'s current build for `platform`, with the depots

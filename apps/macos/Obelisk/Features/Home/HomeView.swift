@@ -287,13 +287,6 @@ private struct HomePage: View {
             bar?.showsBackdrop = under
             bar?.showsGameTitle = false
         }
-        .safeAreaBar(edge: .bottom, spacing: 0) {
-            VStack(spacing: 0) {
-                LibraryTransferBar(installations: model.steam.installations, name: model.steam.transferName)
-                LibraryTransferBar(installations: model.epic.installations, name: model.epic.transferName)
-                LibraryTransferBar(installations: model.gog.installations, name: model.gog.transferName)
-            }
-        }
         .ignoresSafeArea(.container, edges: .top)
         .forceQuitConfirmation(quitting?.title ?? "", isPresented: Binding(
             get: { forceQuitting != nil },
@@ -456,6 +449,7 @@ private struct HomeHeroAction: View {
         case .launch: L10n.string("ui.game.play")
         case .download: L10n.string("model.game.download")
         case .busy: L10n.string("ui.transfer.preparing_short")
+        case .queued: L10n.string("model.game.queued")
         case .transferring: L10n.string("ui.transfer.downloading_short")
         case let .running(stage): stage?.title ?? L10n.string("model.game.running")
         }
