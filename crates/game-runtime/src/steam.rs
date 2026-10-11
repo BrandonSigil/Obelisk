@@ -262,6 +262,7 @@ impl crate::installations::Storefront for Steam {
     const RECEIPTS_UNAVAILABLE: &'static str = "model.steam.receiptsUnavailable";
     const RECEIPTS_NOT_SAVED: &'static str = "model.steam.receiptsNotSaved";
     const GAMES_DIRECTORY: &'static str = "Games/Steam";
+    const QUEUE: crate::queue::Storefront = crate::queue::Storefront::Steam;
     fn receipt_game(receipt: &Receipt) -> u32 {
         receipt.app_id
     }

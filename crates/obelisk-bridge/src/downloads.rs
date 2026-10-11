@@ -125,9 +125,4 @@ impl Downloads {
     pub fn move_to_top(&self, id: u64) {
         self.queue.move_to_top(id)
     }
-
-    /// A game runs, whatever its storefront: automatic updates wait.
-    pub fn set_held(&self, held: bool) {
-        self.queue.set_held(held)
-    }
 }

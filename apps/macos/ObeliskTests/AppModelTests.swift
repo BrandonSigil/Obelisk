@@ -38,25 +38,4 @@ final class AppModelTests: XCTestCase {
         XCTAssertFalse(restarted.updatesGamesAutomatically)
         XCTAssertFalse(restarted.gog.installations.updatesAutomatically)
     }
-
-    func testAGameOfAnyStorefrontHoldsTheQueuesAutomaticUpdates() async throws {
-        let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
-        defer { try? FileManager.default.removeItem(at: root) }
-        let suite = "ObeliskTests.\(UUID().uuidString)"
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
-        defer { defaults.removePersistentDomain(forName: suite) }
-        let sessions = SteamGameSessions()
-        let queue = FakeDownloads()
-        let model = AppModel(directory: root, defaults: defaults,
-                             steam: SteamModel(directory: root, gameSessions: sessions),
-                             downloads: DownloadsModel(backend: queue))
-        XCTAssertFalse(model.downloads.held)
-
-        sessions.fake.show(.steam(appID: 620))
-        try await eventually { model.downloads.held }
-        XCTAssertEqual(queue.calls, [.held(true)])
-
-        sessions.fake.show(nil)
-        try await eventually { !model.downloads.held }
-    }
 }

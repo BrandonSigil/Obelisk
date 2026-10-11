@@ -447,14 +447,12 @@ fn account<S: Named>(
     account: S::Account,
     receipts: String,
     locations: &Locations,
-    storefront: game_runtime::queue::Storefront,
 ) -> Installations<S>
 where
     S::Account: std::fmt::Display,
 {
     let queueing = installations::Queueing {
         queue: crate::downloads::queue().clone(),
-        storefront,
         account: account.to_string(),
         name: <S as Named>::name,
     };
@@ -519,14 +517,7 @@ impl AccountInstallations {
             },
             locations.clone(),
         );
-        let installations = account(
-            content,
-            sessions.clone(),
-            steam_id,
-            receipts,
-            &locations,
-            game_runtime::queue::Storefront::Steam,
-        );
+        let installations = account(content, sessions.clone(), steam_id, receipts, &locations);
         Ok(Arc::new(Self {
             account: Account::Steam(installations),
         }))
@@ -556,14 +547,7 @@ impl AccountInstallations {
             language,
             locations.clone(),
         );
-        let installations = account(
-            content,
-            sessions.clone(),
-            account_id,
-            receipts,
-            &locations,
-            game_runtime::queue::Storefront::Epic,
-        );
+        let installations = account(content, sessions.clone(), account_id, receipts, &locations);
         Ok(Arc::new(Self {
             account: Account::Epic(installations),
         }))
@@ -592,14 +576,7 @@ impl AccountInstallations {
             language,
             locations.clone(),
         );
-        let installations = account(
-            content,
-            sessions.clone(),
-            user_id,
-            receipts,
-            &locations,
-            game_runtime::queue::Storefront::Gog,
-        );
+        let installations = account(content, sessions.clone(), user_id, receipts, &locations);
         Ok(Arc::new(Self {
             account: Account::Gog(installations),
         }))

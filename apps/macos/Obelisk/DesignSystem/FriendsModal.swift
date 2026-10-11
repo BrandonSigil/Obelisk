@@ -41,7 +41,6 @@ final class FriendsModalContainer: NSView {
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         identifier = NSUserInterfaceItemIdentifier("friends-modal-container")
-        wantsLayer = true
         host.translatesAutoresizingMaskIntoConstraints = false
         host.identifier = NSUserInterfaceItemIdentifier("friends-modal-panel")
         host.setAccessibilityRole(.group)

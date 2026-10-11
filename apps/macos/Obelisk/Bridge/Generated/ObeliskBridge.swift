@@ -1286,11 +1286,6 @@ public protocol DownloadsProtocol: AnyObject, Sendable {
     
     func resume(id: UInt64) 
     
-    /**
-     * A game runs, whatever its storefront: automatic updates wait.
-     */
-    func setHeld(held: Bool) 
-    
     func state()  -> DownloadQueueState
     
 }
@@ -1419,18 +1414,6 @@ open func resume(id: UInt64)  {try! rustCall() {
     uniffi_obelisk_bridge_fn_method_downloads_resume(
             self.uniffiCloneHandle(),
         FfiConverterUInt64.lower(id),uniffiCallStatus
-    )
-}
-}
-    
-    /**
-     * A game runs, whatever its storefront: automatic updates wait.
-     */
-open func setHeld(held: Bool)  {try! rustCall() {
-        uniffiCallStatus in
-    uniffi_obelisk_bridge_fn_method_downloads_set_held(
-            self.uniffiCloneHandle(),
-        FfiConverterBool.lower(held),uniffiCallStatus
     )
 }
 }
@@ -13278,9 +13261,6 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_obelisk_bridge_checksum_method_downloads_resume() != 2894) {
-        return InitializationResult.apiChecksumMismatch
-    }
-    if (uniffi_obelisk_bridge_checksum_method_downloads_set_held() != 18736) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_obelisk_bridge_checksum_method_downloads_state() != 47105) {

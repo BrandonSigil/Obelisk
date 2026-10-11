@@ -6,7 +6,7 @@ import Foundation
 @MainActor
 final class FakeDownloads: DownloadsBackend {
     enum Call: Equatable {
-        case remove(UInt64), pause(UInt64), resume(UInt64), moveToTop(UInt64), held(Bool)
+        case remove(UInt64), pause(UInt64), resume(UInt64), moveToTop(UInt64)
     }
 
     private(set) var current = DownloadQueueState(revision: 0, running: nil, waiting: [], held: false)
@@ -33,10 +33,6 @@ final class FakeDownloads: DownloadsBackend {
     func pause(_ id: UInt64) { calls.append(.pause(id)) }
     func resume(_ id: UInt64) { calls.append(.resume(id)) }
     func moveToTop(_ id: UInt64) { calls.append(.moveToTop(id)) }
-    func setHeld(_ held: Bool) {
-        calls.append(.held(held))
-        publish { $0.held = held }
-    }
 }
 
 extension DownloadItem {

@@ -16,7 +16,7 @@ use serde::{Serialize, de::DeserializeOwned};
 use std::{
     fmt,
     path::{Path, PathBuf},
-    sync::{Arc, Mutex, OnceLock, Weak},
+    sync::{Arc, Mutex, OnceLock},
     time::{Duration, Instant},
 };
 use tokio::sync::watch;
@@ -46,6 +46,8 @@ pub trait Storefront: sessions::Storefront {
     const RECEIPTS_NOT_SAVED: &'static str;
     /// Where new installations go, inside Obelisk's library directory.
     const GAMES_DIRECTORY: &'static str;
+    /// The storefront, as the download queue shows it.
+    const QUEUE: queue::Storefront;
 
     fn receipt_game(receipt: &Self::Receipt) -> Self::Game;
     /// A receipt's identity: one per game and platform.
@@ -285,7 +287,6 @@ struct Queued<S: Storefront> {
 /// Where an account's Transfers queue, and how the queue names them.
 pub struct Queueing<S: Storefront> {
     pub queue: Arc<DownloadQueue>,
-    pub storefront: queue::Storefront,
     /// The account, as the queue shows it.
     pub account: String,
     /// A game, as the queue shows it.
@@ -314,9 +315,6 @@ struct Inner<S: Storefront> {
     checking_updates: bool,
     /// When the last update check finished.
     updates_checked: Option<Instant>,
-    /// Grows whenever a Transfer replaces a receipt, so an update check that
-    /// started before it is not trusted.
-    receipt_changes: u64,
     /// The player wants each newer build installed as soon as it is known.
     automatic_updates: bool,
     /// The receipts updated automatically since the last update check: one
@@ -340,36 +338,75 @@ struct Shared<S: Storefront> {
     /// Obelisk's library directory and the user's home: never removed.
     protected: Vec<PathBuf>,
     queueing: Queueing<S>,
-    /// What the download queue asks of these installations.
-    owner: Arc<dyn Owner>,
     /// Publishes the gate again whenever the Game sessions change, and
     /// queues automatic updates whenever the state lets one start.
     watchers: Mutex<Vec<tokio::task::JoinHandle<()>>>,
 }
 
-/// The download queue's handle on an account's installations.
-struct QueueOwner<S: Storefront> {
-    shared: Weak<Shared<S>>,
-}
-
-impl<S: Storefront> Owner for QueueOwner<S> {
+/// What the download queue asks of an account's installations.
+impl<S: Storefront> Owner for Shared<S> {
+    /// Whether the queued Transfer `id` may start now: no Game session holds
+    /// its game, and no Transfer, uninstall or Cloud maintenance holds the
+    /// storefront.
     fn ready(&self, id: u64) -> bool {
-        self.shared.upgrade().is_some_and(|shared| shared.ready(id))
+        let inner = self.inner.lock().unwrap();
+        let Some(queued) = inner.queued.iter().find(|queued| queued.id == id) else {
+            return false;
+        };
+        let game = S::request_game(&queued.request);
+        let sessions = self.sessions.state();
+        !inner.signed_out
+            && !inner.diagnostic
+            && !inner.state.downloading
+            && !inner.state.uninstalling
+            && inner.state.maintenance.is_none()
+            && !sessions.recovering
+            && !sessions.active.iter().any(|active| active.game == game)
     }
-    fn start(&self, id: u64) {
-        if let Some(shared) = self.shared.upgrade() {
-            shared.start(id);
-        }
+
+    /// Starts the queued Transfer `id`, whose turn came.
+    fn start(self: Arc<Self>, id: u64) {
+        let started = self.update(|inner| {
+            let queued = inner.queued.iter().find(|queued| queued.id == id)?;
+            let (request, automatic) = (queued.request.clone(), queued.automatic.clone());
+            if let Some(receipt) = &automatic {
+                inner.automatic_skipped.push(receipt.clone());
+            }
+            self.begin_in(inner, id, &request);
+            Some((request, automatic.is_some()))
+        });
+        let Some((request, automatic)) = started else {
+            self.queueing.queue.finished(id);
+            return;
+        };
+        runtime().spawn(async move {
+            let outcome = self.run(id, &request).await;
+            self.update(|inner| {
+                if let Err(Failure::Failed(key)) = outcome
+                    && !automatic
+                    && !inner.transfer_cancelled
+                    && !inner.signed_out
+                {
+                    inner.state.report = Some(Report::Storefront(key));
+                }
+            });
+        });
     }
+
+    /// Stops the Transfer `id` when it is the one under way.
     fn stop(&self, id: u64) {
-        if let Some(shared) = self.shared.upgrade() {
-            shared.stop(id);
+        let stopping = self.update(|inner| {
+            let stopping = inner.running == Some(id);
+            inner.transfer_cancelled |= stopping;
+            stopping
+        });
+        if stopping {
+            self.content.cancel();
         }
     }
+
     fn removed(&self, id: u64) {
-        if let Some(shared) = self.shared.upgrade() {
-            shared.update(|inner| inner.queued.retain(|queued| queued.id != id));
-        }
+        self.update(|inner| inner.queued.retain(|queued| queued.id != id));
     }
 }
 
@@ -402,10 +439,12 @@ impl<S: Storefront> Shared<S> {
         let sessions = self.sessions.state();
         inner.state.gate = gate(&inner, &sessions);
         inner.state.cloud_sync = cloud_sync(&inner, &sessions, &self.account);
-        let State {
-            updates, receipts, ..
-        } = &mut inner.state;
-        updates.retain(|id| receipts.iter().any(|receipt| S::receipt_id(receipt) == *id));
+        if inner.state.receipts != before.receipts {
+            let State {
+                updates, receipts, ..
+            } = &mut inner.state;
+            updates.retain(|id| receipts.iter().any(|receipt| S::receipt_id(receipt) == *id));
+        }
         let mut queued = Vec::new();
         for waiting in &inner.queued {
             let game = S::request_game(&waiting.request);
@@ -434,13 +473,9 @@ impl<S: Storefront> Shared<S> {
         }
     }
 
-    /// The Reservation gate every installation-mutating action asks.
-    fn can_modify(&self, inner: &Inner<S>, game: &S::Game) -> bool {
-        gate(inner, &self.sessions.state()).modify.allows(game)
-    }
-
-    fn can_maintain_cloud(&self, inner: &Inner<S>, game: &S::Game) -> bool {
-        gate(inner, &self.sessions.state()).maintain.allows(game)
+    /// The Reservation gate every action asks.
+    fn gate(&self, inner: &Inner<S>) -> Gate<S::Game> {
+        gate(inner, &self.sessions.state())
     }
 
     /// Shows maintenance `number`'s progress while it runs. Retry and Launch
@@ -461,8 +496,11 @@ impl<S: Storefront> Shared<S> {
         });
     }
 
-    /// Marks the Transfer's game before its first progress snapshot arrives.
-    fn begin_in(&self, inner: &mut Inner<S>, request: &S::Request) {
+    /// Marks the queued Transfer `id`'s game before its first progress
+    /// snapshot arrives.
+    fn begin_in(&self, inner: &mut Inner<S>, id: u64, request: &S::Request) {
+        inner.running = Some(id);
+        inner.transfer_cancelled = false;
         inner.state.last_download = Some(request.clone());
         inner.state.transfer_game = Some(S::request_game(request));
         inner.state.transfer = Some(TransferProgress::new(S::transfer_name(request)));
@@ -484,7 +522,7 @@ impl<S: Storefront> Shared<S> {
         automatic: bool,
     ) -> queue::Request {
         queue::Request {
-            storefront: self.queueing.storefront,
+            storefront: S::QUEUE,
             account: self.queueing.account.clone(),
             game: (self.queueing.name)(&S::request_game(request)),
             name: S::request_name(request),
@@ -499,7 +537,7 @@ impl<S: Storefront> Shared<S> {
     fn download(self: &Arc<Self>, request: S::Request, automatic: Option<String>) {
         let queued = self.update(|inner| {
             let game = S::request_game(&request);
-            if !self.can_modify(inner, &game) {
+            if !self.gate(inner).modify.allows(&game) {
                 return false;
             }
             if let Err(error) = std::fs::create_dir_all(S::request_directory(&request)) {
@@ -525,7 +563,7 @@ impl<S: Storefront> Shared<S> {
             };
             // The queue calls no owner while it adds: the game is queued at once.
             let id = self.queueing.queue.push(
-                &self.owner,
+                &self.owner(),
                 self.queue_request(&request, kind, automatic.is_some()),
             );
             inner.queued.push(Queued {
@@ -538,73 +576,6 @@ impl<S: Storefront> Shared<S> {
         });
         if queued {
             self.queueing.queue.advance();
-        }
-    }
-
-    /// Whether the queued Transfer `id` may start now: no Game session holds
-    /// its game, and no Transfer, uninstall or Cloud maintenance holds the
-    /// storefront.
-    fn ready(&self, id: u64) -> bool {
-        let inner = self.inner.lock().unwrap();
-        let Some(queued) = inner.queued.iter().find(|queued| queued.id == id) else {
-            return false;
-        };
-        let game = S::request_game(&queued.request);
-        let sessions = self.sessions.state();
-        !inner.signed_out
-            && !inner.diagnostic
-            && !inner.state.downloading
-            && !inner.state.uninstalling
-            && inner.state.maintenance.is_none()
-            && !sessions.recovering
-            && !sessions.active.iter().any(|active| active.game == game)
-    }
-
-    /// Starts the queued Transfer `id`, whose turn came.
-    fn start(self: &Arc<Self>, id: u64) {
-        let started = self.update(|inner| {
-            let queued = inner.queued.iter().find(|queued| queued.id == id)?;
-            let (request, automatic) = (queued.request.clone(), queued.automatic.clone());
-            if let Some(receipt) = &automatic {
-                inner.automatic_skipped.push(receipt.clone());
-            }
-            inner.running = Some(id);
-            inner.transfer_cancelled = false;
-            self.begin_in(inner, &request);
-            Some((request, automatic.is_some()))
-        });
-        let Some((request, automatic)) = started else {
-            self.queueing.queue.finished(id);
-            return;
-        };
-        let shared = self.clone();
-        runtime().spawn(async move {
-            let outcome = shared.perform(&request).await;
-            let requeued = shared.queueing.queue.finished(id);
-            shared.update(|inner| {
-                if !requeued {
-                    inner.queued.retain(|queued| queued.id != id);
-                }
-                if let Err(Failure::Failed(key)) = outcome
-                    && !automatic
-                    && !inner.transfer_cancelled
-                    && !inner.signed_out
-                {
-                    inner.state.report = Some(Report::Storefront(key));
-                }
-            });
-        });
-    }
-
-    /// Stops the Transfer `id` when it is the one under way.
-    fn stop(&self, id: u64) {
-        let stopping = self.update(|inner| {
-            let stopping = inner.running == Some(id);
-            inner.transfer_cancelled |= stopping;
-            stopping
-        });
-        if stopping {
-            self.content.cancel();
         }
     }
 
@@ -631,7 +602,7 @@ impl<S: Storefront> Shared<S> {
         let (id, turn) = self
             .queueing
             .queue
-            .push_first(&self.owner, self.queue_request(request, kind, false));
+            .push_first(&self.owner(), self.queue_request(request, kind, false));
         self.update(|inner| {
             inner.queued.push(Queued {
                 id,
@@ -644,15 +615,23 @@ impl<S: Storefront> Shared<S> {
             self.update(|inner| inner.queued.retain(|queued| queued.id != id));
             return Err(Failure::Cancelled);
         }
-        self.update(|inner| {
-            inner.running = Some(id);
-            inner.transfer_cancelled = false;
-            self.begin_in(inner, request);
-        });
+        self.update(|inner| self.begin_in(inner, id, request));
+        self.run(id, request).await
+    }
+
+    /// Runs the queued Transfer `id` `begin_in` announced, and ends it in
+    /// the queue. One the queue stopped to pause it stays queued.
+    async fn run(self: &Arc<Self>, id: u64, request: &S::Request) -> Result<S::Receipt, Failure> {
         let outcome = self.perform(request).await;
-        self.queueing.queue.finished(id);
-        self.update(|inner| inner.queued.retain(|queued| queued.id != id));
+        let requeued = self.queueing.queue.finished(id);
+        if !requeued {
+            self.update(|inner| inner.queued.retain(|queued| queued.id != id));
+        }
         outcome
+    }
+
+    fn owner(self: &Arc<Self>) -> Arc<dyn Owner> {
+        self.clone()
     }
 
     /// Queues the Transfer of every installation with a newer build when the
@@ -664,7 +643,7 @@ impl<S: Storefront> Shared<S> {
             if !inner.automatic_updates || inner.signed_out {
                 return;
             }
-            let modify = gate(&inner, &self.sessions.state()).modify;
+            let modify = self.gate(&inner).modify;
             inner
                 .state
                 .receipts
@@ -689,21 +668,28 @@ impl<S: Storefront> Shared<S> {
     }
 
     /// Whether the storefront offers a newer build of `receipt`'s
-    /// installation, which the state then shows. `None` when it could not
-    /// tell in time.
-    async fn newer_build(&self, receipt: &S::Receipt) -> Option<bool> {
-        let checked = tokio::time::timeout(UPDATE_TIMEOUT, self.content.update_available(receipt))
+    /// installation. `None` when it could not tell in time.
+    async fn ask_update(&self, receipt: &S::Receipt) -> Option<bool> {
+        tokio::time::timeout(UPDATE_TIMEOUT, self.content.update_available(receipt))
             .await
             .ok()?
-            .ok()?;
-        let id = S::receipt_id(receipt);
-        self.update(|inner| {
-            inner.state.updates.retain(|kept| *kept != id);
-            if checked {
-                inner.state.updates.push(id);
-            }
-        });
-        Some(checked)
+            .ok()
+    }
+
+    /// Records whether the receipt `id` has a newer build, which the state
+    /// then shows.
+    fn mark_update(inner: &mut Inner<S>, id: String, available: bool) {
+        inner.state.updates.retain(|kept| *kept != id);
+        if available {
+            inner.state.updates.push(id);
+        }
+    }
+
+    /// Asks whether `receipt`'s installation has a newer build, and records it.
+    async fn newer_build(&self, receipt: &S::Receipt) -> Option<bool> {
+        let available = self.ask_update(receipt).await?;
+        self.update(|inner| Self::mark_update(inner, S::receipt_id(receipt), available));
+        Some(available)
     }
 
     /// Runs the Transfer `begin_in` announced, whose turn came in the queue.
@@ -771,7 +757,6 @@ impl<S: Storefront> Shared<S> {
                     .retain(|kept| S::receipt_id(kept) != id);
                 inner.state.receipts.push(receipt.clone());
                 inner.state.updates.retain(|kept| *kept != id);
-                inner.receipt_changes += 1;
                 inner.state.last_download = None;
                 self.save(inner);
             }
@@ -817,40 +802,32 @@ fn gate<S: Storefront>(inner: &Inner<S>, sessions: &sessions::State<S>) -> Gate<
     let state = &inner.state;
     let transferring = state.transfer_game.clone().filter(|_| state.downloading);
     let uninstalled = state.uninstall_game.clone().filter(|_| state.uninstalling);
-    let active = sessions.active.iter().map(|active| active.game.clone());
     let held =
         inner.signed_out || inner.diagnostic || state.maintenance.is_some() || sessions.recovering;
+    // The games a Game session holds, or whose Transfer is queued or under way.
+    let busy: Vec<S::Game> = sessions
+        .active
+        .iter()
+        .map(|active| active.game.clone())
+        .chain(
+            inner
+                .queued
+                .iter()
+                .map(|queued| S::request_game(&queued.request)),
+        )
+        .collect();
     // A Transfer waits in the queue: one per game, never of a game a Game
     // session, a Transfer or an uninstall holds.
     let modify = match held {
         true => Opening::Closed,
-        false => {
-            let mut except: Vec<S::Game> = active.clone().collect();
-            except.extend(transferring.clone());
-            except.extend(uninstalled.clone());
-            except.extend(
-                inner
-                    .queued
-                    .iter()
-                    .map(|queued| S::request_game(&queued.request)),
-            );
-            except.dedup();
-            Opening::Open { except }
-        }
+        false => Opening::Open {
+            except: busy.iter().cloned().chain(uninstalled.clone()).collect(),
+        },
     };
     // An uninstall has the storefront's installations to itself.
     let uninstall = match held || state.downloading || state.launching || state.uninstalling {
         true => Opening::Closed,
-        false => {
-            let mut except: Vec<S::Game> = active.collect();
-            except.extend(
-                inner
-                    .queued
-                    .iter()
-                    .map(|queued| S::request_game(&queued.request)),
-            );
-            Opening::Open { except }
-        }
+        false => Opening::Open { except: busy },
     };
     // One Cloud operation at a time: a Game session, a launch or maintenance
     // keeps every game out, a Transfer or uninstall only its own.
@@ -1059,7 +1036,6 @@ impl<S: Storefront> Installations<S> {
             answered: None,
             checking_updates: false,
             updates_checked: None,
-            receipt_changes: 0,
             automatic_updates: false,
             automatic_skipped: Vec::new(),
             queued: Vec::new(),
@@ -1086,7 +1062,7 @@ impl<S: Storefront> Installations<S> {
         inner.state.gate = gate(&inner, &seen);
         inner.state.cloud_sync = cloud_sync(&inner, &seen, &account);
         let (published, _) = watch::channel(inner.state.clone());
-        let shared = Arc::new_cyclic(|shared| Shared {
+        let shared = Arc::new(Shared {
             inner: Mutex::new(inner),
             published,
             content,
@@ -1096,26 +1072,36 @@ impl<S: Storefront> Installations<S> {
             protected: vec![library.clone(), home],
             library,
             queueing,
-            owner: Arc::new(QueueOwner {
-                shared: shared.clone(),
-            }),
             watchers: Mutex::new(Vec::new()),
         });
+        // A game of the storefront running holds every storefront's
+        // automatic updates.
+        shared.queueing.queue.hold(&shared.owner(), seen.busy());
         let weak = Arc::downgrade(&shared);
         let sessions_watcher = runtime().spawn(async move {
             let mut after = seen.revision;
             loop {
-                after = sessions.changed(after).await.revision;
+                let state = sessions.changed(after).await;
+                after = state.revision;
                 let Some(shared) = weak.upgrade() else { return };
                 shared.update(|_| {});
+                shared.queueing.queue.hold(&shared.owner(), state.busy());
             }
         });
         // Whatever ends, a Transfer, a launch, an uninstall, a game or an
         // update check, may let a queued Transfer start or an update queue.
+        // A running Transfer's progress alone changes neither.
         let weak = Arc::downgrade(&shared);
         let mut published = shared.published.subscribe();
         let updater = runtime().spawn(async move {
+            let mut seen = None;
             while published.changed().await.is_ok() {
+                let mut state = published.borrow_and_update().clone();
+                (state.revision, state.transfer) = (0, None);
+                if seen.as_ref() == Some(&state) {
+                    continue;
+                }
+                seen = Some(state);
                 let Some(shared) = weak.upgrade() else { return };
                 shared.update_automatically();
                 shared.queueing.queue.advance();
@@ -1256,38 +1242,41 @@ impl<S: Storefront> Installations<S> {
                 return None;
             }
             inner.checking_updates = true;
-            Some((inner.state.receipts.clone(), inner.receipt_changes))
+            Some(inner.state.receipts.clone())
         });
-        let Some((receipts, changes)) = started else {
+        let Some(receipts) = started else {
             return;
         };
         let shared = shared.clone();
         runtime().spawn(async move {
-            let mut found = Vec::new();
-            for receipt in &receipts {
+            // Every installation is asked at once, each within its timeout.
+            let mut checks = tokio::task::JoinSet::new();
+            for receipt in receipts {
                 // An interrupted Transfer is repaired before its game launches.
-                if S::needs_verification(receipt) {
+                if S::needs_verification(&receipt) {
                     continue;
                 }
-                let checked =
-                    tokio::time::timeout(UPDATE_TIMEOUT, shared.content.update_available(receipt))
-                        .await;
-                if let Ok(Ok(available)) = checked {
-                    found.push((S::receipt_id(receipt), available));
+                let shared = shared.clone();
+                checks.spawn(async move {
+                    let available = shared.ask_update(&receipt).await;
+                    (receipt, available)
+                });
+            }
+            let mut found = Vec::new();
+            while let Some(checked) = checks.join_next().await {
+                if let Ok((receipt, Some(available))) = checked {
+                    found.push((receipt, available));
                 }
             }
             shared.update(|inner| {
                 inner.checking_updates = false;
-                // A Transfer replaced a receipt meanwhile: the next check asks again.
-                if inner.receipt_changes != changes {
-                    return;
-                }
                 inner.updates_checked = Some(Instant::now());
                 inner.automatic_skipped.clear();
-                for (id, available) in found {
-                    inner.state.updates.retain(|kept| *kept != id);
-                    if available {
-                        inner.state.updates.push(id);
+                for (receipt, available) in found {
+                    // A Transfer replaced the receipt meanwhile: its answer is
+                    // about the build it replaced.
+                    if inner.state.receipts.contains(&receipt) {
+                        Shared::mark_update(inner, S::receipt_id(&receipt), available);
                     }
                 }
             });
@@ -1304,7 +1293,7 @@ impl<S: Storefront> Installations<S> {
         let admission = shared.update(|inner| {
             let receipt = inner.receipt(receipt)?;
             let game = S::receipt_game(&receipt);
-            if !gate(inner, &shared.sessions.state()).launch.allows(&game) {
+            if !shared.gate(inner).launch.allows(&game) {
                 return None;
             }
             let admission = shared
@@ -1400,10 +1389,7 @@ impl<S: Storefront> Installations<S> {
         let remaining = shared.update(|inner| {
             let receipt = inner.receipt(receipt)?;
             let game = S::receipt_game(&receipt);
-            if !gate(inner, &shared.sessions.state())
-                .uninstall
-                .allows(&game)
-            {
+            if !shared.gate(inner).uninstall.allows(&game) {
                 return None;
             }
             inner.state.uninstalling = true;
@@ -1473,7 +1459,7 @@ impl<S: Storefront> Installations<S> {
                 .map(|(_, control)| control.clone());
             (inner.launch.take(), maintenance)
         });
-        self.shared.queueing.queue.withdraw(&self.shared.owner);
+        self.shared.queueing.queue.withdraw(&self.shared.owner());
         self.shared.content.cancel();
         if let Some(launch) = launch {
             launch.cancel();
@@ -1501,7 +1487,7 @@ impl<S: Storefront> Installations<S> {
                     Some((receipt, request))
                 }
             };
-            if !shared.can_maintain_cloud(inner, &game) {
+            if !shared.gate(inner).maintain.allows(&game) {
                 return None;
             }
             inner.maintenances += 1;

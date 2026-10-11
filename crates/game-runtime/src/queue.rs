@@ -65,7 +65,7 @@ pub(crate) trait Owner: Send + Sync {
     /// Whether the Transfer `id` may start now.
     fn ready(&self, id: u64) -> bool;
     /// Starts the Transfer `id`; the owner reports `finished` once it ends.
-    fn start(&self, id: u64);
+    fn start(self: Arc<Self>, id: u64);
     /// Stops the running Transfer `id`; `finished` then reports its end.
     fn stop(&self, id: u64);
     /// The Transfer `id` left the queue without running.
@@ -110,7 +110,8 @@ struct State {
     next_id: u64,
     running: Option<Running>,
     waiting: Vec<Entry>,
-    held: bool,
+    /// The owners whose storefront runs a game.
+    holders: Vec<Weak<dyn Owner>>,
 }
 
 impl State {
@@ -126,8 +127,12 @@ impl State {
                 .iter()
                 .map(|entry| entry.item.clone())
                 .collect(),
-            held: self.held,
+            held: self.held(),
         }
+    }
+
+    fn held(&self) -> bool {
+        !self.holders.is_empty()
     }
 
     /// Where a Transfer that goes first lands: behind the launches waiting.
@@ -139,7 +144,7 @@ impl State {
     }
 
     fn eligible(&self, item: &Item) -> bool {
-        !item.paused && !(item.automatic && self.held)
+        !item.paused && !(item.automatic && self.held())
     }
 
     /// Marks the running Transfer stopped, unless a launch waits for it,
@@ -195,7 +200,8 @@ impl DownloadQueue {
         after.revision = before.revision;
         if after != before {
             state.revision += 1;
-            self.published.send_replace(state.view());
+            after.revision = state.revision;
+            self.published.send_replace(after);
         }
         result
     }
@@ -300,20 +306,21 @@ impl DownloadQueue {
         self.advance();
     }
 
-    /// Takes every Transfer of `owner` out of the queue, as its account
-    /// signs out.
+    /// Takes every Transfer of `owner` out of the queue, and its hold, as
+    /// its account signs out.
     pub(crate) fn withdraw(&self, owner: &Arc<dyn Owner>) {
-        let ids: Vec<u64> = {
-            let state = self.state.lock().unwrap();
+        let ids: Vec<u64> = self.update(|state| {
+            state.holders.retain(|holder| !owns(holder, owner));
             state
                 .running
                 .iter()
                 .map(|running| &running.entry)
                 .chain(state.waiting.iter())
-                .filter(|entry| std::ptr::addr_eq(entry.owner.as_ptr(), Arc::as_ptr(owner)))
+                .filter(|entry| owns(&entry.owner, owner))
                 .map(|entry| entry.item.id)
                 .collect()
-        };
+        });
+        self.advance();
         for id in ids {
             self.remove(id);
         }
@@ -356,14 +363,16 @@ impl DownloadQueue {
         });
     }
 
-    /// A game runs, whatever its storefront: automatic updates wait, and one
-    /// under way stops and waits first.
-    pub fn set_held(&self, held: bool) {
+    /// Whether `owner`'s storefront runs a game. While one does, whatever its
+    /// storefront, automatic updates wait, and one under way stops and waits
+    /// first.
+    pub(crate) fn hold(&self, owner: &Arc<dyn Owner>, holding: bool) {
         let stopping = self.update(|state| {
-            state.held = held;
-            if !held {
+            state.holders.retain(|holder| !owns(holder, owner));
+            if !holding {
                 return None;
             }
+            state.holders.push(Arc::downgrade(owner));
             state.stop_running(Stop::Requeue { paused: false }, |item| item.automatic)
         });
         stop(stopping);
@@ -428,6 +437,10 @@ impl DownloadQueue {
             return;
         }
     }
+}
+
+fn owns(entry: &Weak<dyn Owner>, owner: &Arc<dyn Owner>) -> bool {
+    std::ptr::addr_eq(entry.as_ptr(), Arc::as_ptr(owner))
 }
 
 /// Asks the owner of a running Transfer the queue stopped to stop it.

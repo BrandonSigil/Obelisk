@@ -304,6 +304,7 @@ impl crate::installations::Storefront for Epic {
     const RECEIPTS_UNAVAILABLE: &'static str = "model.epic.receiptsUnavailable";
     const RECEIPTS_NOT_SAVED: &'static str = "model.epic.receiptsNotSaved";
     const GAMES_DIRECTORY: &'static str = "Games/Epic";
+    const QUEUE: crate::queue::Storefront = crate::queue::Storefront::Epic;
     fn receipt_game(receipt: &Receipt) -> Store {
         Store {
             namespace: receipt.namespace.clone(),

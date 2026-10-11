@@ -21,7 +21,7 @@ impl Owner for Fake {
     fn ready(&self, id: u64) -> bool {
         !self.blocked.lock().unwrap().contains(&id)
     }
-    fn start(&self, id: u64) {
+    fn start(self: Arc<Self>, id: u64) {
         self.note(format!("start:{id}"));
     }
     fn stop(&self, id: u64) {
@@ -126,7 +126,7 @@ fn a_running_game_holds_automatic_updates_and_stops_the_one_under_way() {
     queue.advance();
     assert_eq!(running(&queue), Some(update));
 
-    queue.set_held(true);
+    queue.hold(&owner, true);
     assert_eq!(fake.log().last(), Some(&format!("stop:{update}")));
     assert!(queue.finished(update));
     assert_eq!(running(&queue), Some(download), "the player's own goes on");
@@ -134,7 +134,23 @@ fn a_running_game_holds_automatic_updates_and_stops_the_one_under_way() {
     assert_eq!(queue.view().running, None);
     assert_eq!(waiting(&queue), [(update, false)]);
 
-    queue.set_held(false);
+    queue.hold(&owner, false);
+    assert_eq!(running(&queue), Some(update));
+}
+
+#[test]
+fn automatic_updates_wait_until_no_storefront_runs_a_game() {
+    let (queue, _, owner) = fixture();
+    let (_, _, other) = fixture();
+    let update = queue.push(&owner, request("620", true));
+    queue.hold(&owner, true);
+    queue.hold(&other, true);
+    queue.hold(&owner, false);
+    assert!(queue.view().held, "the other storefront still runs one");
+    assert_eq!(running(&queue), None);
+
+    queue.withdraw(&other);
+    assert!(!queue.view().held);
     assert_eq!(running(&queue), Some(update));
 }
 
@@ -161,7 +177,7 @@ fn a_launch_goes_first_and_pauses_the_transfer_under_way_until_it_is_done() {
     assert!(turn.try_recv().is_ok());
     assert_eq!(waiting(&queue), [(download, false)]);
     queue.pause(launch);
-    queue.set_held(true);
+    queue.hold(&owner, true);
     assert!(!fake.log().contains(&format!("stop:{launch}")));
 
     queue.finished(launch);

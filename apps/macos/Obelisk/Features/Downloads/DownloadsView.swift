@@ -2,23 +2,25 @@ import Charts
 import SwiftUI
 
 /// What the download queue shows of a game: its title, and its cover and
-/// wide artwork once its storefront's library knows it.
+/// wide artwork once its storefront's library knows it, built when shown.
 struct DownloadGame {
     let title: String
-    let cover: AnyView?
-    let artwork: AnyView?
+    let cover: (() -> AnyView)?
+    let artwork: (() -> AnyView)?
 }
 
 extension LibraryStorefront {
     /// The queued Transfer's game, as the account's library knows it.
     func downloadGame<Cover: View, Artwork: View>(
-        _ item: DownloadItem, cover: (Game) -> Cover, artwork: (Game) -> Artwork
+        _ item: DownloadItem, cover: @escaping (Game) -> Cover, artwork: @escaping (Game) -> Artwork
     ) -> DownloadGame {
-        let game = Store.game(item.game).flatMap { id in games.first { $0.id == id } }
+        guard let game = Store.game(item.game).flatMap({ id in games.first { $0.id == id } }) else {
+            return DownloadGame(title: item.name, cover: nil, artwork: nil)
+        }
         return DownloadGame(
-            title: game.map(title(of:)) ?? item.name,
-            cover: game.map { AnyView(cover($0)) },
-            artwork: game.map { AnyView(artwork($0)) }
+            title: title(of: game),
+            cover: { AnyView(cover(game)) },
+            artwork: { AnyView(artwork(game)) }
         )
     }
 }
@@ -28,23 +30,26 @@ private func verbatimCount(_ prefix: String, _ count: Int) -> String {
     prefix + count.formatted(.number.locale(L10n.locale))
 }
 
+extension SessionStorefront {
+    var section: LibrarySection {
+        switch self {
+        case .steam: .steam
+        case .epic: .epic
+        case .gog: .gog
+        }
+    }
+}
+
 enum DownloadFormatting {
     /// A speed in the file sizes Finder shows; nothing reads as "0 kB/s".
     static func speed(_ bytesPerSecond: Double) -> String {
-        let bytes = Int64(max(0, bytesPerSecond))
-        let style: ByteCountFormatStyle = bytes == 0
-            ? .byteCount(style: .file, allowedUnits: .kb, spellsOutZero: false)
-            : .byteCount(style: .file, spellsOutZero: false)
-        return L10n.string("ui.downloads.speed", bytes.formatted(style.locale(L10n.locale)))
+        L10n.string("ui.downloads.speed", size(UInt64(max(0, bytesPerSecond))))
     }
 
     /// A size in the units Finder shows; nothing reads as "Zero kB".
     static func size(_ bytes: UInt64) -> String {
-        let bytes = Int64(clamping: bytes)
-        let style: ByteCountFormatStyle = bytes == 0
-            ? .byteCount(style: .file, allowedUnits: .kb, spellsOutZero: false)
-            : .byteCount(style: .file, spellsOutZero: false)
-        return bytes.formatted(style.locale(L10n.locale))
+        guard bytes == 0 else { return GameFormatting.bytes(bytes) }
+        return Int64(0).formatted(.byteCount(style: .file, allowedUnits: .kb, spellsOutZero: false).locale(L10n.locale))
     }
 
     static func percent(_ fraction: Double) -> String {
@@ -60,11 +65,7 @@ enum DownloadFormatting {
     }
 
     static func storefront(_ storefront: SessionStorefront) -> String {
-        switch storefront {
-        case .steam: LibrarySection.steam.title
-        case .epic: LibrarySection.epic.title
-        case .gog: LibrarySection.gog.title
-        }
+        storefront.section.title
     }
 }
 
@@ -86,6 +87,9 @@ struct DownloadsSidebarButton: View {
     private var shape: RoundedRectangle { RoundedRectangle(cornerRadius: 14, style: .continuous) }
 
     var body: some View {
+        // The running game, else the next one: resolved once per update.
+        let shown = (downloads.running ?? downloads.waiting.first).map(game)
+        let title = (downloads.running == nil ? nil : shown?.title) ?? L10n.string("ui.downloads.title")
         Button { downloads.isPresented = true } label: {
             HStack(spacing: 10) {
                 DownloadRing(fraction: fraction, active: downloads.running != nil, ink: ink)
@@ -113,7 +117,7 @@ struct DownloadsSidebarButton: View {
             .padding(.leading, 9)
             .padding(.trailing, 11)
             .frame(height: 50)
-            .background { background }
+            .background { background(shown?.artwork) }
             .overlay { shape.strokeBorder(.primary.opacity(0.1), lineWidth: 1) }
             .shadow(color: .black.opacity(colorScheme == .dark ? 0.35 : 0.18), radius: 10, y: 4)
             .contentShape(shape)
@@ -135,16 +139,14 @@ struct DownloadsSidebarButton: View {
 
     /// The running game's artwork, else the next one's, under a veil the
     /// text reads over: darkest behind it, lighter on hover.
-    private var background: some View {
+    private func background(_ artwork: (() -> AnyView)?) -> some View {
         let dark = colorScheme == .dark
         let veil: Color = dark ? .black : .white
         let opacity = (dark ? 0.82 : 0.84) - (isHovered ? 0.08 : 0)
         return Rectangle()
             .fill(dark ? Color(white: 0.14) : Color(white: 0.95))
             .overlay {
-                if let item = downloads.running ?? downloads.waiting.first, let artwork = game(item).artwork {
-                    artwork
-                }
+                if let artwork { artwork() }
             }
             .overlay {
                 LinearGradient(colors: [veil.opacity(opacity), veil.opacity(opacity - 0.24)],
@@ -153,19 +155,12 @@ struct DownloadsSidebarButton: View {
             .clipShape(shape)
     }
 
-    private var title: String {
-        downloads.running.map { game($0).title } ?? L10n.string("ui.downloads.title")
-    }
-
     private var subtitle: String {
         if let running = downloads.running {
             guard let transfer else { return L10n.string("ui.transfer.preparing_short") }
-            if transfer.state == .downloading, let speed = downloads.currentSpeed {
-                return [DownloadFormatting.speed(speed), fraction.map(DownloadFormatting.percent)]
-                    .compactMap { $0 }.joined(separator: " · ")
-            }
             let phase = running.launching ? L10n.string("ui.downloads.before_launch") : transfer.activityTitle
-            return [phase, fraction.map(DownloadFormatting.percent)].compactMap { $0 }.joined(separator: " · ")
+            let lead = (transfer.state == .downloading ? downloads.currentSpeed.map(DownloadFormatting.speed) : nil) ?? phase
+            return [lead, fraction.map(DownloadFormatting.percent)].compactMap { $0 }.joined(separator: " · ")
         }
         if downloads.waitsForGame { return L10n.string("ui.downloads.waiting_for_game") }
         if downloads.waiting.allSatisfy(\.paused) { return L10n.string("ui.downloads.paused") }
@@ -214,8 +209,8 @@ struct DownloadsPanel: View {
                     if downloads.isVisible {
                         if let running = downloads.running {
                             DownloadSpeedCard(downloads: downloads)
-                            DownloadCurrentCard(item: running, transfer: downloads.currentTransfer,
-                                                game: game(running), downloads: downloads, open: { open(running) })
+                            DownloadCurrentCard(item: running, game: game(running), downloads: downloads,
+                                                open: { open(running) })
                         }
                         if !downloads.waiting.isEmpty { queue }
                     } else {
@@ -273,10 +268,8 @@ struct DownloadsPanel: View {
                     .foregroundStyle(.secondary)
             }
             VStack(spacing: 2) {
-                ForEach(Array(downloads.waiting.enumerated()), id: \.element.id) { index, item in
-                    DownloadQueueRow(item: item, game: game(item), first: index == 0,
-                                     waitsForGame: downloads.held && item.automatic,
-                                     downloads: downloads, open: { open(item) })
+                ForEach(downloads.waiting, id: \.id) { item in
+                    DownloadQueueRow(item: item, game: game(item), downloads: downloads, open: { open(item) })
                 }
             }
         }
@@ -425,7 +418,7 @@ private struct DownloadCover: View {
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: width * 0.14, style: .continuous)
         Group {
-            if let cover = game.cover { cover } else {
+            if let cover = game.cover { cover() } else {
                 Image(systemName: "gamecontroller")
                     .font(.system(size: width * 0.32))
                     .foregroundStyle(.tertiary)
@@ -443,10 +436,12 @@ private struct DownloadCover: View {
 /// The Transfer under way: its game, its progress and what it does.
 private struct DownloadCurrentCard: View {
     let item: DownloadItem
-    let transfer: GameTransfer?
     let game: DownloadGame
     let downloads: DownloadsModel
     let open: () -> Void
+
+    /// Read here, so progress updates this card rather than the whole panel.
+    private var transfer: GameTransfer? { downloads.currentTransfer }
 
     var body: some View {
         HStack(alignment: .center, spacing: 16) {
@@ -513,8 +508,6 @@ private struct DownloadCurrentCard: View {
 private struct DownloadQueueRow: View {
     let item: DownloadItem
     let game: DownloadGame
-    let first: Bool
-    let waitsForGame: Bool
     let downloads: DownloadsModel
     let open: () -> Void
     @State private var isHovered = false
@@ -534,7 +527,7 @@ private struct DownloadQueueRow: View {
             Spacer(minLength: 8)
             if item.paused { DownloadBadge(text: L10n.string("ui.downloads.paused"), prominent: false) }
             HStack(spacing: 4) {
-                if !first && !item.launching {
+                if downloads.waiting.first?.id != item.id && !item.launching {
                     rowButton("arrow.up.to.line", L10n.string("ui.downloads.move_to_top")) { downloads.moveToTop(item) }
                 }
                 if !item.launching {
@@ -564,7 +557,7 @@ private struct DownloadQueueRow: View {
             DownloadFormatting.kind(item.kind),
             DownloadFormatting.storefront(item.storefront),
             item.automatic ? L10n.string("ui.downloads.automatic") : nil,
-            waitsForGame ? L10n.string("ui.downloads.waiting_for_game") : nil,
+            downloads.held && item.automatic ? L10n.string("ui.downloads.waiting_for_game") : nil,
         ]
         .compactMap { $0 }
         .joined(separator: " · ")

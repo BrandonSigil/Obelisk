@@ -12,8 +12,6 @@ protocol DownloadsBackend: AnyObject {
     func pause(_ id: UInt64)
     func resume(_ id: UInt64)
     func moveToTop(_ id: UInt64)
-    /// A game runs, whatever its storefront: automatic updates wait.
-    func setHeld(_ held: Bool)
 }
 
 /// The queue every account's installations share in Rust.
@@ -26,7 +24,6 @@ final class RustDownloads: DownloadsBackend {
     func pause(_ id: UInt64) { core.pause(id: id) }
     func resume(_ id: UInt64) { core.resume(id: id) }
     func moveToTop(_ id: UInt64) { core.moveToTop(id: id) }
-    func setHeld(_ held: Bool) { core.setHeld(held: held) }
 }
 
 /// The running Transfer's download speed at one moment.
@@ -62,7 +59,7 @@ final class DownloadsModel {
     @ObservationIgnored private var observation: Task<Void, Never>?
     @ObservationIgnored private var sampling: Task<Void, Never>?
     /// The running Transfer's bytes when last sampled.
-    @ObservationIgnored private var lastSample: (id: UInt64, time: Date, bytes: UInt64)?
+    @ObservationIgnored private var lastSample: (time: Date, bytes: UInt64)?
     @ObservationIgnored private var nextSample = 0
 
     init(backend: any DownloadsBackend = RustDownloads(), period: Duration = .seconds(1)) {
@@ -99,7 +96,6 @@ final class DownloadsModel {
     func pause(_ item: DownloadItem) { backend.pause(item.id) }
     func resume(_ item: DownloadItem) { backend.resume(item.id) }
     func moveToTop(_ item: DownloadItem) { backend.moveToTop(item.id) }
-    func setHeld(_ held: Bool) { backend.setHeld(held) }
 
     private func apply(_ state: DownloadQueueState) {
         if let revision, state.revision <= revision { return }
@@ -132,8 +128,8 @@ final class DownloadsModel {
     /// Adds the speed since the last sample of the running Transfer.
     func sample(at now: Date = Date()) {
         guard let running, let transfer = progress(running) else { return }
-        defer { lastSample = (running.id, now, transfer.networkBytes) }
-        guard let last = lastSample, last.id == running.id else { return }
+        defer { lastSample = (now, transfer.networkBytes) }
+        guard let last = lastSample else { return }
         let elapsed = now.timeIntervalSince(last.time)
         guard elapsed > 0 else { return }
         let bytes = transfer.networkBytes >= last.bytes ? transfer.networkBytes - last.bytes : 0

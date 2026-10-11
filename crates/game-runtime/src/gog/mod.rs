@@ -219,6 +219,7 @@ impl crate::installations::Storefront for Gog {
     const RECEIPTS_UNAVAILABLE: &'static str = "model.gog.receiptsUnavailable";
     const RECEIPTS_NOT_SAVED: &'static str = "model.gog.receiptsNotSaved";
     const GAMES_DIRECTORY: &'static str = "Games/GOG";
+    const QUEUE: crate::queue::Storefront = crate::queue::Storefront::Gog;
     fn receipt_game(receipt: &Receipt) -> String {
         receipt.product_id.clone()
     }

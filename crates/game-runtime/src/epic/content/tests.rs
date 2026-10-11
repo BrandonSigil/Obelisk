@@ -398,7 +398,6 @@ async fn an_older_receipt_learns_its_catalog_item_from_the_installation_itself()
         fixture.locations.home.clone(),
         crate::installations::Queueing {
             queue: crate::queue::DownloadQueue::new(),
-            storefront: crate::queue::Storefront::Epic,
             account: ACCOUNT.into(),
             name: |game: &Store| game.app_name.clone(),
         },

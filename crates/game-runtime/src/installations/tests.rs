@@ -385,7 +385,6 @@ async fn idle(installations: &Installations<Steam>) {
 fn queueing(queue: &Arc<DownloadQueue>) -> Queueing<Steam> {
     Queueing {
         queue: queue.clone(),
-        storefront: queue::Storefront::Steam,
         account: "42".into(),
         name: |game: &u32| game.to_string(),
     }
@@ -863,11 +862,24 @@ async fn downloads_queue_behind_the_transfer_under_way_and_cancelling_one_takes_
     assert_eq!(fixture.installations.state().receipts.len(), 2);
 }
 
+/// Another storefront's installations, whose game runs.
+struct OtherStorefront;
+
+impl queue::Owner for OtherStorefront {
+    fn ready(&self, _: u64) -> bool {
+        false
+    }
+    fn start(self: Arc<Self>, _: u64) {}
+    fn stop(&self, _: u64) {}
+    fn removed(&self, _: u64) {}
+}
+
 #[tokio::test]
 async fn a_running_game_holds_the_queued_automatic_updates() {
     let fixture = Fixture::new(true).await;
     fixture.fake.with(|script| script.newer.push(620));
-    fixture.queue.set_held(true);
+    let other: Arc<dyn queue::Owner> = Arc::new(OtherStorefront);
+    fixture.queue.hold(&other, true);
     fixture.installations.set_automatic_updates(true);
     fixture.installations.check_updates();
     eventually(|| fixture.installations.state().queued == [620]).await;
@@ -875,7 +887,7 @@ async fn a_running_game_holds_the_queued_automatic_updates() {
     assert_eq!(fixture.fake.calls(), Vec::<String>::new());
     assert!(fixture.queue.view().waiting[0].automatic);
 
-    fixture.queue.set_held(false);
+    fixture.queue.hold(&other, false);
     eventually(|| fixture.fake.calls() == ["download:620"]).await;
     idle(&fixture.installations).await;
     assert!(fixture.installations.state().updates.is_empty());

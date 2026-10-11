@@ -73,7 +73,6 @@ final class AppModel {
         self.downloads = downloads ?? DownloadsModel()
         self.downloads.progress = { [weak self] item in self?.downloadTransfer(item) }
         applyAutomaticUpdates()
-        holdUpdatesWhileAGameRuns()
     }
 
     /// A queued Transfer's progress, from its storefront's installations.
@@ -98,15 +97,15 @@ final class AppModel {
     func openDownload(_ item: DownloadItem) {
         downloads.isPresented = false
         switch item.storefront {
-        case .steam: open(item, in: steam, section: .steam)
-        case .epic: open(item, in: epic, section: .epic)
-        case .gog: open(item, in: gog, section: .gog)
+        case .steam: open(item, in: steam)
+        case .epic: open(item, in: epic)
+        case .gog: open(item, in: gog)
         }
     }
 
-    private func open<Model: LibraryStorefront>(_ item: DownloadItem, in model: Model, section: LibrarySection) {
+    private func open<Model: LibraryStorefront>(_ item: DownloadItem, in model: Model) {
         guard let id = Model.Store.game(item.game), let game = model.games.first(where: { $0.id == id }) else { return }
-        selection = section
+        selection = item.storefront.section
         model.open(game)
     }
 
@@ -114,18 +113,6 @@ final class AppModel {
         steam.installations.updatesAutomatically = updatesGamesAutomatically
         epic.installations.updatesAutomatically = updatesGamesAutomatically
         gog.installations.updatesAutomatically = updatesGamesAutomatically
-    }
-
-    /// The queue's automatic updates wait while a game of any storefront
-    /// runs or launches.
-    private func holdUpdatesWhileAGameRuns() {
-        let running = withObservationTracking {
-            steam.installations.sessions.isBusy || epic.installations.sessions.isBusy
-                || gog.installations.sessions.isBusy
-        } onChange: { [weak self] in
-            Task { @MainActor [weak self] in self?.holdUpdatesWhileAGameRuns() }
-        }
-        if downloads.held != running { downloads.setHeld(running) }
     }
 
     /// The Cloud or Rosetta question shown over the whole app, whichever tab is
