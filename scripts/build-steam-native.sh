@@ -11,20 +11,9 @@ case "${CONFIGURATION:-Debug}" in
     Release) PROFILE_NAME=release; PROFILE_DIRECTORY=release ;;
     *) exit 1 ;;
 esac
-# Acquisition happens at build time from hash-pinned Valve CDN archives, never
-# from an installed Steam client. The app ships the verified minimal payload.
-RUNTIME_PACKAGE="$PROJECT_ROOT/build/steam-runtime/runtime.zip"
-# Optimized: the no-op path still inflates and hashes the whole payload, which
-# costs seconds per incremental build when this tool is built unoptimized.
-CARGO_TARGET_DIR="$PROJECT_ROOT/target" cargo run --locked --release \
-    --manifest-path "$PROJECT_ROOT/Cargo.toml" -p game-runtime \
-    --features packaging --bin obelisk-steam-runtime-package -- \
-    "$PROJECT_ROOT/build/steam-runtime/downloads" "$RUNTIME_PACKAGE"
-RUNTIME_DESTINATION="$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/SteamRuntime"
-mkdir -p "$RUNTIME_DESTINATION"
-if ! cmp -s "$RUNTIME_PACKAGE" "$RUNTIME_DESTINATION/runtime.zip"; then
-    cp "$RUNTIME_PACKAGE" "$RUNTIME_DESTINATION/runtime.zip"
-fi
+# Obelisk ships no Valve binary: the first Steam launch downloads the pinned
+# packages from Valve's CDN. Remove the payload earlier builds bundled.
+rm -rf "$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/SteamRuntime"
 export CARGO_TARGET_DIR="$PROJECT_ROOT/build/steam-native-target"
 cargo build --locked --manifest-path "$PROJECT_ROOT/crates/steam-native/Cargo.toml" \
     --workspace --bin obelisk-steam-host --lib --profile "$PROFILE_NAME" --target aarch64-apple-darwin

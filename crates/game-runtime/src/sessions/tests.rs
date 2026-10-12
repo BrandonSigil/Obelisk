@@ -860,12 +860,51 @@ async fn a_rosetta_requirement_is_answered_once_for_its_decision_or_declined() {
 }
 
 #[tokio::test]
+async fn a_runtime_install_shows_which_runtime_downloads_and_stops_with_its_launch() {
+    let sessions = sessions();
+    settled(&sessions).await;
+    let admission = sessions.admit(42, 42).unwrap();
+    let stopped = Arc::new(tokio::sync::Notify::new());
+    let stop = stopped.clone();
+    let install = admission.installing(
+        Runtime::SteamComponents,
+        move || stop.notify_one(),
+        || (1, 4),
+        stopped.notified(),
+    );
+    let cancel = async {
+        eventually(|| {
+            sessions
+                .state()
+                .active
+                .and_then(|active| active.runtime_install)
+                == Some(RuntimeInstall {
+                    runtime: Runtime::SteamComponents,
+                    fraction: 0.25,
+                })
+        })
+        .await;
+        admission.cancel();
+    };
+    tokio::join!(install, cancel);
+    assert!(admission.cancelled());
+    assert!(sessions.state().active.is_none());
+}
+
+#[tokio::test]
 async fn an_admission_shows_the_runtime_install_until_its_game_is_observed() {
     let sessions = sessions();
     settled(&sessions).await;
     let admission = sessions.admit(42, 42).unwrap();
-    admission.runtime_install(Some(0.5));
-    assert_eq!(sessions.state().active.unwrap().runtime_install, Some(0.5));
+    let install = RuntimeInstall {
+        runtime: Runtime::Voile,
+        fraction: 0.5,
+    };
+    admission.runtime_install(Some(install));
+    assert_eq!(
+        sessions.state().active.unwrap().runtime_install,
+        Some(install)
+    );
     admission.runtime_install(None);
     let changed = sessions.state().revision;
     let game = steam(42, Phase::Running);

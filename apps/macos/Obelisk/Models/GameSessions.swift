@@ -194,8 +194,8 @@ final class GameSessions<Store: GameStorefront> {
         var microTxn: SteamMicroTxn?
         /// A supervisor snapshot backs this session, not only its admission.
         var observed: Bool
-        /// How much of Voile has downloaded while the launch waits for it.
-        var runtimeInstall: Double?
+        /// Which runtime downloads while the launch waits for it, and how much.
+        var runtimeInstall: RuntimeInstallState?
         /// When this Obelisk saw the game start, even if it already exited. A
         /// game recovered running started before, and has none.
         var startedAt: Date?
@@ -230,7 +230,7 @@ final class GameSessions<Store: GameStorefront> {
 
     private(set) var active: Session?
     /// Changes with `active`'s game and phase only, not with its progress,
-    /// such as Voile's download while the launch waits for it.
+    /// such as a runtime's download while the launch waits for it.
     private(set) var activeGame: ActiveGame?
     /// The last session observed, kept after it ends.
     private(set) var last: Session?

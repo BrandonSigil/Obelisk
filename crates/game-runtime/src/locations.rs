@@ -16,6 +16,8 @@ pub struct Locations {
     /// The bundled native host every supervisor runs as.
     pub helper: PathBuf,
     pub helpers: PathBuf,
+    /// Valve's Steam components the Steam host loads, which the first Steam
+    /// launch downloads from Valve's CDN.
     pub steam_runtime_package: PathBuf,
     pub steam_runtime_cache: PathBuf,
     pub steam_diagnostics: PathBuf,
@@ -33,6 +35,7 @@ pub struct Locations {
 impl Locations {
     pub fn new(library: &Path, bundle: &Path, home: &Path) -> Self {
         let helpers = bundle.join("Contents/Helpers/SteamNative");
+        let steam_runtime_cache = home.join("Library/Caches/com.zagrios.obelisk/SteamRuntime");
         Self {
             cloud_archive: library.join("SteamCloud"),
             steam_sessions: library.join("SteamSessions"),
@@ -40,8 +43,8 @@ impl Locations {
             gog_sessions: library.join("GOGSessions"),
             helper: helpers.join(crate::package::HOST),
             helpers,
-            steam_runtime_package: bundle.join("Contents/Resources/SteamRuntime/runtime.zip"),
-            steam_runtime_cache: home.join("Library/Caches/com.zagrios.obelisk/SteamRuntime"),
+            steam_runtime_package: crate::valve::payload(&steam_runtime_cache),
+            steam_runtime_cache,
             steam_diagnostics: home.join("Library/Logs/Obelisk/Steam"),
             epic_diagnostics: home.join("Library/Logs/Obelisk/Epic"),
             gog_diagnostics: home.join("Library/Logs/Obelisk/GOG"),

@@ -29,13 +29,5 @@ obelisk-core.workspace = true
 sha1.workspace = true
 cloud-vault = { workspace = true, features = ["testing"] }
 
-[features]
-packaging = []
-
-[[bin]]
-name = "obelisk-steam-runtime-package"
-path = "src/bin/package.rs"
-required-features = ["packaging"]
-
 [lints]
 workspace = true

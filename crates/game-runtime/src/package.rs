@@ -1,5 +1,5 @@
-//! Hash-pinned Valve payload. Runtime preparation is local-only; downloads are
-//! confined to the optional build-time packaging tool.
+//! Hash-pinned Valve payload. Runtime preparation is local-only: it reads the
+//! payload `crate::valve` downloaded from Valve's CDN on the first Steam launch.
 use crate::{Config, Error};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
@@ -202,15 +202,22 @@ pub(crate) fn copy_verified(
     }
     Ok(())
 }
-/// Used by the build tool too; no files are extracted by this validation.
+/// Checks every entry of the payload at `path` against the manifest; no files
+/// are extracted by this validation.
 pub fn verify_archive(path: &Path) -> Result<(), Error> {
-    let entries = &manifest().files;
+    verify(path, &manifest().files, &AtomicBool::new(false))
+}
+pub(crate) fn verify(
+    path: &Path,
+    entries: &[PayloadFile],
+    cancelled: &AtomicBool,
+) -> Result<(), Error> {
     let mut archive = archive(path, entries)?;
     for entry in entries {
         let file = archive
             .by_name(&entry.path)
             .map_err(|_| Error::VersionMismatch)?;
-        copy_verified(file, std::io::sink(), entry, &AtomicBool::new(false))?;
+        copy_verified(file, std::io::sink(), entry, cancelled)?;
     }
     Ok(())
 }

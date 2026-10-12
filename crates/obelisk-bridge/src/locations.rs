@@ -16,6 +16,8 @@ pub struct ObeliskLocations {
     /// The bundled native host every supervisor runs as.
     pub helper: String,
     pub helpers: String,
+    /// Valve's Steam components the Steam host loads, which the first Steam
+    /// launch downloads from Valve's CDN.
     pub steam_runtime_package: String,
     pub steam_runtime_cache: String,
     pub steam_diagnostics: String,
@@ -104,7 +106,10 @@ mod tests {
         );
         assert_eq!(
             locations.steam_runtime_package,
-            "/Obelisk.app/Contents/Resources/SteamRuntime/runtime.zip"
+            format!(
+                "/home/Library/Caches/com.zagrios.obelisk/SteamRuntime/valve-{}.zip",
+                game_runtime::package::manifest().version
+            )
         );
         assert_eq!(
             locations.steam_runtime_cache,

@@ -35,3 +35,8 @@ fi
 require_architectures "$STEAM_HELPERS/obelisk-steam-sdk-x86_64" "x86_64"
 require_architectures "$STEAM_HELPERS/libobelisk_steam_discovery_adapter.dylib" "arm64 x86_64"
 require_architectures "$1/Contents/Helpers/Obelisk Rosetta.app/Contents/MacOS/ObeliskRosetta" "x86_64"
+# Valve's Steam components are downloaded on the first Steam launch, never shipped.
+if [[ -e "$1/Contents/Resources/SteamRuntime" ]]; then
+    echo "Obelisk contains Valve's Steam components, which it must download instead." >&2
+    exit 1
+fi

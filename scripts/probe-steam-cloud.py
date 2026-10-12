@@ -40,8 +40,11 @@ def main():
         "--target-dir", str(project / "build/steam-native-target"),
     ], check=True)
     binary = project / "build/steam-native-target/debug/examples/cloud_storage_probe"
-    package = project / "build/xcode/Build/Products/Debug/Obelisk.app/Contents/Resources/SteamRuntime/runtime.zip"
     manifest = json.loads((project / "crates/game-runtime/runtime-manifest.json").read_text())
+    # Valve's Steam components, as Obelisk downloads them on the first Steam launch.
+    package = Path.home() / f"Library/Caches/com.zagrios.obelisk/SteamRuntime/valve-{manifest['version']}.zip"
+    if not package.is_file():
+        raise SystemExit("Launch a Steam game in Obelisk once so it downloads Valve's Steam components")
     signing = (project / "apps/macos/Config/Signing.local.xcconfig").read_text()
     identity = re.search(r"^CODE_SIGN_IDENTITY\s*=\s*([0-9A-Fa-f]{40})\s*$", signing, re.M)
     if identity is None:
@@ -71,7 +74,7 @@ def main():
         for entry in manifest["files"]:
             payload = archive.read(entry["path"])
             if len(payload) != entry["size"] or hashlib.sha256(payload).hexdigest() != entry["sha256"]:
-                raise SystemExit("Bundled runtime does not match the pinned manifest")
+                raise SystemExit("Downloaded Steam components do not match the pinned manifest")
             target = runtime / entry["path"]
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(payload)

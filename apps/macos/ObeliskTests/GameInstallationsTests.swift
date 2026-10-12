@@ -28,6 +28,34 @@ final class GameInstallationsTests: XCTestCase {
         XCTAssertEqual(fixture.backend.actions.last, .cancel(620))
     }
 
+    func testALaunchNamesTheRuntimeItWaitsFor() async throws {
+        let fixture = Fixture(game: game)
+        let installations = fixture.connect()
+        installations.primaryAction()
+        fixture.backend.publish {
+            $0.launching = true
+            $0.launchGame = 620
+            $0.gate = .action(620)
+        }
+        try await eventually { installations.isLaunching }
+
+        var session = GameSessionState.steam(appID: 620, phase: .preparing, observed: false)
+        session.runtimeInstall = RuntimeInstallState(component: .steamComponents, fraction: 0.25)
+        fixture.sessions.fake.show(session)
+        try await eventually { installations.runtimeInstallFraction == 0.25 }
+        XCTAssertEqual(installations.primaryActionTitle, L10n.string("model.game.installingSteamComponents"))
+
+        session.runtimeInstall = RuntimeInstallState(component: .voile, fraction: 0.5)
+        fixture.sessions.fake.show(session)
+        try await eventually { installations.runtimeInstallFraction == 0.5 }
+        XCTAssertEqual(installations.primaryActionTitle, L10n.string("model.game.installingVoile"))
+
+        session.runtimeInstall = nil
+        fixture.sessions.fake.show(session)
+        try await eventually { installations.runtimeInstallFraction == nil }
+        XCTAssertEqual(installations.primaryActionTitle, L10n.string("model.game.launching"))
+    }
+
     func testAnInstallationLaunchesAndUpdatesBeforeTheStorefrontKnowsWhatItCanInstall() async throws {
         let fixture = Fixture(game: game)
         // The storefront would install the Windows build, once it knows it can.

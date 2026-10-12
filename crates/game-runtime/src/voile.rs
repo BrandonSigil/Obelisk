@@ -305,7 +305,7 @@ impl Install {
 
 /// Removes what `root` holds under the names `remove` picks. Whatever cannot be
 /// removed now goes with a later install.
-fn remove_entries(root: &Path, remove: impl Fn(&str) -> bool) {
+pub(crate) fn remove_entries(root: &Path, remove: impl Fn(&str) -> bool) {
     let Ok(entries) = fs::read_dir(root) else {
         return;
     };

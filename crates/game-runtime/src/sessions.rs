@@ -142,13 +142,18 @@ pub type BeforeBegin = Box<dyn FnOnce() + Send>;
 pub type BoxFuture<'a, T> = std::pin::Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
 /// A storefront's part of handing an admitted game to a new supervisor.
-/// `Admission::hand_off` runs it in order: Voile when the game needs it,
+/// `Admission::hand_off` runs it in order: the runtimes the game needs,
 /// `prepare`, then `start`.
 pub trait Handover<P: Storefront>: Send + Sync + 'static {
     /// What `prepare` readies for `start`.
     type Prepared: Send + 'static;
     /// Voile, which a Windows game needs in place before it is prepared.
     fn voile(&self) -> Option<std::path::PathBuf>;
+    /// The payload of Valve's Steam components, which a game Obelisk's Steam
+    /// host runs needs in place before it is prepared.
+    fn steam_components(&self) -> Option<std::path::PathBuf> {
+        None
+    }
     /// Readies the game, such as its Wine prefix, which may take minutes, and
     /// then the short-lived credentials it starts with. A failure is definite.
     fn prepare(&self) -> BoxFuture<'_, Result<Self::Prepared, Failure>>;
@@ -192,6 +197,22 @@ pub enum Handoff {
     Lost(String),
 }
 
+/// A runtime a launch downloads before its game is prepared.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Runtime {
+    /// Voile, the Wine runtime Windows games run in.
+    Voile,
+    /// Valve's Steam components, which Obelisk's Steam host loads.
+    SteamComponents,
+}
+
+/// How much of a runtime has downloaded while the launch waits for it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RuntimeInstall {
+    pub runtime: Runtime,
+    pub fraction: f64,
+}
+
 /// One Game session as Obelisk presents it.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Session<P: Storefront> {
@@ -206,8 +227,8 @@ pub struct Session<P: Storefront> {
     pub store: Option<P::Store>,
     /// A supervisor snapshot backs this session, not only its admission.
     pub observed: bool,
-    /// How much of Voile has downloaded while the launch waits for it.
-    pub runtime_install: Option<f64>,
+    /// How much of a runtime has downloaded while the launch waits for it.
+    pub runtime_install: Option<RuntimeInstall>,
     /// When this Obelisk saw the game start, in seconds since the Unix
     /// epoch: once a session it saw preparing is past it, even if its game
     /// already exited. A game recovered running started before, and has none.
@@ -857,45 +878,100 @@ impl<P: Storefront> Canceller<P> {
         self.operation.hooks.lock().unwrap().push(Box::new(hook));
     }
 
-    /// How much of Voile has downloaded while the launch waits for it.
-    pub fn runtime_install(&self, fraction: Option<f64>) {
+    /// How much of a runtime has downloaded while the launch waits for it.
+    pub fn runtime_install(&self, install: Option<RuntimeInstall>) {
         self.shared.update(|inner| {
             if inner.current(&self.operation)
                 && let Some(active) = &mut inner.active
             {
-                active.runtime_install = fraction;
+                active.runtime_install = install;
             }
         });
     }
 
     /// Installs Voile unless it is in place, showing its download on the
     /// admitted session. Cancelling the launch cancels the install.
-    pub async fn install_runtime(&self, voile: &std::path::Path) -> Result<(), Failure> {
+    pub async fn install_voile(&self, voile: &std::path::Path) -> Result<(), Failure> {
         if crate::voile::runtime(voile).is_some() {
             return Ok(());
         }
         let install = Arc::new(crate::voile::Install::new());
-        let cancel = install.clone();
-        self.on_cancel(move || cancel.cancel());
-        self.runtime_install(Some(0.0));
-        let (watched, admitted) = (install.clone(), self.clone());
-        let progress = tokio::spawn(async move {
-            loop {
-                let (received, total) = watched.progress();
-                if total > 0 {
-                    admitted.runtime_install(Some((received as f64 / total as f64).min(1.0)));
-                }
-                tokio::time::sleep(PACE).await;
-            }
-        });
-        let installed = install.run(voile, development_archive().as_deref()).await;
-        progress.abort();
-        self.runtime_install(None);
+        let (cancel, watched) = (install.clone(), install.clone());
+        let installed = self
+            .installing(
+                Runtime::Voile,
+                move || cancel.cancel(),
+                move || watched.progress(),
+                install.run(voile, development_archive().as_deref()),
+            )
+            .await;
         match installed {
             Ok(_) => Ok(()),
             Err(crate::voile::Failure::Cancelled) => Err(Failure::Cancelled),
             Err(failure) => Err(Failure::Failed(failure.to_string())),
         }
+    }
+
+    /// Downloads Valve's Steam components into `payload` unless it already
+    /// holds them intact, showing the download on the admitted session.
+    /// Cancelling the launch cancels the download.
+    pub async fn install_steam_components(&self, payload: &std::path::Path) -> Result<(), Failure> {
+        let checked = payload.to_owned();
+        if tokio::task::spawn_blocking(move || crate::valve::installed(&checked))
+            .await
+            .unwrap_or(false)
+        {
+            return Ok(());
+        }
+        let install = Arc::new(crate::valve::Install::new());
+        let (cancel, watched) = (install.clone(), install.clone());
+        let installed = self
+            .installing(
+                Runtime::SteamComponents,
+                move || cancel.cancel(),
+                move || watched.progress(),
+                install.run(payload),
+            )
+            .await;
+        match installed {
+            Ok(()) => Ok(()),
+            Err(crate::valve::Failure::Cancelled) => Err(Failure::Cancelled),
+            Err(failure) => Err(Failure::Failed(failure.to_string())),
+        }
+    }
+
+    /// Runs `install` of `runtime`, cancelled with the launch, while the
+    /// admitted session shows what `progress` reports: the bytes received,
+    /// then the total.
+    async fn installing<T>(
+        &self,
+        runtime: Runtime,
+        cancel: impl Fn() + Send + Sync + 'static,
+        progress: impl Fn() -> (u64, u64) + Send + 'static,
+        install: impl Future<Output = T>,
+    ) -> T {
+        self.on_cancel(cancel);
+        self.runtime_install(Some(RuntimeInstall {
+            runtime,
+            fraction: 0.0,
+        }));
+        let admitted = self.clone();
+        let watching = tokio::spawn(async move {
+            loop {
+                let (received, total) = progress();
+                if total > 0 {
+                    admitted.runtime_install(Some(RuntimeInstall {
+                        runtime,
+                        fraction: (received as f64 / total as f64).min(1.0),
+                    }));
+                }
+                tokio::time::sleep(PACE).await;
+            }
+        });
+        let installed = install.await;
+        watching.abort();
+        self.runtime_install(None);
+        installed
     }
 }
 
@@ -937,7 +1013,13 @@ impl<P: Storefront> Admission<P> {
         let handoff = async move {
             if let Some(voile) = handover.voile() {
                 admission
-                    .install_runtime(&voile)
+                    .install_voile(&voile)
+                    .await
+                    .map_err(Handoff::Refused)?;
+            }
+            if let Some(payload) = handover.steam_components() {
+                admission
+                    .install_steam_components(&payload)
                     .await
                     .map_err(Handoff::Refused)?;
             }

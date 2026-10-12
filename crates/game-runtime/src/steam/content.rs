@@ -339,6 +339,11 @@ impl sessions::Handover<Steam> for Handover {
             crate::wine::Installation::of(&self.locations, game, &self.platform, &self.install);
         matches!(windows, Ok(Some(_))).then(|| self.locations.voile.clone())
     }
+    /// Every Steam game runs beside Obelisk's Steam host, whatever its
+    /// platform or engine.
+    fn steam_components(&self) -> Option<PathBuf> {
+        Some(self.locations.steam_runtime_package.clone())
+    }
     fn prepare(&self) -> BoxFuture<'_, Result<super::Request, Failure>> {
         let (locations, app_id) = (self.locations.clone(), self.app_id);
         let (platform, install, target) = (

@@ -123,7 +123,7 @@ fn compiled_manifest_matches_native_abi_and_contains_seven_libraries_plus_signed
     );
 }
 #[test]
-fn first_preparation_needs_only_bundled_package_and_helpers_then_reuses_cache() {
+fn first_preparation_needs_only_downloaded_package_and_helpers_then_reuses_cache() {
     let fixture = Fixture::new();
     assert!(
         !fixture
@@ -200,7 +200,7 @@ fn missing_changed_and_unexpected_cached_files_are_repaired_without_overwriting(
     }
 }
 #[test]
-fn helper_upgrade_uses_bundled_payload_and_preserves_previous_generation() {
+fn helper_upgrade_uses_downloaded_payload_and_preserves_previous_generation() {
     let fixture = Fixture::new();
     let old = fixture.prepare().unwrap();
     fs::write(fixture.config.helpers.join(HELPERS[0]), b"new helper").unwrap();
@@ -302,15 +302,17 @@ fn archive_symlinks_are_rejected() {
 }
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 #[test]
-#[ignore = "Requires OBELISK_STEAM_BUNDLE pointing at a built app; no account or game is used"]
-fn bundled_runtime_loads_without_steam_installation_access() {
+#[ignore = "Requires OBELISK_STEAM_BUNDLE pointing at a built app and OBELISK_STEAM_PAYLOAD at the Steam components Obelisk downloaded; no account or game is used"]
+fn downloaded_runtime_loads_without_steam_installation_access() {
     let bundle =
         PathBuf::from(std::env::var_os("OBELISK_STEAM_BUNDLE").expect("OBELISK_STEAM_BUNDLE"));
+    let payload =
+        PathBuf::from(std::env::var_os("OBELISK_STEAM_PAYLOAD").expect("OBELISK_STEAM_PAYLOAD"));
     let root = tempfile::tempdir().unwrap();
     let config = Config {
         cloud_save_roots: vec![],
         helpers: bundle.join("Contents/Helpers/SteamNative"),
-        package: bundle.join("Contents/Resources/SteamRuntime/runtime.zip"),
+        package: payload,
         cache: root.path().join("cache"),
         diagnostics: root.path().join("logs"),
         home: root.path().join("home"),

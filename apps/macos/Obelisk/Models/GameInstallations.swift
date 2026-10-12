@@ -454,7 +454,11 @@ final class GameInstallations<Store: InstallationStorefront> {
         if selectedSession?.running == true { return L10n.string("model.game.running") }
         if isUninstalling && uninstallGame == game { return L10n.string("model.game.uninstalling") }
         if isLaunching && launchGame == game {
-            if runtimeInstallFraction != nil { return L10n.string("model.game.installingVoile") }
+            switch runtimeInstall?.component {
+            case .voile: return L10n.string("model.game.installingVoile")
+            case .steamComponents: return L10n.string("model.game.installingSteamComponents")
+            case nil: break
+            }
             return L10n.string(isVerifyingBeforeLaunch ? "model.game.verifying" : "model.game.launching")
         }
         if let game, isQueued(game) { return L10n.string("model.game.queued") }
@@ -465,12 +469,14 @@ final class GameInstallations<Store: InstallationStorefront> {
         return L10n.string(canResumeDownload ? "model.game.resume" : "model.game.download")
     }
 
-    /// How much of Voile has downloaded while the game on screen waits for it.
-    var runtimeInstallFraction: Double? {
+    /// Which runtime downloads while the game on screen waits for it, and how much.
+    var runtimeInstall: RuntimeInstallState? {
         guard isLaunching, let game = launchGame, game == selection()?.game,
               let active = sessions.active, active.game == game else { return nil }
         return active.runtimeInstall
     }
+
+    var runtimeInstallFraction: Double? { runtimeInstall?.fraction }
 
     /// Whether the primary action launches the game rather than installing or
     /// updating it.

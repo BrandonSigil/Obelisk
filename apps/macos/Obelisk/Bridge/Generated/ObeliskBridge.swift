@@ -5825,9 +5825,9 @@ public struct GameSessionState: Equatable, Hashable {
      */
     public var observed: Bool
     /**
-     * How much of Voile has downloaded while the launch waits for it.
+     * How much of a runtime has downloaded while the launch waits for it.
      */
-    public var runtimeInstall: Double?
+    public var runtimeInstall: RuntimeInstallState?
     /**
      * When this Obelisk saw the game start, in seconds since the Unix epoch,
      * even if it already exited. A game recovered running has none.
@@ -5872,8 +5872,8 @@ public struct GameSessionState: Equatable, Hashable {
          * A supervisor snapshot backs this session, not only its admission.
          */observed: Bool, 
         /**
-         * How much of Voile has downloaded while the launch waits for it.
-         */runtimeInstall: Double?, 
+         * How much of a runtime has downloaded while the launch waits for it.
+         */runtimeInstall: RuntimeInstallState?, 
         /**
          * When this Obelisk saw the game start, in seconds since the Unix epoch,
          * even if it already exited. A game recovered running has none.
@@ -5937,7 +5937,7 @@ public struct FfiConverterTypeGameSessionState: FfiConverterRustBuffer {
                 cloud: FfiConverterTypeCloudStatus.read(from: &buf), 
                 host: FfiConverterOptionTypeSteamHostState.read(from: &buf), 
                 observed: FfiConverterBool.read(from: &buf), 
-                runtimeInstall: FfiConverterOptionDouble.read(from: &buf), 
+                runtimeInstall: FfiConverterOptionTypeRuntimeInstallState.read(from: &buf), 
                 startedAt: FfiConverterOptionUInt64.read(from: &buf), 
                 inviteRequest: FfiConverterOptionTypeSteamInviteRequest.read(from: &buf), 
                 lobbyId: FfiConverterOptionUInt64.read(from: &buf), 
@@ -5955,7 +5955,7 @@ public struct FfiConverterTypeGameSessionState: FfiConverterRustBuffer {
         FfiConverterTypeCloudStatus.write(value.cloud, into: &buf)
         FfiConverterOptionTypeSteamHostState.write(value.host, into: &buf)
         FfiConverterBool.write(value.observed, into: &buf)
-        FfiConverterOptionDouble.write(value.runtimeInstall, into: &buf)
+        FfiConverterOptionTypeRuntimeInstallState.write(value.runtimeInstall, into: &buf)
         FfiConverterOptionUInt64.write(value.startedAt, into: &buf)
         FfiConverterOptionTypeSteamInviteRequest.write(value.inviteRequest, into: &buf)
         FfiConverterOptionUInt64.write(value.lobbyId, into: &buf)
@@ -6968,6 +6968,10 @@ public struct ObeliskLocations: Equatable, Hashable {
      */
     public var helper: String
     public var helpers: String
+    /**
+     * Valve's Steam components the Steam host loads, which the first Steam
+     * launch downloads from Valve's CDN.
+     */
     public var steamRuntimePackage: String
     public var steamRuntimeCache: String
     public var steamDiagnostics: String
@@ -6998,7 +7002,11 @@ public struct ObeliskLocations: Equatable, Hashable {
          */cloudArchive: String, steamSessions: String, epicSessions: String, gogSessions: String, 
         /**
          * The bundled native host every supervisor runs as.
-         */helper: String, helpers: String, steamRuntimePackage: String, steamRuntimeCache: String, steamDiagnostics: String, 
+         */helper: String, helpers: String, 
+        /**
+         * Valve's Steam components the Steam host loads, which the first Steam
+         * launch downloads from Valve's CDN.
+         */steamRuntimePackage: String, steamRuntimeCache: String, steamDiagnostics: String, 
         /**
          * Where Wine logs the Windows builds of Epic games.
          */epicDiagnostics: String, 
@@ -7156,6 +7164,63 @@ public func FfiConverterTypeRosettaPromptState_lift(_ buf: RustBuffer) throws ->
 #endif
 public func FfiConverterTypeRosettaPromptState_lower(_ value: RosettaPromptState) -> RustBuffer {
     return FfiConverterTypeRosettaPromptState.lower(value)
+}
+
+
+/**
+ * How much of a runtime has downloaded while the launch waits for it.
+ */
+public struct RuntimeInstallState: Equatable, Hashable {
+    public var component: RuntimeComponent
+    public var fraction: Double
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(component: RuntimeComponent, fraction: Double) {
+        self.component = component
+        self.fraction = fraction
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension RuntimeInstallState: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeRuntimeInstallState: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> RuntimeInstallState {
+        return
+            try RuntimeInstallState(
+                component: FfiConverterTypeRuntimeComponent.read(from: &buf), 
+                fraction: FfiConverterDouble.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: RuntimeInstallState, into buf: inout [UInt8]) {
+        FfiConverterTypeRuntimeComponent.write(value.component, into: &buf)
+        FfiConverterDouble.write(value.fraction, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRuntimeInstallState_lift(_ buf: RustBuffer) throws -> RuntimeInstallState {
+    return try FfiConverterTypeRuntimeInstallState.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRuntimeInstallState_lower(_ value: RuntimeInstallState) -> RustBuffer {
+    return FfiConverterTypeRuntimeInstallState.lower(value)
 }
 
 
@@ -10619,6 +10684,81 @@ public func FfiConverterTypeInstallationReport_lower(_ value: InstallationReport
 
 
 /**
+ * A runtime a launch downloads before its game is prepared.
+ */
+
+public enum RuntimeComponent: Equatable, Hashable {
+    
+    /**
+     * Voile, the Wine runtime Windows games run in.
+     */
+    case voile
+    /**
+     * Valve's Steam components, which Obelisk's Steam host loads.
+     */
+    case steamComponents
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension RuntimeComponent: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeRuntimeComponent: FfiConverterRustBuffer {
+    typealias SwiftType = RuntimeComponent
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> RuntimeComponent {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .voile
+        
+        case 2: return .steamComponents
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: RuntimeComponent, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case .voile:
+            writeInt(&buf, Int32(1))
+        
+        
+        case .steamComponents:
+            writeInt(&buf, Int32(2))
+        
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRuntimeComponent_lift(_ buf: RustBuffer) throws -> RuntimeComponent {
+    return try FfiConverterTypeRuntimeComponent.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeRuntimeComponent_lower(_ value: RuntimeComponent) -> RustBuffer {
+    return FfiConverterTypeRuntimeComponent.lower(value)
+}
+
+
+
+/**
  * The storefront whose Game sessions an object holds.
  */
 
@@ -11796,30 +11936,6 @@ fileprivate struct FfiConverterOptionUInt64: FfiConverterRustBuffer {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
-fileprivate struct FfiConverterOptionDouble: FfiConverterRustBuffer {
-    typealias SwiftType = Double?
-
-    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
-        guard let value = value else {
-            writeInt(&buf, Int8(0))
-            return
-        }
-        writeInt(&buf, Int8(1))
-        FfiConverterDouble.write(value, into: &buf)
-    }
-
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
-        switch try readInt(&buf) as Int8 {
-        case 0: return nil
-        case 1: return try FfiConverterDouble.read(from: &buf)
-        default: throw UniffiInternalError.unexpectedOptionalTag
-        }
-    }
-}
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
 fileprivate struct FfiConverterOptionString: FfiConverterRustBuffer {
     typealias SwiftType = String?
 
@@ -12052,6 +12168,30 @@ fileprivate struct FfiConverterOptionTypeRosettaPromptState: FfiConverterRustBuf
         switch try readInt(&buf) as Int8 {
         case 0: return nil
         case 1: return try FfiConverterTypeRosettaPromptState.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterOptionTypeRuntimeInstallState: FfiConverterRustBuffer {
+    typealias SwiftType = RuntimeInstallState?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypeRuntimeInstallState.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypeRuntimeInstallState.read(from: &buf)
         default: throw UniffiInternalError.unexpectedOptionalTag
         }
     }

@@ -13,6 +13,14 @@ xcodebuild -project "$PROJECT_ROOT/apps/macos/Obelisk.xcodeproj" -scheme Obelisk
     -configuration Debug -derivedDataPath "$PROJECT_ROOT/build/xcode" \
     -destination 'platform=macOS' test
 "$PROJECT_ROOT/scripts/verify-app-signature.sh" "$PROJECT_ROOT/build/xcode/Build/Products/Debug/Obelisk.app"
-OBELISK_STEAM_BUNDLE="$PROJECT_ROOT/build/xcode/Build/Products/Debug/Obelisk.app" \
-    cargo test --locked --manifest-path "$PROJECT_ROOT/Cargo.toml" -p game-runtime \
-    bundled_runtime_loads_without_steam_installation_access -- --ignored
+# Valve's Steam components exist once a Steam launch downloaded them from
+# Valve's CDN; this check reads the copy Obelisk keeps and changes nothing.
+VERSION="$(/usr/bin/plutil -extract version raw -o - "$PROJECT_ROOT/crates/game-runtime/runtime-manifest.json")"
+PAYLOAD="$HOME/Library/Caches/com.zagrios.obelisk/SteamRuntime/valve-$VERSION.zip"
+if [[ -f "$PAYLOAD" ]]; then
+    OBELISK_STEAM_BUNDLE="$PROJECT_ROOT/build/xcode/Build/Products/Debug/Obelisk.app" OBELISK_STEAM_PAYLOAD="$PAYLOAD" \
+        cargo test --locked --manifest-path "$PROJECT_ROOT/Cargo.toml" -p game-runtime \
+        downloaded_runtime_loads_without_steam_installation_access -- --ignored
+else
+    echo "Skipped the Steam components load check: launch a Steam game once so Obelisk downloads them."
+fi

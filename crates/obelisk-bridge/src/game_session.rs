@@ -29,6 +29,38 @@ impl From<supervisor::Phase> for GamePhase {
     }
 }
 
+/// A runtime a launch downloads before its game is prepared.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Enum)]
+pub enum RuntimeComponent {
+    /// Voile, the Wine runtime Windows games run in.
+    Voile,
+    /// Valve's Steam components, which Obelisk's Steam host loads.
+    SteamComponents,
+}
+impl From<sessions::Runtime> for RuntimeComponent {
+    fn from(runtime: sessions::Runtime) -> Self {
+        match runtime {
+            sessions::Runtime::Voile => Self::Voile,
+            sessions::Runtime::SteamComponents => Self::SteamComponents,
+        }
+    }
+}
+
+/// How much of a runtime has downloaded while the launch waits for it.
+#[derive(Clone, Copy, Debug, PartialEq, uniffi::Record)]
+pub struct RuntimeInstallState {
+    pub component: RuntimeComponent,
+    pub fraction: f64,
+}
+impl From<sessions::RuntimeInstall> for RuntimeInstallState {
+    fn from(install: sessions::RuntimeInstall) -> Self {
+        Self {
+            component: install.runtime.into(),
+            fraction: install.fraction,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Enum)]
 pub enum CloudPhase {
     Idle,
@@ -426,8 +458,8 @@ pub struct GameSessionState {
     pub host: Option<SteamHostState>,
     /// A supervisor snapshot backs this session, not only its admission.
     pub observed: bool,
-    /// How much of Voile has downloaded while the launch waits for it.
-    pub runtime_install: Option<f64>,
+    /// How much of a runtime has downloaded while the launch waits for it.
+    pub runtime_install: Option<RuntimeInstallState>,
     /// When this Obelisk saw the game start, in seconds since the Unix epoch,
     /// even if it already exited. A game recovered running has none.
     #[uniffi(default = None)]
@@ -497,7 +529,7 @@ fn session_state<P: Bridged>(session: sessions::Session<P>) -> GameSessionState 
         reconnecting: session.reconnecting,
         cloud: session.cloud.into(),
         observed: session.observed,
-        runtime_install: session.runtime_install,
+        runtime_install: session.runtime_install.map(Into::into),
         started_at: session.started_at,
     }
 }

@@ -10,8 +10,6 @@ pub mod linux_engine;
 mod locations;
 mod native;
 pub mod package;
-#[cfg(feature = "packaging")]
-pub mod packaging;
 mod process;
 pub mod profile;
 pub mod protocol;
@@ -19,6 +17,7 @@ pub mod queue;
 pub mod sessions;
 pub mod steam;
 pub mod supervisor;
+pub mod valve;
 pub mod voile;
 pub mod wine;
 pub use locations::Locations;

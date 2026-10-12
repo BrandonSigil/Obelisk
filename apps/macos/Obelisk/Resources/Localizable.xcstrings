@@ -143,13 +143,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "The Steam runtime bundled with Obelisk is unavailable. Reinstall Obelisk to restore its files."
+            "value": "The Steam components Obelisk launches games with are unavailable. Launch the game again, or reinstall Obelisk if this persists."
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Le moteur Steam fourni avec Obelisk est indisponible. Réinstallez Obelisk pour restaurer ses fichiers."
+            "value": "Les composants Steam avec lesquels Obelisk lance les jeux sont indisponibles. Relancez le jeu, ou réinstallez Obelisk si le problème persiste."
           }
         }
       }
@@ -10135,6 +10135,108 @@
           "stringUnit": {
             "state": "translated",
             "value": "Ajout de Voile…"
+          }
+        }
+      }
+    },
+    "backend.steam.components.downloadFailed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Obelisk could not download from Valve the Steam components Steam games need. Check your connection and try again."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Obelisk n'a pas pu télécharger depuis Valve les composants Steam dont les jeux Steam ont besoin. Vérifiez votre connexion et réessayez."
+          }
+        }
+      }
+    },
+    "backend.steam.components.unavailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Valve no longer offers the Steam components this version of Obelisk uses. Update Obelisk to launch Steam games."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Valve ne propose plus les composants Steam qu'utilise cette version d'Obelisk. Mettez Obelisk à jour pour lancer les jeux Steam."
+          }
+        }
+      }
+    },
+    "backend.steam.components.damaged": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The Steam components downloaded from Valve are damaged. Launch the game again to download them anew."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Les composants Steam téléchargés depuis Valve sont endommagés. Relancez le jeu pour les télécharger à nouveau."
+          }
+        }
+      }
+    },
+    "backend.steam.components.storageFailed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Obelisk could not save the Steam components it downloaded. Check the available disk space and try again."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Obelisk n'a pas pu enregistrer les composants Steam téléchargés. Vérifiez l'espace disque disponible et réessayez."
+          }
+        }
+      }
+    },
+    "backend.steam.components.cancelled": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Steam components download was cancelled."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Le téléchargement des composants Steam a été annulé."
+          }
+        }
+      }
+    },
+    "model.game.installingSteamComponents": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Getting Steam components…"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ajout des composants Steam…"
           }
         }
       }
