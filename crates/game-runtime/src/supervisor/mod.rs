@@ -17,7 +17,49 @@ use client::SessionAlive;
 pub use client::{Client, IdleGuard, OwnerLock};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 pub use session::Inspect;
-use std::{collections::HashMap, path::PathBuf};
+use std::{
+    collections::HashMap,
+    path::{Component, Path, PathBuf},
+};
+
+/// Whether `path` is absolute and never climbs with `..`.
+pub(crate) fn plain_absolute(path: &Path) -> bool {
+    path.is_absolute() && !path.components().any(|c| c == Component::ParentDir)
+}
+
+/// The conversions a storefront's session `Error` makes from the
+/// supervisor's and the runtime's errors, alike for Epic and GOG: its
+/// `Session`, `Busy`, `Cancelled`, `Storage`, `Unsupported`,
+/// `RosettaUnavailable` and `WineUnavailable` stand for them.
+macro_rules! session_error_conversions {
+    ($error:ty) => {
+        impl From<$crate::supervisor::Error> for $error {
+            fn from(error: $crate::supervisor::Error) -> Self {
+                use $crate::supervisor::Error as E;
+                match error {
+                    E::Storage => Self::Storage,
+                    E::NewerSession | E::Busy => Self::Busy,
+                    E::Cancelled => Self::Cancelled,
+                    E::RosettaUnavailable => Self::RosettaUnavailable,
+                    E::InvalidSession | E::Unavailable | E::StartFailed => Self::Session,
+                }
+            }
+        }
+        impl From<$crate::Error> for $error {
+            fn from(error: $crate::Error) -> Self {
+                match error {
+                    $crate::Error::RosettaUnavailable => Self::RosettaUnavailable,
+                    $crate::Error::WineUnavailable => Self::WineUnavailable,
+                    $crate::Error::IncompatibleArchitecture
+                    | $crate::Error::InvalidApplication
+                    | $crate::Error::NotExecutable => Self::Unsupported,
+                    _ => Self::Session,
+                }
+            }
+        }
+    };
+}
+pub(crate) use session_error_conversions;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Identity {

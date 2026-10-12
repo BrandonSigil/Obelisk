@@ -228,8 +228,8 @@ pub struct Receipt {
     pub language: String,
     pub total_bytes: u64,
     /// A Transfer started over this installation and has not succeeded since.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub needs_verification: Option<bool>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub needs_verification: bool,
 }
 
 /// A Steam Transfer: `language` picks the depots.
@@ -276,10 +276,10 @@ impl crate::installations::Storefront for Steam {
         &receipt.directory
     }
     fn needs_verification(receipt: &Receipt) -> bool {
-        receipt.needs_verification == Some(true)
+        receipt.needs_verification
     }
     fn mark_needs_verification(receipt: &mut Receipt) {
-        receipt.needs_verification = Some(true);
+        receipt.needs_verification = true;
     }
     fn request_game(request: &Download) -> u32 {
         request.app_id

@@ -312,10 +312,9 @@ private struct DownloadSpeedCard: View {
                         .monospacedDigit()
                 }
                 Spacer()
-                stat(L10n.string("ui.downloads.peak"), downloads.samples.count > 1
-                     ? DownloadFormatting.speed(downloads.peakSpeed) : "—")
-                stat(L10n.string("ui.downloads.downloaded"),
-                     downloads.currentTransfer.map { DownloadFormatting.size($0.contentBytes) } ?? "—")
+                DownloadStat(title: L10n.string("ui.downloads.peak"),
+                             value: downloads.samples.count > 1 ? DownloadFormatting.speed(downloads.peakSpeed) : "—")
+                DownloadedStat(downloads: downloads)
             }
             chart
                 .frame(height: 104)
@@ -324,17 +323,6 @@ private struct DownloadSpeedCard: View {
     }
 
     private var headline: String { DownloadFormatting.speed(downloads.currentSpeed ?? 0) }
-
-    private func stat(_ title: String, _ value: String) -> some View {
-        VStack(alignment: .trailing, spacing: 2) {
-            Text(title)
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(.secondary)
-            Text(value)
-                .font(.system(size: 13, weight: .semibold))
-                .monospacedDigit()
-        }
-    }
 
     @ViewBuilder private var chart: some View {
         let samples = downloads.samples
@@ -405,6 +393,34 @@ private struct DownloadSpeedCard: View {
         return downloads.samples.min {
             abs($0.time.timeIntervalSince(selected)) < abs($1.time.timeIntervalSince(selected))
         }
+    }
+}
+
+/// One figure beside the speed.
+private struct DownloadStat: View {
+    let title: String
+    let value: String
+
+    var body: some View {
+        VStack(alignment: .trailing, spacing: 2) {
+            Text(title)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(.secondary)
+            Text(value)
+                .font(.system(size: 13, weight: .semibold))
+                .monospacedDigit()
+        }
+    }
+}
+
+/// The running Transfer's downloaded size, in its own body: it changes with
+/// every progress snapshot, the chart only with each speed sample.
+private struct DownloadedStat: View {
+    let downloads: DownloadsModel
+
+    var body: some View {
+        DownloadStat(title: L10n.string("ui.downloads.downloaded"),
+                     value: downloads.currentTransfer.map { DownloadFormatting.size($0.contentBytes) } ?? "—")
     }
 }
 

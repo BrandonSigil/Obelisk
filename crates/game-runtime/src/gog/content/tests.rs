@@ -145,7 +145,7 @@ impl Fixture {
             directory: directory.to_string_lossy().into_owned(),
             platform: platform.into(),
             total_bytes: 100,
-            needs_verification: None,
+            needs_verification: false,
         }
     }
 }
@@ -158,7 +158,7 @@ async fn a_transfer_saves_renewed_credentials_first_and_installs_the_language() 
     assert_eq!(receipt.product_id, "1207658924");
     assert_eq!(receipt.name, "The Witcher");
     assert_eq!(receipt.platform, "windows");
-    assert_eq!(receipt.needs_verification, Some(false));
+    assert!(!receipt.needs_verification);
     assert_eq!(
         Path::new(&receipt.directory),
         fixture

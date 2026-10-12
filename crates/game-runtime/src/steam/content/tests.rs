@@ -162,7 +162,7 @@ impl Fixture {
             platform: platform.into(),
             language: "french".into(),
             total_bytes: 100,
-            needs_verification: None,
+            needs_verification: false,
         };
         let request = Download {
             app_id: 620,
@@ -203,7 +203,7 @@ async fn a_completed_transfer_is_an_installation_that_needs_no_verification() {
     assert_eq!(receipt.app_id, 620);
     assert_eq!(receipt.platform, "macos");
     assert_eq!(receipt.language, "french");
-    assert_eq!(receipt.needs_verification, None);
+    assert!(!receipt.needs_verification);
     assert_eq!(
         PathBuf::from(&receipt.directory),
         request.directory.join("steam-620-macos")

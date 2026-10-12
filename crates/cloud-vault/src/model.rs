@@ -221,7 +221,11 @@ pub struct ContentHash(String);
 
 impl ContentHash {
     pub fn of(bytes: &[u8]) -> Self {
-        Self(format!("{:x}", Sha256::digest(bytes)))
+        Self::of_hasher(Sha256::new_with_prefix(bytes))
+    }
+
+    pub(crate) fn of_hasher(hasher: Sha256) -> Self {
+        Self(format!("{:x}", hasher.finalize()))
     }
 
     pub fn as_str(&self) -> &str {

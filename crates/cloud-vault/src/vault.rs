@@ -733,7 +733,9 @@ impl Vault {
                 removed += 1;
             }
         }
-        File::open(directory)?.sync_all()?;
+        if removed > 0 {
+            File::open(directory)?.sync_all()?;
+        }
         Ok(removed)
     }
 
@@ -753,6 +755,11 @@ impl Vault {
         disk::content(&self.directory, file)
     }
 
+    /// `read_content`'s checks without keeping the bytes.
+    fn check_content(&self, file: &FileVersion) -> Result<()> {
+        disk::check(&self.directory, file)
+    }
+
     fn verify(&self, files: &Manifest) -> Result<()> {
         files.validate()?;
         let mut verified = std::collections::BTreeSet::new();
@@ -760,7 +767,7 @@ impl Vault {
             // Several save names can reference the same archived bytes. Check
             // each content identity once in this transition, never across them.
             if verified.insert((&file.hash, file.size)) {
-                self.read_content(file)?;
+                self.check_content(file)?;
             }
         }
         Ok(())

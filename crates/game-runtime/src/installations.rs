@@ -16,7 +16,10 @@ use serde::{Serialize, de::DeserializeOwned};
 use std::{
     fmt,
     path::{Path, PathBuf},
-    sync::{Arc, Mutex, OnceLock},
+    sync::{
+        Arc, Mutex, OnceLock,
+        atomic::{AtomicBool, Ordering},
+    },
     time::{Duration, Instant},
 };
 use tokio::sync::watch;
@@ -256,7 +259,6 @@ pub struct State<S: Storefront> {
     /// installs the storefront's newer build.
     pub verifying_before_launch: bool,
     pub launch_game: Option<S::Game>,
-    pub uninstalling: bool,
     pub uninstall_game: Option<S::Game>,
     /// A Transfer that stopped before its receipt, which the player can resume.
     pub last_download: Option<S::Request>,
@@ -358,7 +360,7 @@ impl<S: Storefront> Owner for Shared<S> {
         !inner.signed_out
             && !inner.diagnostic
             && !inner.state.downloading
-            && !inner.state.uninstalling
+            && inner.state.uninstall_game.is_none()
             && inner.state.maintenance.is_none()
             && !sessions.recovering
             && !sessions.active.iter().any(|active| active.game == game)
@@ -436,6 +438,7 @@ impl<S: Storefront> Shared<S> {
         let mut inner = self.inner.lock().unwrap();
         let before = inner.state.clone();
         let result = change(&mut inner);
+        inner.state.downloading = inner.running.is_some();
         let sessions = self.sessions.state();
         inner.state.gate = gate(&inner, &sessions);
         inner.state.cloud_sync = cloud_sync(&inner, &sessions, &self.account);
@@ -504,7 +507,6 @@ impl<S: Storefront> Shared<S> {
         inner.state.last_download = Some(request.clone());
         inner.state.transfer_game = Some(S::request_game(request));
         inner.state.transfer = Some(TransferProgress::new(S::transfer_name(request)));
-        inner.state.downloading = true;
         let (game, platform) = (S::request_game(request), S::request_platform(request));
         if let Some(receipt) = inner.state.receipts.iter_mut().find(|receipt| {
             S::receipt_game(receipt) == game && Some(S::receipt_platform(receipt)) == platform
@@ -700,7 +702,6 @@ impl<S: Storefront> Shared<S> {
                 if let Some(transfer) = &mut inner.state.transfer {
                     transfer.state = TransferState::Cancelled;
                 }
-                inner.state.downloading = false;
                 inner.running = None;
             });
             return Err(Failure::Cancelled);
@@ -771,7 +772,6 @@ impl<S: Storefront> Shared<S> {
             if let Some(transfer) = &mut inner.state.transfer {
                 transfer.state = settled;
             }
-            inner.state.downloading = false;
             inner.running = None;
         });
         outcome
@@ -789,6 +789,61 @@ pub(crate) async fn blocking<T: Send + 'static>(
         .map_err(|_| Failure::Failed(failed))
 }
 
+/// The credentials every account call renews and saves first, for a
+/// storefront whose session rotates them, as Epic's and GOG's do.
+pub(crate) struct Credentials {
+    /// Waits until the credentials an account call rotated are saved. It
+    /// blocks.
+    pub(crate) saved: Arc<dyn Fn() + Send + Sync>,
+    /// What a save lost with its thread reports.
+    failed: &'static str,
+    /// A Transfer was cancelled while its credentials were being renewed.
+    cancelled: AtomicBool,
+}
+
+impl Credentials {
+    pub(crate) fn new(saved: Arc<dyn Fn() + Send + Sync>, failed: &'static str) -> Self {
+        Self {
+            saved,
+            failed,
+            cancelled: AtomicBool::new(false),
+        }
+    }
+
+    /// Renewed by `renew`, then saved, before an account call. A
+    /// cancellation meanwhile stops the call before it starts.
+    pub(crate) async fn prepare(
+        &self,
+        renew: impl Future<Output = Result<(), Failure>>,
+    ) -> Result<(), Failure> {
+        self.cancelled.store(false, Ordering::Release);
+        renew.await?;
+        self.save().await?;
+        match self.cancelled.load(Ordering::Acquire) {
+            true => Err(Failure::Cancelled),
+            false => Ok(()),
+        }
+    }
+
+    /// Waits until the credentials an account call rotated are saved.
+    pub(crate) async fn save(&self) -> Result<(), Failure> {
+        let saved = self.saved.clone();
+        blocking(self.failed, move || saved()).await
+    }
+
+    /// Saves them once the caller moved on: a completed Transfer's receipt
+    /// never waits for Keychain.
+    pub(crate) fn save_later(&self) {
+        let saved = self.saved.clone();
+        tokio::task::spawn_blocking(move || saved());
+    }
+
+    /// Stops the account call whose credentials `prepare` renews.
+    pub(crate) fn cancel(&self) {
+        self.cancelled.store(true, Ordering::Release);
+    }
+}
+
 fn active(state: TransferState) -> bool {
     matches!(
         state,
@@ -801,7 +856,7 @@ fn active(state: TransferState) -> bool {
 fn gate<S: Storefront>(inner: &Inner<S>, sessions: &sessions::State<S>) -> Gate<S::Game> {
     let state = &inner.state;
     let transferring = state.transfer_game.clone().filter(|_| state.downloading);
-    let uninstalled = state.uninstall_game.clone().filter(|_| state.uninstalling);
+    let uninstalled = state.uninstall_game.clone();
     let held =
         inner.signed_out || inner.diagnostic || state.maintenance.is_some() || sessions.recovering;
     // The games a Game session holds, or whose Transfer is queued or under way.
@@ -825,7 +880,7 @@ fn gate<S: Storefront>(inner: &Inner<S>, sessions: &sessions::State<S>) -> Gate<
         },
     };
     // An uninstall has the storefront's installations to itself.
-    let uninstall = match held || state.downloading || state.launching || state.uninstalling {
+    let uninstall = match held || state.downloading || state.launching || uninstalled.is_some() {
         true => Opening::Closed,
         false => Opening::Open { except: busy },
     };
@@ -848,7 +903,7 @@ fn gate<S: Storefront>(inner: &Inner<S>, sessions: &sessions::State<S>) -> Gate<
     // A launch waits for another launch and every Game session, and for an
     // uninstall or Cloud maintenance. A Transfer holds only its own game: a
     // launch that needs one goes first in the queue.
-    let launches = held || state.launching || state.uninstalling || sessions.busy();
+    let launches = held || state.launching || state.uninstall_game.is_some() || sessions.busy();
     let launch = match launches {
         true => Opening::Closed,
         false => Opening::Open {
@@ -1009,7 +1064,6 @@ impl<S: Storefront> Installations<S> {
                 launching: false,
                 verifying_before_launch: false,
                 launch_game: None,
-                uninstalling: false,
                 uninstall_game: None,
                 last_download: None,
                 report: None,
@@ -1392,7 +1446,6 @@ impl<S: Storefront> Installations<S> {
             if !shared.gate(inner).uninstall.allows(&game) {
                 return None;
             }
-            inner.state.uninstalling = true;
             inner.state.uninstall_game = Some(game.clone());
             inner.state.report = None;
             let remaining: Vec<_> = inner
@@ -1412,7 +1465,6 @@ impl<S: Storefront> Installations<S> {
         runtime().spawn(async move {
             let outcome = shared.remove(&receipt, &request, &remaining).await;
             shared.update(|inner| {
-                inner.state.uninstalling = false;
                 inner.state.uninstall_game = None;
                 match outcome {
                     Ok(true) => {
@@ -1430,8 +1482,8 @@ impl<S: Storefront> Installations<S> {
                             inner.state.transfer_game = None;
                         }
                     }
-                    Ok(false) => {}
-                    Err(reason) => {
+                    Ok(false) | Err(Failure::Cancelled) => {}
+                    Err(Failure::Failed(reason)) => {
                         inner
                             .state
                             .receipts
@@ -1600,22 +1652,8 @@ impl<S: Storefront> Installations<S> {
 }
 
 impl<S: Storefront> Shared<S> {
-    /// Removes the installation; `Ok(false)` when sign-out or a cancellation
-    /// came first. A failure is a localization key.
+    /// Removes the installation; `Ok(false)` when sign-out came first.
     async fn remove(
-        &self,
-        receipt: &S::Receipt,
-        request: &S::Request,
-        remaining: &[S::Receipt],
-    ) -> Result<bool, String> {
-        match self.removal(receipt, request, remaining).await {
-            Err(Failure::Cancelled) => Ok(false),
-            Err(Failure::Failed(reason)) => Err(reason),
-            Ok(removed) => Ok(removed),
-        }
-    }
-
-    async fn removal(
         &self,
         receipt: &S::Receipt,
         request: &S::Request,
@@ -1640,7 +1678,7 @@ impl<S: Storefront> Shared<S> {
                 .map_err(removal_reason)?;
             // The captured account's receipts are updated even if it signs
             // out while the files go.
-            save(&file, &remaining).map_err(|error| Failure::Failed(error.to_string()))
+            save(&file, &remaining).map_err(sessions::failed)
         })
         .await
         .unwrap_or_else(|_| Err(Failure::Failed("model.game.installationBusy".into())));
@@ -1868,11 +1906,11 @@ impl RuntimeDownload for Download<crate::voile::Install> {
     fn run(&self) -> BoxFuture<'_, Result<(), Failure>> {
         Box::pin(async move {
             let archive = crate::sessions::development_archive();
-            match self.install.add(&self.path, archive.as_deref()).await {
-                Ok(_) => Ok(()),
-                Err(crate::voile::Failure::Cancelled) => Err(Failure::Cancelled),
-                Err(failure) => Err(Failure::Failed(failure.to_string())),
-            }
+            self.install
+                .add(&self.path, archive.as_deref())
+                .await
+                .map(drop)
+                .map_err(Into::into)
         })
     }
 }
@@ -1885,13 +1923,7 @@ impl RuntimeDownload for Download<crate::valve::Install> {
         self.install.cancel();
     }
     fn run(&self) -> BoxFuture<'_, Result<(), Failure>> {
-        Box::pin(async move {
-            match self.install.run(&self.path).await {
-                Ok(()) => Ok(()),
-                Err(crate::valve::Failure::Cancelled) => Err(Failure::Cancelled),
-                Err(failure) => Err(Failure::Failed(failure.to_string())),
-            }
-        })
+        Box::pin(async move { self.install.run(&self.path).await.map_err(Into::into) })
     }
 }
 

@@ -177,18 +177,32 @@ pub(super) fn blob(directory: &Path, file: &FileVersion, bytes: &[u8]) -> Result
 }
 
 pub(super) fn content(directory: &Path, file: &FileVersion) -> Result<Vec<u8>> {
-    let path = directory.join("blobs").join(file.hash.as_str());
-    if file.size > MAX_FILE || !regular(&path)? {
-        return Err(Error::Integrity);
-    }
-    let mut bytes = Vec::new();
-    File::open(path)?
-        .take(file.size + 1)
-        .read_to_end(&mut bytes)?;
+    let mut blob = blob_file(directory, file)?;
+    let mut bytes = Vec::with_capacity(file.size as usize);
+    blob.read_to_end(&mut bytes)?;
     if bytes.len() as u64 != file.size || ContentHash::of(&bytes) != file.hash {
         return Err(Error::Integrity);
     }
     Ok(bytes)
+}
+
+/// `content`'s checks, hashing the blob as it streams instead of keeping it.
+pub(super) fn check(directory: &Path, file: &FileVersion) -> Result<()> {
+    let mut hasher = sha2::Sha256::default();
+    let read = std::io::copy(&mut blob_file(directory, file)?, &mut hasher)?;
+    if read != file.size || ContentHash::of_hasher(hasher) != file.hash {
+        return Err(Error::Integrity);
+    }
+    Ok(())
+}
+
+/// The archived blob of `file`, bounded one byte past its size.
+fn blob_file(directory: &Path, file: &FileVersion) -> Result<std::io::Take<File>> {
+    let path = directory.join("blobs").join(file.hash.as_str());
+    if file.size > MAX_FILE || !regular(&path)? {
+        return Err(Error::Integrity);
+    }
+    Ok(File::open(path)?.take(file.size + 1))
 }
 
 #[cfg(test)]

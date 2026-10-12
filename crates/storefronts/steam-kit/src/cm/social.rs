@@ -109,10 +109,8 @@ impl SteamConnection {
                 persona_state_requested: own_game::REQUESTED,
                 friends: vec![self.steam_id],
             },
-            None,
         )
         .await
-        .map(drop)
     }
 
     /// Sends text as Valve's web chat does, with BBCode enabled; literal

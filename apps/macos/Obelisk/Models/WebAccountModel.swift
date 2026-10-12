@@ -125,7 +125,7 @@ final class WebAccountModel<Store: WebStorefront> {
     private var playtimesFailed = false
 
     /// What the library shows and whose launches date it.
-    private struct Library {
+    private struct Library: Equatable {
         var games: [Game] = []
         /// Each played game's playtime, by id, once the storefront answered.
         var playtimes: [String: Duration] = [:]
@@ -442,10 +442,11 @@ final class WebAccountModel<Store: WebStorefront> {
             }
             let account = Store.accountID(credentials)
             let name = Store.accountName(credentials)
-            if library.cachedAccount != account { library = Library() }
-            library.cachedAccount = nil
+            var accepted = library.cachedAccount == account ? library : Library()
+            accepted.cachedAccount = nil
+            accepted.accountID = account
+            if library != accepted { library = accepted }
             session = connected
-            library.accountID = account
             accountName = name.isEmpty ? account : name
             avatarURL = Store.avatar(of: connected)
             presence.connect(connected, account: account)
@@ -503,7 +504,7 @@ final class WebAccountModel<Store: WebStorefront> {
         do {
             let loaded = try await Store.games(of: connected)
             guard isCurrent(current) else { return }
-            library.games = loaded
+            if library.games != loaded { library.games = loaded }
             reloadPlaytimes(connected, of: loaded, generation: current)
             if let selectedGame {
                 if let updated = loaded.first(where: { $0.id == selectedGame.id }) { open(updated) }

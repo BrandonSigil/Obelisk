@@ -264,7 +264,7 @@ private struct LibraryCardProgress: View {
         .help(L10n.string("ui.transfer.downloading"))
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(L10n.string("ui.transfer.downloading"))
-        .accessibilityValue(fraction.map { $0.formatted(.percent.precision(.fractionLength(0)).locale(L10n.locale)) } ?? "")
+        .accessibilityValue(fraction.map(DownloadFormatting.percent) ?? "")
     }
 }
 

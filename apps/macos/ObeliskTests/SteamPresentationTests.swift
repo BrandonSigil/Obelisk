@@ -571,7 +571,6 @@ final class SteamPresentationTests: XCTestCase {
 
         XCTAssertEqual(fixture.backend.actions, [.uninstall(receipt)])
         fixture.backend.publish {
-            $0.uninstalling = true
             $0.uninstallGame = 620
             $0.gate = .action(620)
         }
@@ -582,7 +581,6 @@ final class SteamPresentationTests: XCTestCase {
         XCTAssertEqual(fixture.backend.actions.count, 1)
         fixture.model.open(fixtureGames[1])
         fixture.backend.publish {
-            $0.uninstalling = false
             $0.uninstallGame = nil
             $0.receipts = []
             $0.gate = .open
@@ -1219,7 +1217,7 @@ final class SteamPresentationTests: XCTestCase {
     }
 }
 
-private actor FixtureCredentialStore: SteamCredentialStore {
+private actor FixtureCredentialStore: CredentialStore {
     private var value: SteamCredentials?
     init(value: SteamCredentials? = SteamCredentials(accountName: "Test account", steamId: 42, refreshToken: "fixture-only-never-sent")) {
         self.value = value

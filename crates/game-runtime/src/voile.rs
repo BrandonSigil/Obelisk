@@ -42,23 +42,6 @@ pub struct Release {
     pub sha256: String,
 }
 
-/// What an install downloads and checks.
-struct Archive<'a> {
-    url: &'a str,
-    size: u64,
-    sha256: &'a str,
-}
-
-impl Release {
-    fn archive(&self) -> Archive<'_> {
-        Archive {
-            url: &self.url,
-            size: self.size,
-            sha256: &self.sha256,
-        }
-    }
-}
-
 pub fn release() -> &'static Release {
     static VALUE: OnceLock<Release> = OnceLock::new();
     VALUE.get_or_init(|| serde_json::from_str(RELEASE).expect("checked-in Voile release"))
@@ -186,7 +169,7 @@ impl Install {
         if let Some(runtime) = located(root, release) {
             return Ok(runtime);
         }
-        let extracted = self.extract(root, release.archive(), archive).await?;
+        let extracted = self.extract(root, release, archive).await?;
         let runtime = extracted.path().join(format!("voile-{}", release.version));
         if !has_wine(&runtime) || version(&runtime).as_deref() != Some(release.version.as_str()) {
             return Err(Failure::Damaged);
@@ -212,7 +195,7 @@ impl Install {
     async fn extract(
         &self,
         root: &Path,
-        expected: Archive<'_>,
+        expected: &Release,
         archive: Option<&Path>,
     ) -> Result<tempfile::TempDir, Failure> {
         self.total.store(expected.size, Ordering::Release);
@@ -227,7 +210,7 @@ impl Install {
         let downloaded;
         let archive = match archive {
             Some(archive) => {
-                let (path, expected_sha) = (archive.to_owned(), expected.sha256.to_owned());
+                let (path, expected_sha) = (archive.to_owned(), expected.sha256.clone());
                 let matches = tokio::task::spawn_blocking(move || {
                     crate::sha(&path).is_ok_and(|sha| sha == expected_sha)
                 })
@@ -240,7 +223,7 @@ impl Install {
                 archive
             }
             None => {
-                downloaded = self.download(root, &expected).await?;
+                downloaded = self.download(root, expected).await?;
                 &*downloaded
             }
         };
@@ -266,7 +249,7 @@ impl Install {
     async fn download(
         &self,
         root: &Path,
-        release: &Archive<'_>,
+        release: &Release,
     ) -> Result<tempfile::TempPath, Failure> {
         let client = reqwest::Client::builder()
             .https_only(true)
@@ -275,7 +258,7 @@ impl Install {
             .build()
             .map_err(|_| Failure::Download)?;
         let mut response = self
-            .cancellable(client.get(release.url).send())
+            .cancellable(client.get(&release.url).send())
             .await?
             .and_then(reqwest::Response::error_for_status)
             .map_err(|_| Failure::Download)?;

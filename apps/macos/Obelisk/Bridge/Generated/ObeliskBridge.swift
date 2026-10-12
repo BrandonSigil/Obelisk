@@ -6827,7 +6827,6 @@ public struct InstallationsState: Equatable, Hashable {
     public var launching: Bool
     public var verifyingBeforeLaunch: Bool
     public var launchGame: String?
-    public var uninstalling: Bool
     public var uninstallGame: String?
     /**
      * The game whose Transfer stopped before its receipt: the player can
@@ -6851,7 +6850,7 @@ public struct InstallationsState: Equatable, Hashable {
          */revision: UInt64, installations: [Installation], transfer: GameTransfer?, 
         /**
          * The game the last Transfer progress belongs to.
-         */transferGame: String?, downloading: Bool, launching: Bool, verifyingBeforeLaunch: Bool, launchGame: String?, uninstalling: Bool, uninstallGame: String?, 
+         */transferGame: String?, downloading: Bool, launching: Bool, verifyingBeforeLaunch: Bool, launchGame: String?, uninstallGame: String?, 
         /**
          * The game whose Transfer stopped before its receipt: the player can
          * resume it.
@@ -6867,7 +6866,6 @@ public struct InstallationsState: Equatable, Hashable {
         self.launching = launching
         self.verifyingBeforeLaunch = verifyingBeforeLaunch
         self.launchGame = launchGame
-        self.uninstalling = uninstalling
         self.uninstallGame = uninstallGame
         self.resumable = resumable
         self.report = report
@@ -6901,7 +6899,6 @@ public struct FfiConverterTypeInstallationsState: FfiConverterRustBuffer {
                 launching: FfiConverterBool.read(from: &buf), 
                 verifyingBeforeLaunch: FfiConverterBool.read(from: &buf), 
                 launchGame: FfiConverterOptionString.read(from: &buf), 
-                uninstalling: FfiConverterBool.read(from: &buf), 
                 uninstallGame: FfiConverterOptionString.read(from: &buf), 
                 resumable: FfiConverterOptionString.read(from: &buf), 
                 report: FfiConverterOptionTypeInstallationReport.read(from: &buf), 
@@ -6921,7 +6918,6 @@ public struct FfiConverterTypeInstallationsState: FfiConverterRustBuffer {
         FfiConverterBool.write(value.launching, into: &buf)
         FfiConverterBool.write(value.verifyingBeforeLaunch, into: &buf)
         FfiConverterOptionString.write(value.launchGame, into: &buf)
-        FfiConverterBool.write(value.uninstalling, into: &buf)
         FfiConverterOptionString.write(value.uninstallGame, into: &buf)
         FfiConverterOptionString.write(value.resumable, into: &buf)
         FfiConverterOptionTypeInstallationReport.write(value.report, into: &buf)

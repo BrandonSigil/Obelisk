@@ -203,10 +203,9 @@ impl SteamLibrary {
             .map(|mut owned| {
                 let record = std::mem::take(&mut owned.record);
                 let game = SteamGame::from(owned);
-                let mut entry = entry_of(&SteamEntry {
+                let mut entry = entry_of(&CachedEntry {
                     id: <steam::Steam as Named>::name(&game.app_id),
-                    game: game.clone(),
-                    platforms: None,
+                    game: &game,
                 });
                 entry.insert("record".into(), record);
                 (entry, game)
@@ -366,21 +365,10 @@ fn set(entry: &mut Entry, key: &str, value: Value) -> bool {
     true
 }
 
-/// A Steam game as the cache keeps it: as the library shows it, with its
-/// platforms. Its entry also keeps its `Player.GetOwnedGames` `record` and
-/// its whole PICS app info, `pics`.
-#[derive(Serialize)]
-struct SteamEntry {
-    id: String,
-    #[serde(flatten)]
-    game: SteamGame,
-    /// Absent until Steam told the game's platforms.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    platforms: Option<Vec<String>>,
-}
-
-/// An Epic or GOG game as the cache keeps it: as the library shows it. Its
-/// entry also keeps its playtime, absent until the storefront told it or
+/// A game as the cache keeps it: as the library shows it. A Steam game's
+/// entry also keeps its `Player.GetOwnedGames` `record`, its `platforms`,
+/// absent until Steam told them, and its whole PICS app info, `pics`. An Epic
+/// or GOG game's keeps its playtime, absent until the storefront told it or
 /// when the game was never played, and everything else the storefront
 /// returned, `metadata`: Epic's catalog items, library records and assets,
 /// GOG's library record and catalog data.

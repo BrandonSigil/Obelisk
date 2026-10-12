@@ -117,7 +117,7 @@ struct LibraryCardActions<Model: LibraryStorefront> {
         preparing = Set([
             session?.game,
             installations.isLaunching ? installations.launchGame : nil,
-            installations.isUninstalling ? installations.uninstallGame : nil,
+            installations.uninstallGame,
         ].compactMap { $0 })
     }
 

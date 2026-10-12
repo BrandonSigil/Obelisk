@@ -14,6 +14,12 @@ pub(crate) fn helpers(storefront: &Path) -> Option<&Path> {
     storefront.parent()
 }
 
+/// The directory that bundles the Rosetta helper app, for the storefront
+/// helper `host` (`Helpers/SteamNative/obelisk-steam-host`).
+pub(crate) fn helpers_of_host(host: &Path) -> Option<&Path> {
+    host.parent().and_then(helpers)
+}
+
 pub(crate) struct Gate {
     pub(crate) helper: PathBuf,
     pub(crate) check: fn(&Path) -> Result<bool, Error>,

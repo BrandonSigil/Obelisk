@@ -1,6 +1,6 @@
 use super::*;
 use std::{
-    collections::BTreeSet,
+    collections::{BTreeSet, HashMap, hash_map::Entry},
     fs::{self, File},
     io::{Read, Write},
     os::unix::fs::MetadataExt,
@@ -196,12 +196,11 @@ impl Vault {
         if owners.switching.is_some() {
             return Err(Error::Recovery);
         }
+        let mut aliases = Aliases::default();
         for (name, file) in &normalized {
             for (claimed, owner) in &owners.files {
                 if !same_store(owner, &self.scope)
-                    && (claimed == &file.path
-                        || same_existing_file(claimed, &file.path)
-                        || names_alias(claimed, &file.path)?)
+                    && (claimed == &file.path || aliases.same_file(claimed, &file.path)?)
                 {
                     return Err(Error::Authentication);
                 }
@@ -250,13 +249,11 @@ impl Vault {
         let normalized = self.normalize(bindings)?;
         let owners: Owners = disk::read(&self.root.join("owners.json"))?.unwrap_or_default();
         let mut displaced = BTreeMap::new();
+        let mut aliases = Aliases::default();
         for file in normalized.values() {
             for (claimed, owner) in &owners.files {
                 owner.validate()?;
-                if claimed != &file.path
-                    && (same_existing_file(claimed, &file.path)
-                        || names_alias(claimed, &file.path)?)
-                {
+                if claimed != &file.path && aliases.same_file(claimed, &file.path)? {
                     // Reassignment needs one unambiguous persisted path/name.
                     return Err(Error::Authentication);
                 }
@@ -446,7 +443,7 @@ impl Vault {
                 let owner = before.owner.clone().unwrap_or_else(|| self.scope.clone());
                 let lock = self.store_lock_for(&owner, foreign)?;
                 let old = Vault::open_locked(self.root.clone(), owner, lock)?;
-                old.read_content(file)?;
+                old.check_content(file)?;
             }
         }
         self.project(
@@ -748,25 +745,64 @@ impl Vault {
     }
 }
 
-fn same_existing_file(a: &Path, b: &Path) -> bool {
-    match (fs::metadata(a), fs::metadata(b)) {
-        (Ok(a), Ok(b)) => a.dev() == b.dev() && a.ino() == b.ino(),
-        _ => false,
-    }
+/// Whether two distinct paths name one file, for every pair of a claim
+/// check: each path is read once, and each folder is probed in one temporary
+/// folder, removed with this value.
+#[derive(Default)]
+struct Aliases {
+    inodes: HashMap<PathBuf, Option<(u64, u64)>>,
+    probes: HashMap<PathBuf, tempfile::TempDir>,
 }
 
-fn names_alias(a: &Path, b: &Path) -> Result<bool> {
-    if a.parent() != b.parent() {
-        return Ok(false);
+impl Aliases {
+    /// `a` and `b` are the same existing file, or names the filesystem of
+    /// their folder treats as one.
+    fn same_file(&mut self, a: &Path, b: &Path) -> Result<bool> {
+        Ok(self.same_existing_file(a, b) || self.names_alias(a, b)?)
     }
-    let probe = tempfile::Builder::new()
-        .prefix(".obelisk-cloud-owner-")
-        .tempdir_in(b.parent().ok_or(Error::Invalid)?)?;
-    File::create_new(probe.path().join(a.file_name().ok_or(Error::Invalid)?))?;
-    match File::create_new(probe.path().join(b.file_name().ok_or(Error::Invalid)?)) {
-        Ok(_) => Ok(false),
-        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => Ok(true),
-        Err(e) => Err(e.into()),
+
+    fn same_existing_file(&mut self, a: &Path, b: &Path) -> bool {
+        match (self.inode(a), self.inode(b)) {
+            (Some(a), Some(b)) => a == b,
+            _ => false,
+        }
+    }
+
+    fn inode(&mut self, path: &Path) -> Option<(u64, u64)> {
+        *self.inodes.entry(path.to_owned()).or_insert_with(|| {
+            fs::metadata(path)
+                .ok()
+                .map(|metadata| (metadata.dev(), metadata.ino()))
+        })
+    }
+
+    fn names_alias(&mut self, a: &Path, b: &Path) -> Result<bool> {
+        if a.parent() != b.parent() {
+            return Ok(false);
+        }
+        let parent = b.parent().ok_or(Error::Invalid)?;
+        let probe = match self.probes.entry(parent.to_owned()) {
+            Entry::Occupied(probe) => probe.into_mut(),
+            Entry::Vacant(probe) => probe.insert(
+                tempfile::Builder::new()
+                    .prefix(".obelisk-cloud-owner-")
+                    .tempdir_in(parent)?,
+            ),
+        };
+        let a = probe.path().join(a.file_name().ok_or(Error::Invalid)?);
+        File::create_new(&a)?;
+        let b = probe.path().join(b.file_name().ok_or(Error::Invalid)?);
+        let aliased = match File::create_new(&b) {
+            Ok(_) => {
+                fs::remove_file(&b)?;
+                false
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => true,
+            Err(e) => return Err(e.into()),
+        };
+        // The next pair probes this folder empty again.
+        fs::remove_file(&a)?;
+        Ok(aliased)
     }
 }
 

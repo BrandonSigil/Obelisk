@@ -7,12 +7,12 @@
 use crate::{
     CloudChoice, CloudIndicator, EpicSession, GameSessionError, GameTransfer, GogSession,
     ObeliskLocations, SteamCredentials, SteamSession, StorefrontSessions,
-    game_session::Storefronts,
+    game_session::{Storefronts, blocking},
 };
 use game_runtime::{
     Locations, epic, gog,
     installations::{self, Installations, Report},
-    sessions::{Failure, Sessions, Storefront as _},
+    sessions::{Sessions, Storefront as _},
     steam,
 };
 use std::sync::Arc;
@@ -169,7 +169,6 @@ pub struct InstallationsState {
     pub launching: bool,
     pub verifying_before_launch: bool,
     pub launch_game: Option<String>,
-    pub uninstalling: bool,
     pub uninstall_game: Option<String>,
     /// The game whose Transfer stopped before its receipt: the player can
     /// resume it.
@@ -222,7 +221,7 @@ impl Named for steam::Steam {
             directory: receipt.directory,
             platform: receipt.platform,
             total_bytes: receipt.total_bytes,
-            needs_verification: receipt.needs_verification == Some(true),
+            needs_verification: receipt.needs_verification,
             update_available: false,
         }
     }
@@ -266,7 +265,7 @@ impl Named for epic::Epic {
             directory: receipt.directory,
             platform: receipt.platform,
             total_bytes: receipt.total_bytes,
-            needs_verification: receipt.needs_verification == Some(true),
+            needs_verification: receipt.needs_verification,
             update_available: false,
         }
     }
@@ -301,7 +300,7 @@ impl Named for gog::Gog {
             directory: receipt.directory,
             platform: receipt.platform,
             total_bytes: receipt.total_bytes,
-            needs_verification: receipt.needs_verification == Some(true),
+            needs_verification: receipt.needs_verification,
             update_available: false,
         }
     }
@@ -345,7 +344,6 @@ fn state<S: Named>(state: installations::State<S>) -> InstallationsState {
         launching: state.launching,
         verifying_before_launch: state.verifying_before_launch,
         launch_game: name(state.launch_game),
-        uninstalling: state.uninstalling,
         uninstall_game: name(state.uninstall_game),
         resumable: name(state.last_download.as_ref().map(S::request_game)),
         report: state.report.map(Into::into),
@@ -383,17 +381,6 @@ fn state<S: Named>(state: installations::State<S>) -> InstallationsState {
     }
 }
 
-/// A blocking call off the async runtime: an answer to a Game session's
-/// question reaches its supervisor, an indicator read reads journals.
-async fn call<T: Send + 'static>(
-    work: impl FnOnce() -> Result<T, Failure> + Send + 'static,
-) -> Result<T, GameSessionError> {
-    tokio::task::spawn_blocking(work)
-        .await
-        .map_err(|_| GameSessionError::new("backend.steam.runtime.startFailed"))?
-        .map_err(Into::into)
-}
-
 fn install<S: Named>(installations: &Installations<S>, offer: GameOffer) {
     if let Some(offer) = S::offer(offer) {
         installations.install(offer);
@@ -416,6 +403,9 @@ fn maintain_cloud<S: Named>(
     }
 }
 
+/// What a blocking call lost with its thread reports.
+const FAILED: &str = "backend.steam.runtime.startFailed";
+
 async fn answer<S: Named>(
     installations: Installations<S>,
     game: String,
@@ -423,7 +413,10 @@ async fn answer<S: Named>(
     choice: CloudChoice,
 ) -> Result<(), GameSessionError> {
     let game = S::named(&game).ok_or_else(|| GameSessionError::new(S::INVALID_SESSION))?;
-    call(move || installations.answer_cloud(&game, decision_id, choice.into())).await
+    blocking(FAILED, move || {
+        installations.answer_cloud(&game, decision_id, choice.into())
+    })
+    .await
 }
 
 async fn indicators<S: Named>(
@@ -431,7 +424,7 @@ async fn indicators<S: Named>(
     games: Vec<String>,
 ) -> Result<Vec<GameCloudIndicator>, GameSessionError> {
     let games: Vec<_> = games.iter().filter_map(|game| S::named(game)).collect();
-    let indicators = call(move || installations.cloud_indicators(&games)).await?;
+    let indicators = blocking(FAILED, move || installations.cloud_indicators(&games)).await?;
     Ok(indicators
         .into_iter()
         .map(|(game, indicator)| GameCloudIndicator {
@@ -702,7 +695,7 @@ mod tests {
             directory: "/library/Games/Epic/epic-hash-Windows".into(),
             platform: "Windows".into(),
             total_bytes: 7,
-            needs_verification: Some(true),
+            needs_verification: true,
         };
         let installation = <epic::Epic as Named>::installation(receipt.clone());
         assert_eq!(

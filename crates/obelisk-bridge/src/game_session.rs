@@ -187,9 +187,15 @@ pub(crate) trait Bridged: Storefront {
     fn account(account: GameAccount) -> Option<Self::Account>;
     fn game_account(account: &Self::Account) -> GameAccount;
     fn identity(game: &Self::Game, account: &Self::Account) -> GameIdentity;
-    fn host(store: &Self::Store) -> Option<SteamHostState>;
-    fn invite_request(store: &Self::Store) -> Option<SteamInviteRequest>;
-    fn lobby(store: &Self::Store) -> Option<u64>;
+    fn host(_: &Self::Store) -> Option<SteamHostState> {
+        None
+    }
+    fn invite_request(_: &Self::Store) -> Option<SteamInviteRequest> {
+        None
+    }
+    fn lobby(_: &Self::Store) -> Option<u64> {
+        None
+    }
     fn overlay_request(_: &Self::Store) -> Option<SteamOverlayRequest> {
         None
     }
@@ -272,15 +278,6 @@ impl Bridged for epic::Epic {
             app_name: game.app_name.clone(),
         }
     }
-    fn host(_: &epic::Store) -> Option<SteamHostState> {
-        None
-    }
-    fn invite_request(_: &epic::Store) -> Option<SteamInviteRequest> {
-        None
-    }
-    fn lobby(_: &epic::Store) -> Option<u64> {
-        None
-    }
 }
 
 impl Bridged for gog::Gog {
@@ -300,15 +297,6 @@ impl Bridged for gog::Gog {
             account_id: account.clone(),
             product_id: game.clone(),
         }
-    }
-    fn host(_: &gog::Store) -> Option<SteamHostState> {
-        None
-    }
-    fn invite_request(_: &gog::Store) -> Option<SteamInviteRequest> {
-        None
-    }
-    fn lobby(_: &gog::Store) -> Option<u64> {
-        None
     }
 }
 
@@ -790,11 +778,12 @@ impl StorefrontSessions {
     }
 }
 
-/// Every supervisor call parks on IPC, so it runs off the async runtime.
-async fn blocking(
+/// Every supervisor call parks on IPC, so it runs off the async runtime, as
+/// do an installation's answer to a Cloud question and its journal reads.
+pub(crate) async fn blocking<T: Send + 'static>(
     failed: &'static str,
-    work: impl FnOnce() -> Result<(), Failure> + Send + 'static,
-) -> Result<(), GameSessionError> {
+    work: impl FnOnce() -> Result<T, Failure> + Send + 'static,
+) -> Result<T, GameSessionError> {
     tokio::task::spawn_blocking(work)
         .await
         .map_err(|_| GameSessionError::new(failed))?

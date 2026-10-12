@@ -287,7 +287,8 @@ impl Client {
     pub fn stop_friends(&self) {
         self.social.stop();
     }
-    pub fn friends(&self) -> crate::friends::Snapshot {
+    #[cfg(test)]
+    pub(crate) fn friends(&self) -> crate::friends::Snapshot {
         self.social.snapshot()
     }
     pub async fn next_friends(&self, after_revision: u64) -> crate::friends::Snapshot {

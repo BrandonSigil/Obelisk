@@ -113,7 +113,6 @@ struct InstallationsSnapshot<Store: InstallationStorefront>: Equatable {
     var launching: Bool
     var verifyingBeforeLaunch: Bool
     var launchGame: Store.GameID?
-    var uninstalling: Bool
     var uninstallGame: Store.GameID?
     /// The game whose Transfer stopped before its receipt.
     var resumable: Store.GameID?
@@ -185,8 +184,8 @@ final class GameInstallations<Store: InstallationStorefront> {
     private(set) var isLaunching = false
     private(set) var isVerifyingBeforeLaunch = false
     private(set) var launchGame: Store.GameID?
-    private(set) var isUninstalling = false
     private(set) var uninstallGame: Store.GameID?
+    var isUninstalling: Bool { uninstallGame != nil }
     /// The game whose Transfer stopped before its receipt: the player can
     /// resume it.
     private(set) var resumableGame: Store.GameID?
@@ -290,7 +289,6 @@ final class GameInstallations<Store: InstallationStorefront> {
         isLaunching = false
         isVerifyingBeforeLaunch = false
         launchGame = nil
-        isUninstalling = false
         uninstallGame = nil
     }
 
@@ -307,7 +305,6 @@ final class GameInstallations<Store: InstallationStorefront> {
             isVerifyingBeforeLaunch = snapshot.verifyingBeforeLaunch
         }
         if launchGame != snapshot.launchGame { launchGame = snapshot.launchGame }
-        if isUninstalling != snapshot.uninstalling { isUninstalling = snapshot.uninstalling }
         if uninstallGame != snapshot.uninstallGame { uninstallGame = snapshot.uninstallGame }
         if resumableGame != snapshot.resumable { resumableGame = snapshot.resumable }
         if queuedGames != snapshot.queued { queuedGames = snapshot.queued }
@@ -452,7 +449,7 @@ final class GameInstallations<Store: InstallationStorefront> {
         if sessions.isRecovering { return L10n.string(Store.recoveringSession) }
         if let quitStage = primaryQuitStage { return quitStage.title }
         if selectedSession?.running == true { return L10n.string("model.game.running") }
-        if isUninstalling && uninstallGame == game { return L10n.string("model.game.uninstalling") }
+        if uninstallGame == game { return L10n.string("model.game.uninstalling") }
         if isLaunching && launchGame == game {
             switch runtimeInstall?.component {
             case .voile: return L10n.string("model.game.installingVoile")
@@ -595,10 +592,6 @@ final class GameInstallations<Store: InstallationStorefront> {
     }
 }
 
-extension TransferState {
-    var isActive: Bool { self == .preparing || self == .verifying || self == .downloading }
-}
-
 extension SteamGames: InstallationStorefront {
     static let nativePlatform = "macos"
     static func game(_ id: String) -> UInt32? { UInt32(id) }
@@ -637,7 +630,7 @@ typealias GogInstallations = GameInstallations<GogGames>
 final class NoInstallations<Store: InstallationStorefront>: InstallationsBackend {
     private let empty = InstallationsSnapshot<Store>(
         revision: 1, receipts: [], transfer: nil, transferGame: nil, downloading: false, launching: false,
-        verifyingBeforeLaunch: false, launchGame: nil, uninstalling: false, uninstallGame: nil, resumable: nil,
+        verifyingBeforeLaunch: false, launchGame: nil, uninstallGame: nil, resumable: nil,
         report: nil, warning: nil, gate: .closed, cloudSync: nil
     )
 
@@ -718,7 +711,7 @@ final class RustInstallations<Store: InstallationStorefront>: InstallationsBacke
             transfer: state.transfer, transferGame: state.transferGame.flatMap(Store.game),
             downloading: state.downloading, launching: state.launching,
             verifyingBeforeLaunch: state.verifyingBeforeLaunch, launchGame: state.launchGame.flatMap(Store.game),
-            uninstalling: state.uninstalling, uninstallGame: state.uninstallGame.flatMap(Store.game),
+            uninstallGame: state.uninstallGame.flatMap(Store.game),
             resumable: state.resumable.flatMap(Store.game), report: state.report, warning: state.warning,
             gate: InstallationsGate(state.gate, game: Store.game),
             cloudSync: state.cloudSync.flatMap { sync in

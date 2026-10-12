@@ -44,6 +44,7 @@ impl SocialService {
             task: Mutex::new(None),
         }
     }
+    #[cfg(test)]
     pub(crate) fn snapshot(&self) -> Snapshot {
         self.state.borrow().clone()
     }

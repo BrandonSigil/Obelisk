@@ -462,15 +462,11 @@ impl Client {
     }
 
     /// Serves PICS metadata from a short-lived cache.
-    async fn app_info(
-        &self,
-        cm: &SteamConnection,
-        app_id: u32,
-    ) -> Result<Arc<AppInfo>, ClientError> {
+    async fn app_info(&self, app_id: u32) -> Result<Arc<AppInfo>, ClientError> {
         if let Some(app) = self.cached_app(app_id) {
             return Ok(app);
         }
-        let app = Arc::new(cm.app_info(app_id).await?);
+        let app = Arc::new(self.cm.app_info(app_id).await?);
         self.remember_app(&app);
         Ok(app)
     }
@@ -526,17 +522,30 @@ impl Client {
 
     /// One caller expands the licenses; the others wait for its catalog.
     /// Player.GetOwnedGames is presentation data, not proof of depot/DLC rights.
-    async fn licensed_content(
-        &self,
-        cm: &SteamConnection,
-    ) -> Result<Arc<ContentLicenses>, ClientError> {
+    async fn licensed_content(&self) -> Result<Arc<ContentLicenses>, ClientError> {
         let mut catalog = self.catalog.lock().await;
         if let Some(owned) = catalog.as_ref() {
             return Ok(Arc::clone(owned));
         }
-        let owned = Arc::new(cm.content_licenses().await?);
+        let owned = Arc::new(self.cm.content_licenses().await?);
         *catalog = Some(Arc::clone(&owned));
         Ok(owned)
+    }
+
+    /// The account's licenses and the PICS metadata of `app_id`, which the
+    /// account must own.
+    async fn owned_app(
+        &self,
+        app_id: u32,
+    ) -> Result<(Arc<ContentLicenses>, Arc<AppInfo>), ClientError> {
+        let owned = self.licensed_content().await?;
+        if !owned.apps.contains(&app_id) {
+            return Err(ClientError::Failure(
+                "backend.steam.client.gameNotOwned".into(),
+            ));
+        }
+        let app = self.app_info(app_id).await?;
+        Ok((owned, app))
     }
 
     pub fn progress(&self) -> Option<TransferProgress> {
@@ -567,9 +576,8 @@ impl Client {
     }
 
     pub async fn details(&self, app_id: u32, language: &str) -> Result<GameDetails, ClientError> {
-        let cm = &self.cm;
-        let owned = self.licensed_content(cm).await?;
-        let app = self.app_info(cm, app_id).await?;
+        let owned = self.licensed_content().await?;
+        let app = self.app_info(app_id).await?;
         let windows = select_depots(&app, &owned, "windows", language);
         let macos = select_depots(&app, &owned, "macos", language);
         Ok(GameDetails {
@@ -616,14 +624,13 @@ impl Client {
             .ok_or_else(|| {
                 ClientError::Failure("backend.steam.client.incompleteInstallation".into())
             })?;
-        let cm = &self.cm;
-        let owned = self.licensed_content(cm).await?;
+        let owned = self.licensed_content().await?;
         if !owned.apps.contains(&receipt.app_id) {
             return Err(ClientError::Failure(
                 "backend.steam.client.gameNotOwned".into(),
             ));
         }
-        let app = Arc::new(cm.app_info(app_id).await?);
+        let app = Arc::new(self.cm.app_info(app_id).await?);
         self.remember_app(&app);
         crate::launch::plan(&app, platform, directory).map_err(Into::into)
     }
@@ -638,14 +645,8 @@ impl Client {
                 "backend.steam.client.unsupportedPlatformOrLanguage".into(),
             ));
         }
-        let picking = CancelToken::new();
-        *self.picking.lock().unwrap_or_else(PoisonError::into_inner) = Some(picking.clone());
-        let picked = picking.race(self.pick_platform(app_id, language)).await;
-        self.picking
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .take();
-        picked?
+        self.with_picking(async |picking| picking.race(self.pick_platform(app_id, language)).await)
+            .await?
     }
 
     /// Installs the game's build for `platform` under `parent`. Without a
@@ -658,16 +659,23 @@ impl Client {
         language: &str,
         parent: &Path,
     ) -> Result<Installation, ClientError> {
+        self.with_picking(async |picking| {
+            self.install_build(app_id, platform, language, parent, picking)
+                .await
+        })
+        .await
+    }
+
+    /// Runs `work` with the token `cancel_download` cancels while it runs.
+    async fn with_picking<T>(&self, work: impl AsyncFnOnce(&CancelToken) -> T) -> T {
         let picking = CancelToken::new();
         *self.picking.lock().unwrap_or_else(PoisonError::into_inner) = Some(picking.clone());
-        let installed = self
-            .install_build(app_id, platform, language, parent, &picking)
-            .await;
+        let output = work(&picking).await;
         self.picking
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .take();
-        installed
+        output
     }
 
     /// `download`, which `picking` cancels until its Transfer starts.
@@ -728,13 +736,7 @@ impl Client {
         app_id: u32,
         language: &str,
     ) -> Result<&'static str, ClientError> {
-        let owned = self.licensed_content(&self.cm).await?;
-        if !owned.apps.contains(&app_id) {
-            return Err(ClientError::Failure(
-                "backend.steam.client.gameNotOwned".into(),
-            ));
-        }
-        let app = self.app_info(&self.cm, app_id).await?;
+        let (owned, app) = self.owned_app(app_id).await?;
         installable_platform(&app, &owned, language)
             .ok_or_else(|| ClientError::Failure("backend.steam.client.noCompatibleDepot".into()))
     }
@@ -755,9 +757,8 @@ impl Client {
         else {
             return Ok(true);
         };
-        let cm = &self.cm;
-        let owned = self.licensed_content(cm).await?;
-        let app = self.app_info(cm, app_id).await?;
+        let owned = self.licensed_content().await?;
+        let app = self.app_info(app_id).await?;
         let selected = select_depots(&app, &owned, platform, language);
         let sources = self
             .cached_app_infos(&shared_sources(&app, &selected))
@@ -863,14 +864,7 @@ impl Client {
         language: &str,
         cancel: &CancelToken,
     ) -> Result<PreparedInstall, ClientError> {
-        let cm = &self.cm;
-        let owned = self.licensed_content(cm).await?;
-        if !owned.apps.contains(&app_id) {
-            return Err(ClientError::Failure(
-                "backend.steam.client.gameNotOwned".into(),
-            ));
-        }
-        let app = self.app_info(cm, app_id).await?;
+        let (owned, app) = self.owned_app(app_id).await?;
         let selected = select_depots(&app, &owned, platform, language);
         if selected.is_empty() {
             return Err(ClientError::Failure(
@@ -881,7 +875,8 @@ impl Client {
         // Every one is kept: Steam's first servers are often its busiest, and a
         // depot spreads over the fastest ones it measures.
         let servers = async {
-            let servers: Vec<ContentServer> = cm
+            let servers: Vec<ContentServer> = self
+                .cm
                 .content_servers()
                 .await?
                 .into_iter()

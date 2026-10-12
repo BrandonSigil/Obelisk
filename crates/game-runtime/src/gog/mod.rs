@@ -35,31 +35,7 @@ pub enum Error {
     #[error("backend.gog.storage")]
     Io(#[from] std::io::Error),
 }
-impl From<supervisor::Error> for Error {
-    fn from(error: supervisor::Error) -> Self {
-        match error {
-            supervisor::Error::Storage => Self::Storage,
-            supervisor::Error::NewerSession | supervisor::Error::Busy => Self::Busy,
-            supervisor::Error::Cancelled => Self::Cancelled,
-            supervisor::Error::RosettaUnavailable => Self::RosettaUnavailable,
-            supervisor::Error::InvalidSession
-            | supervisor::Error::Unavailable
-            | supervisor::Error::StartFailed => Self::Session,
-        }
-    }
-}
-impl From<crate::Error> for Error {
-    fn from(error: crate::Error) -> Self {
-        match error {
-            crate::Error::RosettaUnavailable => Self::RosettaUnavailable,
-            crate::Error::WineUnavailable => Self::WineUnavailable,
-            crate::Error::IncompatibleArchitecture
-            | crate::Error::InvalidApplication
-            | crate::Error::NotExecutable => Self::Unsupported,
-            _ => Self::Session,
-        }
-    }
-}
+supervisor::session_error_conversions!(Error);
 pub type Result<T> = std::result::Result<T, Error>;
 
 /// What a GOG Game session starts: one installed build.
@@ -97,11 +73,8 @@ impl Configuration {
         ]
         .into_iter()
         .chain(prefix)
-        .any(|p| {
-            !p.is_absolute()
-                || p.components()
-                    .any(|c| matches!(c, std::path::Component::ParentDir))
-        }) || !gog_kit::client::valid_product_id(&self.product_id)
+        .any(|path| !supervisor::plain_absolute(path))
+            || !gog_kit::client::valid_product_id(&self.product_id)
             || !gog_kit::auth::valid_user_id(account)
         {
             return Err(Error::Unsupported);
@@ -190,8 +163,8 @@ pub struct Receipt {
     pub platform: String,
     pub total_bytes: u64,
     /// A Transfer started over this installation and has not succeeded since.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub needs_verification: Option<bool>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub needs_verification: bool,
 }
 
 /// A GOG Transfer of one game's build.
@@ -233,10 +206,10 @@ impl crate::installations::Storefront for Gog {
         &receipt.directory
     }
     fn needs_verification(receipt: &Receipt) -> bool {
-        receipt.needs_verification == Some(true)
+        receipt.needs_verification
     }
     fn mark_needs_verification(receipt: &mut Receipt) {
-        receipt.needs_verification = Some(true);
+        receipt.needs_verification = true;
     }
     fn request_game(request: &Download) -> String {
         request.product_id.clone()

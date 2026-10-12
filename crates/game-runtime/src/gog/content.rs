@@ -4,17 +4,14 @@
 use super::{Configuration, Download, Error, Gog, Receipt};
 use crate::{
     Locations, cloud_status,
-    installations::{self, BoxFuture, Runtime, Runtimes, blocking},
-    sessions::{self, Admission, Failure, Storefront as _, Supervised},
+    installations::{self, BoxFuture, Credentials, Runtime, Runtimes, blocking},
+    sessions::{self, Admission, Failure, Storefront as _, Supervised, failed},
 };
 use gog_kit::client::Client as GogClient;
 use obelisk_core::{installation::TransferProgress, transfer::CancelToken};
 use std::{
     path::{Path, PathBuf},
-    sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering},
-    },
+    sync::Arc,
 };
 
 /// What an account's installations ask of GOG's network. Every call may wait
@@ -36,10 +33,6 @@ pub trait Network: Send + Sync + 'static {
     /// Whether GOG's current build differs from the one `receipt` installed.
     fn update_available<'a>(&'a self, receipt: &'a Receipt)
     -> BoxFuture<'a, Result<bool, Failure>>;
-}
-
-fn failed(error: impl std::fmt::Display) -> Failure {
-    Failure::Failed(error.to_string())
 }
 
 impl Network for GogClient {
@@ -97,14 +90,10 @@ impl Network for GogClient {
 /// One signed-in GOG account's installations, as they reach GOG.
 pub struct Content<N: Network> {
     network: Arc<N>,
-    /// Waits until the credentials an account call rotated are saved. It
-    /// blocks.
-    saved: Arc<dyn Fn() + Send + Sync>,
+    credentials: Credentials,
     /// The language whose depots Transfers install, such as `fr-FR`.
     language: String,
     locations: Locations,
-    /// A Transfer was cancelled while its credentials were being renewed.
-    cancelled: AtomicBool,
     runtimes: Runtimes,
 }
 
@@ -117,32 +106,11 @@ impl<N: Network> Content<N> {
     ) -> Self {
         Self {
             network,
-            saved,
+            credentials: Credentials::new(saved, Gog::SESSION_FAILED),
             language,
             runtimes: Runtimes::new(&locations),
             locations,
-            cancelled: AtomicBool::new(false),
         }
-    }
-
-    /// As every GOG account call: renewed and saved credentials first. A
-    /// cancellation meanwhile stops the call before it starts.
-    async fn prepare(&self) -> Result<(), Failure> {
-        self.cancelled.store(false, Ordering::Release);
-        self.network.prepare().await?;
-        let saved = self.saved.clone();
-        blocking(Gog::SESSION_FAILED, move || saved()).await?;
-        match self.cancelled.load(Ordering::Acquire) {
-            true => Err(Failure::Cancelled),
-            false => Ok(()),
-        }
-    }
-
-    /// Saves them once the caller moved on: a completed Transfer's receipt
-    /// never waits for Keychain.
-    fn save_later(&self) {
-        let saved = self.saved.clone();
-        tokio::task::spawn_blocking(move || saved());
     }
 
     fn configuration(&self, receipt: &Receipt) -> Configuration {
@@ -181,12 +149,13 @@ impl<N: Network> installations::Content<Gog> for Content<N> {
     fn download<'a>(&'a self, request: &'a Download) -> BoxFuture<'a, Result<Receipt, Failure>> {
         Box::pin(async move {
             self.runtimes.begin();
-            self.prepare().await?;
+            // As every GOG account call: renewed and saved credentials first.
+            self.credentials.prepare(self.network.prepare()).await?;
             let needed = installations::needs_voile(&request.platform).then_some(Runtime::Voile);
             let game = <Gog as installations::Storefront>::transfer_name(request);
             self.runtimes.get(&game, needed.as_slice()).await?;
             let installed = self.network.download(request, &self.language).await;
-            self.save_later();
+            self.credentials.save_later();
             let installed = installed?;
             Ok(Receipt {
                 product_id: installed.product_id,
@@ -194,7 +163,7 @@ impl<N: Network> installations::Content<Gog> for Content<N> {
                 directory: installed.directory,
                 platform: installed.platform,
                 total_bytes: installed.total_bytes,
-                needs_verification: Some(false),
+                needs_verification: false,
             })
         })
     }
@@ -202,7 +171,7 @@ impl<N: Network> installations::Content<Gog> for Content<N> {
         self.runtimes.progress().or_else(|| self.network.progress())
     }
     fn cancel(&self) {
-        self.cancelled.store(true, Ordering::Release);
+        self.credentials.cancel();
         self.runtimes.cancel();
         self.network.cancel();
     }

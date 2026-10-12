@@ -449,7 +449,6 @@ impl SteamConnection {
                 &proto::Hello {
                     protocol_version: PROTOCOL,
                 },
-                None,
             )
             .await?;
         Ok(connection)
@@ -628,7 +627,6 @@ impl SteamConnection {
                 persona_state_requested: PERSONA_PROFILE,
                 friends: vec![self.steam_id],
             },
-            None,
         )
         .await?;
         Ok(request)
@@ -1001,18 +999,12 @@ impl SteamConnection {
     }
 
     /// Sends a message nobody answers by job.
-    async fn send(
-        &self,
-        kind: u32,
-        message: &impl Message,
-        name: Option<&str>,
-    ) -> Result<u64, CmError> {
+    async fn send(&self, kind: u32, message: &impl Message) -> Result<(), CmError> {
         let job = self.job()?;
         self.outgoing
-            .send(Command::Send(self.message(kind, message, name, job)))
+            .send(Command::Send(self.message(kind, message, None, job)))
             .await
-            .map_err(|_| CmError::Disconnected)?;
-        Ok(job)
+            .map_err(|_| CmError::Disconnected)
     }
 
     /// Sends a message without a job, as Steam requires for service

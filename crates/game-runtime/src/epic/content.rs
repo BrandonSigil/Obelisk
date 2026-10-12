@@ -7,17 +7,14 @@ use crate::{
     Locations,
     cloud::Control,
     cloud_status,
-    installations::{self, BoxFuture, Runtime, Runtimes, blocking},
-    sessions::{self, Admission, BeforeBegin, Failure, Storefront as _, Supervised},
+    installations::{self, BoxFuture, Credentials, Runtime, Runtimes, blocking},
+    sessions::{self, Admission, BeforeBegin, Failure, Storefront as _, Supervised, failed},
 };
 use epic_kit::client::Client as EpicClient;
 use obelisk_core::{installation::TransferProgress, transfer::CancelToken};
 use std::{
     path::{Path, PathBuf},
-    sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering},
-    },
+    sync::Arc,
 };
 
 /// What an account's installations ask of Epic's network. Every call may wait
@@ -49,10 +46,6 @@ pub trait Network: Send + Sync + 'static {
         control: Arc<Control>,
         idle: &'a IdleGuard,
     ) -> BoxFuture<'a, Result<(), Error>>;
-}
-
-fn failed(error: impl std::fmt::Display) -> Failure {
-    Failure::Failed(error.to_string())
 }
 
 impl Network for EpicClient {
@@ -126,15 +119,11 @@ impl Network for EpicClient {
 /// One signed-in Epic account's installations, as they reach Epic.
 pub struct Content<N: Network> {
     network: Arc<N>,
-    /// Waits until the credentials an account call rotated are saved. It
-    /// blocks.
-    saved: Arc<dyn Fn() + Send + Sync>,
+    credentials: Credentials,
     account: String,
     /// The language games launch in.
     language: String,
     locations: Locations,
-    /// A Transfer was cancelled while its credentials were being renewed.
-    cancelled: AtomicBool,
     runtimes: Runtimes,
 }
 
@@ -148,38 +137,17 @@ impl<N: Network> Content<N> {
     ) -> Self {
         Self {
             network,
-            saved,
+            credentials: Credentials::new(saved, Epic::SESSION_FAILED),
             account,
             language,
             runtimes: Runtimes::new(&locations),
             locations,
-            cancelled: AtomicBool::new(false),
         }
     }
 
-    /// As every Epic account call: renewed and saved credentials first. A
-    /// cancellation meanwhile stops the call before it starts.
+    /// As every Epic account call: renewed and saved credentials first.
     async fn prepare(&self) -> Result<(), Failure> {
-        self.cancelled.store(false, Ordering::Release);
-        self.network.prepare().await?;
-        self.save().await?;
-        match self.cancelled.load(Ordering::Acquire) {
-            true => Err(Failure::Cancelled),
-            false => Ok(()),
-        }
-    }
-
-    /// Waits until the credentials an account call rotated are saved.
-    async fn save(&self) -> Result<(), Failure> {
-        let saved = self.saved.clone();
-        blocking(Epic::SESSION_FAILED, move || saved()).await
-    }
-
-    /// Saves them once the caller moved on: a completed Transfer's receipt
-    /// never waits for Keychain.
-    fn save_later(&self) {
-        let saved = self.saved.clone();
-        tokio::task::spawn_blocking(move || saved());
+        self.credentials.prepare(self.network.prepare()).await
     }
 
     /// The build's Cloud configuration: a Windows build keeps its saves in
@@ -259,7 +227,7 @@ impl<N: Network> installations::Content<Epic> for Content<N> {
             let game = <Epic as installations::Storefront>::transfer_name(request);
             self.runtimes.get(&game, needed.as_slice()).await?;
             let installed = self.network.download(request).await;
-            self.save_later();
+            self.credentials.save_later();
             let installed = installed?;
             Ok(Receipt {
                 namespace: request.namespace.clone(),
@@ -269,7 +237,7 @@ impl<N: Network> installations::Content<Epic> for Content<N> {
                 directory: installed.directory,
                 platform: installed.platform,
                 total_bytes: installed.total_bytes,
-                needs_verification: Some(false),
+                needs_verification: false,
             })
         })
     }
@@ -277,7 +245,7 @@ impl<N: Network> installations::Content<Epic> for Content<N> {
         self.runtimes.progress().or_else(|| self.network.progress())
     }
     fn cancel(&self) {
-        self.cancelled.store(true, Ordering::Release);
+        self.credentials.cancel();
         self.runtimes.cancel();
         self.network.cancel();
     }
@@ -288,7 +256,7 @@ impl<N: Network> installations::Content<Epic> for Content<N> {
         Box::pin(async move {
             let available = self.network.update_available(receipt).await;
             // The call may have renewed the account's credentials.
-            self.save_later();
+            self.credentials.save_later();
             available
         })
     }
@@ -304,10 +272,10 @@ impl<N: Network> installations::Content<Epic> for Content<N> {
                     network: self.network.clone(),
                     configuration: self.configuration(receipt, request),
                     locations: self.locations.clone(),
-                    saved: self.saved.clone(),
+                    saved: self.credentials.saved.clone(),
                 })
                 .await;
-            self.save_later();
+            self.credentials.save_later();
             outcome
         })
     }
@@ -322,7 +290,7 @@ impl<N: Network> installations::Content<Epic> for Content<N> {
                 .network
                 .archive(self.configuration(receipt, request))
                 .await;
-            self.save_later();
+            self.credentials.save_later();
             archived.map_err(failed)
         })
     }

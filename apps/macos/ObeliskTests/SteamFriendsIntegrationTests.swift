@@ -332,7 +332,7 @@ func friendsTestModel(
     )
 }
 
-private struct FriendsTestCredentials: SteamCredentialStore {
+private struct FriendsTestCredentials: CredentialStore {
     let accountID: UInt64
     func load() async throws -> SteamCredentials? {
         SteamCredentials(accountName: "Fixture", steamId: accountID, refreshToken: "fixture-only-never-sent")

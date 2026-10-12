@@ -174,7 +174,6 @@ final class EpicDownloadTests: XCTestCase {
 
         XCTAssertEqual(fixture.backend.actions, [.uninstall(receipt)])
         fixture.backend.publish {
-            $0.uninstalling = true
             $0.uninstallGame = fixture.game.libraryID
             $0.gate = .action(fixture.game.libraryID)
         }
@@ -186,7 +185,6 @@ final class EpicDownloadTests: XCTestCase {
         XCTAssertEqual(fixture.backend.actions.count, 1)
 
         fixture.backend.publish {
-            $0.uninstalling = false
             $0.uninstallGame = nil
             $0.receipts = []
             $0.gate = .open

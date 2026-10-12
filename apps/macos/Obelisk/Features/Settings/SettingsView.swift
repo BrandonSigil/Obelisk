@@ -284,15 +284,10 @@ private struct SettingsHeroArtwork: View {
 /// A card of settings rows, as a game page's card, its rows divided.
 private struct SettingsCard<Content: View>: View {
     @ViewBuilder let content: Content
-    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
-        let palette = ObeliskPalette(colorScheme: colorScheme)
-        let shape = RoundedRectangle(cornerRadius: 18, style: .continuous)
         VStack(alignment: .leading, spacing: 0) { content }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(palette.surface, in: shape)
-            .overlay { shape.strokeBorder(palette.border, lineWidth: 1).allowsHitTesting(false) }
+            .modifier(GamePageCard(padding: 0))
     }
 }
 

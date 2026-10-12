@@ -1,13 +1,7 @@
 import Foundation
 
-protocol SteamCredentialStore: Sendable {
-    func load() async throws -> SteamCredentials?
-    func save(_ credentials: SteamCredentials) async throws
-    func remove() async throws
-}
-
 /// Refresh tokens live only in Keychain. Library files contain no credentials.
-struct SteamKeychain: SteamCredentialStore {
+struct SteamKeychain: CredentialStore {
     private let store: KeychainStore<StoredCredentials>
 
     init(service: String = AppIdentity.storageIdentifier + ".steam") {

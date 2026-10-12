@@ -43,7 +43,7 @@ fn receipts_name_one_installation_per_game_and_platform() {
         directory: "/library/Games/GOG/gog-1207658924-windows".into(),
         platform: "windows".into(),
         total_bytes: 7,
-        needs_verification: None,
+        needs_verification: false,
     };
     assert_eq!(Gog::receipt_id(&receipt), "1207658924:windows");
     let update = Gog::update_request(&receipt);

@@ -19,10 +19,8 @@ struct Probe {
 }
 
 fn save(directory: &Path, probe: &Probe) -> Result<(), CloudError> {
-    let mut file = tempfile::NamedTempFile::new_in(directory).map_err(|_| CloudError::Storage)?;
-    serde_json::to_writer(file.as_file_mut(), probe).map_err(|_| CloudError::Storage)?;
-    file.as_file().sync_all().map_err(|_| CloudError::Storage)?;
-    file.persist(directory.join("interruption-probe.json"))
+    let bytes = serde_json::to_vec(probe).map_err(|_| CloudError::Storage)?;
+    obelisk_core::write_atomic(&directory.join("interruption-probe.json"), &bytes)
         .map_err(|_| CloudError::Storage)?;
     crate::cloud::upload::sync(directory)
 }

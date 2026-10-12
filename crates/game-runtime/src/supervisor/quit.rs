@@ -185,7 +185,7 @@ pub(crate) fn kill(pids: &[u32]) {
 }
 
 /// What `command` prints, unless it fails or outlasts `LISTING_TIMEOUT`.
-fn listing(mut command: Command) -> Option<String> {
+pub(crate) fn listing(mut command: Command) -> Option<String> {
     let mut child = command
         .env_clear()
         .env("LC_ALL", "C")

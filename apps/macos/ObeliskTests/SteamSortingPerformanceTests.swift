@@ -114,7 +114,7 @@ private func sortingLibrary(count: Int) -> [SteamGame] {
     }
 }
 
-private actor SortingCredentials: SteamCredentialStore {
+private actor SortingCredentials: CredentialStore {
     func load() -> SteamCredentials? { SteamCredentials(accountName: "Benchmark account", steamId: 42, refreshToken: "fixture-only-never-sent") }
     func save(_ credentials: SteamCredentials) {}
     func remove() {}

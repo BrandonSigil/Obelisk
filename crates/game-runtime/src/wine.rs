@@ -692,28 +692,14 @@ fn run(mut command: Command, timeout: Duration) -> Result<Option<i32>, Error> {
 /// starts apart: those froze without their session, and nothing else runs
 /// from `voile`.
 pub fn end_orphans(voile: &Path) -> usize {
-    let Ok(listing) = Command::new("/usr/sbin/lsof")
-        .args(["-n", "-P", "-d", "txt", "-Fpn"])
-        .stdin(Stdio::null())
-        .stderr(Stdio::null())
-        .output()
-    else {
+    let mut command = Command::new("/usr/sbin/lsof");
+    command.args(["-n", "-P", "-d", "txt", "-Fpn"]);
+    let Some(listing) = crate::supervisor::quit::listing(command) else {
         return 0;
     };
     let voile = voile.canonicalize().unwrap_or_else(|_| voile.to_owned());
-    let orphans = running_from(
-        &String::from_utf8_lossy(&listing.stdout),
-        &voile,
-        std::process::id(),
-    );
-    for pid in &orphans {
-        let _ = Command::new("/bin/kill")
-            .args(["-KILL", &pid.to_string()])
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status();
-    }
+    let orphans = running_from(&listing, &voile, std::process::id());
+    crate::supervisor::quit::kill(&orphans);
     orphans.len()
 }
 

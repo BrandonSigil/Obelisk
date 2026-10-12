@@ -183,7 +183,7 @@ impl Fixture {
             directory: directory.to_string_lossy().into_owned(),
             platform: platform.into(),
             total_bytes: 100,
-            needs_verification: None,
+            needs_verification: false,
         };
         (receipt, self.request(platform))
     }
@@ -227,7 +227,7 @@ async fn every_account_call_renews_and_saves_the_credentials_first() {
 
     assert_eq!(receipt.namespace, "sandbox");
     assert_eq!(receipt.name, "Fixture");
-    assert_eq!(receipt.needs_verification, Some(false));
+    assert!(!receipt.needs_verification);
     // The Transfer's own rotation is saved after it, without holding it.
     eventually(|| fixture.fake.calls().len() == 4).await;
     assert_eq!(

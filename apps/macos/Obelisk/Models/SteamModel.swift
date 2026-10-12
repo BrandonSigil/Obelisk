@@ -66,7 +66,7 @@ final class SteamModel {
     let installations: SteamInstallations
 
     @ObservationIgnored private let directory: URL
-    @ObservationIgnored private let keychain: any SteamCredentialStore
+    @ObservationIgnored private let keychain: any CredentialStore<SteamCredentials>
     @ObservationIgnored private let connectSession: @Sendable (SteamCredentials) async throws -> any SteamSessionProtocol
     @ObservationIgnored private let loadNews: @Sendable (UInt32) async throws -> [SteamNews]
     @ObservationIgnored private let loadWebCookies: @Sendable (any SteamSessionProtocol) async throws -> [SteamWebCookie]
@@ -127,7 +127,7 @@ final class SteamModel {
 
     init(
         directory: URL,
-        keychain: any SteamCredentialStore = SteamKeychain(),
+        keychain: any CredentialStore<SteamCredentials> = SteamKeychain(),
         connect: (@Sendable (SteamCredentials) async throws -> any SteamSessionProtocol)? = nil,
         news: @escaping @Sendable (UInt32) async throws -> [SteamNews] = { try await steamNews(appId: $0) },
         webCookies: @escaping @Sendable (any SteamSessionProtocol) async throws -> [SteamWebCookie] = {
@@ -561,7 +561,7 @@ final class SteamModel {
         do {
             let loaded = try await session.games()
             guard current == generation && self.session === session else { return }
-            games = loaded
+            if games != loaded { games = loaded }
             if let selected = selectedGame, let updated = loaded.first(where: { $0.appId == selected.appId }) {
                 selectedGame = updated
             }
@@ -668,12 +668,17 @@ final class SteamModel {
               friends?.connection != .authenticationRequired else { return }
         stopFriends()
         friends?.connection = .interrupted
-        libraryPlatforms.cancel()
-        session?.shutdown()
-        chat.suspend()
         let previous = session
-        session = nil
+        dropSession(previous)
         observeFriends(previous, generation: generation)
+    }
+
+    /// Shuts `session` down and forgets it until a reconnection replaces it.
+    private func dropSession(_ session: (any SteamSessionProtocol)?) {
+        session?.shutdown()
+        libraryPlatforms.cancel()
+        chat.suspend()
+        self.session = nil
     }
 
     private func stopFriends() {
@@ -708,16 +713,10 @@ final class SteamModel {
                     case .loading, .ready, .error:
                         continue
                     case .authenticationRequired:
-                        observed.shutdown()
-                        self.libraryPlatforms.cancel()
-                        self.chat.suspend()
-                        self.session = nil
+                        self.dropSession(observed)
                         return
                     case .disconnected:
-                        observed.shutdown()
-                        self.libraryPlatforms.cancel()
-                        self.chat.suspend()
-                        self.session = nil
+                        self.dropSession(observed)
                         active = nil
                     }
                 }

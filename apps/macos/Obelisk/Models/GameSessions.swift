@@ -232,8 +232,6 @@ final class GameSessions<Store: GameStorefront> {
     /// Changes with `active`'s game and phase only, not with its progress,
     /// such as a runtime's download while the launch waits for it.
     private(set) var activeGame: ActiveGame?
-    /// The last session observed, kept after it ends.
-    private(set) var last: Session?
     private(set) var isRecovering = true
     private(set) var recoveryError: String?
     var isBusy: Bool { activeGame != nil || isRecovering }
@@ -298,7 +296,6 @@ final class GameSessions<Store: GameStorefront> {
         if self.active != active { self.active = active }
         let activeGame = active.map { ActiveGame(game: $0.game, account: $0.account, running: $0.running) }
         if self.activeGame != activeGame { self.activeGame = activeGame }
-        if self.last != last { self.last = last }
         if isRecovering != state.recovering { isRecovering = state.recovering }
         let recoveryError = state.recoveryFailed ? L10n.string(Store.recoveringSession) : nil
         if self.recoveryError != recoveryError { self.recoveryError = recoveryError }

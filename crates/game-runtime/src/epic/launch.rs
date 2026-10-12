@@ -122,7 +122,9 @@ impl<S: Services> lifecycle::Launch for Launch<S> {
                 namespace: request.config.namespace.clone(),
                 app_name: request.config.app_name.clone(),
             },
-            helpers: helpers(&request.config)?.into(),
+            helpers: crate::supervisor::rosetta::helpers_of_host(&request.config.helper)
+                .ok_or(Error::Session)?
+                .into(),
         };
         let launch = Self {
             request,
@@ -224,16 +226,6 @@ impl<S: Services> lifecycle::Launch for Launch<S> {
     fn rosetta(helper: &Path) -> std::result::Result<bool, Core> {
         S::rosetta(helper)
     }
-}
-
-/// `config.helper` is `Helpers/SteamNative/obelisk-steam-host`; the Rosetta
-/// helper app sits beside `SteamNative`, as for Steam.
-fn helpers(config: &Configuration) -> Result<&Path> {
-    config
-        .helper
-        .parent()
-        .and_then(crate::supervisor::rosetta::helpers)
-        .ok_or(Error::Session)
 }
 
 /// The plan's ownership token in a private folder that lives as long as the

@@ -187,6 +187,29 @@ pub enum Failure {
     Failed(String),
 }
 
+/// The failure whose localization key `error` displays.
+pub(crate) fn failed(error: impl std::fmt::Display) -> Failure {
+    Failure::Failed(error.to_string())
+}
+
+impl From<crate::voile::Failure> for Failure {
+    fn from(failure: crate::voile::Failure) -> Self {
+        match failure {
+            crate::voile::Failure::Cancelled => Self::Cancelled,
+            failure => failed(failure),
+        }
+    }
+}
+
+impl From<crate::valve::Failure> for Failure {
+    fn from(failure: crate::valve::Failure) -> Self {
+        match failure {
+            crate::valve::Failure::Cancelled => Self::Cancelled,
+            failure => failed(failure),
+        }
+    }
+}
+
 /// What a handoff to a new supervisor returned instead of its session.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Handoff {
@@ -909,11 +932,7 @@ impl<P: Storefront> Canceller<P> {
                 install.run(voile, development_archive().as_deref()),
             )
             .await;
-        match installed {
-            Ok(_) => Ok(()),
-            Err(crate::voile::Failure::Cancelled) => Err(Failure::Cancelled),
-            Err(failure) => Err(Failure::Failed(failure.to_string())),
-        }
+        installed.map(drop).map_err(Into::into)
     }
 
     /// Downloads Valve's Steam components into `payload` unless it already
@@ -929,19 +948,14 @@ impl<P: Storefront> Canceller<P> {
         }
         let install = Arc::new(crate::valve::Install::new());
         let (cancel, watched) = (install.clone(), install.clone());
-        let installed = self
-            .installing(
-                Runtime::SteamComponents,
-                move || cancel.cancel(),
-                move || watched.progress(),
-                install.run(payload),
-            )
-            .await;
-        match installed {
-            Ok(()) => Ok(()),
-            Err(crate::valve::Failure::Cancelled) => Err(Failure::Cancelled),
-            Err(failure) => Err(Failure::Failed(failure.to_string())),
-        }
+        self.installing(
+            Runtime::SteamComponents,
+            move || cancel.cancel(),
+            move || watched.progress(),
+            install.run(payload),
+        )
+        .await
+        .map_err(Into::into)
     }
 
     /// Runs `install` of `runtime`, cancelled with the launch, while the

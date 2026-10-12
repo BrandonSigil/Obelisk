@@ -8,7 +8,7 @@ use crate::{
     cloud_status,
     installations::{self, BoxFuture, Runtime, Runtimes, blocking},
     protocol::Credentials,
-    sessions::{self, Admission, Failure, Storefront as _, Supervised},
+    sessions::{self, Admission, Failure, Storefront as _, Supervised, failed},
 };
 use obelisk_core::{installation::TransferProgress, launch::LaunchTarget, transfer::CancelToken};
 use std::{
@@ -70,7 +70,7 @@ impl Network for steam_kit::client::Client {
             steam_kit::client::Client::platform(self, app_id, language)
                 .await
                 .map(str::to_owned)
-                .map_err(|error| Failure::Failed(error.to_string()))
+                .map_err(failed)
         })
     }
     fn download<'a>(
@@ -86,7 +86,7 @@ impl Network for steam_kit::client::Client {
                 &request.directory,
             )
             .await
-            .map_err(|error| Failure::Failed(error.to_string()))
+            .map_err(failed)
         })
     }
     fn progress(&self) -> Option<TransferProgress> {
@@ -108,7 +108,7 @@ impl Network for steam_kit::client::Client {
                 Path::new(&receipt.directory),
             )
             .await
-            .map_err(|error| Failure::Failed(error.to_string()))
+            .map_err(failed)
         })
     }
     fn launch_target<'a>(
@@ -121,7 +121,7 @@ impl Network for steam_kit::client::Client {
             self.launch_plan(app_id, platform, install)
                 .await
                 .map(|plan| plan.target)
-                .map_err(|error| Failure::Failed(error.to_string()))
+                .map_err(failed)
         })
     }
     fn archive_rules(
@@ -238,7 +238,7 @@ impl<N: Network> installations::Content<Steam> for Content<N> {
                 platform: installed.platform,
                 language: installed.language,
                 total_bytes: installed.total_bytes,
-                needs_verification: None,
+                needs_verification: false,
             })
         })
     }
@@ -348,7 +348,7 @@ impl<N: Network> installations::Content<Steam> for Content<N> {
             blocking(Steam::SESSION_FAILED, move || {
                 // Its idle guard keeps every launch of Steam out meanwhile.
                 let idle = super::Client::idle_guard(&locations.steam_sessions, &locations.helper)
-                    .map_err(|error| Failure::Failed(error.to_string()))?;
+                    .map_err(failed)?;
                 network
                     .maintain(target, &credentials, control, &idle)
                     .map_err(cloud_failure)
@@ -401,7 +401,7 @@ impl sessions::Handover<Steam> for Handover {
             .await?
             .map_err(|error| match error {
                 crate::Error::Cancelled => Failure::Cancelled,
-                error => Failure::Failed(error.to_string()),
+                error => failed(error),
             })
         })
     }

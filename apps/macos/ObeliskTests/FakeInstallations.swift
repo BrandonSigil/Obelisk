@@ -35,7 +35,7 @@ final class FakeInstallations<Store: InstallationStorefront>: InstallationsBacke
     init(receipts: [InstallationReceipt<Store.GameID>] = []) {
         state = InstallationsSnapshot(
             revision: 1, receipts: receipts, transfer: nil, transferGame: nil, downloading: false, launching: false,
-            verifyingBeforeLaunch: false, launchGame: nil, uninstalling: false, uninstallGame: nil,
+            verifyingBeforeLaunch: false, launchGame: nil, uninstallGame: nil,
             resumable: nil, report: nil, warning: nil, gate: .open, cloudSync: nil
         )
     }

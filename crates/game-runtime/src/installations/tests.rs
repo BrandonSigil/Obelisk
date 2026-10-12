@@ -134,7 +134,7 @@ impl super::Content<Steam> for Content {
                 platform,
                 language: request.language.clone(),
                 total_bytes: 100,
-                needs_verification: None,
+                needs_verification: false,
             })
         })
     }
@@ -463,7 +463,7 @@ fn receipt(directory: &Path, platform: &str) -> Receipt {
         platform: platform.into(),
         language: "french".into(),
         total_bytes: 100,
-        needs_verification: None,
+        needs_verification: false,
     }
 }
 
@@ -578,7 +578,7 @@ async fn an_offer_without_a_platform_shows_its_transfer_at_once_and_keeps_the_bu
         ..fixture.offer("macos")
     });
     assert!(
-        fixture.receipt().needs_verification == Some(true),
+        fixture.receipt().needs_verification,
         "the installed build updates in place"
     );
     fixture.fake.release();
@@ -604,14 +604,14 @@ async fn a_failed_transfer_is_reported_and_stays_resumable_and_its_installation_
     );
     assert_eq!(state.transfer.unwrap().state, TransferState::Failed);
     assert_eq!(state.last_download, Some(fixture.request("macos")));
-    assert_eq!(state.receipts[0].needs_verification, Some(true));
-    assert_eq!(fixture.saved()[0].needs_verification, Some(true));
+    assert!(state.receipts[0].needs_verification);
+    assert!(fixture.saved()[0].needs_verification);
 
     fixture.installations.install(fixture.offer("macos"));
     idle(&fixture.installations).await;
     let state = fixture.installations.state();
     assert_eq!(state.report, None);
-    assert_eq!(state.receipts[0].needs_verification, None);
+    assert!(!state.receipts[0].needs_verification);
     assert_eq!(fixture.fake.calls(), ["download:620", "download:620"]);
 }
 
@@ -1007,7 +1007,7 @@ async fn nothing_touches_an_installation_its_game_session_or_another_action_hold
     fixture.installations.uninstall("620-macos");
     fixture.installations.launch("620-macos");
     let state = fixture.installations.state();
-    assert!(!state.downloading && !state.uninstalling && !state.launching);
+    assert!(!state.downloading && state.uninstall_game.is_none() && !state.launching);
     drop(admission);
 
     fixture.installations.set_diagnostic(true);
@@ -1025,8 +1025,8 @@ async fn an_uninstall_archives_removes_records_and_deletes_the_prefix_in_order()
     let receipt = fixture.receipt();
 
     fixture.installations.uninstall("620-windows");
-    assert!(fixture.installations.state().uninstalling);
-    eventually(|| !fixture.installations.state().uninstalling).await;
+    assert!(fixture.installations.state().uninstall_game.is_some());
+    eventually(|| fixture.installations.state().uninstall_game.is_none()).await;
 
     let state = fixture.installations.state();
     assert!(state.receipts.is_empty());
@@ -1048,7 +1048,7 @@ async fn a_failed_archive_keeps_the_game_and_a_lost_prefix_is_only_a_warning() {
     });
     let receipt = fixture.receipt();
     fixture.installations.uninstall("620-macos");
-    eventually(|| !fixture.installations.state().uninstalling).await;
+    eventually(|| fixture.installations.state().uninstall_game.is_none()).await;
     let state = fixture.installations.state();
     assert_eq!(
         state.report,
@@ -1064,7 +1064,7 @@ async fn a_failed_archive_keeps_the_game_and_a_lost_prefix_is_only_a_warning() {
         .fake
         .with(|script| script.prefix = Some(Err("busy".into())));
     fixture.installations.uninstall("620-windows");
-    eventually(|| !fixture.installations.state().uninstalling).await;
+    eventually(|| fixture.installations.state().uninstall_game.is_none()).await;
     let state = fixture.installations.state();
     assert!(state.receipts.is_empty());
     assert_eq!(
@@ -1082,7 +1082,7 @@ async fn a_removal_is_recorded_even_when_the_receipts_cannot_be_saved_after_it()
     std::fs::create_dir_all(&file).unwrap();
 
     fixture.installations.uninstall("620-macos");
-    eventually(|| !fixture.installations.state().uninstalling).await;
+    eventually(|| fixture.installations.state().uninstall_game.is_none()).await;
 
     let state = fixture.installations.state();
     assert!(!Path::new(&receipt.directory).exists());
@@ -1325,7 +1325,7 @@ async fn a_new_installation_goes_to_the_library_and_an_update_or_launch_stays_wh
     let file = fixture.root.join("steam-installations-43.json");
     let mut receipt = receipt(&installed, "macos");
     receipt.language = "english".into();
-    receipt.needs_verification = Some(true);
+    receipt.needs_verification = true;
     save(&file, &[receipt]).unwrap();
     let fake = Fake::new();
     let moved = Installations::new(

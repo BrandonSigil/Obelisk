@@ -9,7 +9,6 @@ use crate::supervisor::{
 };
 use std::{
     io::{Read, Write},
-    path::Path,
     sync::Arc,
 };
 
@@ -41,7 +40,9 @@ impl lifecycle::Launch for Launch {
             store: Store {
                 product_id: request.config.product_id.clone(),
             },
-            helpers: helpers(&request.config)?.into(),
+            helpers: crate::supervisor::rosetta::helpers_of_host(&request.config.helper)
+                .ok_or(Error::Session)?
+                .into(),
         };
         Ok((opening, Self { request }))
     }
@@ -95,16 +96,6 @@ impl lifecycle::Launch for Launch {
         record.cloud.allowed_choices.clear();
         record.cloud.phase = crate::cloud::Phase::Unsupported;
     }
-}
-
-/// `config.helper` is `Helpers/SteamNative/obelisk-steam-host`; the Rosetta
-/// helper app sits beside `SteamNative`, as for Steam.
-fn helpers(config: &Configuration) -> Result<&Path> {
-    config
-        .helper
-        .parent()
-        .and_then(crate::supervisor::rosetta::helpers)
-        .ok_or(Error::Session)
 }
 
 /// A Windows build, which Wine starts in its prefix.

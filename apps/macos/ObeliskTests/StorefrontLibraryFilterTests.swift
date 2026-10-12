@@ -191,7 +191,7 @@ final class StorefrontLibraryFilterTests: XCTestCase {
 
 private enum FilterFixtureFailure: Error { case unexpectedOperation, timeout }
 
-private actor FilterSteamCredentials: SteamCredentialStore {
+private actor FilterSteamCredentials: CredentialStore {
     func load() -> SteamCredentials? {
         SteamCredentials(accountName: "Filter fixture", steamId: 42, refreshToken: "fixture-only-never-sent")
     }

@@ -25,7 +25,8 @@ final class SteamLibraryPlatforms {
         cancel()
         var seen: Set<UInt32> = []
         let appIds = appIds.filter { seen.insert($0).inserted }
-        platforms = platforms.filter { seen.contains($0.key) }
+        let kept = platforms.filter { seen.contains($0.key) }
+        if kept.count != platforms.count { platforms = kept }
         guard !appIds.isEmpty else { return }
 
         let loadID = UUID()
@@ -46,7 +47,8 @@ final class SteamLibraryPlatforms {
                     let result = try await session.platforms(appIds: batch)
                     // UniFFI can return after cancellation or account replacement.
                     guard !Task.isCancelled, let self, self.loadID == loadID else { return }
-                    self.platforms.merge(result.map { ($0.appId, $0.platforms) }) { _, loaded in loaded }
+                    let merged = self.platforms.merging(result.map { ($0.appId, $0.platforms) }) { _, loaded in loaded }
+                    if merged != self.platforms { self.platforms = merged }
                 } catch {
                     guard !Task.isCancelled, let self, self.loadID == loadID else { return }
                     self.hasFailures = true

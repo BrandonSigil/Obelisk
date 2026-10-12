@@ -154,7 +154,6 @@ final class SteamChatModel {
     @ObservationIgnored private var generation = 0
     @ObservationIgnored private var observations: [Task<Void, Never>] = []
     @ObservationIgnored private var typingExpiries: [UInt64: Task<Void, Never>] = [:]
-    @ObservationIgnored private var typingSent: [UInt64: ContinuousClock.Instant] = [:]
     /// The latest message each conversation is known read up to.
     @ObservationIgnored private var acknowledged: [UInt64: UInt32] = [:]
     @ObservationIgnored private var notes = 0
@@ -212,7 +211,6 @@ final class SteamChatModel {
         unread = [:]
         visibleFriend = nil
         acknowledged = [:]
-        typingSent = [:]
     }
 
     /// Requests in flight end with their generation, and their flags with it.
@@ -451,16 +449,13 @@ final class SteamChatModel {
 
     func draft(for friend: UInt64) -> String { drafts[friend] ?? "" }
 
-    /// Tells the friend the account is typing, at most every 10 seconds as
-    /// Valve's clients do.
+    /// Tells the friend the account is typing; Rust sends it at most every
+    /// 10 seconds, as Valve's clients do.
     func setDraft(_ text: String, for friend: UInt64) {
         let previous = draft(for: friend)
         drafts[friend] = text
         guard let session, text.count > previous.count,
               !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-        let now = ContinuousClock.now
-        if let sent = typingSent[friend], now - sent < .seconds(10) { return }
-        typingSent[friend] = now
         Task { try? await session.sendTyping(friendSteamId: friend) }
     }
 
@@ -480,7 +475,6 @@ final class SteamChatModel {
                 self.conversations[friend]?.merge([.message(timestamp: sent.timestamp, ordinal: sent.ordinal,
                                                             fromMe: true, bbcode: sent.message)])
                 self.conversations[friend]?.isSending = false
-                self.typingSent[friend] = nil
                 self.acknowledgeIfReading(friend)
             } catch {
                 guard let self, account == self.account else { return }

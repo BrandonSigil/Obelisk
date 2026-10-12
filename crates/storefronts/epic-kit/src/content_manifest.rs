@@ -259,6 +259,19 @@ pub(crate) fn binary_header(data: &[u8]) -> Result<(BinaryHeader, Reader<'_>), E
     ))
 }
 
+/// The zlib `payload` inflated, unless it is damaged, expands past `limit`
+/// bytes, or does not end where `payload` does. The caller checks the length.
+pub(crate) fn inflate(payload: &[u8], limit: usize) -> Option<Vec<u8>> {
+    let mut decoder = flate2::read::ZlibDecoder::new(payload);
+    let mut bytes = Vec::with_capacity(limit);
+    decoder
+        .by_ref()
+        .take(limit as u64 + 1)
+        .read_to_end(&mut bytes)
+        .ok()?;
+    (decoder.total_in() == payload.len() as u64).then_some(bytes)
+}
+
 /// Expands (when zlib-compressed) and hash-checks the container body.
 pub(crate) fn binary_body<'a>(
     data: &'a [u8],
@@ -269,17 +282,9 @@ pub(crate) fn binary_body<'a>(
         return Err(EpicError::Protocol);
     }
     let body: std::borrow::Cow<'a, [u8]> = if header.flags & 1 != 0 {
-        let mut decoder = flate2::read::ZlibDecoder::new(payload);
-        let mut bytes = Vec::new();
-        decoder
-            .by_ref()
-            .take(header.expanded_size as u64 + 1)
-            .read_to_end(&mut bytes)
-            .map_err(|_| EpicError::Protocol)?;
-        if decoder.total_in() != payload.len() as u64 {
-            return Err(EpicError::Protocol);
-        }
-        bytes.into()
+        inflate(payload, header.expanded_size)
+            .ok_or(EpicError::Protocol)?
+            .into()
     } else {
         payload.into()
     };

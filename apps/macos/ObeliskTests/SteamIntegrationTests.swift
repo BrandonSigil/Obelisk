@@ -382,7 +382,7 @@ private let cachedSteamOrders: [(StorefrontLibrarySort, [UInt32])] = [
     (.playtime, [1, 2, 4, 3, 5]),
 ]
 
-private actor CachedSteamCredentials: SteamCredentialStore {
+private actor CachedSteamCredentials: CredentialStore {
     func load() -> SteamCredentials? {
         SteamCredentials(accountName: "Cache fixture", steamId: 42, refreshToken: "fixture-only-never-sent")
     }

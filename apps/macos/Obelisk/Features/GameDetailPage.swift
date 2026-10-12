@@ -283,13 +283,18 @@ struct GamePageSection<Content: View>: View {
 
 /// A game page's card: a rounded surface, concentric with the covers.
 struct GamePageCard: ViewModifier {
+    let padding: CGFloat
     @Environment(\.colorScheme) private var colorScheme
+
+    init(padding: CGFloat = 18) {
+        self.padding = padding
+    }
 
     func body(content: Content) -> some View {
         let palette = ObeliskPalette(colorScheme: colorScheme)
         let shape = RoundedRectangle(cornerRadius: 18, style: .continuous)
         content
-            .padding(18)
+            .padding(padding)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(palette.surface, in: shape)
             .overlay { shape.strokeBorder(palette.border, lineWidth: 1).allowsHitTesting(false) }

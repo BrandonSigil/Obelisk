@@ -659,17 +659,8 @@ pub(crate) fn decode_chunk(bytes: &[u8], chunk: &Chunk) -> ChunkResult {
     }
     let payload = &bytes[header_size..];
     let decoded = if stored_as & 1 != 0 {
-        let mut decoder = flate2::read::ZlibDecoder::new(payload);
-        let mut output = Vec::with_capacity(chunk.window_size as usize);
-        decoder
-            .by_ref()
-            .take(u64::from(chunk.window_size) + 1)
-            .read_to_end(&mut output)
-            .map_err(|_| EpicError::Integrity)?;
-        if decoder.total_in() != payload.len() as u64 {
-            return Err(EpicError::Integrity);
-        }
-        output
+        crate::content_manifest::inflate(payload, chunk.window_size as usize)
+            .ok_or(EpicError::Integrity)?
     } else {
         payload.to_vec()
     };
