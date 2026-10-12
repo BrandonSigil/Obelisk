@@ -1,5 +1,7 @@
-// Copy to Signing.local.xcconfig, then select an existing identity shown by:
+// Copy to Signing.local.xcconfig, then select existing identities shown by:
 // security find-identity -v -p codesigning
-// Use the same certificate for Debug and Release during local development.
+// Debug keeps one development certificate so Keychain recognizes every build.
 CODE_SIGN_IDENTITY = Apple Development
+// Release needs a Developer ID Application certificate for notarization.
+DISTRIBUTION_CODE_SIGN_IDENTITY = Developer ID Application
 DEVELOPMENT_TEAM = YOUR_TEAM_ID

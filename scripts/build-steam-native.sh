@@ -33,12 +33,14 @@ ADAPTER="$DESTINATION/libobelisk_steam_discovery_adapter.dylib"
 /usr/bin/lipo -create "$ARM_BUILD/libobelisk_steam_discovery_adapter.dylib" \
     "$INTEL_BUILD/libobelisk_steam_discovery_adapter.dylib" -output "$ADAPTER"
 IDENTITY="${EXPANDED_CODE_SIGN_IDENTITY:?A stable Apple signing identity is required}"
-/usr/bin/codesign --force --sign "$IDENTITY" --options runtime \
+# Notarization needs a secure timestamp; Debug skips the round trip to Apple.
+if [[ "${CONFIGURATION:-Debug}" == Release ]]; then TIMESTAMP=--timestamp; else TIMESTAMP=--timestamp=none; fi
+/usr/bin/codesign --force --sign "$IDENTITY" "$TIMESTAMP" --options runtime \
     --identifier com.zagrios.obelisk.steam-host \
     --entitlements "$PROJECT_ROOT/packaging/steam-host.entitlements" "$DESTINATION/obelisk-steam-host"
-/usr/bin/codesign --force --sign "$IDENTITY" \
+/usr/bin/codesign --force --sign "$IDENTITY" "$TIMESTAMP" \
     --identifier com.zagrios.obelisk.steam-discovery "$ADAPTER"
-/usr/bin/codesign --force --sign "$IDENTITY" --options runtime \
+/usr/bin/codesign --force --sign "$IDENTITY" "$TIMESTAMP" --options runtime \
     --identifier com.zagrios.obelisk.steam-sdk-x86_64 \
     --entitlements "$PROJECT_ROOT/packaging/steam-host.entitlements" \
     "$DESTINATION/obelisk-steam-sdk-x86_64"
@@ -67,4 +69,4 @@ cp "$ROSETTA_EXECUTABLE" "$ROSETTA_APP/Contents/MacOS/ObeliskRosetta"
 if ! cmp -s "$ROSETTA_SOURCE/Info.plist" "$ROSETTA_APP/Contents/Info.plist"; then
     cp "$ROSETTA_SOURCE/Info.plist" "$ROSETTA_APP/Contents/Info.plist"
 fi
-/usr/bin/codesign --force --sign "$IDENTITY" --options runtime "$ROSETTA_APP"
+/usr/bin/codesign --force --sign "$IDENTITY" "$TIMESTAMP" --options runtime "$ROSETTA_APP"

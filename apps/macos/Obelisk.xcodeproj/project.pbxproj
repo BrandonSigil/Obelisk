@@ -236,6 +236,7 @@
 		BAD9C2A5BE6895E16311595E /* FriendsPresentationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FriendsPresentationTests.swift; sourceTree = "<group>"; };
 		BBB7F9CA7F940C0DBF11C4EA /* CachedArtwork.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CachedArtwork.swift; sourceTree = "<group>"; };
 		BD2642EDE818ED25773E9541 /* FakeDownloads.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FakeDownloads.swift; sourceTree = "<group>"; };
+		BDF8E366D4F3358BA33DDF7D /* Signing.Release.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Signing.Release.xcconfig; sourceTree = "<group>"; };
 		C0A3B427D2628C8CC7A53F9E /* SteamRosettaTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SteamRosettaTests.swift; sourceTree = "<group>"; };
 		C0AFB12EA2883945E5144743 /* FriendConversation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FriendConversation.swift; sourceTree = "<group>"; };
 		C1C4A0FC63EB12053F6FC464 /* GogModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GogModelTests.swift; sourceTree = "<group>"; };
@@ -439,6 +440,7 @@
 			isa = PBXGroup;
 			children = (
 				C6E717BEA15BD379DE482B47 /* App.xcconfig */,
+				BDF8E366D4F3358BA33DDF7D /* Signing.Release.xcconfig */,
 				D7FDA889A991EC0F287B957D /* Signing.xcconfig */,
 			);
 			path = Config;
@@ -876,8 +878,10 @@
 			baseConfigurationReference = C6E717BEA15BD379DE482B47 /* App.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = Config/Obelisk.entitlements;
 				COMBINE_HIDPI_IMAGES = YES;
 				ENABLE_APP_SANDBOX = NO;
+				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				HEADER_SEARCH_PATHS = "$(SRCROOT)/Obelisk/Bridge/Generated";
 				INFOPLIST_KEY_CFBundleDevelopmentRegion = en;
@@ -964,8 +968,10 @@
 			baseConfigurationReference = C6E717BEA15BD379DE482B47 /* App.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = Config/Obelisk.entitlements;
 				COMBINE_HIDPI_IMAGES = YES;
 				ENABLE_APP_SANDBOX = NO;
+				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				HEADER_SEARCH_PATHS = "$(SRCROOT)/Obelisk/Bridge/Generated";
 				INFOPLIST_KEY_CFBundleDevelopmentRegion = en;
@@ -1000,7 +1006,7 @@
 		};
 		F9C575C1730F637F12E84434 /* Release */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = D7FDA889A991EC0F287B957D /* Signing.xcconfig */;
+			baseConfigurationReference = BDF8E366D4F3358BA33DDF7D /* Signing.Release.xcconfig */;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				ARCHS = "$(NATIVE_ARCH_ACTUAL)";

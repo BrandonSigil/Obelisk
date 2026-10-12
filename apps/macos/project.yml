@@ -7,7 +7,7 @@ options:
   developmentLanguage: en
 configFiles:
   Debug: Config/Signing.xcconfig
-  Release: Config/Signing.xcconfig
+  Release: Config/Signing.Release.xcconfig
 settings:
   base:
     SWIFT_VERSION: "6.0"
@@ -37,6 +37,8 @@ targets:
         INFOPLIST_KEY_NSHighResolutionCapable: YES
         INFOPLIST_KEY_NSMicrophoneUsageDescription: "Games launched by Obelisk can use your microphone for in-game voice chat."
         ENABLE_APP_SANDBOX: NO
+        ENABLE_HARDENED_RUNTIME: YES
+        CODE_SIGN_ENTITLEMENTS: Config/Obelisk.entitlements
         SWIFT_INCLUDE_PATHS: "$(SRCROOT)/Obelisk/Bridge/Generated"
         HEADER_SEARCH_PATHS: "$(SRCROOT)/Obelisk/Bridge/Generated"
         LIBRARY_SEARCH_PATHS: "$(SRCROOT)/../../build/rust/$(CONFIGURATION)"
