@@ -13,8 +13,9 @@ xcodebuild -project "$PROJECT_ROOT/apps/macos/Obelisk.xcodeproj" -scheme Obelisk
     -configuration Debug -derivedDataPath "$PROJECT_ROOT/build/xcode" \
     -destination 'platform=macOS' test
 "$PROJECT_ROOT/scripts/verify-app-signature.sh" "$PROJECT_ROOT/build/xcode/Build/Products/Debug/Obelisk.app"
-# Valve's Steam components exist once a Steam launch downloaded them from
-# Valve's CDN; this check reads the copy Obelisk keeps and changes nothing.
+# Valve's Steam components exist once a Steam game's download or launch got
+# them from Valve's CDN; this check reads the copy Obelisk keeps and changes
+# nothing.
 VERSION="$(/usr/bin/plutil -extract version raw -o - "$PROJECT_ROOT/crates/game-runtime/runtime-manifest.json")"
 PAYLOAD="$HOME/Library/Caches/com.zagrios.obelisk/SteamRuntime/valve-$VERSION.zip"
 if [[ -f "$PAYLOAD" ]]; then

@@ -11,8 +11,8 @@ case "${CONFIGURATION:-Debug}" in
     Release) PROFILE_NAME=release; PROFILE_DIRECTORY=release ;;
     *) exit 1 ;;
 esac
-# Obelisk ships no Valve binary: the first Steam launch downloads the pinned
-# packages from Valve's CDN. Remove the payload earlier builds bundled.
+# Obelisk ships no Valve binary: a Steam game's download, or a launch that
+# misses them, gets the pinned packages from Valve's CDN. Remove the payload earlier builds bundled.
 rm -rf "$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/SteamRuntime"
 export CARGO_TARGET_DIR="$PROJECT_ROOT/build/steam-native-target"
 cargo build --locked --manifest-path "$PROJECT_ROOT/crates/steam-native/Cargo.toml" \

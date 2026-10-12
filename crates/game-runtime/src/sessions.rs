@@ -197,7 +197,8 @@ pub enum Handoff {
     Lost(String),
 }
 
-/// A runtime a launch downloads before its game is prepared.
+/// A runtime a launch downloads before its game is prepared, unless its
+/// Transfer got it already.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Runtime {
     /// Voile, the Wine runtime Windows games run in.
@@ -890,9 +891,12 @@ impl<P: Storefront> Canceller<P> {
     }
 
     /// Installs Voile unless it is in place, showing its download on the
-    /// admitted session. Cancelling the launch cancels the install.
+    /// admitted session, then removes the releases it replaces. Cancelling
+    /// the launch cancels the install.
     pub async fn install_voile(&self, voile: &std::path::Path) -> Result<(), Failure> {
         if crate::voile::runtime(voile).is_some() {
+            let root = voile.to_owned();
+            let _ = tokio::task::spawn_blocking(move || crate::voile::remove_replaced(&root)).await;
             return Ok(());
         }
         let install = Arc::new(crate::voile::Install::new());
@@ -977,7 +981,7 @@ impl<P: Storefront> Canceller<P> {
 
 /// A local copy of the pinned Voile release, which replaces its download in
 /// development builds while the release is private.
-fn development_archive() -> Option<std::path::PathBuf> {
+pub(crate) fn development_archive() -> Option<std::path::PathBuf> {
     development_copy("OBELISK_VOILE_ARCHIVE")
 }
 

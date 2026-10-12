@@ -80,8 +80,19 @@ private struct SteamFriendsMenuButton: View {
 
 /// Both stores use the same progress text, accessibility and transfer controls.
 extension GameTransfer {
+    /// The runtimes a Transfer gets before its game's files, by the message
+    /// that names them while they download.
+    private static let runtimeMessages: Set<String> = ["model.game.installingVoile", "model.game.installingSteamComponents"]
+
+    /// The runtime the Transfer downloads now, before its game's files.
+    var runtimeTitle: String? {
+        guard isInProgress, Self.runtimeMessages.contains(message) else { return nil }
+        return L10n.string(message)
+    }
+
     var activityTitle: String {
-        switch state {
+        if let runtimeTitle { return runtimeTitle }
+        return switch state {
         case .preparing: L10n.string("ui.transfer.checking_updates")
         case .verifying: L10n.string("ui.transfer.verifying_files")
         case .downloading: L10n.string("ui.transfer.downloading")
@@ -106,7 +117,8 @@ extension GameTransfer {
     }
 
     var buttonTitle: String {
-        switch state {
+        if let runtimeTitle { return runtimeTitle }
+        return switch state {
         case .preparing: L10n.string("ui.transfer.preparing_short")
         case .verifying: L10n.string("ui.transfer.verifying_short")
         case .downloading: L10n.string("ui.transfer.downloading_short")
@@ -125,13 +137,18 @@ extension GameTransfer {
         return Double(min(completedBytes, totalBytes)) / Double(totalBytes)
     }
 
+    /// The files verified so far; a runtime's download counts no game files.
+    var countedFilesText: String? {
+        totalBytes > 0 && runtimeTitle == nil ? verifiedProgressText : nil
+    }
+
     var progressSummary: String {
         [
             activityTitle,
-            totalBytes > 0 ? verifiedProgressText : nil,
+            countedFilesText,
             downloadedGameDataText,
             currentFile.isEmpty ? nil : L10n.message(currentFile),
-            message.isEmpty ? nil : L10n.message(message),
+            message.isEmpty || runtimeTitle != nil ? nil : L10n.message(message),
         ]
         .compactMap { $0 }
         .joined(separator: "\n")

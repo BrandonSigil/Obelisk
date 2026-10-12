@@ -1,8 +1,8 @@
 //! Steam's part of the installations through their Content interface, with a
 //! network the test stands in for and real files in a temporary library.
 use super::*;
-use crate::installations::Content as _;
-use std::{path::PathBuf, sync::Mutex};
+use crate::installations::{Content as _, tests::FakeRuntimes};
+use std::{path::PathBuf, sync::Mutex, time::Duration};
 
 /// The Cloud rules an archive finds.
 type Rules = Result<Option<(CloudMetadata, CloudListing)>, steam_cloud::Failure>;
@@ -10,6 +10,11 @@ type Rules = Result<Option<(CloudMetadata, CloudListing)>, steam_cloud::Failure>
 /// What the test's Steam network was asked, and what it answers.
 #[derive(Default)]
 struct Fake {
+    /// The platform pick, the runtimes and the game's files, in the order
+    /// the Transfer asked for them.
+    calls: Arc<Mutex<Vec<String>>>,
+    /// The build Steam picks; the Mac one without it.
+    picked: Mutex<Option<String>>,
     downloads: Mutex<Vec<Download>>,
     /// Each maintenance's target, and whether a Steam launch could start
     /// meanwhile.
@@ -18,12 +23,26 @@ struct Fake {
     locations: Mutex<Option<Locations>>,
 }
 
+impl Fake {
+    fn calls(&self) -> Vec<String> {
+        self.calls.lock().unwrap().clone()
+    }
+}
+
 impl Network for Fake {
+    fn platform<'a>(&'a self, _: u32, _: &'a str) -> BoxFuture<'a, Result<String, Failure>> {
+        Box::pin(async move {
+            self.calls.lock().unwrap().push("platform".into());
+            let picked = self.picked.lock().unwrap().clone();
+            Ok(picked.unwrap_or_else(|| "macos".into()))
+        })
+    }
     fn download<'a>(
         &'a self,
         request: &'a Download,
     ) -> BoxFuture<'a, Result<steam_kit::client::Installation, Failure>> {
         Box::pin(async move {
+            self.calls.lock().unwrap().push("game".into());
             self.downloads.lock().unwrap().push(request.clone());
             Ok(steam_kit::client::Installation {
                 app_id: request.app_id,
@@ -92,11 +111,17 @@ struct Fixture {
     _root: tempfile::TempDir,
     locations: Locations,
     fake: Arc<Fake>,
+    runtimes: Arc<FakeRuntimes>,
     content: Content<Fake>,
 }
 
 impl Fixture {
+    /// Every runtime is in place.
     fn new() -> Self {
+        Self::with_runtimes(&[Runtime::SteamComponents, Runtime::Voile])
+    }
+
+    fn with_runtimes(present: &[Runtime]) -> Self {
         let root = tempfile::tempdir().unwrap();
         let library = root.path().canonicalize().unwrap();
         let locations = Locations::new(
@@ -111,11 +136,18 @@ impl Fixture {
             account_name: "fixture".into(),
             refresh_token: "fixture-only-never-sent".into(),
         };
+        let calls = fake.calls.clone();
+        let runtimes = FakeRuntimes::new(present, move |runtime| {
+            calls.lock().unwrap().push(runtime);
+        });
+        let mut content = Content::new(fake.clone(), credentials, locations.clone());
+        content.runtimes = Runtimes::from_source(runtimes.clone());
         Self {
-            content: Content::new(fake.clone(), credentials, locations.clone()),
+            content,
             _root: root,
             locations,
             fake,
+            runtimes,
         }
     }
     /// Portal 2, installed for `platform`.
@@ -282,4 +314,80 @@ async fn an_uninstalled_windows_game_loses_its_prefix_and_a_mac_game_has_none() 
         fixture.content.directory_name(&mac, &mac_request),
         "steam-620-macos"
     );
+}
+
+#[tokio::test]
+async fn a_transfer_gets_valve_components_then_voile_for_a_windows_build_before_the_game() {
+    for (platform, calls) in [
+        ("windows", vec!["steam components", "voile", "game"]),
+        ("macos", vec!["steam components", "game"]),
+    ] {
+        let fixture = Fixture::with_runtimes(&[]);
+        let (_, request) = fixture.installed(platform);
+
+        fixture.content.download(&request).await.unwrap();
+
+        assert_eq!(fixture.fake.calls(), calls, "{platform}");
+    }
+}
+
+#[tokio::test]
+async fn runtimes_in_place_are_not_downloaded_again() {
+    let fixture = Fixture::with_runtimes(&[Runtime::SteamComponents, Runtime::Voile]);
+    let (_, request) = fixture.installed("windows");
+
+    fixture.content.download(&request).await.unwrap();
+
+    assert_eq!(fixture.fake.calls(), ["game"]);
+}
+
+#[tokio::test]
+async fn a_transfer_without_a_platform_picks_the_build_before_its_runtimes() {
+    let fixture = Fixture::with_runtimes(&[Runtime::SteamComponents]);
+    *fixture.fake.picked.lock().unwrap() = Some("windows".into());
+    let (_, mut request) = fixture.installed("windows");
+    request.platform = None;
+
+    let receipt = fixture.content.download(&request).await.unwrap();
+
+    assert_eq!(fixture.fake.calls(), ["platform", "voile", "game"]);
+    let downloaded = fixture.fake.downloads.lock().unwrap()[0].clone();
+    assert_eq!(downloaded.platform.as_deref(), Some("windows"));
+    assert_eq!(receipt.platform, "windows");
+}
+
+#[tokio::test]
+async fn a_runtime_that_fails_to_download_fails_the_transfer_before_the_game() {
+    let fixture = Fixture::with_runtimes(&[]);
+    let failure = Failure::Failed("backend.steam.components.unavailable".into());
+    fixture.runtimes.fail(failure.clone());
+    let (_, request) = fixture.installed("windows");
+
+    assert_eq!(fixture.content.download(&request).await, Err(failure));
+    assert_eq!(fixture.fake.calls(), ["steam components"]);
+    let stopped = fixture.content.progress().unwrap();
+    assert_eq!(stopped.message, "backend.steam.components.unavailable");
+}
+
+#[tokio::test]
+async fn cancelling_the_transfer_cancels_its_runtime_download_and_the_game_never_starts() {
+    let fixture = Fixture::with_runtimes(&[Runtime::SteamComponents]);
+    fixture.runtimes.hold();
+    let (_, request) = fixture.installed("windows");
+
+    let (downloaded, ()) = tokio::join!(fixture.content.download(&request), async {
+        let deadline = std::time::Instant::now() + Duration::from_secs(3);
+        while fixture.content.progress().is_none() {
+            assert!(std::time::Instant::now() < deadline, "timed out");
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        let shown = fixture.content.progress().unwrap();
+        assert_eq!(shown.game, "620");
+        assert_eq!(shown.message, "model.game.installingVoile");
+        fixture.content.cancel();
+    });
+
+    assert_eq!(downloaded, Err(Failure::Cancelled));
+    assert_eq!(fixture.fake.calls(), ["voile"]);
+    assert!(!fixture.runtimes.present().contains(&Runtime::Voile));
 }

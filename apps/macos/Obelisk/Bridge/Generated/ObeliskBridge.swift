@@ -6969,8 +6969,8 @@ public struct ObeliskLocations: Equatable, Hashable {
     public var helper: String
     public var helpers: String
     /**
-     * Valve's Steam components the Steam host loads, which the first Steam
-     * launch downloads from Valve's CDN.
+     * Valve's Steam components the Steam host loads, which a Steam game's
+     * download, or a launch that misses them, gets from Valve's CDN.
      */
     public var steamRuntimePackage: String
     public var steamRuntimeCache: String
@@ -7004,8 +7004,8 @@ public struct ObeliskLocations: Equatable, Hashable {
          * The bundled native host every supervisor runs as.
          */helper: String, helpers: String, 
         /**
-         * Valve's Steam components the Steam host loads, which the first Steam
-         * launch downloads from Valve's CDN.
+         * Valve's Steam components the Steam host loads, which a Steam game's
+         * download, or a launch that misses them, gets from Valve's CDN.
          */steamRuntimePackage: String, steamRuntimeCache: String, steamDiagnostics: String, 
         /**
          * Where Wine logs the Windows builds of Epic games.

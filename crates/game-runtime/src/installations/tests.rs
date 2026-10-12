@@ -1443,3 +1443,184 @@ async fn the_account_asks_one_cloud_question_whichever_sync_asks_it_until_it_is_
     next.end(None);
     eventually(|| sync().is_none()).await;
 }
+
+/// What `FakeRuntimes` does, shared with each of its downloads.
+struct FakeRuntime {
+    present: Vec<Runtime>,
+    /// The next download's failure.
+    failure: Option<Failure>,
+    /// Downloads wait until they are cancelled.
+    held: bool,
+    record: Arc<dyn Fn(String) + Send + Sync>,
+}
+
+/// Runtimes a test stands in for. Those `present` are in place; a download
+/// of another records its name through `record`, then fails as `fail` says,
+/// waits until cancelled once `hold` is called, or else puts its runtime in
+/// place.
+pub(crate) struct FakeRuntimes(Arc<Mutex<FakeRuntime>>);
+
+impl FakeRuntimes {
+    pub(crate) fn new(
+        present: &[Runtime],
+        record: impl Fn(String) + Send + Sync + 'static,
+    ) -> Arc<Self> {
+        Arc::new(Self(Arc::new(Mutex::new(FakeRuntime {
+            present: present.to_vec(),
+            failure: None,
+            held: false,
+            record: Arc::new(record),
+        }))))
+    }
+    pub(crate) fn fail(&self, failure: Failure) {
+        self.0.lock().unwrap().failure = Some(failure);
+    }
+    pub(crate) fn hold(&self) {
+        self.0.lock().unwrap().held = true;
+    }
+    pub(crate) fn present(&self) -> Vec<Runtime> {
+        self.0.lock().unwrap().present.clone()
+    }
+}
+
+pub(crate) fn runtime_name(runtime: Runtime) -> String {
+    match runtime {
+        Runtime::Voile => "voile".into(),
+        Runtime::SteamComponents => "steam components".into(),
+    }
+}
+
+impl RuntimeSource for FakeRuntimes {
+    fn present(&self, runtime: Runtime) -> bool {
+        self.0.lock().unwrap().present.contains(&runtime)
+    }
+    fn download(&self, runtime: Runtime) -> Arc<dyn RuntimeDownload> {
+        Arc::new(FakeDownload {
+            runtime,
+            state: self.0.clone(),
+            cancel: obelisk_core::transfer::CancelToken::new(),
+        })
+    }
+}
+
+struct FakeDownload {
+    runtime: Runtime,
+    state: Arc<Mutex<FakeRuntime>>,
+    cancel: obelisk_core::transfer::CancelToken,
+}
+
+impl RuntimeDownload for FakeDownload {
+    fn progress(&self) -> (u64, u64) {
+        (5, 10)
+    }
+    fn cancel(&self) {
+        self.cancel.cancel();
+    }
+    fn run(&self) -> BoxFuture<'_, Result<(), Failure>> {
+        Box::pin(async move {
+            let (record, failure, held) = {
+                let mut state = self.state.lock().unwrap();
+                (state.record.clone(), state.failure.take(), state.held)
+            };
+            record(runtime_name(self.runtime));
+            if held {
+                self.cancel.cancelled().await;
+                return Err(Failure::Cancelled);
+            }
+            if let Some(failure) = failure {
+                return Err(failure);
+            }
+            self.state.lock().unwrap().present.push(self.runtime);
+            Ok(())
+        })
+    }
+}
+
+fn recorded() -> (
+    Arc<Mutex<Vec<String>>>,
+    impl Fn(String) + Send + Sync + 'static,
+) {
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let recording = events.clone();
+    (events, move |event| recording.lock().unwrap().push(event))
+}
+
+#[tokio::test]
+async fn a_transfer_gets_only_the_runtimes_not_in_place_in_order() {
+    let (events, record) = recorded();
+    let fake = FakeRuntimes::new(&[Runtime::Voile], record);
+    let runtimes = Runtimes::from_source(fake.clone());
+    runtimes.begin();
+    let needed = [Runtime::SteamComponents, Runtime::Voile];
+
+    runtimes.get("620", &needed).await.unwrap();
+    runtimes.get("620", &needed).await.unwrap();
+
+    assert_eq!(*events.lock().unwrap(), ["steam components"]);
+    assert_eq!(fake.present(), [Runtime::Voile, Runtime::SteamComponents]);
+    // Once done, the game's own progress shows.
+    assert_eq!(runtimes.progress(), None);
+}
+
+#[tokio::test]
+async fn a_runtime_download_shows_as_its_transfer_and_cancelling_stops_it() {
+    let (events, record) = recorded();
+    let fake = FakeRuntimes::new(&[], record);
+    fake.hold();
+    let runtimes = Arc::new(Runtimes::from_source(fake.clone()));
+    runtimes.begin();
+    let getting = {
+        let runtimes = runtimes.clone();
+        tokio::spawn(async move { runtimes.get("620", &[Runtime::Voile]).await })
+    };
+    eventually(|| runtimes.progress().is_some()).await;
+    let shown = runtimes.progress().unwrap();
+    assert_eq!(shown.game, "620");
+    assert_eq!(shown.state, TransferState::Downloading);
+    assert_eq!((shown.completed_bytes, shown.total_bytes), (5, 10));
+    assert_eq!(shown.message, "model.game.installingVoile");
+
+    runtimes.cancel();
+
+    assert_eq!(getting.await.unwrap(), Err(Failure::Cancelled));
+    let stopped = runtimes.progress().unwrap();
+    assert_eq!(stopped.state, TransferState::Cancelled);
+    // Voile's bytes stay out of the stopped Transfer, where they would read
+    // as the game's.
+    assert_eq!((stopped.completed_bytes, stopped.total_bytes), (0, 0));
+    assert_eq!(*events.lock().unwrap(), ["voile"]);
+    assert!(fake.present().is_empty());
+    // A cancellation holds until the next Transfer starts.
+    assert_eq!(
+        runtimes.get("620", &[Runtime::Voile]).await,
+        Err(Failure::Cancelled)
+    );
+    runtimes.begin();
+    assert_eq!(runtimes.progress(), None);
+}
+
+#[tokio::test]
+async fn a_failed_runtime_download_ends_the_transfer_with_its_own_failure() {
+    let (events, record) = recorded();
+    let fake = FakeRuntimes::new(&[], record);
+    fake.fail(Failure::Failed(
+        "backend.steam.components.downloadFailed".into(),
+    ));
+    let runtimes = Runtimes::from_source(fake.clone());
+    runtimes.begin();
+
+    let got = runtimes
+        .get("620", &[Runtime::SteamComponents, Runtime::Voile])
+        .await;
+
+    assert_eq!(
+        got,
+        Err(Failure::Failed(
+            "backend.steam.components.downloadFailed".into()
+        ))
+    );
+    assert_eq!(*events.lock().unwrap(), ["steam components"]);
+    let stopped = runtimes.progress().unwrap();
+    assert_eq!(stopped.state, TransferState::Failed);
+    assert_eq!(stopped.message, "backend.steam.components.downloadFailed");
+}

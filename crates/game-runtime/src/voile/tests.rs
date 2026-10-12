@@ -65,7 +65,7 @@ async fn a_release_replaces_the_one_before_it_and_leaves_nothing_unfinished() {
     assert_eq!(located(&root, &release), None);
 
     let runtime = Install::new()
-        .install(&root, &release, Some(&archive))
+        .install(&root, &release, Some(&archive), true)
         .await
         .unwrap();
 
@@ -75,13 +75,37 @@ async fn a_release_replaces_the_one_before_it_and_leaves_nothing_unfinished() {
 }
 
 #[tokio::test]
+async fn a_release_a_transfer_adds_keeps_the_ones_before_it() {
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path().join("Voile");
+    let (archive, release) = release_archive(directory.path(), "v1.0.0-2", "v1.0.0-2");
+    fs::create_dir_all(root.join("v1.0.0-1/bin")).unwrap();
+    fs::create_dir_all(root.join(".interrupted")).unwrap();
+
+    let runtime = Install::new()
+        .install(&root, &release, Some(&archive), false)
+        .await
+        .unwrap();
+
+    assert_eq!(runtime, root.join("v1.0.0-2"));
+    assert_eq!(located(&root, &release), Some(runtime));
+    assert_eq!(names(&root), ["v1.0.0-1", "v1.0.0-2"]);
+
+    // The next launch finds it in place and removes the one before it.
+    fs::create_dir_all(root.join("current/bin")).unwrap();
+    fs::create_dir_all(root.join(".unfinished")).unwrap();
+    remove_replaced_by(&root, "v1.0.0-2");
+    assert_eq!(names(&root), [".unfinished", "current", "v1.0.0-2"]);
+}
+
+#[tokio::test]
 async fn a_damaged_archive_installs_nothing() {
     let directory = tempfile::tempdir().unwrap();
     let root = directory.path().join("Voile");
     let (archive, mut release) = release_archive(directory.path(), "v1.0.0-2", "v1.0.0-2");
     release.sha256 = "0".repeat(64);
     let failure = Install::new()
-        .install(&root, &release, Some(&archive))
+        .install(&root, &release, Some(&archive), true)
         .await;
     assert_eq!(failure, Err(Failure::Damaged));
     assert_eq!(names(&root), Vec::<String>::new());
@@ -93,7 +117,7 @@ async fn an_archive_of_another_release_installs_nothing() {
     let root = directory.path().join("Voile");
     let (archive, release) = release_archive(directory.path(), "v1.0.0-2", "v1.0.0-1");
     let failure = Install::new()
-        .install(&root, &release, Some(&archive))
+        .install(&root, &release, Some(&archive), true)
         .await;
     assert_eq!(failure, Err(Failure::Damaged));
     assert_eq!(names(&root), Vec::<String>::new());
@@ -107,7 +131,7 @@ async fn the_development_runtime_takes_precedence_over_any_release() {
     fs::create_dir_all(root.join("current/bin")).unwrap();
     fs::write(root.join("current/bin/wine"), "wine").unwrap();
     let runtime = Install::new()
-        .install(&root, &release, Some(&archive))
+        .install(&root, &release, Some(&archive), true)
         .await
         .unwrap();
     assert_eq!(runtime, root.join("current"));
@@ -121,7 +145,7 @@ async fn a_cancelled_install_stops_before_it_starts() {
     let (archive, release) = release_archive(directory.path(), "v1.0.0-2", "v1.0.0-2");
     let install = Install::new();
     install.cancel();
-    let failure = install.install(&root, &release, Some(&archive)).await;
+    let failure = install.install(&root, &release, Some(&archive), true).await;
     assert_eq!(failure, Err(Failure::Cancelled));
     assert!(!root.exists());
 }
@@ -133,7 +157,7 @@ async fn the_linux_runtime_comes_with_its_release() {
     let (archive, release) = release_archive(directory.path(), "v1.0.0-2", "v1.0.0-2");
     assert_eq!(located_linux(&root, &release), None);
     Install::new()
-        .install(&root, &release, Some(&archive))
+        .install(&root, &release, Some(&archive), true)
         .await
         .unwrap();
     assert_eq!(

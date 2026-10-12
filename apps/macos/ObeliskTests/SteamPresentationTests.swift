@@ -30,6 +30,23 @@ final class SteamPresentationTests: XCTestCase {
     }
 
     @MainActor
+    func testARuntimeDownloadBeforeTheGameNamesTheRuntimeAndCountsNoGameFiles() {
+        var transfer = GameTransfer(game: "620", state: .downloading, completedBytes: 5_000_000, totalBytes: 20_000_000, networkBytes: 5_000_000, contentBytes: 0, currentFile: "", message: "model.game.installingVoile")
+        XCTAssertEqual(transfer.activityTitle, L10n.string("model.game.installingVoile"))
+        XCTAssertEqual(transfer.buttonTitle, L10n.string("model.game.installingVoile"))
+        XCTAssertEqual(transfer.progressFraction, 0.25)
+        XCTAssertNil(transfer.countedFilesText)
+        XCTAssertNil(transfer.downloadedGameDataText)
+        XCTAssertEqual(transfer.progressSummary, L10n.string("model.game.installingVoile"))
+
+        // A failed runtime download shows its own failure, as any Transfer's.
+        transfer.state = .failed
+        transfer.message = "backend.voile.downloadFailed"
+        XCTAssertNil(transfer.runtimeTitle)
+        XCTAssertEqual(transfer.activityTitle, L10n.string("ui.transfer.failed"))
+    }
+
+    @MainActor
     func testManifestPreparationAndLocalCompletionDoNotClaimAFileDownload() {
         var transfer = GameTransfer(game: "620", state: .preparing, completedBytes: 0, totalBytes: 0, networkBytes: 253, contentBytes: 0, currentFile: "", message: "")
         XCTAssertEqual(transfer.activityTitle, L10n.string("ui.transfer.checking_updates"))

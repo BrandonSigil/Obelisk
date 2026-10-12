@@ -1674,5 +1674,226 @@ fn removal_reason(failure: obelisk_core::installation::RemovalFailure) -> Failur
     })
 }
 
+/// A runtime a build needs to launch: a Transfer gets the ones not in place
+/// yet before its game's files.
+pub use crate::sessions::Runtime;
+
+/// Whether a build of `platform` runs in Wine, and so needs Voile.
+pub(crate) fn needs_voile(platform: &str) -> bool {
+    platform.eq_ignore_ascii_case("windows")
+}
+
+/// One runtime's download, which the Transfer that needs it runs, cancels
+/// and watches.
+pub trait RuntimeDownload: Send + Sync {
+    /// The bytes received so far, and the total.
+    fn progress(&self) -> (u64, u64);
+    fn cancel(&self);
+    /// A failure is the runtime's own localization key.
+    fn run(&self) -> BoxFuture<'_, Result<(), Failure>>;
+}
+
+/// Where Transfers find the runtimes: whether one is in place, and its
+/// download. Tests stand in for it.
+pub trait RuntimeSource: Send + Sync {
+    /// It reads a few files, never a whole runtime.
+    fn present(&self, runtime: Runtime) -> bool;
+    fn download(&self, runtime: Runtime) -> Arc<dyn RuntimeDownload>;
+}
+
+/// The runtimes a storefront's Transfers get before their game's files, so
+/// the game launches without waiting for them. Cancelling the Transfer
+/// cancels the download under way, and the next Transfer that needs the
+/// runtime starts it again.
+pub struct Runtimes {
+    source: Arc<dyn RuntimeSource>,
+    getting: Mutex<Getting>,
+}
+
+#[derive(Default)]
+struct Getting {
+    /// The Transfer under way was cancelled.
+    cancelled: bool,
+    /// The download under way, and the name the Transfer's progress gives
+    /// its game.
+    current: Option<(String, Runtime, Arc<dyn RuntimeDownload>)>,
+    /// How the last download stopped, until the next Transfer starts.
+    stopped: Option<TransferProgress>,
+}
+
+impl Runtimes {
+    /// Gets the runtimes into the places `locations` names, where launches
+    /// read them.
+    pub fn new(locations: &crate::Locations) -> Self {
+        Self::from_source(Arc::new(Downloads(locations.clone())))
+    }
+
+    pub(crate) fn from_source(source: Arc<dyn RuntimeSource>) -> Self {
+        Self {
+            source,
+            getting: Mutex::new(Getting::default()),
+        }
+    }
+
+    /// A Transfer starts: the cancellation and outcome of the one before no
+    /// longer count.
+    pub fn begin(&self) {
+        *self.getting.lock().unwrap() = Getting::default();
+    }
+
+    /// Gets each runtime of `needed` that is not in place, in order, while
+    /// the Transfer's progress for `game` shows it. The first failure ends
+    /// the Transfer.
+    pub async fn get(&self, game: &str, needed: &[Runtime]) -> Result<(), Failure> {
+        for &runtime in needed {
+            let source = self.source.clone();
+            if blocking(storage_failed(runtime), move || source.present(runtime)).await? {
+                continue;
+            }
+            let download = self.source.download(runtime);
+            {
+                let mut getting = self.getting.lock().unwrap();
+                if getting.cancelled {
+                    return Err(Failure::Cancelled);
+                }
+                getting.current = Some((game.to_owned(), runtime, download.clone()));
+            }
+            let outcome = download.run().await;
+            let mut getting = self.getting.lock().unwrap();
+            getting.current = None;
+            let outcome = match outcome {
+                Err(_) if getting.cancelled => Err(Failure::Cancelled),
+                outcome => outcome,
+            };
+            if let Err(failure) = &outcome {
+                // No bytes: once the Transfer stops, they would read as the
+                // game's own.
+                let mut stopped = shown(game, runtime, (0, 0));
+                (stopped.state, stopped.message) = match failure {
+                    Failure::Cancelled => (TransferState::Cancelled, String::new()),
+                    Failure::Failed(key) => (TransferState::Failed, key.clone()),
+                };
+                getting.stopped = Some(stopped);
+            }
+            outcome?;
+        }
+        match self.getting.lock().unwrap().cancelled {
+            true => Err(Failure::Cancelled),
+            false => Ok(()),
+        }
+    }
+
+    /// The Transfer's progress while it gets a runtime, then how that
+    /// stopped if it did not finish.
+    pub fn progress(&self) -> Option<TransferProgress> {
+        let getting = self.getting.lock().unwrap();
+        match &getting.current {
+            Some((game, runtime, download)) => Some(shown(game, *runtime, download.progress())),
+            None => getting.stopped.clone(),
+        }
+    }
+
+    /// Cancels the Transfer's download under way, and any it would start.
+    pub fn cancel(&self) {
+        let mut getting = self.getting.lock().unwrap();
+        getting.cancelled = true;
+        if let Some((_, _, download)) = &getting.current {
+            download.cancel();
+        }
+    }
+}
+
+/// A runtime's download as its Transfer's progress: the bytes received, and
+/// the runtime the game page names.
+fn shown(game: &str, runtime: Runtime, (received, total): (u64, u64)) -> TransferProgress {
+    TransferProgress {
+        state: TransferState::Downloading,
+        completed_bytes: received,
+        total_bytes: total,
+        network_bytes: received,
+        message: match runtime {
+            Runtime::Voile => "model.game.installingVoile",
+            Runtime::SteamComponents => "model.game.installingSteamComponents",
+        }
+        .into(),
+        ..TransferProgress::new(game)
+    }
+}
+
+fn storage_failed(runtime: Runtime) -> String {
+    match runtime {
+        Runtime::Voile => crate::voile::Failure::Storage.to_string(),
+        Runtime::SteamComponents => crate::valve::Failure::Storage.to_string(),
+    }
+}
+
+/// The runtimes Obelisk downloads, in the places its launches read them.
+struct Downloads(crate::Locations);
+
+impl RuntimeSource for Downloads {
+    fn present(&self, runtime: Runtime) -> bool {
+        match runtime {
+            Runtime::Voile => crate::voile::runtime(&self.0.voile).is_some(),
+            Runtime::SteamComponents => crate::valve::installed(&self.0.steam_runtime_package),
+        }
+    }
+    fn download(&self, runtime: Runtime) -> Arc<dyn RuntimeDownload> {
+        match runtime {
+            Runtime::Voile => Arc::new(Download {
+                install: crate::voile::Install::new(),
+                path: self.0.voile.clone(),
+            }),
+            Runtime::SteamComponents => Arc::new(Download {
+                install: crate::valve::Install::new(),
+                path: self.0.steam_runtime_package.clone(),
+            }),
+        }
+    }
+}
+
+/// One runtime's install into `path`.
+struct Download<I> {
+    install: I,
+    path: PathBuf,
+}
+
+impl RuntimeDownload for Download<crate::voile::Install> {
+    fn progress(&self) -> (u64, u64) {
+        self.install.progress()
+    }
+    fn cancel(&self) {
+        self.install.cancel();
+    }
+    /// Keeps the releases it replaces: a Windows game may run from one.
+    fn run(&self) -> BoxFuture<'_, Result<(), Failure>> {
+        Box::pin(async move {
+            let archive = crate::sessions::development_archive();
+            match self.install.add(&self.path, archive.as_deref()).await {
+                Ok(_) => Ok(()),
+                Err(crate::voile::Failure::Cancelled) => Err(Failure::Cancelled),
+                Err(failure) => Err(Failure::Failed(failure.to_string())),
+            }
+        })
+    }
+}
+
+impl RuntimeDownload for Download<crate::valve::Install> {
+    fn progress(&self) -> (u64, u64) {
+        self.install.progress()
+    }
+    fn cancel(&self) {
+        self.install.cancel();
+    }
+    fn run(&self) -> BoxFuture<'_, Result<(), Failure>> {
+        Box::pin(async move {
+            match self.install.run(&self.path).await {
+                Ok(()) => Ok(()),
+                Err(crate::valve::Failure::Cancelled) => Err(Failure::Cancelled),
+                Err(failure) => Err(Failure::Failed(failure.to_string())),
+            }
+        })
+    }
+}
+
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

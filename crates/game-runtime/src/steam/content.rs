@@ -6,7 +6,7 @@ use crate::{
     Locations,
     cloud::Control,
     cloud_status,
-    installations::{self, BoxFuture, blocking},
+    installations::{self, BoxFuture, Runtime, Runtimes, blocking},
     protocol::Credentials,
     sessions::{self, Admission, Failure, Storefront as _, Supervised},
 };
@@ -20,6 +20,13 @@ use steam_kit::cloud::{CloudListing, CloudMetadata};
 /// What an account's installations ask of Steam's network. Every call may
 /// wait on it.
 pub trait Network: Send + Sync + 'static {
+    /// The build a Transfer without a platform installs: the one the
+    /// account's licenses grant, the native one first.
+    fn platform<'a>(
+        &'a self,
+        app_id: u32,
+        language: &'a str,
+    ) -> BoxFuture<'a, Result<String, Failure>>;
     /// Runs one Transfer into the folder `request` names.
     fn download<'a>(
         &'a self,
@@ -54,6 +61,18 @@ pub trait Network: Send + Sync + 'static {
 }
 
 impl Network for steam_kit::client::Client {
+    fn platform<'a>(
+        &'a self,
+        app_id: u32,
+        language: &'a str,
+    ) -> BoxFuture<'a, Result<String, Failure>> {
+        Box::pin(async move {
+            steam_kit::client::Client::platform(self, app_id, language)
+                .await
+                .map(str::to_owned)
+                .map_err(|error| Failure::Failed(error.to_string()))
+        })
+    }
     fn download<'a>(
         &'a self,
         request: &'a Download,
@@ -131,6 +150,7 @@ pub struct Content<N: Network> {
     network: Arc<N>,
     credentials: Credentials,
     locations: Locations,
+    runtimes: Runtimes,
 }
 
 impl<N: Network> Content<N> {
@@ -138,6 +158,7 @@ impl<N: Network> Content<N> {
         Self {
             network,
             credentials,
+            runtimes: Runtimes::new(&locations),
             locations,
         }
     }
@@ -186,9 +207,30 @@ fn cloud_failure(failure: steam_cloud::Failure) -> Failure {
 }
 
 impl<N: Network> installations::Content<Steam> for Content<N> {
+    /// Picks the build first, then gets Valve's Steam components, and Voile
+    /// for a Windows build, unless they are in place, then the game's files.
     fn download<'a>(&'a self, request: &'a Download) -> BoxFuture<'a, Result<Receipt, Failure>> {
         Box::pin(async move {
-            let installed = self.network.download(request).await?;
+            self.runtimes.begin();
+            let platform = match &request.platform {
+                Some(platform) => platform.clone(),
+                None => {
+                    self.network
+                        .platform(request.app_id, &request.language)
+                        .await?
+                }
+            };
+            let mut needed = vec![Runtime::SteamComponents];
+            if installations::needs_voile(&platform) {
+                needed.push(Runtime::Voile);
+            }
+            let game = <Steam as installations::Storefront>::transfer_name(request);
+            self.runtimes.get(&game, &needed).await?;
+            let request = Download {
+                platform: Some(platform),
+                ..request.clone()
+            };
+            let installed = self.network.download(&request).await?;
             Ok(Receipt {
                 app_id: installed.app_id,
                 name: installed.name,
@@ -201,9 +243,10 @@ impl<N: Network> installations::Content<Steam> for Content<N> {
         })
     }
     fn progress(&self) -> Option<TransferProgress> {
-        self.network.progress()
+        self.runtimes.progress().or_else(|| self.network.progress())
     }
     fn cancel(&self) {
+        self.runtimes.cancel();
         self.network.cancel();
     }
     fn update_available<'a>(

@@ -1,5 +1,6 @@
 //! Hash-pinned Valve payload. Runtime preparation is local-only: it reads the
-//! payload `crate::valve` downloaded from Valve's CDN on the first Steam launch.
+//! payload `crate::valve` downloaded from Valve's CDN, with a Steam game's
+//! Transfer or, when it is still missing, its launch.
 use crate::{Config, Error};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
@@ -19,6 +20,11 @@ pub const HOST: &str = "obelisk-steam-host";
 pub(crate) const ADAPTER: &str = "libobelisk_steam_discovery_adapter.dylib";
 pub(crate) const SDK_INTEL: &str = "obelisk-steam-sdk-x86_64";
 pub(crate) const HELPERS: [&str; 3] = [HOST, ADAPTER, SDK_INTEL];
+/// What Steam launches leave in the runtime cache: the generations `prepare`
+/// extracts, their unfinished staging, and each launch's own folder.
+const GENERATION: &str = "runtime-v1-";
+const STAGING: &str = ".staging-";
+pub(crate) const LAUNCH: &str = "launch-";
 
 fn executable_helper(name: &str) -> bool {
     matches!(name, HOST | SDK_INTEL)
@@ -143,7 +149,11 @@ fn verify_tree(root: &Path, entries: &[PayloadFile], cancelled: &AtomicBool) -> 
 
 /// Inspect every archive entry before writing. Only exact manifest paths and
 /// ordinary files are accepted; ZIP paths are never used as arbitrary targets.
-fn archive(path: &Path, entries: &[PayloadFile]) -> Result<zip::ZipArchive<File>, Error> {
+/// It reads the central directory only: no entry is inflated.
+pub(crate) fn archive(
+    path: &Path,
+    entries: &[PayloadFile],
+) -> Result<zip::ZipArchive<File>, Error> {
     if regular(path)?.len() > 128 * 1024 * 1024 {
         return Err(Error::VersionMismatch);
     }
@@ -202,11 +212,6 @@ pub(crate) fn copy_verified(
     }
     Ok(())
 }
-/// Checks every entry of the payload at `path` against the manifest; no files
-/// are extracted by this validation.
-pub fn verify_archive(path: &Path) -> Result<(), Error> {
-    verify(path, &manifest().files, &AtomicBool::new(false))
-}
 pub(crate) fn verify(
     path: &Path,
     entries: &[PayloadFile],
@@ -256,7 +261,7 @@ fn prepare_with(
         digest.update([0]);
         digest.update(entry.sha256.as_bytes());
     }
-    let prefix = format!("runtime-v1-{:x}-", digest.finalize());
+    let prefix = format!("{GENERATION}{:x}-", digest.finalize());
     super::files::private_directory(&config.cache)?;
     // Sandbox literal rules use canonical paths (not macOS /var aliases).
     let cache = config.cache.canonicalize()?;
@@ -276,7 +281,7 @@ fn prepare_with(
     }
     let mut archive = archive(&config.package, payload)?;
     let staging = tempfile::Builder::new()
-        .prefix(".staging-")
+        .prefix(STAGING)
         .tempdir_in(&cache)?;
     for entry in payload {
         check(cancelled)?;
@@ -286,7 +291,14 @@ fn prepare_with(
         let input = archive
             .by_name(&entry.path)
             .map_err(|_| Error::VersionMismatch)?;
-        copy_verified(input, &mut output, entry, cancelled)?;
+        if let Err(error) = copy_verified(input, &mut output, entry, cancelled) {
+            // The payload lists the right files but holds other bytes: removed,
+            // the next Transfer or launch downloads it again.
+            if matches!(error, Error::VersionMismatch) {
+                let _ = fs::remove_file(&config.package);
+            }
+            return Err(error);
+        }
         output.sync_all()?;
     }
     for name in HELPERS {
@@ -302,6 +314,28 @@ fn prepare_with(
     fs::rename(staging.path(), &directory)?;
     File::open(&cache)?.sync_all()?;
     Ok(directory)
+}
+
+/// Removes from `cache` every generation, staging folder and launch folder
+/// but `generation` and `launch`, the current launch's, and nothing else: the
+/// payloads stay. Whatever cannot be removed goes with a later launch. Only
+/// the Steam supervisor calls it, after `prepare`: it holds the Steam
+/// sessions' owner lock, and starts no game while an earlier one still runs,
+/// so no other launch uses what goes. The lock lives in the library while the
+/// cache does not: two Obelisks with libraries of their own, as
+/// `OBELISK_LIBRARY_DIRECTORY` gives in development, must not both run Steam
+/// games.
+pub(crate) fn remove_stale(cache: &Path, generation: &Path, launch: &Path) {
+    let kept: Vec<_> = [generation, launch]
+        .iter()
+        .filter_map(|path| path.file_name())
+        .collect();
+    crate::voile::remove_entries(cache, |name| {
+        [GENERATION, STAGING, LAUNCH]
+            .iter()
+            .any(|prefix| name.starts_with(prefix))
+            && !kept.iter().any(|kept| **kept == *name)
+    });
 }
 
 #[cfg(test)]

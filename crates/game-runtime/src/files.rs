@@ -84,7 +84,8 @@ pub(crate) fn prepare(
     }
     let directory = crate::package::prepare(config, cancelled)?;
     let id = uuid::Uuid::new_v4();
-    let run_directory = config.cache.join(format!("launch-{id}"));
+    let run_directory = config.cache.join(format!("{}{id}", crate::package::LAUNCH));
+    crate::package::remove_stale(&config.cache, &directory, &run_directory);
     let listeners = [
         std::net::TcpListener::bind("127.0.0.1:0")?,
         std::net::TcpListener::bind("127.0.0.1:0")?,

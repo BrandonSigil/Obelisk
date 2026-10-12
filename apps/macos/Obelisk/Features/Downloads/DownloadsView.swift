@@ -496,7 +496,7 @@ private struct DownloadCurrentCard: View {
         guard let transfer else { return DownloadFormatting.storefront(item.storefront) }
         return [
             DownloadFormatting.storefront(item.storefront),
-            transfer.totalBytes > 0 ? transfer.verifiedProgressText : nil,
+            transfer.countedFilesText,
             transfer.downloadedGameDataText,
         ]
         .compactMap { $0 }

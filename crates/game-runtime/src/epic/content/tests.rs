@@ -1,7 +1,10 @@
 //! Epic's part of the installations through their Content interface, with a
 //! network the test stands in for and real files in a temporary library.
 use super::*;
-use crate::{installations::Content as _, sessions::Sessions};
+use crate::{
+    installations::{Content as _, tests::FakeRuntimes},
+    sessions::Sessions,
+};
 use std::{collections::VecDeque, sync::Mutex, time::Duration};
 use tokio::sync::Notify;
 
@@ -128,11 +131,17 @@ struct Fixture {
     _root: tempfile::TempDir,
     locations: Locations,
     fake: Arc<Fake>,
+    runtimes: Arc<FakeRuntimes>,
     content: Content<Fake>,
 }
 
 impl Fixture {
+    /// Voile is in place.
     fn new() -> Self {
+        Self::with_runtimes(&[Runtime::Voile])
+    }
+
+    fn with_runtimes(present: &[Runtime]) -> Self {
         let root = tempfile::tempdir().unwrap();
         let library = root.path().canonicalize().unwrap();
         let locations = Locations::new(
@@ -143,17 +152,21 @@ impl Fixture {
         std::fs::create_dir_all(&locations.cloud_archive).unwrap();
         let fake = Arc::new(Fake::default());
         let saves = fake.clone();
-        let content = Content::new(
+        let mut content = Content::new(
             fake.clone(),
             Arc::new(move || saves.call("saved")),
             ACCOUNT.into(),
             "fr".into(),
             locations.clone(),
         );
+        let calls = fake.clone();
+        let runtimes = FakeRuntimes::new(present, move |runtime| calls.call(&runtime));
+        content.runtimes = Runtimes::from_source(runtimes.clone());
         Self {
             _root: root,
             locations,
             fake,
+            runtimes,
             content,
         }
     }
@@ -408,5 +421,47 @@ async fn an_older_receipt_learns_its_catalog_item_from_the_installation_itself()
     assert_eq!(
         saved[0].catalog_item_id, "catalog",
         "the file keeps what it learnt"
+    );
+}
+
+#[tokio::test]
+async fn a_windows_transfer_gets_voile_before_the_game_and_a_mac_one_does_not() {
+    for (platform, downloads) in [
+        ("Windows", vec!["voile", "download"]),
+        ("Mac", vec!["download"]),
+    ] {
+        let fixture = Fixture::with_runtimes(&[]);
+
+        fixture
+            .content
+            .download(&fixture.request(platform))
+            .await
+            .unwrap();
+
+        let calls: Vec<_> = fixture
+            .fake
+            .calls()
+            .into_iter()
+            .filter(|call| call == "voile" || call.starts_with("download"))
+            .collect();
+        assert_eq!(calls, downloads, "{platform}");
+    }
+}
+
+#[tokio::test]
+async fn voile_that_fails_to_download_fails_the_transfer_before_the_game() {
+    let fixture = Fixture::with_runtimes(&[]);
+    let failure = Failure::Failed("backend.voile.downloadFailed".into());
+    fixture.runtimes.fail(failure.clone());
+
+    let downloaded = fixture.content.download(&fixture.request("Windows")).await;
+
+    assert_eq!(downloaded, Err(failure));
+    assert!(
+        !fixture
+            .fake
+            .calls()
+            .iter()
+            .any(|call| call.starts_with("download"))
     );
 }

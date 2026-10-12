@@ -1,7 +1,7 @@
 //! GOG's part of the installations through their Content interface, with a
 //! network the test stands in for and real folders in a temporary library.
 use super::*;
-use crate::installations::Content as _;
+use crate::installations::{Content as _, tests::FakeRuntimes};
 use std::sync::Mutex;
 use tokio::sync::Notify;
 
@@ -86,11 +86,17 @@ struct Fixture {
     _root: tempfile::TempDir,
     locations: Locations,
     fake: Arc<Fake>,
+    runtimes: Arc<FakeRuntimes>,
     content: Content<Fake>,
 }
 
 impl Fixture {
+    /// Voile is in place.
     fn new() -> Self {
+        Self::with_runtimes(&[Runtime::Voile])
+    }
+
+    fn with_runtimes(present: &[Runtime]) -> Self {
         let root = tempfile::tempdir().unwrap();
         let library = root.path().canonicalize().unwrap();
         let locations = Locations::new(
@@ -100,16 +106,20 @@ impl Fixture {
         );
         let fake = Arc::new(Fake::default());
         let saves = fake.clone();
-        let content = Content::new(
+        let mut content = Content::new(
             fake.clone(),
             Arc::new(move || saves.call("saved")),
             "fr-FR".into(),
             locations.clone(),
         );
+        let calls = fake.clone();
+        let runtimes = FakeRuntimes::new(present, move |runtime| calls.call(&runtime));
+        content.runtimes = Runtimes::from_source(runtimes.clone());
         Self {
             _root: root,
             locations,
             fake,
+            runtimes,
             content,
         }
     }
@@ -241,5 +251,47 @@ fn only_a_windows_build_runs_in_its_own_prefix() {
             .content
             .directory_name(&mac, &fixture.request("macos")),
         "gog-1207658924-macos"
+    );
+}
+
+#[tokio::test]
+async fn a_windows_transfer_gets_voile_before_the_game_and_a_mac_one_does_not() {
+    for (platform, downloads) in [
+        ("windows", vec!["voile", "download fr-FR"]),
+        ("macos", vec!["download fr-FR"]),
+    ] {
+        let fixture = Fixture::with_runtimes(&[]);
+
+        fixture
+            .content
+            .download(&fixture.request(platform))
+            .await
+            .unwrap();
+
+        let calls: Vec<_> = fixture
+            .fake
+            .calls()
+            .into_iter()
+            .filter(|call| call == "voile" || call.starts_with("download"))
+            .collect();
+        assert_eq!(calls, downloads, "{platform}");
+    }
+}
+
+#[tokio::test]
+async fn voile_that_fails_to_download_fails_the_transfer_before_the_game() {
+    let fixture = Fixture::with_runtimes(&[]);
+    let failure = Failure::Failed("backend.voile.downloadFailed".into());
+    fixture.runtimes.fail(failure.clone());
+
+    let downloaded = fixture.content.download(&fixture.request("windows")).await;
+
+    assert_eq!(downloaded, Err(failure));
+    assert!(
+        !fixture
+            .fake
+            .calls()
+            .iter()
+            .any(|call| call.starts_with("download"))
     );
 }

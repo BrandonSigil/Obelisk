@@ -1,6 +1,7 @@
 //! Voile, the Wine runtime Windows games run in. Obelisk downloads the release
-//! it pins on the first Windows launch; a development runtime that voile's
-//! install-dev.sh put in `current` takes precedence.
+//! it pins with a Windows build's Transfer, before the game's files, and a
+//! launch that still misses it downloads it first; a development runtime that
+//! voile's install-dev.sh put in `current` takes precedence.
 //!
 //! The release also carries the Linux engine's runtime, in its `linux` folder.
 use obelisk_core::transfer::CancelToken;
@@ -164,7 +165,14 @@ impl Install {
     /// then removes the releases it replaces. `archive`, a local copy of the
     /// release, stands in for the download while the release is private.
     pub async fn run(&self, root: &Path, archive: Option<&Path>) -> Result<PathBuf, Failure> {
-        self.install(root, release(), archive).await
+        self.install(root, release(), archive, true).await
+    }
+
+    /// Installs the pinned release as `run` does, but keeps the releases it
+    /// replaces: a Transfer holds no Game session, and a Windows game may run
+    /// from one of them.
+    pub async fn add(&self, root: &Path, archive: Option<&Path>) -> Result<PathBuf, Failure> {
+        self.install(root, release(), archive, false).await
     }
 
     async fn install(
@@ -172,6 +180,7 @@ impl Install {
         root: &Path,
         release: &Release,
         archive: Option<&Path>,
+        replace: bool,
     ) -> Result<PathBuf, Failure> {
         let _installing = self.cancellable(INSTALLING.lock()).await?;
         if let Some(runtime) = located(root, release) {
@@ -189,12 +198,9 @@ impl Install {
                 fs::remove_dir_all(&destination)?;
             }
             fs::rename(&runtime, &destination)?;
-            // No game runs from the releases removed here: only Steam launches
-            // Windows games, and this install runs inside the one Game session
-            // its Reservation gate admits.
-            remove_entries(&root, |name| {
-                name != DEVELOPMENT && name != version && !name.starts_with(UNFINISHED)
-            });
+            if replace {
+                remove_replaced_by(&root, &version);
+            }
             Ok(destination)
         })
         .await
@@ -301,6 +307,22 @@ impl Install {
     async fn cancellable<T>(&self, work: impl Future<Output = T>) -> Result<T, Failure> {
         self.cancel.race(work).await.map_err(|_| Failure::Cancelled)
     }
+}
+
+/// Removes the releases in `root` the pinned one replaces. A launch that
+/// finds the pinned release in place calls it, since a Transfer installs it
+/// without removing them: no game runs from them then, as the launch runs
+/// inside the one Game session its Reservation gate admits.
+pub fn remove_replaced(root: &Path) {
+    remove_replaced_by(root, &release().version);
+}
+
+/// Removes every release in `root` but `version`, leaving the development
+/// runtime and unfinished installs.
+fn remove_replaced_by(root: &Path, version: &str) {
+    remove_entries(root, |name| {
+        name != DEVELOPMENT && name != version && !name.starts_with(UNFINISHED)
+    });
 }
 
 /// Removes what `root` holds under the names `remove` picks. Whatever cannot be

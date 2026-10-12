@@ -16,8 +16,8 @@ pub struct ObeliskLocations {
     /// The bundled native host every supervisor runs as.
     pub helper: String,
     pub helpers: String,
-    /// Valve's Steam components the Steam host loads, which the first Steam
-    /// launch downloads from Valve's CDN.
+    /// Valve's Steam components the Steam host loads, which a Steam game's
+    /// download, or a launch that misses them, gets from Valve's CDN.
     pub steam_runtime_package: String,
     pub steam_runtime_cache: String,
     pub steam_diagnostics: String,

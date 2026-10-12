@@ -1,9 +1,10 @@
 //! Valve's Steam components, the libraries Obelisk's Steam host loads. Obelisk
-//! ships none of them: the first Steam launch downloads the public packages
-//! the runtime manifest pins from Valve's CDN, keeps only the files it names
-//! in one payload in the Steam runtime cache, and `package::prepare` extracts
-//! it from there. Never searches for Steam, executes an installer or accesses
-//! account data.
+//! ships none of them: a Steam game's Transfer downloads the public packages
+//! the runtime manifest pins from Valve's CDN before the game's files, and a
+//! launch that still misses them downloads them first. Only the files the
+//! manifest names are kept, in one payload in the Steam runtime cache, and
+//! `package::prepare` extracts it from there. Never searches for Steam,
+//! executes an installer or accesses account data.
 use crate::{
     package::{self, Manifest, PayloadFile, SourcePackage},
     voile::remove_entries,
@@ -42,10 +43,16 @@ fn payload_in(cache: &Path, manifest: &Manifest) -> PathBuf {
     cache.join(format!("{PAYLOAD}{}.zip", manifest.version))
 }
 
-/// Whether `payload` holds every file the pinned manifest names, intact. It
-/// reads the whole payload, so it blocks for a moment.
+/// Whether `payload` lists every file the pinned manifest names, at its size.
+/// It reads the payload's central directory only, never inflates a file:
+/// the install hashes every file it keeps, and `package::prepare` every file
+/// it extracts.
 pub fn installed(payload: &Path) -> bool {
-    package::verify_archive(payload).is_ok()
+    listed(payload, &package::manifest().files)
+}
+
+fn listed(payload: &Path, files: &[PayloadFile]) -> bool {
+    package::archive(payload, files).is_ok()
 }
 
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]

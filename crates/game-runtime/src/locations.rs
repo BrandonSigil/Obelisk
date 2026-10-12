@@ -16,8 +16,8 @@ pub struct Locations {
     /// The bundled native host every supervisor runs as.
     pub helper: PathBuf,
     pub helpers: PathBuf,
-    /// Valve's Steam components the Steam host loads, which the first Steam
-    /// launch downloads from Valve's CDN.
+    /// Valve's Steam components the Steam host loads, which a Steam game's
+    /// download, or a launch that misses them, gets from Valve's CDN.
     pub steam_runtime_package: PathBuf,
     pub steam_runtime_cache: PathBuf,
     pub steam_diagnostics: PathBuf,

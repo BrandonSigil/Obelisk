@@ -628,6 +628,26 @@ impl Client {
         crate::launch::plan(&app, platform, directory).map_err(Into::into)
     }
 
+    /// The build `download` installs when it is given no platform: the one
+    /// the account's licenses grant, the native one first. It asks Steam for
+    /// the licenses, before any of the game's files; `cancel_download` stops
+    /// it.
+    pub async fn platform(&self, app_id: u32, language: &str) -> Result<&'static str, ClientError> {
+        if !crate::language::is_supported(language) {
+            return Err(ClientError::Failure(
+                "backend.steam.client.unsupportedPlatformOrLanguage".into(),
+            ));
+        }
+        let picking = CancelToken::new();
+        *self.picking.lock().unwrap_or_else(PoisonError::into_inner) = Some(picking.clone());
+        let picked = picking.race(self.pick_platform(app_id, language)).await;
+        self.picking
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take();
+        picked?
+    }
+
     /// Installs the game's build for `platform` under `parent`. Without a
     /// platform, it installs the build the account's licenses grant, the
     /// native one first.

@@ -41,7 +41,7 @@ def main():
     ], check=True)
     binary = project / "build/steam-native-target/debug/examples/cloud_storage_probe"
     manifest = json.loads((project / "crates/game-runtime/runtime-manifest.json").read_text())
-    # Valve's Steam components, as Obelisk downloads them on the first Steam launch.
+    # Valve's Steam components, as Obelisk downloads them with a Steam game's download or launch.
     package = Path.home() / f"Library/Caches/com.zagrios.obelisk/SteamRuntime/valve-{manifest['version']}.zip"
     if not package.is_file():
         raise SystemExit("Launch a Steam game in Obelisk once so it downloads Valve's Steam components")

@@ -269,6 +269,34 @@ async fn an_intact_payload_is_kept_without_a_download() {
 }
 
 #[tokio::test]
+async fn a_payload_counts_as_installed_from_its_listing_alone() {
+    let fixture = Fixture::new();
+    let files = &fixture.manifest.files;
+    assert!(!listed(&fixture.payload, files));
+    fixture.install(&Install::new()).await.unwrap();
+    assert!(listed(&fixture.payload, files));
+
+    // The listing is all it reads: other bytes of the same sizes pass, and
+    // `package::prepare` refuses them when it extracts.
+    let engine: &[u8] = b"fixture ENGINE";
+    let reporter: &[u8] = b"fixture CRASH REPORTER";
+    let paths = [files[0].path.as_str(), files[1].path.as_str()];
+    let same_sizes = zip_of(&[(paths[0], engine), (paths[1], reporter)]);
+    fs::write(&fixture.payload, same_sizes).unwrap();
+    assert!(listed(&fixture.payload, files));
+
+    // A missing file, another size or a damaged listing does not pass.
+    fs::write(&fixture.payload, zip_of(&[(paths[0], engine)])).unwrap();
+    assert!(!listed(&fixture.payload, files));
+    let other_size: &[u8] = b"fixture crash reporter, longer";
+    let other_sizes = zip_of(&[(paths[0], engine), (paths[1], other_size)]);
+    fs::write(&fixture.payload, other_sizes).unwrap();
+    assert!(!listed(&fixture.payload, files));
+    fs::write(&fixture.payload, b"PK damaged").unwrap();
+    assert!(!listed(&fixture.payload, files));
+}
+
+#[tokio::test]
 async fn a_damaged_payload_is_downloaded_anew() {
     let fixture = Fixture::new();
     fixture.install(&Install::new()).await.unwrap();

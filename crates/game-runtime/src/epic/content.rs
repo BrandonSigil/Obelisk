@@ -7,7 +7,7 @@ use crate::{
     Locations,
     cloud::Control,
     cloud_status,
-    installations::{self, BoxFuture, blocking},
+    installations::{self, BoxFuture, Runtime, Runtimes, blocking},
     sessions::{self, Admission, BeforeBegin, Failure, Storefront as _, Supervised},
 };
 use epic_kit::client::Client as EpicClient;
@@ -135,6 +135,7 @@ pub struct Content<N: Network> {
     locations: Locations,
     /// A Transfer was cancelled while its credentials were being renewed.
     cancelled: AtomicBool,
+    runtimes: Runtimes,
 }
 
 impl<N: Network> Content<N> {
@@ -150,6 +151,7 @@ impl<N: Network> Content<N> {
             saved,
             account,
             language,
+            runtimes: Runtimes::new(&locations),
             locations,
             cancelled: AtomicBool::new(false),
         }
@@ -247,9 +249,15 @@ impl<N: Network> Content<N> {
 }
 
 impl<N: Network> installations::Content<Epic> for Content<N> {
+    /// Gets Voile for a Windows build unless it is in place, then the
+    /// game's files.
     fn download<'a>(&'a self, request: &'a Download) -> BoxFuture<'a, Result<Receipt, Failure>> {
         Box::pin(async move {
+            self.runtimes.begin();
             self.prepare().await?;
+            let needed = installations::needs_voile(&request.platform).then_some(Runtime::Voile);
+            let game = <Epic as installations::Storefront>::transfer_name(request);
+            self.runtimes.get(&game, needed.as_slice()).await?;
             let installed = self.network.download(request).await;
             self.save_later();
             let installed = installed?;
@@ -266,10 +274,11 @@ impl<N: Network> installations::Content<Epic> for Content<N> {
         })
     }
     fn progress(&self) -> Option<TransferProgress> {
-        self.network.progress()
+        self.runtimes.progress().or_else(|| self.network.progress())
     }
     fn cancel(&self) {
         self.cancelled.store(true, Ordering::Release);
+        self.runtimes.cancel();
         self.network.cancel();
     }
     fn update_available<'a>(

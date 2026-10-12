@@ -159,6 +159,8 @@ fn corrupt_payload_cleans_staging_and_never_publishes() {
     );
     assert!(matches!(fixture.prepare(), Err(Error::VersionMismatch)));
     assert!(fixture.contents().is_empty());
+    // Its listing passes `valve::installed`: removed, it is downloaded again.
+    assert!(!fixture.config.package.exists());
 }
 #[test]
 fn incomplete_truncated_and_unexpected_archives_are_rejected() {
@@ -395,4 +397,39 @@ fn tree_validation_rejects_root_file_and_nested_parent_symlinks() {
         assert!(verify_tree(&old, &fixture.files, &AtomicBool::new(false)).is_err());
         assert!(external.exists());
     }
+}
+
+#[test]
+fn a_launch_removes_what_earlier_launches_left_but_keeps_its_own_and_the_payloads() {
+    let fixture = Fixture::new();
+    let current = fixture.prepare().unwrap();
+    let cache = &fixture.config.cache;
+    let launch = cache.join(format!("{LAUNCH}current"));
+    for stale in [
+        "runtime-v1-0000-old",
+        "runtime-v1-ffff-other",
+        ".staging-interrupted",
+        "launch-crashed",
+    ] {
+        fs::create_dir_all(cache.join(stale).join("nested")).unwrap();
+        fs::write(cache.join(stale).join("nested/file"), b"stale").unwrap();
+    }
+    fs::create_dir_all(&launch).unwrap();
+    fs::write(cache.join("valve-41.zip"), b"older payload").unwrap();
+    fs::write(cache.join("valve-42.zip"), b"payload").unwrap();
+
+    remove_stale(cache, &current, &launch);
+
+    let mut contents = fixture.contents();
+    contents.sort();
+    let mut expected = vec![
+        current.file_name().unwrap().to_string_lossy().into_owned(),
+        "launch-current".to_owned(),
+        "valve-41.zip".to_owned(),
+        "valve-42.zip".to_owned(),
+    ];
+    expected.sort();
+    assert_eq!(contents, expected);
+    // The kept generation is still the one a launch reuses.
+    assert_eq!(fixture.prepare().unwrap(), current);
 }
