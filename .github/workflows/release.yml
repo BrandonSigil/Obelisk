@@ -1,5 +1,6 @@
 # Pushing a tag vX.Y.Z builds Obelisk, signs it with the Developer ID,
-# notarizes the DMG and publishes it as that tag's GitHub release.
+# notarizes the DMG and attaches it to a draft release of that tag, which is
+# published by hand once its notes are written.
 name: Release
 
 on:
@@ -79,11 +80,11 @@ jobs:
           printf '%s\n' "$NOTARY_KEY" > "$OBELISK_NOTARY_KEY"
           scripts/build-dmg.sh
 
-      - name: Publish the release
+      - name: Draft the release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" --title "Obelisk $VERSION" --generate-notes \
+          gh release create "$GITHUB_REF_NAME" --draft --title "Obelisk $VERSION" --generate-notes \
             build/dist/Obelisk-"$VERSION"-*.dmg build/dist/Obelisk-"$VERSION"-*.dmg.sha256
 
       - name: Remove the signing material
