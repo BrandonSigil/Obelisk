@@ -1,152 +1,239 @@
-# Obelisk
+<a name="readme-top"></a>
 
-A macOS game library app. The interface uses SwiftUI and AppKit. A Rust library manages the local catalog and connects to Swift through UniFFI.
+<div align="center">
+  <img src="assets/readme/icon.png" alt="Obelisk icon" width="200" height="200">
+  <h1>Obelisk</h1>
+  <p>
+    <b>Your Steam, Epic Games and GOG games together on your Mac.</b><br>
+    Download, update and play them from one app, Windows games included.
+  </p>
+  <p>
+    <a href="https://github.com/Zagrios/obelisk/releases/latest"><b>Download</b></a>
+    ·
+    <a href="https://github.com/Zagrios/obelisk/issues/new">Report a bug</a>
+    ·
+    <a href="https://github.com/Zagrios/obelisk/issues/new">Request a feature</a>
+  </p>
+  <p>
+    <a href="https://github.com/Zagrios/obelisk/releases/latest"><img src="https://img.shields.io/github/v/release/Zagrios/obelisk?style=for-the-badge&label=version" alt="Latest version"></a>
+    <a href="https://github.com/Zagrios/obelisk/releases"><img src="https://img.shields.io/github/downloads/Zagrios/obelisk/total?style=for-the-badge" alt="Downloads"></a>
+    <img src="https://img.shields.io/badge/macOS-26%2B-000000?style=for-the-badge&logo=apple&logoColor=white" alt="macOS 26 or later">
+    <img src="https://img.shields.io/badge/Apple%20silicon-only-000000?style=for-the-badge" alt="Apple silicon only">
+  </p>
+</div>
 
-## What works
+## Contents
 
-- Recent, Steam, Epic, GOG, and Other navigation, with Settings at the bottom of the sidebar.
-- Manual import of `.app` bundles or `.exe` executables, with the catalog saved as JSON.
-- Local search, removal from the catalog without deleting files, Mac app launches, and launch history.
-- System, light, and dark appearance options.
-- A shared fixed glass title bar for stores, with an avatar or initials, account menu, search, and sorting.
-- Steam sign-in with a QR code or username, password, and Steam Guard. Sessions can be saved in the macOS Keychain.
-- A Steam library with thumbnails, search, and sorting by last played, name, or playtime.
-- Steam friends in a window-centered panel, with avatars, presence, current games, and changes received through the existing Steam connection.
-- In-app game details with news, estimated size, and Windows or macOS downloads.
-- One-click SteamPipe downloads in Rust, with file verification, cancellation, and resuming.
-- A **Launch** button after installation, and **Verify game files** in the game's gear menu to check, repair and update its files.
-- macOS game launches using the paths and arguments declared by Steam.
-- Epic Games sign-in in an embedded window with an automatic callback, optional session storage in the macOS Keychain, and a library with thumbnails, search, and name sorting.
-- Epic friends in the same panel, with an initial friends summary and native STOMP/WebSocket presence events. See the [protocol notes](docs/epic-protocol.md#friends-and-live-presence) for live verification limits.
-- Epic BuildPatch downloads in Rust, sharing Steam's progress controls, cancellation, file verification, and resumable installation behavior.
-- Epic macOS game launches, with file verification, repair and updates from the game's gear menu.
-- GOG sign-in in the same embedded window, a library with covers and search, Galaxy downloads in Rust with the same progress, cancellation and resuming, and launches of macOS builds and, through Wine, Windows builds.
+- [What is Obelisk?](#what-is-obelisk)
+- [Requirements](#requirements)
+- [Installation](#installation)
+- [Getting started](#getting-started)
+- [Features](#features)
+- [Store support](#store-support)
+- [Windows games](#windows-games)
+- [Known limitations](#known-limitations)
+- [FAQ](#faq)
+- [Support](#support)
+- [Credits](#credits)
+- [Contributing](#contributing)
 
-Windows Steam games run in [Voile](https://github.com/Zagrios/voile), Obelisk's Wine runtime, as Steam's run in Proton. Voile builds [voile-wine](https://github.com/Zagrios/voile-wine), CrossOver's open-source Wine with Obelisk's changes. Each installation gets its own Wine prefix, which uninstalling deletes after archiving its Cloud saves, as Steam deletes a Proton prefix. The game reaches Obelisk's Steam host through Proton's lsteamclient, and Steam Auto-Cloud syncs the saves inside the prefix. Saves written through the SDK's RemoteStorage stay in the macOS Steam engine's storage, like a macOS game's. As Steam does, a Windows game's download includes the Steamworks Common Redistributables it names, such as DirectX or OpenAL, and the "Run Process" steps of their install scripts run once in its prefix before it starts. A step that fails runs again on the next launch, and the game starts anyway. Visual C++ installs in the prefix as it does under Proton, where its installer replaces Wine's own runtime, and Epic games run the prerequisites their manifests name, Unreal's included. The .NET Framework and XNA stay out: their installers do not work in Wine, and .NET games run on the Wine Mono Voile carries. The download of a Windows build, whatever its store, first gets the Voile release Obelisk pins (`crates/game-runtime/voile-release.json`, with its size and SHA-256) into `Voile/<version>` in Obelisk's library, unless it is already there, and shows it in the game's download; pausing or cancelling that download cancels Voile's, which starts again next time. It keeps the releases before it, since a Windows game may still run from one. A launch that still misses the release, such as after an Obelisk update that pins a newer one, downloads it first with its progress on the launch button. Each Windows launch then removes the releases the pinned one replaces, unless a game of any store still runs or is being recovered, since it may run from one. A runtime installed by hand with voile's `install-dev.sh` goes in `Voile/current` and takes precedence. While the repositories are private, the release cannot be downloaded anonymously: a Debug build given `OBELISK_VOILE_ARCHIVE`, the path of a local copy of the release, installs that copy instead, after checking its SHA-256. GOG's Windows builds run there too, after the installer scripts and redistributables their build names. Multiplayer and controller support will have separate modules.
+## What is Obelisk?
 
-Steam Cloud's [Rust coordinator](docs/steam-cloud-coordinator.md) synchronizes supported AutoCloud and SDK RemoteStorage saves before launch and after game exit: AutoCloud saves of macOS games in the player's home, of Windows games in their Wine prefix. The detached supervisor completes the exit check even when Obelisk is closed. Divergent saves require an explicit Local/Cloud choice. An [authenticated lifecycle validation](docs/steam-cloud-lifecycle.md) exercised Silksong with the interface closed. FileShare and Dynamic Cloud remain unsupported.
+Obelisk is a free game launcher for Macs with Apple silicon. Sign in with your Steam, Epic Games and GOG accounts, and every game you own shows up in one library, ready to download and play.
 
-## Languages
+Windows games play too. Obelisk sets everything up for you: no bottles to create, no Wine to configure, no launcher to install. Click **Download**, then **Play**.
 
-The interface supports English and French. It follows the system language and falls back to English when the requested language is unavailable. English is the source language.
+- **One library.** Every store in one place, with search across all of them, your recently played games and what is installed on this Mac.
+- **No other launcher needed.** Steam, the Epic Games Launcher and GOG Galaxy do not need to be installed. Obelisk downloads, updates and launches games itself.
+- **Windows games without setup.** Windows versions run through Voile, Obelisk's Windows runtime, which Obelisk installs and keeps up to date on its own.
+- **Your saves follow you.** Steam and Epic Cloud saves sync before you play and after you quit.
+- **Your friends are here.** See who is online and what they play, chat with Steam friends, and invite them or join their games.
+- **Made for the Mac.** A native macOS app, in light or dark appearance, in English and French.
 
-User-facing text belongs in `apps/macos/Obelisk/Resources/Localizable.xcstrings` and is accessed through the shared `L10n` helper. Add both English and French translations when adding text. Any text that must remain hardcoded, such as technical diagnostics, must be in English. Run `python3 scripts/verify-localization.py` to validate the translation catalog and its references.
+## Requirements
 
-## Steam
+- A Mac with Apple silicon (M1 or later). Intel Macs are not supported.
+- macOS 26 Tahoe or later.
+- Rosetta, for Windows games. If it is missing, Obelisk asks macOS to install it the first time a game needs it.
+- Disk space for your games. The first Windows game also downloads Voile, a few hundred MB, once.
 
-Open the Steam tab. Scan the QR code with the Steam mobile app, or enter your credentials in Obelisk and complete Steam Guard confirmation. Obelisk never saves your password. The option to remember the session stores only the session in the macOS Keychain.
+## Installation
 
-The account menu opens **Steam friends** and shows the online count once the initial list has loaded. The panel searches names locally, lists friends playing games first, then other online friends, and keeps offline friends in a collapsible section. Search includes that section even when collapsed. Presence and game activity remain separate, so an away friend can still be playing. Missing names, avatars, and game names have fallbacks.
+1. Download `Obelisk-<version>-arm64.dmg` from the [latest release](https://github.com/Zagrios/obelisk/releases/latest).
+2. Open the disk image and drag **Obelisk** onto **Applications**.
+3. Open Obelisk from your Applications folder.
 
-Friends keep updating while the panel is closed or another section is selected. A connection interruption marks the last list as stale. Obelisk makes a bounded reconnection attempt and loads a fresh list; rejected authentication requires signing in again. Downloads waiting in the queue keep their place while it reconnects and continue through the new connection: a Steam download whose turn comes meanwhile waits for it, and so do the downloads of every store behind it. This uses Obelisk's native Steam session without Steam, Wine, or a Steamworks SDK installation. Chat, invitations, friend management, and GOG friends are not implemented. See [the CM notes](docs/steam-cm-notes.md) for protocol references and verification limits.
+Obelisk is signed and notarized by Apple, so it opens without a security warning.
 
-The library shows the games Steam returns for the signed-in account, including free games that have been played. Games without a play history appear after recently played games. Click a thumbnail to open its details. **Download** automatically chooses macOS when available, otherwise Windows, using the system's preferred language. There is no platform, language, or folder picker.
-
-Games are saved in `Games/Steam/steam-<appid>-<platform>` under Obelisk's data directory. Existing installations keep their location during verification and updates. Verified files and chunks remain available after cancellation and are reused when resuming.
-
-The details page places the size next to playtime and the main button on the right. During an operation, a white bar at the bottom of the button shows progress. Its label distinguishes preparation, verification, and downloading. Hover over it for details, or use the adjacent cross to cancel. After installation, **Launch** starts the macOS game at once. Obelisk compares the installed depot manifests with Steam's public ones when an account connects or its session reconnects, and whenever Obelisk comes to the front, at most every ten minutes. Every download, update and verification, whatever its store, joins one **download queue** and runs one at a time: the button above Settings in the sidebar, over the artwork of the game under way, opens it in a popover, with the download speed over the last two minutes, the transfer under way, and what waits, which can be paused, resumed, moved to the top or removed. With **Update games automatically** on under Settings → Games, each newer build joins the queue as soon as it is known; while any game runs or launches, whatever its store, these automatic updates wait and the one in progress pauses, then resumes from what it already verified. Turned off, the button reads **Update** and a launch installs the update first. A launch that needs a download goes to the front of the queue and pauses the transfer under way. While one game downloads, every other game still launches. **Verify game files**, in the gear menu beside the button, checks every file, repairs missing or changed ones and applies available updates. An installation with an interrupted update is still repaired before it launches; cancellation, an error, or signing out then prevents the launch. An initial download never starts the game automatically.
-
-Verification reads all existing file contents, with up to four readers and accelerated SHA-1 calculation on Apple Silicon. It keeps valid files and reports its own progress. Game bytes actually downloaded are counted separately. Obelisk still contacts Steam to check for updates. A cached manifest is reused if it is still current. An invalid cache is fetched again.
-
-On Apple silicon, launching starts Obelisk's Rust host with the already-loaded session, then the macOS game. Silksong has been validated with the genuine Steamworks library, account/license checks and stats received in the game, without opening Steam or requesting Keychain access again. Obelisk ships no Valve binary. The download of a Steam game, whatever its platform, first gets the Valve packages Obelisk pins (`crates/game-runtime/runtime-manifest.json`, with their sizes and SHA-256) from Valve's CDN unless they are already there, keeps only the libraries the host loads in `~/Library/Caches/com.zagrios.obelisk/SteamRuntime/valve-<version>.zip`, and shows it in the game's download; a game without a chosen platform picks its build first, so a Windows build gets Voile next and a Mac build does not. Pausing or cancelling the game's download cancels Valve's. A launch that still misses them downloads them first, with their progress on the launch button, and cancelling the launch cancels that download. Each launch then removes what earlier launches left in that folder, except the payload. Once Valve stops serving a pinned package, Steam launches ask for a newer Obelisk. Obelisk never imports an installed Steam client. Other games and SDK versions need compatibility testing. See [native Steam launches](docs/steam-native-launch.md). AutoCloud transfers belong to Rust; the native host cannot read the game's ordinary save roots.
-
-This first version downloads the public branch, including depots for the selected platform and owned DLC. If Steam does not recognize the system language, or a translated depot is missing, Obelisk uses English. Private branches, Workshop, Dynamic Cloud, and install script steps other than "Run Process" are not integrated. Depots containing symbolic links are explicitly rejected. Updates retain old files that are no longer used.
-
-The protocols are implemented in `steam-kit` based on a study of the public SteamKit and DepotDownloader sources. Obelisk runs neither of these programs nor SteamCMD. See [the protocol and dependencies](docs/steam-protocol.md) for sources, validation, and exact limitations.
-
-## Epic Games
-
-Open the Epic tab, then choose **Sign in to Epic Games**. A window displays the Epic Games website. Sign in and complete any security prompts on that site. Obelisk automatically finishes signing in, closes the window, and loads the library. Closing the window cancels the attempt.
-
-The option to remember the session stores the refresh token in a macOS Keychain item separate from Steam. Obelisk refreshes the session and replaces the saved token when Epic rotates it. Sign-in pages use a temporary web session. Obelisk neither reads nor saves the password. The account menu lets you refresh the library or sign out.
-
-The account menu also opens **Epic friends**. It shows accepted friends and the presence/game data returned by Epic, using the same panel, local search, keyboard navigation and avatar fallbacks as Steam. Both stores can stay connected while another library is selected. Closing the panel keeps the social connection alive. Only one account's panel is visible at a time.
-
-After the STOMP welcome, Obelisk reads the friends summary and registers the connection to receive initial presence events. Relationship events refresh membership; reconnects establish a new presence registration. There is no periodic friends/status polling. Unknown presence stays explicit, and an interrupted connection marks cached rows as stale. Social access errors leave the library and downloads available. Retry and macOS wake restart only the social transport. This feature needs neither Epic Games Launcher nor Wine. Epic requires an automatic online registration for this connection. Obelisk sends no manual presence settings, party or game activity. Unreported friends remain unknown.
-
-Live validation on September 16, 2026 returned 21 accepted friends with resolved names and delivered an already-connected friend's away status in the first ready state, about one second after connection. This uses the registration observed in the official launcher and replaces the denied legacy initial-presence read. The other 20 unreported statuses remained unknown. Real subsequent status and game transitions remain unverified. See [the protocol evidence and remaining checks](docs/epic-protocol.md#friends-and-live-presence).
-
-The library shows owned games, their cover art, and the metadata available from Epic. It offers search, alphabetical sorting, and a details page using the Steam layout, with a banner, information, and a working **Download** button. Opening a game loads its account playtime and estimated installation size from Epic. Size uses the Mac build when available, otherwise Windows, and includes all files in that build's manifest. Both stores share the same persistent scrollbar. Unavailable values appear as a dash. Epic's playtime response does not provide a last-launch date, so that field remains unavailable. Unreal content and add-ons are not shown as standalone games. See [the Epic protocol and its validation](docs/epic-protocol.md).
-
-**Download** chooses the Mac build when available, otherwise Windows, and saves it in `Games/Epic/epic-<identity-hash>-<platform>` under Obelisk's data directory. The identity includes the namespace, catalog item, and app name. Progress and cancellation use the same controls as Steam. Epic downloads wait in the same download queue as Steam's and GOG's; other installed games still launch meanwhile. Cancelled or failed transfers can resume, including after restarting Obelisk, by verifying existing files and reusing validated chunks. After installation, **Launch** starts the macOS game. A newer live build, which Epic's launcher service names by its build version, turns the button into **Update** as for Steam. **Verify game files** checks the current build, repairs missing or changed files and applies available updates. An initial download never starts the game automatically. All manifest files and languages are included; encrypted content and symbolic-link installations are rejected explicitly.
-
-Epic and Steam share the verification scheduler, with up to four disk readers and accelerated SHA-1 on Apple Silicon. Epic retains validated manifests on disk across app restarts. Each verification checks ownership and the current manifest hash with Epic before reusing the cache. A changed hash or corrupt cache triggers a fresh manifest download; a response without a manifest hash is downloaded without cache reuse. Cached manifests do not skip checking the game files, and cached bytes are not counted as network traffic.
-
-Launching uses the executable and arguments declared by Epic, a fresh exchange code for the current account, and an ownership token when required by the game. Steam and Epic share the native process launcher. Epic's Windows games remain downloadable, but launching them through Wine is not wired yet.
-
-## GOG
-
-Open the GOG tab, then choose **Sign in to GOG**. A window shows GOG's own sign-in page, as GOG Galaxy does. Once GOG returns its code, Obelisk closes the window and loads the library. As for Epic, only the refresh token can be remembered, in its own Keychain item, and Obelisk saves each one GOG rotates.
-
-The library lists the GOG products of the account's Galaxy library. gamesdb gives each one its title, portrait cover, wide artwork and platforms; a product gamesdb does not know is described by the store, and DLCs, movies and hidden products stay out. GOG tells no playtime, so the library sorts by name or by the last launch from Obelisk, which also picks its hero.
-
-**Download** installs the newest build of the default branch, the Mac build first, in `Games/GOG/gog-<product>-<platform>`, with the depots of the system language, or English when GOG has none, and those of the DLCs the account owns. A Mac build that names its bundle installs inside it, so the game keeps its `.app`. Chunks come from the secure links of each product, renewed when they lapse; each is checked by MD5 before and after it inflates. Verification shares Steam's and Epic's scheduler, reading each file chunk by chunk. A file whose chunks are already on disk, in its partial copy after a cancellation or in the installed copy before an update, downloads only the chunks that differ. Windows builds also get the redistributables they name, except the .NET Framework, XNA and Windows Installer packages, and the support files of their installer scripts.
-
-A newer build in GOG's public build list turns **Launch** into **Update**. **Launch** plays the primary task of the game's `goggame-<product>.info`. A Windows build first runs, once per prefix, its installer scripts through GOG's Install Script Interpreter, or its own installer, then its redistributables. Builds only offered in GOG's older content generation, Cloud saves, achievements, playtime, and Galaxy's online services are not implemented.
+**Updating Obelisk:** Obelisk does not update itself yet. Download the new disk image and replace the app in Applications. Your games, saves and sign-ins stay where they are.
 
 ## Getting started
 
-You need macOS, Xcode with its command-line tools, stable Rust with Cargo, and a valid Apple Development identity with its private key in the Keychain. The app targets macOS 26 and later. Builds use the host Mac's architecture.
+1. Open Obelisk. The **Home** page offers to sign in to each store.
+2. Sign in to the stores you use:
+   - **Steam:** scan the QR code with the Steam mobile app, or enter your account name and password, then confirm with Steam Guard.
+   - **Epic Games** and **GOG:** a window shows the store's own sign-in page. Sign in there, and Obelisk takes over once you are done.
+3. Keep **Remember me** on to stay signed in. Obelisk stores the session in your macOS Keychain, never your password.
+4. Open a game and choose **Download**. Once it is installed, choose **Play**.
 
-Signing settings shared by Debug and Release live in `apps/macos/Config/Signing.xcconfig`. To select a specific certificate, copy `Signing.local.xcconfig.example` to `Signing.local.xcconfig` in the same directory, then set the certificate and team. Git ignores this local file. `security find-identity -v -p codesigning` lists available certificates. Use the fingerprint to avoid an ambiguous selection.
+## Features
 
-```sh
-./scripts/run.sh
-```
+### Library
 
-Alternatively, open `apps/macos/Obelisk.xcodeproj` in Xcode, select the **Obelisk** scheme, and choose Run. The Xcode project is included, so XcodeGen is not needed for this step. The first build downloads Cargo dependencies and generates the Swift bridge.
+- **Home** shows your last game, your recently played games and the games installed on this Mac, and searches all your libraries at once.
+- Each store has its own library with cover art, sorted by last played, name or playtime, and filtered to installed games, games compatible with macOS or games you have already played.
+- A game's page shows your playtime, when you last played, its size, its achievements, its news on Steam and its details on Epic Games and GOG.
 
-Builds use a stable Apple Development signature. The build, test, and DMG scripts reject ad hoc signatures. Notarized distribution still needs configuration. The app does not use App Sandbox, so it can open local apps selected by the user and eventually manage Wine processes. No driver, privileged entitlement, or system-level helper is included.
+### Downloads and updates
 
-On the first signed launch after an older ad hoc build, macOS may still ask for permission to read the Steam session. Choose "Always Allow" to trust this identity across builds. The dialog asks for the "login" Keychain password, usually the password for your Mac account. Keeping the same signing identity preserves that trust across rebuilds. A locked Keychain or a change of identity may still require user action. Obelisk does not move the token to a file or change permissions for other apps. See [Apple's code signing requirements](https://developer.apple.com/documentation/technotes/tn3127-inside-code-signing-requirements).
+- **Download** picks the Mac version of a game when there is one, otherwise the Windows version. Games download in your language when they offer it, in English otherwise.
+- Downloads wait in one queue, whatever their store, and run one at a time. The **downloads** button above Settings in the sidebar shows the download speed and lets you pause, resume, reorder or remove each download.
+- An interrupted download resumes where it stopped, even after quitting Obelisk.
+- Games update automatically when a new version comes out. Updates wait while you play. To update only when you launch a game, turn off **Update games automatically** in **Settings → Games**.
+- You can play an installed game while another one downloads.
+- **Verify game files**, in the gear menu next to the **Play** button, repairs missing or damaged files. **Uninstall** is in the same menu.
 
-## Verification
+### Cloud saves
 
-```sh
-./scripts/test.sh
-```
+- Steam and Epic Games Cloud saves sync before a game starts and after it quits.
+- If your saves on this Mac and in the Cloud differ, Obelisk asks which version to keep. It never overwrites one side silently.
+- A game's page shows when its saves last synced, with **Sync now** when something is waiting to be sent.
 
-This command checks English and French localization, Rust formatting, Clippy, catalog and kit tests, Swift → UniFFI → Rust integration tests in Xcode, and the app's signature. Tests use temporary directories and do not launch games.
+### Friends, chat and invitations
 
-## Building the installer disk image
+- The account menu of Steam and Epic Games opens your friends list: who is online, away or playing, and which game.
+- Steam friends can chat with you in Obelisk, and you can invite them to the game you are playing.
+- When a Steam friend invites you, Obelisk shows a notification. Choose **Join Game** to start the game and join them. You can also right-click a friend who is playing to join their game.
+- While Obelisk is open, your Steam friends see you as online.
 
-```sh
-./scripts/build-dmg.sh
-```
+### In-game overlay
 
-This command builds Release and creates `build/dist/Obelisk-<version>-<architecture>.dmg` with its SHA-256 checksum. Open the DMG, then drag **Obelisk** to **Applications**. The disk image shows the two icons side by side.
+Press **Shift+Tab** during a game to open the overlay without leaving it. It shows your friends, the game's achievements, its store page and the invitations you received. Steam games can also ask you there to authorize an in-game purchase.
 
-The current build targets the host Mac's architecture, Apple Silicon on the development machine. Developer ID signing and notarization are not yet configured for public distribution. See [macOS distribution](docs/distribution-macos.md).
+### Controllers
 
-## Structure
+Gamepads work in Windows games, which see them as Xbox controllers. Mac games use macOS's own controller support.
 
-```text
-apps/macos/
-  Obelisk.xcodeproj       Shared Xcode project
-  project.yml          XcodeGen definition
-  Config/              Display name, version, bundle identifier
-  Obelisk/
-    App/               Swift lifecycle, state, and coordination
-    Models/            Presentation types independent of UniFFI
-    Features/          Library, navigation, and settings
-    DesignSystem/      Shared colors and visual components
-    Bridge/            Swift adapter for the Rust core and generated code
-  ObeliskTests/          Integration tests between both languages
-crates/                Catalog, UniFFI bridge, and store kits
-docs/                  Architecture and scope
-scripts/               Building, launching, and verification
-```
+Some controllers, such as the Steam Controller, get full support once Obelisk is allowed in **System Settings → Privacy & Security → Input Monitoring**.
 
-The library is stored in `~/Library/Application Support/com.zagrios.obelisk`. To use an isolated development catalog, set `OBELISK_LIBRARY_DIRECTORY` before launching the binary. This setting does not change the Keychain identifier. Store sessions start when their tab is opened or a store operation is requested. Once connected, Steam keeps its friends observation active across section changes until sign-out. Download receipts are separated by SteamID or Epic account ID and contain no secrets. Friends and their avatar cache stay in memory.
+## Store support
 
-## Editing the project
+|                           | Steam | Epic Games | GOG |
+| ------------------------- | :---: | :--------: | :-: |
+| Mac games                 |  ✅   |     ✅     | ✅  |
+| Windows games             |  ✅   |     ✅     | ✅  |
+| Automatic updates         |  ✅   |     ✅     | ✅  |
+| Cloud saves               |  ✅   |     ✅     | ❌  |
+| Achievements              |  ✅   |     ✅     | ✅  |
+| Friends list              |  ✅   |     ✅     | ❌  |
+| Chat and invitations      |  ✅   |     ❌     | ❌  |
+| In-game overlay           |  ✅   |     ✅     | ✅  |
 
-After changing the Swift file structure or Xcode settings, install XcodeGen 2.46.0 or later, then run:
+Support for more stores is planned in the near future.
 
-```sh
-./scripts/generate-project.sh
-```
+## Windows games
 
-`build-rust.sh` regenerates files in `Bridge/Generated`. Do not edit them manually. `Cargo.lock` pins Rust dependency versions. This repository redistributes neither the proprietary Steamworks SDK nor a Wine engine.
+When a game has no Mac version, Obelisk installs its Windows version and runs it through [Voile](https://github.com/Zagrios/voile), a Windows runtime built on Wine, the same kind of technology as CrossOver and Steam's Proton. You do not need to do anything:
 
-The display name is configured in `apps/macos/Config/App.xcconfig`. Keep the storage identifier stable when renaming the app, or provide an explicit migration. See [the architecture](docs/architecture.md).
+- Obelisk downloads Voile with your first Windows game and keeps it up to date.
+- Each Windows game gets its own Windows environment. Uninstalling the game deletes it, after its Cloud saves are safe.
+- The software a game needs, such as DirectX or Visual C++, installs by itself before its first launch.
+- Direct3D 10, 11 and 12 games draw with Metal through Apple's D3DMetal.
+
+**Anti-cheat:** We already run games whose anti-cheat supports Linux, such as **Rocket League** and **ELDEN RING**, and more are coming. We are currently working on BattlEye support, and still studying how to run games whose anti-cheat only supports Windows, such as Easy Anti-Cheat on Windows, or works at a lower level of the system. We never modify or bypass an anti-cheat, so every game runs fully legitimately.
+
+We cannot test every game that exists. If a game does not work well, or does not work at all, please [open an issue](#support).
+
+## Known limitations
+
+- Only games you own through Steam, Epic Games or GOG appear. Adding other games by hand is not supported yet.
+- Games install in Obelisk's library folder, shown in **Settings → Storage**. Another location cannot be chosen yet.
+- Steam: Workshop content and beta branches are not available yet.
+- GOG: Cloud saves, friends and GOG Galaxy's online features are not available yet. Games only offered in GOG's older download format cannot be installed yet.
+- Games whose anti-cheat does not accept Wine or Linux do not run yet (see [Windows games](#windows-games)).
+
+## FAQ
+
+<details>
+<summary><b>Do I need Steam, the Epic Games Launcher or GOG Galaxy installed?</b></summary>
+<br>
+No. Obelisk talks to the stores directly. It downloads, updates and launches games without them.
+</details>
+
+<details>
+<summary><b>Is my password safe?</b></summary>
+<br>
+Obelisk never saves your password. Your Steam password goes to Steam to sign in and is then forgotten. Epic Games and GOG passwords are typed on their own websites, which Obelisk never reads. With <b>Remember me</b> on, only the session is kept, in your macOS Keychain.
+</details>
+
+<details>
+<summary><b>Where are my games installed?</b></summary>
+<br>
+In <code>~/Library/Application Support/com.zagrios.obelisk/Games</code>. <b>Settings → Storage → Show in Finder</b> opens the folder.
+</details>
+
+<details>
+<summary><b>Can I play while something downloads?</b></summary>
+<br>
+Yes. Any installed game launches while others download. Automatic updates pause while you play and resume afterwards.
+</details>
+
+<details>
+<summary><b>What happens if I quit Obelisk while playing?</b></summary>
+<br>
+Closing Obelisk's window keeps the game running, and Obelisk stays in the menu bar. Quitting Obelisk stops the game, after syncing its Cloud saves.
+</details>
+
+<details>
+<summary><b>Is Obelisk free?</b></summary>
+<br>
+Yes. Obelisk is free, and you only play games you own.
+</details>
+
+<details>
+<summary><b>How do I remove Obelisk completely?</b></summary>
+<br>
+Deleting the app alone leaves your games and settings on the Mac. To remove everything:
+
+1. Quit Obelisk and move it from Applications to the Trash.
+2. In Finder, choose **Go → Go to Folder…**, enter `~/Library`, and delete:
+   - `Application Support/com.zagrios.obelisk`: your games, their Windows environments and Voile,
+   - `Caches/com.zagrios.obelisk`, `HTTPStorages/com.zagrios.obelisk` and `WebKit/com.zagrios.obelisk`,
+   - `Preferences/com.zagrios.obelisk.plist`,
+   - `Logs/Obelisk`.
+3. In the Keychain Access app, delete the items named `com.zagrios.obelisk.steam`, `com.zagrios.obelisk.epic` and `com.zagrios.obelisk.gog`.
+</details>
+
+## Support
+
+Found a bug or a game that does not work? [Open an issue](https://github.com/Zagrios/obelisk/issues/new) and include:
+
+- your Mac model and macOS version,
+- your Obelisk version, shown in **Settings**,
+- the game, its store, and what happened.
+
+Logs help a lot. They are in `~/Library/Logs/Obelisk` (Finder: **Go → Go to Folder…**). Attach the ones of the game you tried, after checking they show nothing you want to keep private.
+
+## Credits
+
+Obelisk is developed by [Zagrios](https://github.com/Zagrios)
+
+It builds on the work of many open-source projects, without which Windows games could not run on a Mac:
+
+- [Wine](https://www.winehq.org) and [CrossOver](https://www.codeweavers.com/crossover)'s open-source Wine by CodeWeavers, the base of [voile-wine](https://github.com/Zagrios/voile-wine).
+- [Proton](https://github.com/ValveSoftware/Proton) by Valve, whose Steam bridge connects Windows games to Steam.
+- Apple's [Game Porting Toolkit](https://developer.apple.com/games/game-porting-toolkit/) and its D3DMetal, which draws Direct3D with Metal.
+- [FEX](https://github.com/FEX-Emu/FEX), [UTM](https://github.com/utmapp/UTM)'s Neptune and virglrenderer, and [DXMT](https://github.com/3Shain/dxmt), which power parts of the Linux engine.
+- [SDL](https://github.com/libsdl-org/SDL), for gamepads, and [Wine Mono](https://gitlab.winehq.org/mono/wine-mono), for .NET games.
+
+Obelisk is not affiliated with or endorsed by Valve, Epic Games, GOG or Apple. Steam, Epic Games, GOG and the games shown are trademarks of their respective owners.
+
+## Contributing
+
+Want to build Obelisk from source or help with its development? Read the [contributing guide](CONTRIBUTING.md).
+
+<div align="right">
+
+[Back to top](#readme-top)
+
+</div>
