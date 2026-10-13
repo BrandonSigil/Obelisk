@@ -12179,23 +12179,6 @@
         }
       }
     },
-    "ui.invites.joiningFriend": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Finding your friend’s game…"
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Recherche de la partie de votre ami…"
-          }
-        }
-      }
-    },
     "ui.invites.unknownGame": {
       "extractionState": "manual",
       "localizations": {

@@ -80,28 +80,39 @@ final class SteamInvitationsTests: XCTestCase {
         XCTAssertEqual(notifier.withdrawn, [invite])
     }
 
-    func testJoiningAFriendsGameUsesTheirInvitationElseWhatSteamShowsOfThem() async throws {
+    func testAFriendsGameJoinsFromTheLobbySteamPushesOfThem() async throws {
         let receipt = InstallationReceipt.steam(appId: Self.peak.appId, name: "PEAK", directory: "/tmp/peak",
                                                 platform: "windows")
         let (model, session, backend, _) = try await signedIn(receipts: [receipt])
         defer { model.signOut() }
+        func alice() -> FriendPresentation? { model.friends?.friends.first { $0.steamID == Self.alice } }
+        XCTAssertNil(alice()?.steamJoin, "Online without a game")
 
-        session.friendGames = { _ in SteamJoinTarget(appId: 3_527_290, invite: .connect(connect: "+connect 1")) }
-        model.invitations.joinFriend(Self.alice, appId: Self.peak.appId)
-        try await eventually { backend.actions.contains(.join(receipt, .connect(connect: "+connect 1"))) }
-        XCTAssertNil(model.invitations.friendJoin)
+        // Steam pushes Alice in PEAK's lobby: her row's menu can join it.
+        session.friends.friendPlaying(friendSteamId: Self.alice, appId: Self.peak.appId, lobbyId: Self.lobby,
+                                      connect: nil)
+        try await eventually { alice()?.steamJoin != nil }
+        let target = try XCTUnwrap(alice()?.steamJoin)
+        XCTAssertEqual(target, SteamJoinTarget(appId: Self.peak.appId, invite: .lobby(lobbyId: Self.lobby)))
+        model.invitations.joinFriend(Self.alice, target: target)
+        try await eventually { backend.actions.contains(.join(receipt, .lobby(lobbyId: Self.lobby))) }
+        XCTAssertNil(model.invitations.friendJoinFailure)
+
+        // A launch Rust refuses says why.
         backend.publish {
             $0.launching = false
             $0.launchGame = nil
             $0.gate = .open
         }
+        backend.onCall = { _ in }
         try await eventually { model.invitations.availability(appId: Self.peak.appId) == .launch }
+        model.invitations.joinFriend(Self.alice, target: target)
+        try await eventually { model.invitations.friendJoinFailure != nil }
+        XCTAssertEqual(model.invitations.friendJoinFailure, L10n.string("ui.invites.unavailable"))
 
-        // A game that takes no one says so.
-        session.friendGames = { _ in throw SteamError.Failure(reason: "backend.steam.join.unavailable") }
-        model.invitations.joinFriend(Self.alice, appId: Self.peak.appId)
-        try await eventually { if case .failed = model.invitations.friendJoin { true } else { false } }
-        XCTAssertEqual(model.invitations.friendJoin, .failed(L10n.string("backend.steam.join.unavailable")))
+        // A game without lobby or connect string offers nothing to join.
+        session.friends.friendPlaying(friendSteamId: Self.alice, appId: Self.peak.appId, lobbyId: 0, connect: nil)
+        try await eventually { alice()?.steamJoin == nil }
     }
 
     func testAnInvitationGoesAfterSixHoursOrOnceItsFriendPlaysAnotherGame() async throws {

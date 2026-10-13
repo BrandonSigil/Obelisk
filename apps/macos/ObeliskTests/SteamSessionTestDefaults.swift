@@ -72,9 +72,6 @@ extension SteamSessionProtocol {
         for await _ in stream {}
         return SteamReceivedInvites(revision: afterRevision + 1, connected: false, invites: [])
     }
-    func friendGame(friendSteamId: UInt64) async throws -> SteamJoinTarget {
-        throw CocoaError(.featureUnsupported)
-    }
 }
 
 /// Saves as Rust does: now, then after every rotation, in order.

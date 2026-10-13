@@ -335,16 +335,6 @@ impl SteamSession {
         self.client().next_invites(after_revision).await.into()
     }
 
-    /// The game `friend_steam_id` plays and how to join it now. Fails with
-    /// `backend.steam.join.unavailable` when it takes no one.
-    pub async fn friend_game(&self, friend_steam_id: u64) -> Result<SteamJoinTarget, SteamError> {
-        let (app_id, invite) = self.client().friend_game(friend_steam_id).await?;
-        Ok(SteamJoinTarget {
-            app_id,
-            invite: invite.into(),
-        })
-    }
-
     /// Fails with `backend.steam.invite.unavailable` unless the account plays
     /// `app_id` and that game can take an invitation now.
     pub async fn invite_to_game(

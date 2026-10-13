@@ -795,7 +795,8 @@ final class SteamModel {
                 name: friend.displayName,
                 avatarURL: friend.avatarUrl.flatMap(URL.init(string:)),
                 presence: FriendPresence(friend.presence),
-                activity: friend.game.map { FriendGameActivity(id: $0.appId.map(String.init) ?? "unknown", name: $0.name) }
+                activity: friend.game.map { FriendGameActivity(id: $0.appId.map(String.init) ?? "unknown", name: $0.name) },
+                steamJoin: friend.join
             )
         }
         switch snapshot.connection {

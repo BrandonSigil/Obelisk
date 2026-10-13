@@ -3133,6 +3133,12 @@ public protocol SteamFriendsFixtureProtocol: AnyObject, Sendable {
      */
     func disconnect(authenticationRequired: Bool) 
     
+    /**
+     * Steam pushes `friend_steam_id` playing `app_id` (0 for none), in a
+     * lobby and with a rich presence `connect` string when given.
+     */
+    func friendPlaying(friendSteamId: UInt64, appId: UInt32, lobbyId: UInt64, connect: String?) 
+    
     func nextFriends(afterRevision: UInt64) async  -> SteamFriendsSnapshot
     
     /**
@@ -3245,6 +3251,22 @@ open func disconnect(authenticationRequired: Bool)  {try! rustCall() {
     uniffi_obelisk_bridge_fn_method_steamfriendsfixture_disconnect(
             self.uniffiCloneHandle(),
         FfiConverterBool.lower(authenticationRequired),uniffiCallStatus
+    )
+}
+}
+    
+    /**
+     * Steam pushes `friend_steam_id` playing `app_id` (0 for none), in a
+     * lobby and with a rich presence `connect` string when given.
+     */
+open func friendPlaying(friendSteamId: UInt64, appId: UInt32, lobbyId: UInt64, connect: String?)  {try! rustCall() {
+        uniffiCallStatus in
+    uniffi_obelisk_bridge_fn_method_steamfriendsfixture_friend_playing(
+            self.uniffiCloneHandle(),
+        FfiConverterUInt64.lower(friendSteamId),
+        FfiConverterUInt32.lower(appId),
+        FfiConverterUInt64.lower(lobbyId),
+        FfiConverterOptionString.lower(connect),uniffiCallStatus
     )
 }
 }
@@ -3620,12 +3642,6 @@ public protocol SteamSessionProtocol: AnyObject, Sendable {
     func ack(friendSteamId: UInt64, timestamp: UInt32) async throws 
     
     func activeSessions() async throws  -> [SteamChatSession]
-    
-    /**
-     * The game `friend_steam_id` plays and how to join it now. Fails with
-     * `backend.steam.join.unavailable` when it takes no one.
-     */
-    func friendGame(friendSteamId: UInt64) async throws  -> SteamJoinTarget
     
     /**
      * Invites into `invite`, which the account's running game of `app_id`
@@ -4027,26 +4043,6 @@ open func activeSessions()async throws  -> [SteamChatSession]  {
             completeFunc: ffi_obelisk_bridge_rust_future_complete_rust_buffer,
             freeFunc: ffi_obelisk_bridge_rust_future_free_rust_buffer,
             liftFunc: FfiConverterSequenceTypeSteamChatSession.lift,
-            errorHandler: FfiConverterTypeSteamError_lift
-        )
-}
-    
-    /**
-     * The game `friend_steam_id` plays and how to join it now. Fails with
-     * `backend.steam.join.unavailable` when it takes no one.
-     */
-open func friendGame(friendSteamId: UInt64)async throws  -> SteamJoinTarget  {
-    return
-        try  await uniffiRustCallAsync(
-            rustFutureFunc: {
-                uniffi_obelisk_bridge_fn_method_steamsession_friend_game(
-                        self.uniffiCloneHandle(),FfiConverterUInt64.lower(friendSteamId)
-                )
-            },
-            pollFunc: ffi_obelisk_bridge_rust_future_poll_rust_buffer,
-            completeFunc: ffi_obelisk_bridge_rust_future_complete_rust_buffer,
-            freeFunc: ffi_obelisk_bridge_rust_future_free_rust_buffer,
-            liftFunc: FfiConverterTypeSteamJoinTarget_lift,
             errorHandler: FfiConverterTypeSteamError_lift
         )
 }
@@ -8119,15 +8115,23 @@ public struct SteamFriend: Equatable, Hashable {
     public var avatarUrl: String?
     public var presence: SteamFriendPresence
     public var game: SteamFriendGame?
+    /**
+     * The friend's game and how Steam's "Join Game" joins it, while it can.
+     */
+    public var join: SteamJoinTarget?
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(steamId: UInt64, displayName: String?, avatarUrl: String?, presence: SteamFriendPresence, game: SteamFriendGame?) {
+    public init(steamId: UInt64, displayName: String?, avatarUrl: String?, presence: SteamFriendPresence, game: SteamFriendGame?, 
+        /**
+         * The friend's game and how Steam's "Join Game" joins it, while it can.
+         */join: SteamJoinTarget? = nil) {
         self.steamId = steamId
         self.displayName = displayName
         self.avatarUrl = avatarUrl
         self.presence = presence
         self.game = game
+        self.join = join
     }
 
     
@@ -8150,7 +8154,8 @@ public struct FfiConverterTypeSteamFriend: FfiConverterRustBuffer {
                 displayName: FfiConverterOptionString.read(from: &buf), 
                 avatarUrl: FfiConverterOptionString.read(from: &buf), 
                 presence: FfiConverterTypeSteamFriendPresence.read(from: &buf), 
-                game: FfiConverterOptionTypeSteamFriendGame.read(from: &buf)
+                game: FfiConverterOptionTypeSteamFriendGame.read(from: &buf), 
+                join: FfiConverterOptionTypeSteamJoinTarget.read(from: &buf)
         )
     }
 
@@ -8160,6 +8165,7 @@ public struct FfiConverterTypeSteamFriend: FfiConverterRustBuffer {
         FfiConverterOptionString.write(value.avatarUrl, into: &buf)
         FfiConverterTypeSteamFriendPresence.write(value.presence, into: &buf)
         FfiConverterOptionTypeSteamFriendGame.write(value.game, into: &buf)
+        FfiConverterOptionTypeSteamJoinTarget.write(value.join, into: &buf)
     }
 }
 
@@ -14090,9 +14096,6 @@ private let initializationResult: InitializationResult = {
     if (uniffi_obelisk_bridge_checksum_method_steamsession_active_sessions() != 4743) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_obelisk_bridge_checksum_method_steamsession_friend_game() != 41688) {
-        return InitializationResult.apiChecksumMismatch
-    }
     if (uniffi_obelisk_bridge_checksum_method_steamsession_invite_into_game() != 13368) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -14163,6 +14166,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_obelisk_bridge_checksum_method_steamfriendsfixture_disconnect() != 58396) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_obelisk_bridge_checksum_method_steamfriendsfixture_friend_playing() != 12561) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_obelisk_bridge_checksum_method_steamfriendsfixture_next_friends() != 52490) {

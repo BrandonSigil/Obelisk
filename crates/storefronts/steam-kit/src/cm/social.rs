@@ -32,8 +32,6 @@ pub enum SocialError {
     InvalidRecipient,
     #[error("backend.steam.invite.unavailable")]
     InviteUnavailable,
-    #[error("backend.steam.join.unavailable")]
-    JoinUnavailable,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -86,10 +84,6 @@ impl SteamConnection {
 
     pub(crate) fn invite_source(&self) -> invites::InviteSource {
         self.social.invites.clone()
-    }
-
-    pub(crate) fn friend_games_source(&self) -> own_game::FriendGames {
-        self.social.friend_games.clone()
     }
 
     /// Shows the account Online. Steam keeps the status for the session, so a

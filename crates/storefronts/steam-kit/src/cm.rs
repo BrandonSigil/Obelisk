@@ -342,7 +342,6 @@ struct Social {
     chat: chat::ChatEventSource,
     own_game: own_game::OwnGameSource,
     invites: invites::InviteSource,
-    friend_games: own_game::FriendGames,
 }
 
 impl Social {
@@ -350,7 +349,6 @@ impl Social {
         self.chat.disconnect();
         self.own_game.disconnect();
         self.invites.disconnect();
-        self.friend_games.disconnect();
     }
 }
 
@@ -1226,7 +1224,6 @@ async fn connection_worker(
                             // Malformed optional persona updates are ignored.
                             if let Ok(state) = proto::PersonaState::decode(&packet.body[..]) {
                                 social.own_game.receive_state(steam_id, &state);
-                                social.friend_games.receive(steam_id, &state);
                             }
                             if let Some(update) = persona_profile(&packet.body, steam_id) {
                                 profile.send_modify(|state| {

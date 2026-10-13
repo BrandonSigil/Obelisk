@@ -112,14 +112,6 @@ final class SteamReceivedInvitations {
     /// account's session and the running game's Steam both receive it.
     static let repeatWindow: UInt64 = 120
 
-    /// Joining a friend's game from the friends list.
-    enum FriendJoin: Equatable {
-        /// The game the friend plays is being looked up.
-        case looking(friend: UInt64)
-        /// Why it could not be joined, until the player reads it.
-        case failed(String)
-    }
-
     /// The invitations the player can still join or dismiss, newest first,
     /// at most one per friend.
     private(set) var invites: [SteamReceivedInvite] = []
@@ -129,7 +121,9 @@ final class SteamReceivedInvitations {
     private(set) var failures: [Key: String] = [:]
     /// The account's running game's session.
     private(set) var session: String?
-    var friendJoin: FriendJoin?
+    /// Why joining a friend's game from the friends list failed, until the
+    /// player reads it.
+    var friendJoinFailure: String?
     /// Invitations that just showed for the first time, newest first, for
     /// their notice.
     @ObservationIgnored var onReceived: (@MainActor ([SteamReceivedInvite]) -> Void)?
@@ -145,8 +139,6 @@ final class SteamReceivedInvitations {
     @ObservationIgnored private let sessions: SteamGameSessions
     @ObservationIgnored private let installations: SteamInstallations
     @ObservationIgnored private let now: () -> Date
-    /// The account's Steam session, which asks for a friend's game.
-    @ObservationIgnored private var steam: (any SteamSessionProtocol)?
     @ObservationIgnored private var account: UInt64?
     /// Invitations that arrived but have not shown yet.
     @ObservationIgnored private var unannounced: Set<Key> = []
@@ -175,7 +167,6 @@ final class SteamReceivedInvitations {
         if self.account != account { reset() }
         self.account = account
         observation?.cancel()
-        steam = session
         observation = Task { [weak self] in
             var revision: UInt64 = 0
             while !Task.isCancelled {
@@ -192,8 +183,6 @@ final class SteamReceivedInvitations {
     func suspend() {
         observation?.cancel()
         observation = nil
-        steam = nil
-        if case .looking = friendJoin { friendJoin = nil }
     }
 
     /// Forgets every invitation, at sign-out or account change.
@@ -204,7 +193,7 @@ final class SteamReceivedInvitations {
         dismissed = [:]
         unannounced = []
         if !failures.isEmpty { failures = [:] }
-        if friendJoin != nil { friendJoin = nil }
+        if friendJoinFailure != nil { friendJoinFailure = nil }
         leaveSession()
         show()
     }
@@ -302,35 +291,18 @@ final class SteamReceivedInvitations {
         return await join(invite)
     }
 
-    /// Joins the game `friend` plays now, as Steam's "Join Game" does: the
-    /// invitation they sent into it, else the lobby or `connect` string Steam
-    /// shows of them.
-    func joinFriend(_ friend: UInt64, appId: UInt32) {
-        if case .looking = friendJoin { return }
-        guard accepting == nil, availability(appId: appId).canJoin else { return }
-        friendJoin = nil
-        if let invite = invites.first(where: { $0.friendSteamId == friend && $0.appId == appId }) {
-            Task { [weak self] in
-                guard let self, !(await self.accept(invite)) else { return }
-                self.friendJoin = .failed(self.failure(joining: invite))
-            }
-            return
-        }
-        guard let steam else { return }
-        let looking = FriendJoin.looking(friend: friend)
-        friendJoin = looking
+    /// Joins the game `friend` plays, as Steam's "Join Game" does: the
+    /// invitation they sent into it, else `target`, the lobby or `connect`
+    /// string Steam shows of them.
+    func joinFriend(_ friend: UInt64, target: SteamJoinTarget) {
+        guard accepting == nil, availability(appId: target.appId).canJoin else { return }
+        friendJoinFailure = nil
+        let invite = invites.first { $0.friendSteamId == friend && $0.appId == target.appId }
+            ?? SteamReceivedInvite(friendSteamId: friend, appId: target.appId, invite: target.invite,
+                                   receivedAt: Self.seconds(now()))
         Task { [weak self] in
-            do {
-                let target = try await steam.friendGame(friendSteamId: friend)
-                guard let self, self.friendJoin == looking else { return }
-                self.friendJoin = nil
-                let invite = SteamReceivedInvite(friendSteamId: friend, appId: target.appId, invite: target.invite,
-                                                 receivedAt: Self.seconds(self.now()))
-                if !(await self.join(invite)) { self.friendJoin = .failed(self.failure(joining: invite)) }
-            } catch {
-                guard let self, self.friendJoin == looking else { return }
-                self.friendJoin = .failed(SteamModel.message(error))
-            }
+            guard let self, !(await self.join(invite)) else { return }
+            self.friendJoinFailure = self.failure(joining: invite)
         }
     }
 

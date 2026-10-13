@@ -9,7 +9,7 @@ use std::{
 use prost::Message;
 use tokio::sync::watch;
 
-use crate::proto;
+use crate::{own_game::GameInvite, proto};
 
 pub(crate) const PERSONA_STATE: u32 = 766;
 pub(crate) const FRIENDS_LIST: u32 = 767;
@@ -18,6 +18,7 @@ pub(crate) const PLAYER_NAME: u32 = 2;
 pub(crate) const PRESENCE: u32 = 16;
 pub(crate) const GAME_EXTRA_INFO: u32 = 256;
 pub(crate) const GAME_DATA_BLOB: u32 = 512;
+pub(crate) const RICH_PRESENCE: u32 = 4096;
 pub(crate) const REQUESTED: u32 = PLAYER_NAME | PRESENCE;
 pub(crate) const REQUEST_BATCH: usize = 100;
 // These are defensive client limits, not claims about Steam's account limits.
@@ -55,10 +56,34 @@ impl From<u32> for FriendPresence {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct FriendGame {
     pub app_id: Option<u32>,
     pub name: Option<String>,
+    /// The lobby the friend is in, 0 for none, as their persona shows it.
+    pub lobby_id: u64,
+    /// The friend's rich presence `connect` string, for this game.
+    pub connect: Option<String>,
+}
+
+impl FriendGame {
+    /// What Steam's "Join Game" joins: the friend's lobby, else their rich
+    /// presence `connect` string. A game without an app has neither.
+    pub fn invite(&self) -> GameInvite {
+        let invite = match (self.app_id, self.lobby_id, &self.connect) {
+            (None, _, _) => GameInvite::None,
+            (Some(_), lobby_id, _) if lobby_id != 0 => GameInvite::Lobby { lobby_id },
+            (Some(_), _, Some(connect)) => GameInvite::Connect {
+                connect: connect.clone(),
+            },
+            (Some(_), _, None) => GameInvite::None,
+        };
+        if invite.sendable() {
+            invite
+        } else {
+            GameInvite::None
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -140,10 +165,16 @@ impl CachedFriend {
                         .map(|id| (id & 0x00ff_ffff) as u32)
                         .filter(|id| *id != 0)
                 });
+            let previous = self.friend.game.take();
             self.friend.game = (app_id.is_some() || persona.game_id.is_some_and(|id| id != 0))
                 .then(|| FriendGame {
                     app_id,
                     name: persona.game_name.as_deref().and_then(label),
+                    lobby_id: persona.game_lobby_id.unwrap_or(0),
+                    // A connect string only holds for the game it came with.
+                    connect: previous
+                        .filter(|game| game.app_id == app_id)
+                        .and_then(|game| game.connect),
                 });
         } else {
             // Compatibility with explicitly populated historical game groups.
@@ -154,12 +185,9 @@ impl CachedFriend {
                 if app_id == 0 {
                     self.friend.game = None;
                 } else {
-                    let game = self.friend.game.get_or_insert(FriendGame {
-                        app_id: None,
-                        name: None,
-                    });
+                    let game = self.friend.game.get_or_insert_default();
                     if game.app_id != Some(app_id) {
-                        game.name = None;
+                        *game = FriendGame::default();
                     }
                     game.app_id = Some(app_id);
                 }
@@ -172,13 +200,10 @@ impl CachedFriend {
                         // CGameID's low 24 bits are the app ID. Non-Steam shortcuts
                         // can have no app ID while still supplying a game name.
                         let app_id = (game_id & 0x00ff_ffff) as u32;
-                        let game = self.friend.game.get_or_insert(FriendGame {
-                            app_id: None,
-                            name: None,
-                        });
+                        let game = self.friend.game.get_or_insert_default();
                         let app_id = (app_id != 0).then_some(app_id);
                         if game.app_id != app_id {
-                            game.name = None;
+                            *game = FriendGame::default();
                         }
                         game.app_id = app_id;
                     }
@@ -192,10 +217,24 @@ impl CachedFriend {
                         && (persona.game_played_app_id != Some(0)
                             || persona.game_id.is_some_and(|id| id != 0))
                     {
-                        self.friend.game = Some(FriendGame { app_id: None, name });
+                        self.friend.game = Some(FriendGame {
+                            name,
+                            ..FriendGame::default()
+                        });
                     }
                 }
             }
+        }
+        // Valve's friends client replaces rich presence only with its flag.
+        if flags & RICH_PRESENCE != 0
+            && let Some(game) = &mut self.friend.game
+        {
+            game.connect = persona
+                .rich_presence
+                .iter()
+                .find(|pair| pair.key.eq_ignore_ascii_case("connect"))
+                .map(|pair| pair.value.clone())
+                .filter(|connect| !connect.is_empty());
         }
         // An explicit offline event invalidates activity even without a game
         // field. Later online-only events cannot resurrect the old game.
@@ -817,6 +856,71 @@ mod tests {
     }
 
     #[test]
+    fn a_friends_game_tells_how_to_join_it_as_steams_pushes_show_it() {
+        let source = FriendsEventSource::new(ACCOUNT);
+        list(&source, false, &[(FRIEND, 3)]);
+        let invite = |source: &FriendsEventSource| {
+            source.snapshot().friends[0]
+                .game
+                .as_ref()
+                .map(FriendGame::invite)
+        };
+        let connect = proto::RichPresence {
+            key: "connect".into(),
+            value: "+connect 10.0.0.1".into(),
+        };
+        let playing = proto::Persona {
+            persona_state: Some(1),
+            game_played_app_id: Some(620),
+            game_lobby_id: Some(0),
+            rich_presence: vec![connect.clone()],
+            ..update()
+        };
+        persona(&source, STATUS | RICH_PRESENCE, playing.clone());
+        assert_eq!(
+            invite(&source),
+            Some(GameInvite::Connect {
+                connect: "+connect 10.0.0.1".into()
+            })
+        );
+        // A lobby wins; a Status update keeps the game's connect string.
+        const LOBBY: u64 = 109_775_244_421_126_053;
+        persona(
+            &source,
+            STATUS,
+            proto::Persona {
+                game_lobby_id: Some(LOBBY),
+                rich_presence: vec![],
+                ..playing.clone()
+            },
+        );
+        assert_eq!(invite(&source), Some(GameInvite::Lobby { lobby_id: LOBBY }));
+        // Another game drops the previous game's connect string.
+        persona(
+            &source,
+            STATUS,
+            proto::Persona {
+                game_played_app_id: Some(730),
+                rich_presence: vec![],
+                ..playing.clone()
+            },
+        );
+        assert_eq!(invite(&source), Some(GameInvite::None));
+        // Rich presence alone replaces it; offline drops the game.
+        persona(
+            &source,
+            RICH_PRESENCE,
+            proto::Persona {
+                rich_presence: vec![connect],
+                ..update()
+            },
+        );
+        assert!(matches!(invite(&source), Some(GameInvite::Connect { .. })));
+        persona(&source, STATUS, update());
+        assert_eq!(invite(&source), None);
+    }
+
+    #[test]
     fn switching_account_drops_resolved_titles_and_rejects_the_old_accounts_answers() {
         let source = FriendsEventSource::new(ACCOUNT);
         list(&source, false, &[(FRIEND, 3)]);
@@ -872,7 +976,8 @@ mod tests {
             snapshot.friends[0].game,
             Some(FriendGame {
                 app_id: Some(570),
-                name: Some("Game".into())
+                name: Some("Game".into()),
+                ..FriendGame::default()
             })
         );
         assert_eq!(snapshot.friends[0].avatar_url, None);

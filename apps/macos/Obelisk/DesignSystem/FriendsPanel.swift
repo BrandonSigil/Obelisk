@@ -177,21 +177,15 @@ private struct FriendsList: View {
         .onExitCommand(perform: dismiss)
     }
 
-    /// A friend's game being looked up to join it, or why it could not be.
+    /// Why joining a friend's game could not, until the player reads it.
     @ViewBuilder
     private func joinStatus(_ invitations: SteamReceivedInvitations) -> some View {
-        if let join = invitations.friendJoin {
+        if let failure = invitations.friendJoinFailure {
             HStack(spacing: 10) {
-                switch join {
-                case .looking:
-                    ProgressView().controlSize(.small)
-                    Text(L10n.string("ui.invites.joiningFriend")).frame(maxWidth: .infinity, alignment: .leading)
-                case .failed(let failure):
-                    Label(failure, systemImage: "exclamationmark.circle").frame(maxWidth: .infinity, alignment: .leading)
-                    Button { invitations.friendJoin = nil } label: { Image(systemName: "xmark") }
-                        .obeliskButtonStyle(.plain)
-                        .accessibilityLabel(L10n.string("ui.overlay.invites.dismiss"))
-                }
+                Label(failure, systemImage: "exclamationmark.circle").frame(maxWidth: .infinity, alignment: .leading)
+                Button { invitations.friendJoinFailure = nil } label: { Image(systemName: "xmark") }
+                    .obeliskButtonStyle(.plain)
+                    .accessibilityLabel(L10n.string("ui.overlay.invites.dismiss"))
             }
             .font(.system(size: 12))
             .foregroundStyle(.secondary)
@@ -393,7 +387,7 @@ private struct FriendChatRow: View {
         // Online, but Steam's chat reconnects: the picker waits for it.
         let waiting = picking && offer == nil && friend.presence.isOnline
         let trailing = trailing(offer: offer, invited: invited, waiting: waiting)
-        let canJoinGame = joinable.map { chat.invitations?.availability(appId: $0).canJoin == true } ?? false
+        let canJoinGame = joinable.map { chat.invitations?.availability(appId: $0.appId).canJoin == true } ?? false
         Button {
             // A friend the picker cannot invite, offline for one, still opens.
             if picking, let offer {
@@ -428,6 +422,7 @@ private struct FriendChatRow: View {
             if let joinable {
                 Button(L10n.string("ui.invites.joinGame"), systemImage: "play") { join(joinable) }
                     .disabled(!canJoinGame)
+                    .help(chat.invitations?.availability(appId: joinable.appId).reason ?? "")
             }
         }
         .accessibilityActions {
@@ -508,14 +503,14 @@ private struct FriendChatRow: View {
             .accessibilityIdentifier("friends-row-invite-unavailable-\(steamID)")
     }
 
-    /// The Steam game the friend plays, which Steam's "Join Game" would join.
-    private var joinable: UInt32? {
-        guard !picking, friend.presence.isOnline, let id = friend.activity?.id else { return nil }
-        return UInt32(id)
+    /// The game the friend plays and how to join it, while Steam shows one,
+    /// as its "Join Game" does.
+    private var joinable: SteamJoinTarget? {
+        picking ? nil : friend.steamJoin
     }
 
-    private func join(_ appId: UInt32) {
-        chat.invitations?.joinFriend(steamID, appId: appId)
+    private func join(_ target: SteamJoinTarget) {
+        chat.invitations?.joinFriend(steamID, target: target)
     }
 
     /// What the row shows at its trailing edge, and the room it leaves for it.

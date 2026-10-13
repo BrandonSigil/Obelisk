@@ -869,17 +869,6 @@ final class ChatBridgeTestSession: SteamSessionProtocol, @unchecked Sendable {
     func nextInvites(afterRevision: UInt64) async -> SteamReceivedInvites {
         await chat.nextInvites(afterRevision: afterRevision)
     }
-    /// What Steam tells of a friend's game, to join it.
-    var friendGames: @Sendable (UInt64) throws -> SteamJoinTarget {
-        get { lock.withLock { _friendGames } }
-        set { lock.withLock { _friendGames = newValue } }
-    }
-    private var _friendGames: @Sendable (UInt64) throws -> SteamJoinTarget = { _ in
-        throw SteamError.Failure(reason: "backend.steam.join.unavailable")
-    }
-    func friendGame(friendSteamId: UInt64) async throws -> SteamJoinTarget {
-        try friendGames(friendSteamId)
-    }
 }
 
 actor ChatTestGate {

@@ -57,6 +57,8 @@ struct FriendPresentation: Identifiable, Equatable, Sendable {
     let avatarURL: URL?
     let presence: FriendPresence
     let activity: FriendGameActivity?
+    /// A Steam friend's game and how Steam's "Join Game" joins it, while it can.
+    var steamJoin: SteamJoinTarget? = nil
 
     var displayName: String {
         let value = name?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""

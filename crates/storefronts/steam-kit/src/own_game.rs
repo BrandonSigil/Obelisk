@@ -4,17 +4,13 @@
 //! Asking Steam for the account's own persona makes its game drop out and
 //! come back, which tells every friend again that it started: Obelisk never
 //! asks, and only reads what Steam pushes.
-use std::{
-    collections::HashMap,
-    sync::{Arc, Mutex, PoisonError},
-};
-
 use prost::Message;
 use tokio::sync::watch;
 
-use crate::{friends, proto};
-
-pub(crate) const RICH_PRESENCE: u32 = 4096;
+use crate::{
+    friends::{self, RICH_PRESENCE},
+    proto,
+};
 /// EClientPersonaStateFlag Status | PlayerName | Presence | GameExtraInfo |
 /// GameDataBlob | RichPresence (SteamKit enums.steamd), as fixtures push them.
 #[cfg(any(test, debug_assertions))]
@@ -177,84 +173,6 @@ impl OwnGameSource {
             };
             true
         });
-    }
-}
-
-/// The games the account's friends play, as Steam pushes their personas:
-/// what Steam's "Join Game" joins, their lobby or rich presence `connect`.
-/// Asking Steam for a friend's persona answers first with an empty one, which
-/// would read as offline, so only pushes count.
-#[derive(Clone)]
-pub struct FriendGames {
-    state: Arc<Mutex<FriendGamesState>>,
-}
-
-struct FriendGamesState {
-    connected: bool,
-    games: HashMap<u64, OwnGame>,
-}
-
-impl Default for FriendGames {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl FriendGames {
-    /// More friends than any account has; a flood cannot grow it further.
-    const MAX: usize = 10_000;
-
-    pub fn new() -> Self {
-        Self {
-            state: Arc::new(Mutex::new(FriendGamesState {
-                connected: true,
-                games: HashMap::new(),
-            })),
-        }
-    }
-
-    /// Applies a ClientPersonaState's entries for anyone but `account_id`,
-    /// the account itself.
-    pub(crate) fn receive(&self, account_id: u64, state: &proto::PersonaState) {
-        if state.status_flags & (friends::STATUS | RICH_PRESENCE) == 0 {
-            return;
-        }
-        let mut current = self.state.lock().unwrap_or_else(PoisonError::into_inner);
-        if !current.connected {
-            return;
-        }
-        for persona in &state.friends {
-            if !friends::individual(persona.friend_id, account_id)
-                || (current.games.len() >= Self::MAX
-                    && !current.games.contains_key(&persona.friend_id))
-            {
-                continue;
-            }
-            let game = current.games.entry(persona.friend_id).or_insert(OwnGame {
-                revision: 0,
-                connected: true,
-                app_id: 0,
-                lobby_id: 0,
-                connect: None,
-            });
-            apply(game, state.status_flags, persona);
-        }
-    }
-
-    /// `friend`'s game as Steam last pushed it.
-    pub fn game(&self, friend: u64) -> Option<OwnGame> {
-        let state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
-        state
-            .connected
-            .then(|| state.games.get(&friend).cloned())
-            .flatten()
-    }
-
-    pub fn disconnect(&self) {
-        self.state
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .connected = false;
     }
 }
 
@@ -505,43 +423,5 @@ mod tests {
         let ended = waiting.await.unwrap();
         assert!(!ended.connected);
         assert_eq!(ended.invite(), GameInvite::None);
-    }
-
-    #[test]
-    fn friends_games_follow_their_pushed_personas() {
-        const FRIEND: u64 = ACCOUNT + 1;
-        let games = FriendGames::new();
-        let friend = |persona: proto::Persona| proto::PersonaState {
-            status_flags: REQUESTED,
-            friends: vec![proto::Persona {
-                friend_id: FRIEND,
-                ..persona
-            }],
-        };
-        games.receive(ACCOUNT, &friend(playing(620, 9, Some("+join"))));
-        assert_eq!(
-            games.game(FRIEND).map(|game| game.invite()),
-            Some(GameInvite::Lobby { lobby_id: 9 })
-        );
-        // The account's own persona is not a friend's game.
-        let own =
-            proto::PersonaState::decode(&persona(REQUESTED, playing(730, 3, None))[..]).unwrap();
-        games.receive(ACCOUNT, &own);
-        assert_eq!(games.game(ACCOUNT), None);
-        games.receive(ACCOUNT, &friend(playing(620, 0, Some("+join"))));
-        assert_eq!(
-            games.game(FRIEND).map(|game| game.invite()),
-            Some(GameInvite::Connect {
-                connect: "+join".into()
-            })
-        );
-        // Steam pushes an offline friend without any field: no game left.
-        games.receive(ACCOUNT, &friend(proto::Persona::default()));
-        assert_eq!(
-            games.game(FRIEND).map(|game| game.invite()),
-            Some(GameInvite::None)
-        );
-        games.disconnect();
-        assert_eq!(games.game(FRIEND), None);
     }
 }

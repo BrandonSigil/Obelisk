@@ -447,57 +447,6 @@ async fn invitations_reach_the_invite_stream_from_every_channel() {
     assert_eq!(invites.invites[0].app_id, 620);
 }
 
-/// The friend's game once Steam pushed `persona`; nothing is asked of Steam.
-async fn friend_game(persona: Vec<u8>) -> Result<(u32, crate::own_game::GameInvite), String> {
-    let (client, mut server) = session().await;
-    server
-        .send(PERSONA_STATE, proto::Header::default(), &persona)
-        .await;
-    // The account's own persona, read after the friend's, is not its game.
-    server
-        .send(
-            PERSONA_STATE,
-            proto::Header::default(),
-            &own_persona(730, 9, None),
-        )
-        .await;
-    client.next_own_game(1).await;
-    let game = client
-        .friend_game(FRIEND)
-        .await
-        .map_err(|error| error.to_string());
-    assert!(server.quiet().await, "Steam is never asked");
-    game
-}
-
-#[tokio::test]
-async fn a_friends_game_is_joined_by_its_lobby_else_its_connect_string() {
-    use crate::own_game::{GameInvite, fixture::persona};
-    const LOBBY: u64 = 0x0186_0000_0000_0042;
-    assert_eq!(
-        friend_game(persona(FRIEND, 620, LOBBY, Some("+join 7"))).await,
-        Ok((620, GameInvite::Lobby { lobby_id: LOBBY }))
-    );
-    assert_eq!(
-        friend_game(persona(FRIEND, 620, 0, Some("+join 7"))).await,
-        Ok((
-            620,
-            GameInvite::Connect {
-                connect: "+join 7".into()
-            }
-        ))
-    );
-    for unjoinable in [
-        persona(FRIEND, 620, 0, None),
-        persona(FRIEND, 0, LOBBY, Some("+x")),
-    ] {
-        assert_eq!(
-            friend_game(unjoinable).await,
-            Err("backend.steam.join.unavailable".into())
-        );
-    }
-}
-
 /// Invites the friend into app 620. The caller keeps the session alive, since
 /// dropping it would abort the worker before the invitation is written.
 fn invite(client: &Arc<Client>) -> tokio::task::JoinHandle<Result<GameInviteKind, String>> {

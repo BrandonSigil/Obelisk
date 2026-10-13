@@ -6,7 +6,9 @@ use game_runtime::steam::account_session::{Phase, State};
 use obelisk_core::transfer::CancelToken;
 use steam_kit::friends;
 
-use crate::{LibraryCache, SteamCredentials, SteamError, SteamSession};
+use crate::{
+    LibraryCache, SteamCredentials, SteamError, SteamSession, steam_chat::SteamJoinTarget,
+};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Enum)]
 pub enum SteamFriendPresence {
@@ -77,6 +79,9 @@ pub struct SteamFriend {
     pub avatar_url: Option<String>,
     pub presence: SteamFriendPresence,
     pub game: Option<SteamFriendGame>,
+    /// The friend's game and how Steam's "Join Game" joins it, while it can.
+    #[uniffi(default = None)]
+    pub join: Option<SteamJoinTarget>,
 }
 
 #[derive(Clone, Debug, uniffi::Record)]
@@ -116,6 +121,14 @@ impl From<State> for SteamFriendsSnapshot {
                     display_name: friend.display_name,
                     avatar_url: friend.avatar_url,
                     presence: friend.presence.into(),
+                    join: friend.game.as_ref().and_then(|game| {
+                        let invite = game.invite();
+                        let app_id = game.app_id?;
+                        invite.sendable().then(|| SteamJoinTarget {
+                            app_id,
+                            invite: invite.into(),
+                        })
+                    }),
                     game: friend.game.map(|game| SteamFriendGame {
                         app_id: game.app_id,
                         name: game.name,
@@ -233,6 +246,27 @@ impl SteamFriendsFixture {
         self.publish(&source, phase, transport);
     }
 
+    /// Steam pushes `friend_steam_id` playing `app_id` (0 for none), in a
+    /// lobby and with a rich presence `connect` string when given.
+    pub fn friend_playing(
+        &self,
+        friend_steam_id: u64,
+        app_id: u32,
+        lobby_id: u64,
+        connect: Option<String>,
+    ) {
+        // ClientPersonaState.
+        self.receive(
+            766,
+            steam_kit::own_game::fixture::persona(
+                friend_steam_id,
+                app_id,
+                lobby_id,
+                connect.as_deref(),
+            ),
+        );
+    }
+
     /// The CM connection drops and the session connects again, or Steam
     /// asks the account to sign in again.
     pub fn disconnect(&self, authentication_required: bool) {
@@ -298,6 +332,41 @@ mod tests {
             transport: 2,
             friends: snapshot,
         }
+    }
+
+    #[test]
+    fn a_friend_crosses_with_how_to_join_their_game_while_steam_shows_one() {
+        const LOBBY: u64 = 109_775_244_421_126_053;
+        let friend = |game: Option<friends::FriendGame>| friends::Friend {
+            steam_id: 76_561_197_960_265_729,
+            display_name: None,
+            avatar_url: None,
+            presence: friends::FriendPresence::Online,
+            game,
+        };
+        let mut state = state(Phase::Connected, friends::FriendsConnection::Ready);
+        state.friends.friends = vec![
+            friend(Some(friends::FriendGame {
+                app_id: Some(620),
+                lobby_id: LOBBY,
+                ..Default::default()
+            })),
+            friend(Some(friends::FriendGame {
+                app_id: Some(620),
+                ..Default::default()
+            })),
+            friend(None),
+        ];
+        let crossed = SteamFriendsSnapshot::from(state);
+        assert_eq!(
+            crossed.friends[0].join,
+            Some(SteamJoinTarget {
+                app_id: 620,
+                invite: crate::SteamGameInvite::Lobby { lobby_id: LOBBY }
+            })
+        );
+        assert_eq!(crossed.friends[1].join, None, "no lobby or connect string");
+        assert_eq!(crossed.friends[2].join, None);
     }
 
     #[test]

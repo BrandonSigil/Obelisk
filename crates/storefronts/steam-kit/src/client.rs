@@ -29,7 +29,7 @@ use crate::{
         DepotInstallation,
     },
     invites::{InviteSource, ReceivedInvites},
-    own_game::{FriendGames, GameInvite, OwnGame, OwnGameSource},
+    own_game::{GameInvite, OwnGame, OwnGameSource},
 };
 mod cloud;
 
@@ -184,7 +184,6 @@ pub struct Client {
     chat: ChatEventSource,
     own_game: OwnGameSource,
     invites: InviteSource,
-    friend_games: FriendGames,
     /// When each friend last heard that the account is typing.
     typing: Mutex<HashMap<u64, Instant>>,
     connection_abort: tokio::task::AbortHandle,
@@ -225,7 +224,6 @@ impl Client {
             chat: cm.chat_source(),
             own_game: cm.own_game_source(),
             invites: cm.invite_source(),
-            friend_games: cm.friend_games_source(),
             typing: Mutex::new(HashMap::new()),
             connection_abort: cm.abort_handle(),
             cloud_authorized: std::sync::atomic::AtomicBool::new(true),
@@ -371,24 +369,6 @@ impl Client {
         self.invites.next(after_revision).await
     }
 
-    /// The game `friend` plays, as Steam tells it now, and how Steam's "Join
-    /// Game" would join it: its lobby, else its rich presence `connect`
-    /// string. A friend in no game that takes players has none.
-    pub async fn friend_game(&self, friend: u64) -> Result<(u32, GameInvite), ClientError> {
-        if !self.cm.logged_on() {
-            return Err(crate::cm::CmError::Disconnected.into());
-        }
-        let game = self
-            .friend_games
-            .game(friend)
-            .ok_or(crate::cm::SocialError::JoinUnavailable)?;
-        let invite = game.invite();
-        if !invite.sendable() {
-            return Err(crate::cm::SocialError::JoinUnavailable.into());
-        }
-        Ok((game.app_id, invite))
-    }
-
     pub async fn next_own_game(&self, after_revision: u64) -> OwnGame {
         self.own_game.next(after_revision).await
     }
@@ -445,7 +425,6 @@ impl Client {
         self.chat.disconnect();
         self.own_game.disconnect();
         self.invites.disconnect();
-        self.friend_games.disconnect();
         self.connection_abort.abort();
         self.downloads.cancel();
     }
