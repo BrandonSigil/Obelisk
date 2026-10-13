@@ -36,9 +36,16 @@ struct InstallationReceipt<GameID: Hashable & Sendable>: Identifiable, Equatable
     var needsVerification = false
     /// The storefront offers a newer build than the installed one.
     var updateAvailable = false
+
+    /// The installation for `platform` among one game's `receipts`, else its
+    /// other one: an installed build shows whatever the storefront would
+    /// install now.
+    static func preferred(among receipts: [Self], platform: String) -> Self? {
+        receipts.first { $0.platform == platform } ?? receipts.first
+    }
 }
 
-/// The game on screen, as the storefront model sees it.
+/// A game as the storefront model sees it: the one on screen, or one of its library.
 struct InstallationSelection<Store: InstallationStorefront> {
     let game: Store.GameID
     let platform: String
@@ -163,8 +170,8 @@ protocol InstallationsBackend<Store>: AnyObject {
 }
 
 /// One storefront's installed games and the actions on them, as Rust keeps
-/// them: Transfers, launches and uninstalls. This presents them for
-/// the game on screen and forwards the player's actions.
+/// them: Transfers, launches and uninstalls. This presents them, with each
+/// game's Game action, and forwards the player's actions.
 @MainActor @Observable
 final class GameInstallations<Store: InstallationStorefront> {
     typealias Receipt = InstallationReceipt<Store.GameID>
@@ -337,6 +344,9 @@ final class GameInstallations<Store: InstallationStorefront> {
         sessions.refresh()
     }
 
+    /// Whether an account is signed in, whose installations these are.
+    var isConnected: Bool { account != nil }
+
     // MARK: Reservation gate
 
     /// Whether a Transfer of `game` may join the download queue, as Rust's
@@ -370,18 +380,20 @@ final class GameInstallations<Store: InstallationStorefront> {
         return nil
     }
 
+    /// The active Game session's game when it is this account's: a session of
+    /// another account is not this account's game.
+    var accountSession: GameSessions<Store>.ActiveGame? {
+        sessions.activeGame.flatMap { $0.account == account ? $0 : nil }
+    }
+
     /// The last Transfer progress, when it belongs to `game`.
     func transfer(for game: Store.GameID) -> GameTransfer? {
         transferGame == game ? transfer : nil
     }
 
-    func receipt(for game: Store.GameID, platform: String) -> Receipt? {
-        receipts.first { $0.gameID == game && $0.platform == platform }
-    }
-
     /// The game's installation for `platform`, else its other one.
     func receipt(for game: Store.GameID, preferring platform: String) -> Receipt? {
-        receipt(for: game, platform: platform) ?? receipts.first { $0.gameID == game }
+        Receipt.preferred(among: receipts.filter { $0.gameID == game }, platform: platform)
     }
 
     // MARK: The game on screen
@@ -390,18 +402,6 @@ final class GameInstallations<Store: InstallationStorefront> {
     /// installed build stays on screen whatever the storefront would install now.
     var selectedReceipt: Receipt? {
         selection().flatMap { receipt(for: $0.game, preferring: $0.platform) }
-    }
-
-    /// The active Game session when it is this account's, for the game on screen.
-    var selectedSession: GameSessions<Store>.Session? {
-        guard let active = sessions.active, active.account == account,
-              active.game == selection()?.game else { return nil }
-        return active
-    }
-
-    var canResumeDownload: Bool {
-        guard let resumableGame else { return false }
-        return canModify(resumableGame) && resumableGame == selection()?.game
     }
 
     /// Whether the game on screen's installation may be verified.
@@ -438,94 +438,22 @@ final class GameInstallations<Store: InstallationStorefront> {
     /// The game on screen's Cloud indicator, or nil when it is hidden.
     var cloudIndicator: CloudIndicatorPresentation? {
         guard Store.syncsCloud, let game = selection()?.game, account != nil else { return nil }
-        let playing = sessions.activeGame.map { $0.game == game && $0.account == account } ?? false
+        let playing = accountSession?.game == game
         return CloudIndicatorPresentation.make(saved: cloud.indicator(for: game), isSyncing: isSynchronizingSaves,
                                                isPlaying: playing, isInstalled: selectedReceipt != nil)
     }
 
-    var primaryActionTitle: String {
-        let game = selection()?.game
-        if isSynchronizingSaves { return L10n.string("ui.cloud.sync_short") }
-        if sessions.isRecovering { return L10n.string(Store.recoveringSession) }
-        if let quitStage = primaryQuitStage { return quitStage.title }
-        if selectedSession?.running == true { return L10n.string("model.game.running") }
-        if uninstallGame == game { return L10n.string("model.game.uninstalling") }
-        if isLaunching && launchGame == game {
-            switch runtimeInstall?.component {
-            case .voile: return L10n.string("model.game.installingVoile")
-            case .steamComponents: return L10n.string("model.game.installingSteamComponents")
-            case nil: break
-            }
-            return L10n.string(isVerifyingBeforeLaunch ? "model.game.verifying" : "model.game.launching")
-        }
-        if let game, isQueued(game) { return L10n.string("model.game.queued") }
-        if selectedSession != nil { return L10n.string("model.game.launching") }
-        if let selectedReceipt {
-            return L10n.string(selectedReceipt.updateAvailable ? "model.game.update" : "model.game.launch")
-        }
-        return L10n.string(canResumeDownload ? "model.game.resume" : "model.game.download")
-    }
+    // MARK: Game actions
 
-    /// Which runtime downloads while the game on screen waits for it, and how much.
-    var runtimeInstall: RuntimeInstallState? {
-        guard isLaunching, let game = launchGame, game == selection()?.game,
-              let active = sessions.active, active.game == game else { return nil }
-        return active.runtimeInstall
-    }
-
-    var runtimeInstallFraction: Double? { runtimeInstall?.fraction }
-
-    /// Whether the primary action launches the game rather than installing or
-    /// updating it.
-    var primaryActionLaunches: Bool {
-        selectedSession != nil || selectedReceipt.map { !$0.updateAvailable } ?? false
-    }
-
-    /// While the game on screen runs, the primary action ends it instead.
-    var primaryQuitStage: GameQuitStage? {
-        selectedSession?.running == true ? sessions.quitStage : nil
-    }
-
-    /// An installation launches from its receipt; only a new download waits for
-    /// the storefront to know what it can install.
-    var primaryActionAvailable: Bool {
-        if let primaryQuitStage { return primaryQuitStage != .closing }
-        guard let selection = selection(), account != nil, !isQueued(selection.game) else { return false }
-        if let selectedReceipt {
-            return selectedReceipt.updateAvailable ? canModify(selection.game) : canLaunch(selection.game)
-        }
-        return selection.offer != nil && canModify(selection.game)
-    }
-
-    /// Launches the installed game, updates it when the storefront offers a
-    /// newer build, otherwise installs it. While the game runs, it quits it,
-    /// then forces it to quit once it may: the page asks its player to
-    /// confirm that first.
-    func primaryAction() {
-        guard primaryActionAvailable else { return }
-        if primaryQuitStage != nil {
-            endRunningGame()
-        } else if let receipt = selectedReceipt, !receipt.updateAvailable {
-            launch(receipt)
-        } else {
-            downloadSelected()
-        }
-    }
-
-    /// Quit, or Force Quit once the running game may be forced, from its
-    /// page or from the library. Its player confirms a Force Quit first.
-    func endRunningGame() {
+    /// Asks the running game to quit, from wherever its Game action shows: a
+    /// Mac build is asked as its own Quit menu would.
+    func quitRunningGame() {
         guard let active = sessions.active else { return }
-        switch sessions.quitStage {
-        case .quit:
-            // Only a Mac build runs from its own installation.
-            let macApps = active.account != account ? [] : receipts
-                .filter { $0.gameID == active.game && $0.platform == Store.nativePlatform }
-                .map(\.directory)
-            Task { await sessions.quit(macApps: macApps) }
-        case .forceQuit: forceQuitRunningGame()
-        case .closing, nil: break
-        }
+        // Only a Mac build runs from its own installation.
+        let macApps = active.account != account ? [] : receipts
+            .filter { $0.gameID == active.game && $0.platform == Store.nativePlatform }
+            .map(\.directory)
+        Task { await sessions.quit(macApps: macApps) }
     }
 
     /// The Force Quit its player confirmed, while the running game may still
@@ -540,29 +468,18 @@ final class GameInstallations<Store: InstallationStorefront> {
         act { $0.launch(receipt) }
     }
 
-    /// Whether the library may install `game`: no build of it is installed
-    /// and no operation holds it.
-    func canInstall(_ game: Store.GameID) -> Bool {
+    /// Whether `game` may be installed: no build of it is installed and no
+    /// operation holds it.
+    private func canInstall(_ game: Store.GameID) -> Bool {
         account != nil && canModify(game) && !receipts.contains { $0.gameID == game }
     }
 
-    /// Installs a game from the library, where no game is on screen. Rust
-    /// resumes the game's interrupted Transfer instead, and picks every folder.
+    /// Installs `offer`, a build of a game none of whose builds is installed,
+    /// from its page or from the library. Rust resumes the game's interrupted
+    /// Transfer instead, and picks every folder.
     func install(_ offer: GameOffer, of game: Store.GameID) {
         guard canInstall(game) else { return }
         act { $0.install(offer) }
-    }
-
-    /// Installs the game on screen, or updates its installation in place with
-    /// the installed build. Rust resumes the game's interrupted Transfer
-    /// instead, and picks every folder.
-    func downloadSelected() {
-        guard let selection = selection(), canModify(selection.game) else { return }
-        if let receipt = selectedReceipt {
-            act { $0.update(receipt) }
-        } else if let offer = selection.offer {
-            act { $0.install(offer) }
-        }
     }
 
     // MARK: Transfers

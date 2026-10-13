@@ -205,3 +205,45 @@ extension CloudIndicator {
     static let neverSynced = CloudIndicator(state: .neverSynced, gameSession: false, syncedAt: nil,
                                             pendingUpload: false, installationRemoved: false)
 }
+
+/// One signed-in Steam account with Portal 2 on screen, installed for macOS.
+@MainActor
+final class InstallationsFixture {
+    let sessions: SteamGameSessions
+    let receipt: InstallationReceipt<UInt32>
+    let installations: SteamInstallations
+    private(set) var backend = FakeInstallations<SteamGames>()
+    private(set) var reported: [String] = []
+    private let installed: Bool
+
+    init(installed: Bool = true, quitting: FakeQuitting = FakeQuitting()) {
+        self.installed = installed
+        sessions = SteamGameSessions(quitting: quitting.quitting)
+        receipt = .steam(appId: 620, name: "Portal 2", directory: "/fixture/Games/Steam/steam-620-macos",
+                         platform: "macos", totalBytes: 100)
+        installations = SteamInstallations(sessions: sessions, cloud: SteamCloudModel(sessions: sessions))
+    }
+
+    /// What Steam offers to install of Portal 2, for `platform`.
+    func offer(_ platform: String) -> GameOffer {
+        GameOffer.steam(appId: 620, name: receipt.name, platform: platform, language: "english")
+    }
+
+    /// `game` as its page or the library reads it. Steam offers Portal 2
+    /// alone, once the storefront knows what it can install.
+    func selection(_ game: UInt32, platform: String = "macos",
+                   installable: Bool = true) -> InstallationSelection<SteamGames> {
+        InstallationSelection(game: game, platform: platform, offer: installable && game == 620 ? offer(platform) : nil)
+    }
+
+    func connect(platform: String = "macos", installable: Bool = true) -> SteamInstallations {
+        let selection = selection(620, platform: platform, installable: installable)
+        installations.selection = { selection }
+        backend = FakeInstallations(receipts: installed ? [receipt] : [])
+        installations.connect(account: 42, backend: backend, port: InstallationPort(
+            report: { [unowned self] error in if let error { reported.append(SteamModel.message(error)) } },
+            warn: { _ in }
+        ))
+        return installations
+    }
+}

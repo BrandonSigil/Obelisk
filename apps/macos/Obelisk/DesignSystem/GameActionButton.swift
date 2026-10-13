@@ -1,76 +1,80 @@
 import SwiftUI
 
+/// A game's Game action as its page and its library's hero show it. It reads
+/// the game's progress in its own body, so a progress tick redraws the button
+/// alone.
 struct GameActionButton: View {
-    let title: String
-    /// Whether the button launches the game rather than installing it.
-    let launches: Bool
-    let transfer: GameTransfer?
-    let isTransferring: Bool
-    let isAvailable: Bool
-    let action: () -> Void
-    let cancel: () -> Void
-    var isCancellable = false
-    /// A step outside any Transfer holds the button: a pre-launch Cloud sync,
-    /// or Voile installing before a Windows launch.
-    var isStep = false
-    /// The step's progress, when it has one.
-    var stepFraction: Double? = nil
-    /// Set while the game runs: the button then ends it.
-    var quitStage: GameQuitStage? = nil
+    let action: GameAction
+    /// Names the game a Force Quit asks about.
+    let gameName: String
+    /// The Force Quit its player is asked to confirm.
+    @State private var asking: GameAction?
 
     /// A step outranks a byte-counted transfer: it has no per-file title to show.
-    /// A closing game shows as a step.
+    /// A closing game shows as a step, and so does a wait in the library, as
+    /// its cards show one busy.
     private enum Mode { case idle, transferring, step }
     private var mode: Mode {
-        if isStep || quitStage == .closing { .step } else if isTransferring { .transferring } else { .idle }
+        switch action.kind {
+        case .step, .running(.closing): .step
+        case .waiting where action.place == .library: .step
+        case .transferring: .transferring
+        default: .idle
+        }
+    }
+
+    /// Set while the game runs: the button then ends it.
+    private var quitStage: GameQuitStage? {
+        if case let .running(stage) = action.kind { stage } else { nil }
     }
 
     private var colors: [Color] {
         switch quitStage {
         case .quit, .closing: ObeliskStyle.quitGradient
         case .forceQuit: ObeliskStyle.forceQuitGradient
-        case nil: launches ? ObeliskStyle.launchGradient : ObeliskStyle.installGradient
+        case nil: action.launches ? ObeliskStyle.launchGradient : ObeliskStyle.installGradient
         }
     }
 
     private var symbol: String {
         if quitStage != nil { return "stop.fill" }
-        return launches ? "play.fill" : "arrow.down.to.line"
+        return action.launches ? "play.fill" : "arrow.down.to.line"
     }
 
-    private var showsProgress: Bool {
+    private func showsProgress(_ transfer: GameTransfer?) -> Bool {
         switch mode {
         case .step: true
         case .transferring: transfer?.isInProgress ?? true
         case .idle: false
         }
     }
-    private var helpText: String {
+    private func helpText(_ transfer: GameTransfer?) -> String {
         switch quitStage {
         case .closing: L10n.string("ui.game.closing_help")
         case .forceQuit: L10n.string("ui.game.force_quit_help")
-        case .quit, nil: mode == .step ? title : transfer?.progressSummary ?? title
+        case .quit, nil: mode == .step ? action.title : transfer?.progressSummary ?? action.title
         }
     }
-    private var accessibilityText: String {
+    private func accessibilityText(_ transfer: GameTransfer?) -> String {
         switch mode {
-        case .step: title
+        case .step: action.title
         case .transferring: transfer?.progressSummary ?? L10n.string("ui.transfer.preparing_accessibility")
         case .idle: ""
         }
     }
 
     var body: some View {
+        let transfer = action.transfer()
         HStack(spacing: 8) {
-            Button(action: action) {
+            Button { action.run(asking: $asking) } label: {
                 Group {
                     switch mode {
                     case .step:
-                        Text(title)
+                        Text(action.title)
                     case .transferring:
                         Text(transfer?.buttonTitle ?? L10n.string("ui.transfer.preparing_short"))
                     case .idle:
-                        Label(title, systemImage: symbol)
+                        Label(action.title, systemImage: symbol)
                     }
                 }
                 .lineLimit(1)
@@ -79,8 +83,8 @@ struct GameActionButton: View {
             }
             .buttonStyle(GameActionButtonStyle(colors: colors, isBusy: mode != .idle))
             .overlay(alignment: .bottom) {
-                if showsProgress {
-                    GameButtonProgress(fraction: mode == .step ? stepFraction : transfer?.progressFraction)
+                if showsProgress(transfer) {
+                    GameButtonProgress(fraction: mode == .step ? action.stepFraction() : transfer?.progressFraction)
                         .frame(height: 3)
                         .padding(.horizontal, 24)
                         .padding(.bottom, 6)
@@ -88,12 +92,12 @@ struct GameActionButton: View {
                         .accessibilityHidden(true)
                 }
             }
-            .disabled(!isAvailable || mode != .idle)
-            .help(helpText)
-            .accessibilityValue(accessibilityText)
+            .disabled(!action.isAvailable || mode != .idle)
+            .help(helpText(transfer))
+            .accessibilityValue(accessibilityText(transfer))
 
-            if isTransferring || isCancellable {
-                Button(action: cancel) {
+            if action.isCancellable {
+                Button(action: action.cancel) {
                     StorefrontGlassIcon(systemName: "xmark", size: 12)
                 }
                 .obeliskButtonStyle(.plain)
@@ -104,6 +108,7 @@ struct GameActionButton: View {
             }
         }
         .fixedSize()
+        .forceQuitConfirmation(gameName, asking: $asking)
     }
 }
 
@@ -184,14 +189,26 @@ private struct GameButtonProgress: View {
     }
 }
 
+extension GameAction {
+    /// Runs the action, or hands it to `asking` when its player confirms it first.
+    func run(asking: Binding<GameAction?>) {
+        if needsConfirmation { asking.wrappedValue = self } else { perform() }
+    }
+}
+
 extension View {
     /// Asks before forcing `gameName` to quit, as macOS's own Force Quit does:
-    /// what the game did not save is lost.
-    func forceQuitConfirmation(_ gameName: String, isPresented: Binding<Bool>,
-                               confirm: @escaping () -> Void) -> some View {
-        alert(L10n.string("ui.game.force_quit_title", gameName), isPresented: isPresented) {
+    /// what the game did not save is lost. The confirmation runs the action
+    /// `asking` holds.
+    func forceQuitConfirmation(_ gameName: String, asking: Binding<GameAction?>) -> some View {
+        // Read now: the alert may clear `asking` before its button runs.
+        let asked = asking.wrappedValue
+        return alert(L10n.string("ui.game.force_quit_title", gameName), isPresented: Binding(
+            get: { asking.wrappedValue != nil },
+            set: { if !$0 { asking.wrappedValue = nil } }
+        )) {
             Button(L10n.string("ui.common.cancel"), role: .cancel) {}
-            Button(L10n.string("model.game.forceQuit"), role: .destructive, action: confirm)
+            Button(L10n.string("model.game.forceQuit"), role: .destructive) { asked?.perform() }
         } message: {
             Text(L10n.string("ui.game.force_quit_message"))
         }

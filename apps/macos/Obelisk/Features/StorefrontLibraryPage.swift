@@ -47,16 +47,15 @@ import SwiftUI
     func open(_ game: Game)
     /// Returns from the game's page to the library.
     func closeGame()
-    func downloadFromLibrary(_ game: Game)
-    /// Whether the storefront may have a build of `game` to install.
-    func canInstallFromLibrary(_ game: Game) -> Bool
+    /// What the library installs of `game` without opening its page, when
+    /// the storefront has a build of it.
+    func libraryOffer(of game: Game) -> GameOffer?
     /// The messages the account has not read, which its menu tells.
     var unreadCount: Int { get }
 }
 
 extension LibraryStorefront {
     func syncCloud() { installations.syncCloud() }
-    func canInstallFromLibrary(_ game: Game) -> Bool { true }
     var unreadCount: Int { 0 }
     var filterRevision: Int { 0 }
 
@@ -77,60 +76,10 @@ extension LibraryStorefront {
         return "\(Store.cloudTitle) · \(name)"
     }
 
-    /// Launches the game's native installation first.
-    func launchFromLibrary(_ game: Game) {
-        guard let receipt = installations.receipt(for: game.id, preferring: Store.nativePlatform) else { return }
-        installations.launch(receipt)
-    }
-
-    /// Runs a card's button: launches, downloads or ends the game. Force
-    /// Quit asks the player first, through `confirmForceQuit`.
-    func performCardAction(_ action: LibraryCardAction, for game: Game, confirmForceQuit: () -> Void) {
-        switch action {
-        case .launch: launchFromLibrary(game)
-        case .running(.forceQuit): confirmForceQuit()
-        case .running: installations.endRunningGame()
-        default: downloadFromLibrary(game)
-        }
-    }
-}
-
-/// What each card's button shows and does, read once for a whole set of
-/// cards: these change with an operation, not with its progress.
-@MainActor
-struct LibraryCardActions<Model: LibraryStorefront> {
-    private let model: Model
-    private let installed: Set<Model.Store.GameID>
-    private let transferring: Model.Store.GameID?
-    private let queued: Set<Model.Store.GameID>
-    private let running: Model.Store.GameID?
-    private let preparing: Set<Model.Store.GameID>
-
-    init(_ model: Model) {
-        let installations = model.installations
-        let session = installations.sessions.activeGame
-        self.model = model
-        installed = Set(installations.receipts.map(\.gameID))
-        transferring = installations.activeTransferGame
-        queued = Set(installations.queuedGames)
-        running = session.flatMap { $0.running ? $0.game : nil }
-        preparing = Set([
-            session?.game,
-            installations.isLaunching ? installations.launchGame : nil,
-            installations.uninstallGame,
-        ].compactMap { $0 })
-    }
-
-    func isInstalled(_ game: Model.Game) -> Bool { installed.contains(game.id) }
-
-    func callAsFunction(_ game: Model.Game) -> LibraryCardAction {
-        let installations = model.installations
-        if game.id == running { return .running(installations.sessions.quitStage) }
-        if game.id == transferring { return .transferring }
-        if preparing.contains(game.id) { return .busy }
-        if queued.contains(game.id) { return .queued }
-        if installed.contains(game.id) { return .launch(enabled: installations.canLaunch(game.id)) }
-        return .download(enabled: installations.canModify(game.id) && model.canInstallFromLibrary(game))
+    /// A game of the library, as its Game action reads it: its native build
+    /// first, and what the library installs without opening its page.
+    func librarySelection(_ game: Game) -> InstallationSelection<Store> {
+        InstallationSelection(game: game.id, platform: Store.nativePlatform, offer: libraryOffer(of: game))
     }
 }
 
@@ -159,8 +108,6 @@ struct StorefrontLibraryPage<Model: LibraryStorefront, HeroArtwork: View, HeroLo
     /// A game's cover.
     @ViewBuilder let artwork: (Model.Game) -> Artwork
     @State private var position: ScrollPosition
-    /// The running game whose Force Quit its player is asked to confirm.
-    @State private var forceQuitting: String?
     @Environment(\.storefrontBar) private var bar
 
     private static var columns: [GridItem] {
@@ -203,12 +150,12 @@ struct StorefrontLibraryPage<Model: LibraryStorefront, HeroArtwork: View, HeroLo
 
     var body: some View {
         let heroGame = heroGame
-        let actions = LibraryCardActions(model)
+        let actions = GameActions(model.installations, in: .library)
         let backdropOffset = heroGame == nil ? 0 : ObeliskStyle.libraryHeroHeight
         return StorefrontScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 if let heroGame {
-                    hero(heroGame, action: actions(heroGame))
+                    hero(heroGame, action: actions(model.librarySelection(heroGame)))
                 }
                 VStack(alignment: .leading, spacing: 22) {
                     StorefrontWarningBanner(message: $model.storageWarning)
@@ -234,27 +181,16 @@ struct StorefrontLibraryPage<Model: LibraryStorefront, HeroArtwork: View, HeroLo
             bar?.showsGameTitle = false
         }
         .ignoresSafeArea(.container, edges: .top)
-        .forceQuitConfirmation(forceQuitting ?? "", isPresented: Binding(
-            get: { forceQuitting != nil },
-            set: { if !$0 { forceQuitting = nil } }
-        )) {
-            model.installations.forceQuitRunningGame()
-        }
     }
 
-    private func hero(_ game: Model.Game, action: LibraryCardAction) -> some View {
-        let installations = model.installations
-        let title = model.title(of: game)
-        return LibraryHero(
-            title: title,
+    private func hero(_ game: Model.Game, action: GameAction) -> some View {
+        LibraryHero(
+            title: model.title(of: game),
             details: [
                 model.lastPlayed(of: game).map { .init(symbol: "calendar", text: GameFormatting.lastPlayed($0)) },
                 model.playtime(of: game).map { .init(symbol: "clock", text: GameFormatting.playtime($0)) },
             ].compactMap { $0 },
             action: action,
-            transfer: { installations.transfer(for: game.id) },
-            cancelTransfer: { installations.cancel(game.id) },
-            perform: { model.performCardAction(action, for: game) { forceQuitting = title } },
             open: { open(game, .hero) }
         ) {
             heroArtwork(game)
@@ -263,7 +199,7 @@ struct StorefrontLibraryPage<Model: LibraryStorefront, HeroArtwork: View, HeroLo
         }
     }
 
-    private func library(_ actions: LibraryCardActions<Model>) -> some View {
+    private func library(_ actions: GameActions<Model.Store>) -> some View {
         let filtered = model.filteredGames
         return VStack(alignment: .leading, spacing: 22) {
             header(count: filtered.count)
@@ -343,11 +279,9 @@ struct StorefrontLibraryPage<Model: LibraryStorefront, HeroArtwork: View, HeroLo
         }
     }
 
-    private func grid(_ games: [Model.Game], actions: LibraryCardActions<Model>) -> some View {
-        let installations = model.installations
-        return LazyVGrid(columns: Self.columns, alignment: .leading, spacing: 18) {
+    private func grid(_ games: [Model.Game], actions: GameActions<Model.Store>) -> some View {
+        LazyVGrid(columns: Self.columns, alignment: .leading, spacing: 18) {
             ForEach(games) { game in
-                let action = actions(game)
                 let title = model.title(of: game)
                 LibraryCoverCard(
                     title: title,
@@ -356,11 +290,9 @@ struct StorefrontLibraryPage<Model: LibraryStorefront, HeroArtwork: View, HeroLo
                     help: [title, model.playtime(of: game).map(GameFormatting.playtime)].compactMap { $0 }
                         .joined(separator: " · "),
                     platform: model.platform(of: game),
-                    action: action,
-                    progress: { installations.transfer(for: game.id)?.progressFraction },
+                    action: actions(model.librarySelection(game)),
                     matchID: game.id,
-                    open: { open(game, .cover) },
-                    perform: { model.performCardAction(action, for: game) { forceQuitting = title } }
+                    open: { open(game, .cover) }
                 ) {
                     artwork(game)
                 }

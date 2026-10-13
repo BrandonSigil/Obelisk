@@ -65,3 +65,7 @@ _Avoid_: prompt, Cloud decision
 **Account revocation**:
 Signing a storefront account out while its Game sessions may still run. It stops that account's network work and presence, keeps any exit save locally as pending for that account, and never ends a running game.
 _Avoid_: sign-out cancel, logout kill
+
+**Game action**:
+What the player can do with one game of an account now, as its button shows it: download, resume or update it, launch it, wait for its queued Transfer, follow its Transfer, wait while it is uninstalled or launched, follow a step outside any Transfer (a runtime its launch waits for, or a Cloud sync), or end its running game. A game's page and its library show the same action, except for an installed game whose storefront offers a newer build: the page offers the update alone, while the library launches it and the launch installs the update first. A Game session of another account is not this account's running game.
+_Avoid_: primary action, card action

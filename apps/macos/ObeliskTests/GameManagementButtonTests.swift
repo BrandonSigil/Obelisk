@@ -45,8 +45,9 @@ final class GameManagementButtonTests: XCTestCase {
         let fixture = ManagementButtonWindow(
             HStack(spacing: 10) {
                 GameActionButton(
-                    title: L10n.string("model.game.launch"), launches: true, transfer: nil,
-                    isTransferring: false, isAvailable: true, action: {}, cancel: {}
+                    action: GameAction(kind: .launch, title: L10n.string("model.game.launch"), isAvailable: true,
+                                       launches: true),
+                    gameName: "Portal 2"
                 )
                 GameManagementButton(gameName: "Portal 2", canVerify: true, canUninstall: true, verify: {}, uninstall: {}, directory: "/Applications")
             }

@@ -23,16 +23,12 @@ struct HomeGame: Identifiable {
     let playtime: Duration?
     let platform: GamePlatform?
     let isInstalled: Bool
-    let action: LibraryCardAction
+    /// What the game's card and hero buttons show and do.
+    let action: GameAction
     let cover: () -> AnyView
     let hero: Hero
-    /// The game's Transfer, read only by the views that show its progress.
-    let transfer: @MainActor () -> GameTransfer?
-    let cancelTransfer: () -> Void
     /// Opens the game's page in its storefront.
     let open: () -> Void
-    /// Runs the card's button. Force Quit runs at once: Home asks first.
-    let perform: () -> Void
 
     /// The last played first, then the never played, each by name.
     static func lastPlayedFirst(_ left: HomeGame, _ right: HomeGame) -> Bool {
@@ -57,26 +53,19 @@ extension LibraryStorefront {
         heroArtwork: @escaping (Game) -> Artwork,
         heroLogo: @escaping (Game) -> Logo
     ) -> [HomeGame] {
-        let actions = LibraryCardActions(self)
-        let installations = installations
+        let actions = GameActions(installations, in: .library)
         return games.map { game in
-            let action = actions(game)
-            return HomeGame(
+            HomeGame(
                 id: HomeGame.ID(section: section, game: "\(game.id)"),
                 title: title(of: game),
                 lastPlayed: lastPlayed(of: game),
                 playtime: playtime(of: game),
                 platform: platform(of: game),
-                isInstalled: actions.isInstalled(game),
-                action: action,
+                isInstalled: actions.isInstalled(game.id),
+                action: actions(librarySelection(game)),
                 cover: { AnyView(cover(game)) },
                 hero: HomeGame.Hero(artwork: { AnyView(heroArtwork(game)) }, logo: { AnyView(heroLogo(game)) }),
-                transfer: { installations.transfer(for: game.id) },
-                cancelTransfer: { installations.cancel(game.id) },
-                open: { self.open(game) },
-                perform: {
-                    self.performCardAction(action, for: game, confirmForceQuit: installations.forceQuitRunningGame)
-                }
+                open: { self.open(game) }
             )
         }
     }

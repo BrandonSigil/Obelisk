@@ -559,12 +559,7 @@ final class WebAccountModel<Store: WebStorefront> {
 
     /// The library already tells which builds a game ships, so it downloads
     /// one without opening the game's page.
-    func downloadFromLibrary(_ game: Game) {
-        guard let offer = game.offer else { return }
-        installations.install(offer, of: game.id)
-    }
-
-    func canInstallFromLibrary(_ game: Game) -> Bool { game.offer != nil }
+    func libraryOffer(of game: Game) -> GameOffer? { game.offer }
 
     func reloadAchievements() {
         guard let game = selectedGame else { return }

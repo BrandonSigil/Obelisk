@@ -932,11 +932,12 @@ final class SteamModel {
         }
     }
 
-    /// Downloads a game without opening its page: Steam picks the build the
-    /// account can install, the native one first, as the Transfer starts.
-    func downloadFromLibrary(_ game: SteamGame) {
-        guard session != nil, installations.canInstall(game.appId) else { return }
-        installations.install(.steam(appId: game.appId, name: game.name, platform: nil, language: language), of: game.appId)
+    /// The library downloads a game without opening its page: Steam picks the
+    /// build the account can install, the native one first, as the Transfer
+    /// starts. It needs the account's session to.
+    func libraryOffer(of game: SteamGame) -> GameOffer? {
+        guard session != nil else { return nil }
+        return .steam(appId: game.appId, name: game.name, platform: nil, language: language)
     }
 
     func closeGame() {

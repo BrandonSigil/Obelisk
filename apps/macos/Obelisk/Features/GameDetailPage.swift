@@ -113,7 +113,7 @@ struct GameDetailPage<Model: LibraryStorefront, HeroArtwork: View, Cover: View, 
                 // The part of the cover over the artwork.
                 Color.clear.frame(height: Self.coverOverlap)
                 GameLaunchRow(metrics: metrics) {
-                    GamePrimaryAction(installations: installations, game: game.id, gameName: name)
+                    GamePageAction(installations: installations, gameName: name)
                     if let receipt = installations.selectedReceipt {
                         GameManagementButton(
                             gameName: name,
@@ -206,38 +206,16 @@ struct GameDetailPage<Model: LibraryStorefront, HeroArtwork: View, Cover: View, 
     }
 }
 
-/// The game's primary action. It reads the Transfer progress in its own body,
-/// so a progress tick redraws only the button.
-private struct GamePrimaryAction<Store: InstallationStorefront>: View {
+/// The game's Game action. It reads the action in its own body, and its button
+/// the progress, so neither redraws the page.
+private struct GamePageAction<Store: InstallationStorefront>: View {
     let installations: GameInstallations<Store>
-    let game: Store.GameID
     let gameName: String
-    @State private var confirmsForceQuit = false
 
     var body: some View {
-        let cancelsSynchronization = installations.cloud.canCancelSynchronization(for: game)
-        GameActionButton(
-            title: installations.primaryActionTitle,
-            launches: installations.primaryActionLaunches,
-            transfer: installations.transfer(for: game),
-            isTransferring: installations.activeTransferGame == game,
-            isAvailable: installations.primaryActionAvailable,
-            action: {
-                if installations.primaryQuitStage == .forceQuit { confirmsForceQuit = true }
-                else { installations.primaryAction() }
-            },
-            cancel: {
-                if cancelsSynchronization { installations.cloud.cancelSynchronization(for: game) }
-                else { installations.cancel(game) }
-            },
-            isCancellable: cancelsSynchronization
-                || (installations.isLaunching && installations.launchGame == game)
-                || installations.isQueued(game),
-            isStep: installations.isSynchronizingSaves || installations.runtimeInstallFraction != nil,
-            stepFraction: installations.runtimeInstallFraction,
-            quitStage: installations.primaryQuitStage
-        )
-        .forceQuitConfirmation(gameName, isPresented: $confirmsForceQuit, confirm: installations.forceQuitRunningGame)
+        if let action = installations.selectedAction {
+            GameActionButton(action: action, gameName: gameName)
+        }
     }
 }
 
@@ -259,7 +237,7 @@ struct GameOperationStatus<Store: InstallationStorefront>: View {
         }
         // Another game's operation matters only when it keeps this one waiting.
         if let activeGame = installations.activeTransferGame ?? installations.launchGame, activeGame != game,
-           !installations.primaryActionAvailable {
+           installations.selectedAction?.isAvailable != true {
             return L10n.string(Store.otherGameOperation)
         }
         return nil

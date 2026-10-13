@@ -281,6 +281,33 @@ final class SteamFriendsIntegrationTests: XCTestCase {
     }
 
     @MainActor
+    func testTheLibraryDownloadsNothingWhileTheSessionReconnects() async {
+        let first = FriendsBridgeTestSession(hydrated: true)
+        let connections = FriendsTestConnections(first: first)
+        let backend = FakeInstallations<SteamGames>()
+        let model = friendsTestModel(connect: { try await connections.connect($0) },
+                                     installations: SteamModel.installations(backend))
+        await model.start()
+        defer { model.signOut() }
+        await first.settle()
+        let portal = SteamGame(appId: 620, name: "Portal 2", iconHash: "", lastPlayed: 0, playtimeMinutes: 0)
+        let download = { GameActions(model.installations, in: .library)(model.librarySelection(portal)) }
+        XCTAssertTrue(download().isAvailable)
+
+        first.fixture.disconnect(authenticationRequired: false)
+        await connections.waitForRequest(2)
+        XCTAssertEqual(download().kind, .download(.install))
+        XCTAssertFalse(download().isAvailable, "The shut-down session installs nothing")
+        download().perform()
+        XCTAssertEqual(backend.actions, [])
+
+        let replacement = FriendsBridgeTestSession(hydrated: true)
+        await connections.release(2, session: replacement)
+        await replacement.settle()
+        XCTAssertTrue(download().isAvailable)
+    }
+
+    @MainActor
     func testInitialConnectionCompletingAfterSignOutIsClosed() async {
         let connections = FriendsTestConnections()
         let model = friendsTestModel(connect: { try await connections.connect($0) })

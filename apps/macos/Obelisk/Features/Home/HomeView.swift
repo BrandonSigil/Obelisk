@@ -208,8 +208,6 @@ private struct HomePage: View {
     /// Opens a game's page, from one of its cards or from the hero.
     let open: (HomeGame, GameOpeningSource, AnyHashable?) -> Void
     @State private var position: ScrollPosition
-    /// The running game whose Force Quit its player is asked to confirm.
-    @State private var forceQuitting: HomeGame?
     @State private var tilesInOneRow = true
     @Environment(\.storefrontBar) private var bar
 
@@ -250,7 +248,6 @@ private struct HomePage: View {
         let shelves = query.isEmpty ? HomeShelves(games) : nil
         let heroGame = shelves?.hero
         let backdropOffset = heroGame == nil ? 0 : ObeliskStyle.libraryHeroHeight
-        let quitting = forceQuitting
         return StorefrontScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 if let heroGame {
@@ -288,12 +285,6 @@ private struct HomePage: View {
             bar?.showsGameTitle = false
         }
         .ignoresSafeArea(.container, edges: .top)
-        .forceQuitConfirmation(quitting?.title ?? "", isPresented: Binding(
-            get: { forceQuitting != nil },
-            set: { if !$0 { forceQuitting = nil } }
-        )) {
-            quitting?.perform()
-        }
     }
 
     private func hero(_ game: HomeGame) -> some View {
@@ -306,9 +297,6 @@ private struct HomePage: View {
                 game.playtime.map { LibraryHeroDetail(symbol: "clock", text: GameFormatting.playtime($0)) },
             ].compactMap { $0 },
             action: game.action,
-            transfer: game.transfer,
-            cancelTransfer: game.cancelTransfer,
-            perform: { perform(game) },
             open: { open(game, .hero, nil) }
         ) {
             game.hero.artwork()
@@ -329,21 +317,10 @@ private struct HomePage: View {
             platform: game.platform,
             store: game.id.section,
             action: game.action,
-            progress: { game.transfer()?.progressFraction },
             matchID: card,
-            open: { open(game, .cover, card) },
-            perform: { perform(game) }
+            open: { open(game, .cover, card) }
         ) {
             game.cover()
-        }
-    }
-
-    /// Runs a card's or the hero's button; Force Quit asks first.
-    private func perform(_ game: HomeGame) {
-        if game.action == .running(.forceQuit) {
-            forceQuitting = game
-        } else {
-            game.perform()
         }
     }
 

@@ -29,7 +29,7 @@ final class EpicCloudTests: XCTestCase {
         sessions.fake.show(session)
         backend.publish { $0.cloudSync = .launch("sandbox:game", working: true, cancellable: true) }
         try await eventually { model.installations.isSynchronizingSaves }
-        XCTAssertEqual(model.installations.primaryActionTitle, L10n.string("ui.cloud.sync_short"))
+        XCTAssertEqual(model.installations.selectedAction?.title, L10n.string("ui.cloud.sync_short"))
         let view = EpicView(model: model)
             .environment(\.colorScheme, .dark)
             .tint(ObeliskStyle.accent)
@@ -130,13 +130,13 @@ final class EpicCloudTests: XCTestCase {
                               gameSessions: sessions, installations: EpicModel.installations(backend))
         await model.start()
         model.open(owned)
-        XCTAssertTrue(model.installations.primaryActionAvailable)
+        XCTAssertEqual(model.installations.selectedAction?.isAvailable, true)
         sessions.fake.show(.epic(account: "account", namespace: "sandbox", appName: "game"))
         backend.publish { $0.gate = .session("sandbox:game") }
         try await eventually { sessions.active?.phase == .running }
-        XCTAssertEqual(model.installations.primaryActionTitle, L10n.string("model.game.quit"))
-        XCTAssertTrue(model.installations.primaryActionAvailable)
-        model.installations.downloadSelected()
+        XCTAssertEqual(model.installations.selectedAction?.title, L10n.string("model.game.quit"))
+        XCTAssertEqual(model.installations.selectedAction?.isAvailable, true)
+        model.installations.install(try XCTUnwrap(owned.offer), of: owned.libraryID)
         XCTAssertEqual(backend.actions, [], "A running game's files stay untouched")
         model.signOut()
         XCTAssertEqual(sessions.active?.game, owned.libraryID, "The running game stays reserved")

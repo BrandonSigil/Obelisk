@@ -82,9 +82,11 @@ final class SteamAchievementsTests: XCTestCase {
                     let launches = metrics.isInstalled
                     // The game page's launch row and metrics, at the widths its header gets.
                     let view = GameLaunchRow(metrics: metrics) {
-                        GameActionButton(title: L10n.string(launches ? "model.game.launch" : "model.game.download"),
-                                         launches: launches, transfer: nil, isTransferring: false, isAvailable: true,
-                                         action: {}, cancel: {})
+                        GameActionButton(action: GameAction(
+                            kind: launches ? .launch : .download(.install),
+                            title: L10n.string(launches ? "model.game.launch" : "model.game.download"),
+                            isAvailable: true, launches: launches
+                        ), gameName: "Thronefall")
                         if launches {
                             GameManagementButton(gameName: "Thronefall", canVerify: true, canUninstall: true, verify: {}, uninstall: {}, directory: "/Applications")
                         }
@@ -98,20 +100,23 @@ final class SteamAchievementsTests: XCTestCase {
         let downloading = GameTransfer(game: "620", state: .downloading, completedBytes: 200_000_000,
                                        totalBytes: 522_734_781, networkBytes: 0, contentBytes: 0, currentFile: "", message: "")
         let buttons = VStack(alignment: .leading, spacing: 12) {
-            GameActionButton(title: GameQuitStage.quit.title, launches: true, transfer: nil,
-                             isTransferring: false, isAvailable: true, action: {}, cancel: {}, quitStage: .quit)
-            GameActionButton(title: GameQuitStage.closing.title, launches: true, transfer: nil,
-                             isTransferring: false, isAvailable: false, action: {}, cancel: {}, quitStage: .closing)
-            GameActionButton(title: GameQuitStage.forceQuit.title, launches: true, transfer: nil,
-                             isTransferring: false, isAvailable: true, action: {}, cancel: {}, quitStage: .forceQuit)
-            GameActionButton(title: L10n.string("model.game.download"), launches: false,
-                             transfer: downloading, isTransferring: true, isAvailable: true, action: {}, cancel: {})
-            GameActionButton(title: L10n.string("ui.cloud.sync_short"), launches: true, transfer: nil,
-                             isTransferring: false, isAvailable: true, action: {}, cancel: {}, isCancellable: true,
-                             isStep: true)
-            GameActionButton(title: L10n.string("model.game.installingVoile"), launches: true, transfer: nil,
-                             isTransferring: false, isAvailable: true, action: {}, cancel: {}, isCancellable: true,
-                             isStep: true, stepFraction: 0.4)
+            GameActionButton(action: GameAction(kind: .running(.quit), title: GameQuitStage.quit.title,
+                                                isAvailable: true, launches: true), gameName: "Thronefall")
+            GameActionButton(action: GameAction(kind: .running(.closing), title: GameQuitStage.closing.title,
+                                                isAvailable: false, launches: true), gameName: "Thronefall")
+            GameActionButton(action: GameAction(kind: .running(.forceQuit), title: GameQuitStage.forceQuit.title,
+                                                isAvailable: true, launches: true), gameName: "Thronefall")
+            GameActionButton(action: GameAction(kind: .transferring(.files),
+                                                title: L10n.string("ui.transfer.preparing_short"),
+                                                isAvailable: true, launches: false, isCancellable: true,
+                                                transfer: { downloading }), gameName: "Thronefall")
+            GameActionButton(action: GameAction(kind: .step(.cloudSync), title: L10n.string("ui.cloud.sync_short"),
+                                                isAvailable: true, launches: true, isCancellable: true),
+                             gameName: "Thronefall")
+            GameActionButton(action: GameAction(kind: .step(.runtime(.voile)),
+                                                title: L10n.string("model.game.installingVoile"),
+                                                isAvailable: true, launches: true, isCancellable: true,
+                                                stepFraction: { 0.4 }), gameName: "Thronefall")
         }
         try await render(buttons.padding(24).foregroundStyle(.white).environment(\.colorScheme, .dark).background(.black),
                          to: output.appending(path: "header-buttons.png"))

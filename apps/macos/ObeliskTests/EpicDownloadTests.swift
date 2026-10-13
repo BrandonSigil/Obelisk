@@ -10,7 +10,7 @@ final class EpicDownloadTests: XCTestCase {
     func testDownloadPrefersMacAndShowsTheTransferUntilItsReceipt() async throws {
         let fixture = try await fixture(game: game("native", macos: true))
 
-        fixture.model.installations.downloadSelected()
+        fixture.model.installations.selectedAction?.perform()
 
         XCTAssertEqual(fixture.backend.actions, [.install(fixture.offer("Mac"))])
         fixture.backend.publish {
@@ -23,8 +23,8 @@ final class EpicDownloadTests: XCTestCase {
         try await eventually { fixture.model.installations.isDownloading }
         XCTAssertEqual(fixture.model.installations.activeTransferGame, fixture.game.libraryID)
         XCTAssertEqual(fixture.model.installations.transfer(for: fixture.game.libraryID)?.completedBytes, 40)
-        XCTAssertFalse(fixture.model.installations.primaryActionAvailable)
-        fixture.model.installations.downloadSelected()
+        XCTAssertEqual(fixture.model.installations.selectedAction?.isAvailable, false)
+        fixture.model.installations.selectedAction?.perform()
         XCTAssertEqual(fixture.backend.actions.count, 1, "One Transfer at a time")
 
         fixture.backend.publish {
@@ -36,23 +36,22 @@ final class EpicDownloadTests: XCTestCase {
         try await eventually { !fixture.model.installations.isDownloading }
         XCTAssertEqual(fixture.model.installations.selectedReceipt?.name, "Game native")
         XCTAssertEqual(fixture.model.installations.transfer?.state, .complete)
-        XCTAssertEqual(fixture.model.installations.primaryActionTitle, L10n.string("model.game.launch"))
-        XCTAssertFalse(fixture.model.installations.canResumeDownload)
+        XCTAssertEqual(fixture.model.installations.selectedAction?.title, L10n.string("model.game.launch"))
         XCTAssertNil(fixture.model.errorMessage)
     }
 
     func testAWindowsBuildDownloadsAndAGameWithoutASupportedBuildIsDisabled() async throws {
         let fixture = try await fixture(game: game("windows"))
-        XCTAssertTrue(fixture.model.installations.primaryActionAvailable)
-        fixture.model.installations.downloadSelected()
+        XCTAssertEqual(fixture.model.installations.selectedAction?.isAvailable, true)
+        fixture.model.installations.selectedAction?.perform()
         guard case let .install(offer) = fixture.backend.actions.first else { return XCTFail("No Transfer") }
         XCTAssertEqual(offer.platform, "Windows")
 
         var unsupported = game("unsupported")
         unsupported.windows = false
         fixture.model.open(unsupported)
-        XCTAssertFalse(fixture.model.installations.primaryActionAvailable)
-        fixture.model.installations.downloadSelected()
+        XCTAssertEqual(fixture.model.installations.selectedAction?.isAvailable, false)
+        fixture.model.installations.selectedAction?.perform()
         XCTAssertEqual(fixture.backend.actions.count, 1)
     }
 
@@ -66,16 +65,15 @@ final class EpicDownloadTests: XCTestCase {
 
         try await eventually { fixture.model.errorMessage != nil }
         XCTAssertEqual(fixture.model.errorMessage, L10n.string("model.epic.network"))
-        XCTAssertTrue(fixture.model.installations.canResumeDownload)
-        XCTAssertEqual(fixture.model.installations.primaryActionTitle, L10n.string("model.game.resume"))
-        fixture.model.installations.downloadSelected()
+        XCTAssertEqual(fixture.model.installations.selectedAction?.title, L10n.string("model.game.resume"))
+        fixture.model.installations.selectedAction?.perform()
         XCTAssertEqual(fixture.backend.actions, [.install(fixture.offer("Windows"))], "Rust resumes the Transfer")
         XCTAssertNil(fixture.model.errorMessage, "An action clears the last failure")
     }
 
     func testChangingSelectionKeepsDownloadAttachedToOriginalGame() async throws {
         let fixture = try await fixture()
-        fixture.model.installations.downloadSelected()
+        fixture.model.installations.selectedAction?.perform()
         fixture.backend.publish {
             $0.downloading = true
             $0.gate = .action(fixture.game.libraryID)
@@ -86,7 +84,7 @@ final class EpicDownloadTests: XCTestCase {
         fixture.model.open(other)
         XCTAssertEqual(fixture.model.installations.activeTransferGame, fixture.game.libraryID)
         XCTAssertNil(fixture.model.installations.selectedReceipt)
-        XCTAssertFalse(fixture.model.installations.primaryActionAvailable)
+        XCTAssertEqual(fixture.model.installations.selectedAction?.isAvailable, false)
 
         fixture.backend.publish {
             $0.downloading = false
@@ -97,22 +95,15 @@ final class EpicDownloadTests: XCTestCase {
         XCTAssertEqual(fixture.model.selectedGame?.libraryID, other.libraryID)
         XCTAssertNil(fixture.model.installations.selectedReceipt)
         XCTAssertEqual(fixture.model.installations.receipts.first?.gameID, fixture.game.libraryID)
-        XCTAssertEqual(fixture.model.installations.primaryActionTitle, L10n.string("model.game.download"))
-        XCTAssertTrue(fixture.model.installations.primaryActionAvailable)
-    }
-
-    func testTransferProgressIsClamped() {
-        let transfer = GameTransfer(game: "one", state: .verifying, completedBytes: 120, totalBytes: 100,
-                                    networkBytes: 0, contentBytes: 0, currentFile: "Content/game.pak", message: "")
-        XCTAssertEqual(transfer.progressFraction, 1)
-        XCTAssertEqual(transfer.downloadedGameDataText, L10n.string("ui.transfer.no_downloaded_data"))
+        XCTAssertEqual(fixture.model.installations.selectedAction?.title, L10n.string("model.game.download"))
+        XCTAssertEqual(fixture.model.installations.selectedAction?.isAvailable, true)
     }
 
     func testAnInstalledBuildShowsEachStepOfItsLaunch() async throws {
         let fixture = try await fixture(game: game("native", macos: true), installed: "Mac")
         let receipt = try XCTUnwrap(fixture.model.installations.selectedReceipt)
 
-        fixture.model.installations.primaryAction()
+        fixture.model.installations.selectedAction?.perform()
 
         XCTAssertEqual(fixture.backend.actions, [.launch(receipt)])
         fixture.backend.publish {
@@ -122,12 +113,12 @@ final class EpicDownloadTests: XCTestCase {
             $0.launchGame = fixture.game.libraryID
         }
         try await eventually { fixture.model.installations.isVerifyingBeforeLaunch }
-        XCTAssertEqual(fixture.model.installations.primaryActionTitle, L10n.string("model.game.verifying"))
-        fixture.model.installations.primaryAction()
+        XCTAssertEqual(fixture.model.installations.selectedAction?.title, L10n.string("model.game.verifying"))
+        fixture.model.installations.selectedAction?.perform()
         XCTAssertEqual(fixture.backend.actions.count, 1, "A launch still preparing is not repeated")
         fixture.backend.publish { $0.verifyingBeforeLaunch = false }
         try await eventually { !fixture.model.installations.isVerifyingBeforeLaunch }
-        XCTAssertEqual(fixture.model.installations.primaryActionTitle, L10n.string("model.game.launching"))
+        XCTAssertEqual(fixture.model.installations.selectedAction?.title, L10n.string("model.game.launching"))
 
         fixture.sessions.fake.show(.epic(account: Self.account, namespace: fixture.game.namespace,
                                          appName: fixture.game.appName))
@@ -136,14 +127,14 @@ final class EpicDownloadTests: XCTestCase {
             $0.launchGame = nil
             $0.gate = .session(fixture.game.libraryID)
         }
-        try await eventually { fixture.model.installations.selectedSession?.running == true }
-        XCTAssertEqual(fixture.model.installations.primaryActionTitle, L10n.string("model.game.quit"))
-        XCTAssertTrue(fixture.model.installations.primaryActionAvailable)
+        try await eventually { fixture.model.installations.selectedAction?.kind == .running(.quit) }
+        XCTAssertEqual(fixture.model.installations.selectedAction?.title, L10n.string("model.game.quit"))
+        XCTAssertEqual(fixture.model.installations.selectedAction?.isAvailable, true)
     }
 
     func testChangingSelectionDoesNotRetargetAPendingLaunch() async throws {
         let fixture = try await fixture(installed: "Windows")
-        fixture.model.installations.primaryAction()
+        fixture.model.installations.selectedAction?.perform()
         fixture.backend.publish {
             $0.launching = true
             $0.launchGame = fixture.game.libraryID
@@ -153,7 +144,7 @@ final class EpicDownloadTests: XCTestCase {
 
         fixture.model.open(game("other"))
 
-        XCTAssertFalse(fixture.model.installations.primaryActionAvailable)
+        XCTAssertEqual(fixture.model.installations.selectedAction?.isAvailable, false)
         fixture.backend.publish {
             $0.launching = false
             $0.launchGame = nil
@@ -162,7 +153,7 @@ final class EpicDownloadTests: XCTestCase {
         try await eventually { !fixture.model.installations.isLaunching }
         XCTAssertEqual(fixture.model.selectedGame?.appName, "other")
         XCTAssertNil(fixture.model.installations.selectedReceipt)
-        XCTAssertTrue(fixture.model.installations.primaryActionAvailable)
+        XCTAssertEqual(fixture.model.installations.selectedAction?.isAvailable, true)
     }
 
     func testUninstallRemovesTheInstalledBuildAndRestoresTheDownloadAction() async throws {
@@ -178,8 +169,8 @@ final class EpicDownloadTests: XCTestCase {
             $0.gate = .action(fixture.game.libraryID)
         }
         try await eventually { fixture.model.installations.isUninstalling }
-        XCTAssertEqual(fixture.model.installations.primaryActionTitle, L10n.string("model.game.uninstalling"))
-        XCTAssertFalse(fixture.model.installations.primaryActionAvailable)
+        XCTAssertEqual(fixture.model.installations.selectedAction?.title, L10n.string("model.game.uninstalling"))
+        XCTAssertEqual(fixture.model.installations.selectedAction?.isAvailable, false)
         XCTAssertFalse(fixture.model.installations.canUninstallSelectedGame)
         fixture.model.installations.uninstall(receipt)
         XCTAssertEqual(fixture.backend.actions.count, 1)
@@ -190,8 +181,8 @@ final class EpicDownloadTests: XCTestCase {
             $0.gate = .open
         }
         try await eventually { fixture.model.installations.receipts.isEmpty }
-        XCTAssertEqual(fixture.model.installations.primaryActionTitle, L10n.string("model.game.download"))
-        XCTAssertTrue(fixture.model.installations.primaryActionAvailable)
+        XCTAssertEqual(fixture.model.installations.selectedAction?.title, L10n.string("model.game.download"))
+        XCTAssertEqual(fixture.model.installations.selectedAction?.isAvailable, true)
     }
 
     func testAFailedUninstallShowsItsReason() async throws {
@@ -225,7 +216,7 @@ final class EpicDownloadTests: XCTestCase {
         let fixture = try await fixture(game: game("native", macos: true))
         fixture.model.closeGame()
 
-        fixture.model.downloadFromLibrary(fixture.game)
+        libraryAction(fixture.game, of: fixture.model).perform()
 
         XCTAssertEqual(fixture.backend.actions, [.install(fixture.offer("Mac"))])
         XCTAssertNil(fixture.model.selectedGame)
@@ -235,7 +226,7 @@ final class EpicDownloadTests: XCTestCase {
         let fixture = try await fixture(game: game("native", macos: true), installed: "Mac")
         fixture.model.closeGame()
 
-        fixture.model.launchFromLibrary(fixture.game)
+        libraryAction(fixture.game, of: fixture.model).perform()
 
         XCTAssertEqual(fixture.backend.actions, [.launch(fixture.receipt("native", platform: "Mac"))])
         XCTAssertNil(fixture.model.selectedGame)
@@ -247,10 +238,16 @@ final class EpicDownloadTests: XCTestCase {
         let fixture = try await fixture(game: unsupported)
         fixture.model.closeGame()
 
-        XCTAssertFalse(fixture.model.canInstallFromLibrary(unsupported))
-        fixture.model.downloadFromLibrary(unsupported)
+        let action = libraryAction(unsupported, of: fixture.model)
+        XCTAssertFalse(action.isAvailable)
+        action.perform()
 
         XCTAssertTrue(fixture.backend.actions.isEmpty)
+    }
+
+    /// The library's button for `game`, as its card and hero show it.
+    private func libraryAction(_ game: EpicGame, of model: EpicModel) -> GameAction {
+        GameActions(model.installations, in: .library)(model.librarySelection(game))
     }
 
     /// An account with `owned` on screen, installed for `installed`.

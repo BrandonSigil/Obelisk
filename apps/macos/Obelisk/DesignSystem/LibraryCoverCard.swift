@@ -10,16 +10,17 @@ struct LibraryCoverCard<Artwork: View>: View {
     var platform: GamePlatform?
     /// The storefront the game belongs to, where a page mixes several.
     var store: LibrarySection?
-    let action: LibraryCardAction
-    /// The Transfer's progress, read by the button alone so a progress tick
-    /// redraws only the button.
-    var progress: @MainActor () -> Double? = { nil }
+    /// What the game's button shows and does. Its button reads the Transfer's
+    /// progress alone, so a progress tick redraws only the button.
+    let action: GameAction
     /// The game, matching this cover with the one on its page as it opens.
     let matchID: AnyHashable
     let open: () -> Void
-    let perform: () -> Void
     @ViewBuilder let artwork: Artwork
     @State private var hovered = false
+    /// The Force Quit its player is asked to confirm. The card asks, not its
+    /// bar, which goes as the alert takes the pointer.
+    @State private var asking: GameAction?
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -40,8 +41,8 @@ struct LibraryCoverCard<Artwork: View>: View {
         .accessibilityValue(platform?.title ?? "")
         // The bar only shows under the pointer; its action stays reachable.
         .accessibilityActions {
-            if action.isEnabled, let label = action.label(title: title) {
-                Button(label, action: perform)
+            if action.isAvailable, let name = label(action.kind, title: title) {
+                Button(name) { action.run(asking: $asking) }
             }
         }
         .overlay(alignment: .topLeading) {
@@ -63,11 +64,10 @@ struct LibraryCoverCard<Artwork: View>: View {
                 LibraryCardBar(
                     title: title,
                     action: action,
-                    progress: progress,
                     // Concentric with the card: its radius less the margin.
                     cornerRadius: Self.cornerRadius - Self.barInset,
                     open: open,
-                    perform: perform
+                    run: { action.run(asking: $asking) }
                 )
                 // A point closer to the sides than to the bottom.
                 .padding(.horizontal, Self.barInset - 1)
@@ -89,51 +89,28 @@ struct LibraryCoverCard<Artwork: View>: View {
         .scaleEffect(hovered && !reduceMotion ? 1.03 : 1)
         .animation(reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 0.72), value: hovered)
         .onHover { hovered = $0 }
+        .forceQuitConfirmation(title, asking: $asking)
     }
 }
 
-/// What a library card's round button shows and does for its game.
-enum LibraryCardAction: Equatable {
-    case launch(enabled: Bool)
-    case download(enabled: Bool)
-    /// A launch, uninstall or download being prepared.
-    case busy
-    /// A Transfer runs for the game.
-    case transferring
-    /// The game's Transfer waits in the download queue.
-    case queued
-    /// The game runs: the button ends it, as on the game's page, unless its
-    /// session cannot be asked anything, such as while it reconnects.
-    case running(GameQuitStage?)
-
-    /// What the button does for `title`, when it launches, downloads or ends
-    /// the game.
-    func label(title: String) -> String? {
-        switch self {
-        case .launch: L10n.string("ui.game.launch_named", title)
-        case .download: L10n.string("ui.game.download_named", title)
-        case let .running(stage): stage?.label(title: title)
-        case .busy, .transferring, .queued: nil
-        }
-    }
-
-    var isEnabled: Bool {
-        switch self {
-        case let .launch(enabled), let .download(enabled): enabled
-        case let .running(stage): stage == .quit || stage == .forceQuit
-        case .busy, .transferring, .queued: false
-        }
+/// What a card's button does for `title`, when it launches, downloads or ends
+/// the game.
+private func label(_ kind: GameAction.Kind, title: String) -> String? {
+    switch kind {
+    case .launch: L10n.string("ui.game.launch_named", title)
+    case .download: L10n.string("ui.game.download_named", title)
+    case let .running(stage): stage?.label(title: title)
+    case .queued, .transferring, .waiting, .step: nil
     }
 }
 
 /// The card's glass bar: the title opens the game, the button acts on it.
 private struct LibraryCardBar: View {
     let title: String
-    let action: LibraryCardAction
-    let progress: @MainActor () -> Double?
+    let action: GameAction
     let cornerRadius: CGFloat
     let open: () -> Void
-    let perform: () -> Void
+    let run: () -> Void
 
     var body: some View {
         HStack(spacing: 8) {
@@ -150,7 +127,7 @@ private struct LibraryCardBar: View {
             // The cover already opens the game for assistive technologies.
             .accessibilityHidden(true)
 
-            LibraryCardButton(title: title, action: action, progress: progress, perform: perform)
+            LibraryCardButton(title: title, action: action, run: run)
         }
         .padding(.leading, 12)
         .padding(.trailing, 6)
@@ -164,25 +141,24 @@ private struct LibraryCardBar: View {
 
 private struct LibraryCardButton: View {
     let title: String
-    let action: LibraryCardAction
-    let progress: @MainActor () -> Double?
-    let perform: () -> Void
+    let action: GameAction
+    let run: () -> Void
 
     private static var diameter: CGFloat { 32 }
 
     var body: some View {
-        switch action {
+        switch action.kind {
         case .launch:
             button(symbol: "play.fill", colors: ObeliskStyle.launchGradient)
         case .download:
             button(symbol: "square.and.arrow.down", colors: ObeliskStyle.installGradient)
-        case .busy:
+        case .waiting, .step:
             ProgressView()
                 .controlSize(.small)
                 .frame(width: Self.diameter, height: Self.diameter)
                 .accessibilityLabel(L10n.string("ui.transfer.preparing_accessibility"))
         case .transferring:
-            LibraryCardProgress(progress: progress, diameter: Self.diameter)
+            LibraryCardProgress(progress: { action.transfer()?.progressFraction }, diameter: Self.diameter)
         case .queued:
             Image(systemName: "clock")
                 .font(.system(size: 13, weight: .semibold))
@@ -215,8 +191,8 @@ private struct LibraryCardButton: View {
     /// Green launches, blue downloads, grey quits and red forces a quit, as on
     /// the game's page, through glass.
     private func button(symbol: String, colors: [Color], help: String? = nil) -> some View {
-        let label = action.label(title: title) ?? title
-        return Button(action: perform) {
+        let name = label(action.kind, title: title) ?? title
+        return Button(action: run) {
             Image(systemName: symbol)
                 .font(.system(size: 12, weight: .bold))
                 .foregroundStyle(.white)
@@ -231,9 +207,9 @@ private struct LibraryCardButton: View {
                 .contentShape(.circle)
         }
         .obeliskButtonStyle(.plain)
-        .disabled(!action.isEnabled)
-        .help(help ?? label)
-        .accessibilityLabel(label)
+        .disabled(!action.isAvailable)
+        .help(help ?? name)
+        .accessibilityLabel(name)
     }
 }
 

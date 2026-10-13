@@ -226,11 +226,13 @@ final class GameSessions<Store: GameStorefront> {
         let game: Store.GameID
         let account: Store.AccountID
         let running: Bool
+        /// The runtime the launch waits for, while it downloads.
+        let runtime: RuntimeComponent?
     }
 
     private(set) var active: Session?
-    /// Changes with `active`'s game and phase only, not with its progress,
-    /// such as a runtime's download while the launch waits for it.
+    /// Changes with `active`'s game, phase and awaited runtime only, not with
+    /// how far that runtime downloaded.
     private(set) var activeGame: ActiveGame?
     private(set) var isRecovering = true
     private(set) var recoveryError: String?
@@ -294,7 +296,9 @@ final class GameSessions<Store: GameStorefront> {
         }
         // Repeated states do not invalidate unchanged presentation.
         if self.active != active { self.active = active }
-        let activeGame = active.map { ActiveGame(game: $0.game, account: $0.account, running: $0.running) }
+        let activeGame = active.map {
+            ActiveGame(game: $0.game, account: $0.account, running: $0.running, runtime: $0.runtimeInstall?.component)
+        }
         if self.activeGame != activeGame { self.activeGame = activeGame }
         if isRecovering != state.recovering { isRecovering = state.recovering }
         let recoveryError = state.recoveryFailed ? L10n.string(Store.recoveringSession) : nil

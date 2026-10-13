@@ -340,46 +340,6 @@ final class EpicPresentationTests: XCTestCase {
     }
 
     @MainActor
-    func testUnsupportedGameDisablesDownloadWhenAccessibilityExposesButton() async throws {
-        let session = EpicPresentationSession(games: epicPresentationLibrary)
-        let model = EpicModel(keychain: EpicPresentationCredentials(), restore: { _ in session })
-        await model.start()
-        model.open(epicPresentationLibrary[0])
-        let fixture = EpicPresentationWindow(EpicView(model: model), size: NSSize(width: 900, height: 700))
-        defer { fixture.close() }
-        fixture.layout()
-        try await Task.sleep(for: .milliseconds(100))
-        fixture.layout()
-        XCTAssertFalse(model.installations.primaryActionAvailable)
-        guard let button = accessibilityElement(in: fixture.host, label: L10n.string("model.game.download")) else {
-            // AppKit may omit SwiftUI virtual buttons from an offscreen host's
-            // accessibility tree. Keep this explicit instead of claiming a click.
-            throw XCTSkip("This macOS host does not expose the SwiftUI download button through accessibility")
-        }
-        let selected = model.selectedGame?.libraryID
-        let account = model.accountName
-        let calls = await session.gameCalls
-        if let nativeButton = button as? NSButton {
-            XCTAssertFalse(nativeButton.isEnabled)
-        } else if let accessibleButton = button as? NSAccessibilityProtocol {
-            XCTAssertFalse(accessibleButton.isAccessibilityEnabled())
-        } else {
-            throw XCTSkip("The virtual button does not provide the typed AppKit accessibility API")
-        }
-        await Task.yield()
-        fixture.layout()
-        let subsequentCalls = await session.gameCalls
-        let disconnections = await session.disconnections
-        XCTAssertEqual(model.selectedGame?.libraryID, selected)
-        XCTAssertEqual(model.accountName, account)
-        XCTAssertEqual(subsequentCalls, calls)
-        XCTAssertEqual(disconnections, 0)
-        XCTAssertTrue(model.isConnected)
-        XCTAssertFalse(model.isLoadingGames)
-        XCTAssertNil(model.errorMessage)
-    }
-
-    @MainActor
     func testRenderFixtureLibraryAndDetailWhenRequested() async throws {
         guard let destination = ProcessInfo.processInfo.environment["OBELISK_RENDER_PREVIEWS"], !destination.isEmpty else {
             throw XCTSkip("Set OBELISK_RENDER_PREVIEWS to render isolated Epic fixtures")
@@ -579,7 +539,6 @@ private actor EpicPresentationSession: EpicSessionProtocol {
     private var gamesContinuation: CheckedContinuation<[EpicGame], Never>?
     private(set) var waitingForGames = false
     private(set) var gameCalls = 0
-    private(set) var disconnections = 0
 
     init(
         games: [EpicGame],
@@ -629,7 +588,7 @@ private actor EpicPresentationSession: EpicSessionProtocol {
         gamesContinuation?.resume(returning: library)
         gamesContinuation = nil
     }
-    func disconnect() { disconnections += 1 }
+    func disconnect() {}
 }
 
 private let epicPresentationCredentials = EpicCredentials(accountId: "epic-presentation", displayName: "Test account", refreshToken: "fixture-only-never-sent")

@@ -41,13 +41,12 @@ final class HomeShelvesTests: XCTestCase {
             playtime: playtime.map { .seconds($0) },
             platform: nil,
             isInstalled: installed,
-            action: installed ? .launch(enabled: true) : .download(enabled: true),
+            action: GameAction(kind: installed ? .launch : .download(.install),
+                               title: L10n.string(installed ? "ui.game.play" : "model.game.download"),
+                               isAvailable: true, launches: installed),
             cover: { AnyView(EmptyView()) },
             hero: HomeGame.Hero(artwork: { AnyView(EmptyView()) }, logo: { AnyView(EmptyView()) }),
-            transfer: { nil },
-            cancelTransfer: {},
-            open: {},
-            perform: {}
+            open: {}
         )
     }
 }

@@ -7,13 +7,8 @@ struct LibraryHero<Artwork: View, Logo: View>: View {
     /// The game's name, read aloud as the hero's heading.
     let title: String
     let details: [Detail]
-    /// What the game's button shows and does, as on its cover.
-    let action: LibraryCardAction
-    /// The game's Transfer, read only by the button showing its progress.
-    let transfer: @MainActor () -> GameTransfer?
-    let cancelTransfer: () -> Void
-    /// Runs the game's button.
-    let perform: () -> Void
+    /// What the game's button shows and does, as on its cover and its page.
+    let action: GameAction
     /// Opens the game's page.
     let open: () -> Void
     @ViewBuilder let artwork: Artwork
@@ -52,8 +47,7 @@ struct LibraryHero<Artwork: View, Logo: View>: View {
                     .foregroundStyle(.white)
                     .shadow(color: .black.opacity(0.6), radius: 6)
                     HStack(spacing: 12) {
-                        LibraryHeroAction(action: action, transfer: transfer, cancel: cancelTransfer,
-                                          perform: perform)
+                        GameActionButton(action: action, gameName: title)
                         LibraryHeroOpenButton(open: open)
                     }
                     .padding(.top, 4)
@@ -137,49 +131,6 @@ struct HeroBackdrop<Artwork: View>: View {
 private struct OpenTopRectangle: Shape {
     func path(in rect: CGRect) -> Path {
         Path(CGRect(x: rect.minX, y: rect.minY - 10_000, width: rect.width, height: rect.height + 10_000))
-    }
-}
-
-/// The hero's main button: plays its game, or downloads or ends it, as the
-/// game's page does. It reads the Transfer in its own body, so a progress
-/// tick redraws the button alone.
-private struct LibraryHeroAction: View {
-    let action: LibraryCardAction
-    let transfer: @MainActor () -> GameTransfer?
-    let cancel: () -> Void
-    let perform: () -> Void
-
-    var body: some View {
-        GameActionButton(
-            title: title,
-            launches: !isDownload,
-            transfer: transfer(),
-            isTransferring: action == .transferring,
-            isAvailable: action.isEnabled,
-            action: perform,
-            cancel: cancel,
-            isStep: action == .busy,
-            quitStage: quitStage
-        )
-    }
-
-    private var isDownload: Bool {
-        if case .download = action { true } else { false }
-    }
-
-    private var quitStage: GameQuitStage? {
-        if case let .running(stage) = action { stage } else { nil }
-    }
-
-    private var title: String {
-        switch action {
-        case .launch: L10n.string("ui.game.play")
-        case .download: L10n.string("model.game.download")
-        case .busy: L10n.string("ui.transfer.preparing_short")
-        case .queued: L10n.string("model.game.queued")
-        case .transferring: L10n.string("ui.transfer.downloading_short")
-        case let .running(stage): stage?.title ?? L10n.string("model.game.running")
-        }
     }
 }
 
