@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import XCTest
 @testable import Obelisk
@@ -12,6 +13,26 @@ final class LocalizationTests: XCTestCase {
         }
         XCTAssertEqual(L10n.resolvedLanguage(preferredLanguages: []), "en")
         XCTAssertEqual(L10n.resolvedLanguage(preferredLanguages: ["de-DE", "fr-FR"]), "en")
+        XCTAssertEqual(L10n.resolvedLanguage(preferredLanguages: ["de-DE"], available: ["en", "fr", "de"]), "de")
+    }
+
+    func testTheLanguageChoicesAreTheMacsThenEveryTranslationByItsOwnName() {
+        XCTAssertEqual(AppLanguage.choices, [.system, .language("en"), .language("fr")])
+        XCTAssertEqual(AppLanguage.name(of: "en"), "English")
+        XCTAssertEqual(AppLanguage.name(of: "fr"), "Français")
+        XCTAssertEqual(AppLanguage.language("fr").resolved(system: ["en-US"]), "fr")
+        XCTAssertEqual(AppLanguage.system.resolved(system: ["fr-BE", "en"]), "fr")
+        XCTAssertEqual(AppLanguage.system.resolved(system: ["ja-JP"]), "en")
+        XCTAssertEqual(AppLanguage.language("en").flags, ["Flag-us", "Flag-gb"])
+        XCTAssertEqual(AppLanguage.language("fr").flags, ["Flag-fr"])
+        XCTAssertEqual(AppLanguage.system.flags, [])
+        for code in L10n.available {
+            let flags = AppLanguage.language(code).flags
+            XCTAssertFalse(flags.isEmpty, code)
+            for flag in flags {
+                XCTAssertNotNil(NSImage(named: flag), "\(code) misses \(flag)")
+            }
+        }
     }
 
     func testBothTranslationsArePackagedAndUnsupportedLanguagesUseEnglish() {

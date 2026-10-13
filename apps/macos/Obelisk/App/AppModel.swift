@@ -39,6 +39,17 @@ final class AppModel {
     var appearance: AppAppearance {
         didSet { defaults.set(appearance.rawValue, forKey: "appearance") }
     }
+    /// The language Obelisk shows from its next start.
+    var language: AppLanguage {
+        didSet { language.save(in: defaults) }
+    }
+    /// Whether Obelisk shows another language than the chosen one until it
+    /// restarts.
+    var languageNeedsRestart: Bool {
+        language.resolved(system: AppLanguage.systemLanguages) != L10n.languageCode
+    }
+    /// Quits Obelisk and opens it again; its lifecycle provides it.
+    @ObservationIgnored var restart: () -> Void = {}
     /// Whether every storefront installs a game's newer build as soon as it
     /// is published, rather than at the game's next launch.
     var updatesGamesAutomatically: Bool {
@@ -55,13 +66,15 @@ final class AppModel {
 
     /// The test host's models register no Shift-Tab, open no overlay and post
     /// no notification.
-    init(directory: URL = AppIdentity.libraryDirectory, defaults: UserDefaults = .standard, steam: SteamModel? = nil,
+    init(directory: URL = AppIdentity.libraryDirectory, defaults: UserDefaults = .standard,
+         defaultsDomain: String = Bundle.main.bundleIdentifier ?? AppIdentity.storageIdentifier, steam: SteamModel? = nil,
          epic: EpicModel? = nil, gog: GogModel? = nil, downloads: DownloadsModel? = nil,
          overlay: GameOverlayEnvironment = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil
             ? .live : .inert) {
         libraryDirectory = directory.path
         self.defaults = defaults
         appearance = AppAppearance(rawValue: defaults.string(forKey: "appearance") ?? "system") ?? .system
+        language = AppLanguage(defaults: defaults, domain: defaultsDomain)
         updatesGamesAutomatically = defaults.object(forKey: Self.automaticUpdatesKey) as? Bool ?? true
         // Every storefront's library shares one cache, as every cache of the
         // directory does, `LaunchHistory.live`'s included.

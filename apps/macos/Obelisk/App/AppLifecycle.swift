@@ -80,21 +80,44 @@ final class AppLifecycle: NSObject, NSApplicationDelegate {
     /// Really quits: a running game is stopped first, once the player agrees,
     /// and its Cloud saves settle before Obelisk exits.
     func quit() {
+        quit(reopening: false)
+    }
+
+    /// Quits as `quit()` does, then opens Obelisk again once it has exited, so
+    /// a new language applies everywhere.
+    func restart() {
+        quit(reopening: true)
+    }
+
+    private func quit(reopening: Bool) {
         guard !quitting else { return }
         if games.running() {
             NSApp.activate()
             let alert = NSAlert()
             alert.messageText = L10n.string("app.quit.running.title")
-            alert.informativeText = L10n.string("app.quit.running.message")
-            alert.addButton(withTitle: L10n.string("app.quit.stop"))
+            alert.informativeText = L10n.string(reopening ? "app.restart.running.message" : "app.quit.running.message")
+            alert.addButton(withTitle: L10n.string(reopening ? "app.restart.stop" : "app.quit.stop"))
             alert.addButton(withTitle: L10n.string("ui.common.cancel"))
             guard alert.runModal() == .alertFirstButtonReturn else { return }
         }
         quitting = true
         Task {
             await stopGames()
+            if reopening { Self.reopenOnceExited() }
             NSApp.terminate(nil)
         }
+    }
+
+    /// A shell that outlives this Obelisk opens its bundle again once its
+    /// process is gone: two Obelisks never run at once.
+    private static func reopenOnceExited() {
+        let shell = Process()
+        shell.executableURL = URL(fileURLWithPath: "/bin/sh")
+        shell.arguments = [
+            "-c", "while /bin/kill -0 \"$1\" 2>/dev/null; do /bin/sleep 0.2; done; exec /usr/bin/open \"$2\"",
+            "obelisk-restart", String(ProcessInfo.processInfo.processIdentifier), Bundle.main.bundlePath,
+        ]
+        try? shell.run()
     }
 
     private func stopGames() async {
@@ -127,6 +150,7 @@ struct AppMenuBarLabel: View {
             .onAppear {
                 lifecycle.libraryCache = model.libraryCache
                 model.overlay.showLibrary = { lifecycle.show() }
+                model.restart = { lifecycle.restart() }
                 let (steam, epic, gog) = (model.steam.gameSessions, model.epic.gameSessions, model.gog.gameSessions)
                 lifecycle.games = (
                     running: { steam.active != nil || epic.active != nil || gog.active != nil },

@@ -7516,6 +7516,91 @@
         }
       }
     },
+    "ui.settings.language": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Language"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Langue"
+          }
+        }
+      }
+    },
+    "ui.settings.language_system": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "System"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Système"
+          }
+        }
+      }
+    },
+    "ui.settings.language_restart_title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Restart to change the language"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Redémarrez pour changer de langue"
+          }
+        }
+      }
+    },
+    "ui.settings.language_restart": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ switches to %2$@ when it restarts."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ passera en %2$@ à son redémarrage."
+          }
+        }
+      }
+    },
+    "ui.settings.restart": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Restart"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Redémarrer"
+          }
+        }
+      }
+    },
     "ui.sort.library": {
       "extractionState": "manual",
       "localizations": {
@@ -10339,6 +10424,40 @@
           "stringUnit": {
             "state": "translated",
             "value": "Arrêter le jeu et quitter"
+          }
+        }
+      }
+    },
+    "app.restart.running.message": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Restarting Obelisk stops the game. Its Cloud saves are synced before Obelisk restarts."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Redémarrer Obelisk arrête le jeu. Ses sauvegardes Cloud sont synchronisées avant qu’Obelisk ne redémarre."
+          }
+        }
+      }
+    },
+    "app.restart.stop": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Stop the Game and Restart"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Arrêter le jeu et redémarrer"
           }
         }
       }

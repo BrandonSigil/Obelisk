@@ -20,6 +20,39 @@ final class AppModelTests: XCTestCase {
         XCTAssertEqual(AppModel(directory: root, defaults: defaults).appearance, .dark)
     }
 
+    func testTheChosenLanguageIsObelisksOwnAppleLanguagesUntilThePlayerFollowsTheMacAgain() throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let suite = "ObeliskTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let model = AppModel(directory: root, defaults: defaults, defaultsDomain: suite)
+        XCTAssertEqual(model.language, .system)
+
+        let other = L10n.languageCode == "fr" ? "en" : "fr"
+        model.language = .language(other)
+        XCTAssertEqual(defaults.persistentDomain(forName: suite)?["AppleLanguages"] as? [String], [other])
+        XCTAssertTrue(model.languageNeedsRestart)
+        XCTAssertEqual(AppModel(directory: root, defaults: defaults, defaultsDomain: suite).language, .language(other))
+
+        model.language = .language(L10n.languageCode)
+        XCTAssertFalse(model.languageNeedsRestart)
+
+        model.language = .system
+        XCTAssertNil(defaults.persistentDomain(forName: suite)?["AppleLanguages"])
+        XCTAssertEqual(AppModel(directory: root, defaults: defaults, defaultsDomain: suite).language, .system)
+    }
+
+    func testALanguageMacOSChoseForObeliskReadsAsTheTranslationItShows() throws {
+        let suite = "ObeliskTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set(["fr-CA"], forKey: "AppleLanguages")
+        XCTAssertEqual(AppLanguage(defaults: defaults, domain: suite), .language("fr"))
+        defaults.set(["de-DE"], forKey: "AppleLanguages")
+        XCTAssertEqual(AppLanguage(defaults: defaults, domain: suite), .language("en"))
+    }
+
     func testGamesUpdateAutomaticallyUnlessThePlayerTurnsItOffInEveryStorefront() throws {
         let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }

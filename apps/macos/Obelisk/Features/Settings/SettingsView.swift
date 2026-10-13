@@ -2,8 +2,9 @@ import AppKit
 import SwiftUI
 
 /// Obelisk's settings: a hero in the violet of Obelisk's icon, its obelisk
-/// glowing, reaching under the title bar band; then the appearance, the games,
-/// the storage and the storefronts, each a card of rows as a game page's. The
+/// glowing, reaching under the title bar band; then the appearance, the
+/// language, the games, the storage and the storefronts, each a card of rows
+/// as a game page's. The
 /// bar's backdrop and the page's title show once the hero scrolled under it.
 struct SettingsView: View {
     @Bindable var model: AppModel
@@ -25,6 +26,18 @@ struct SettingsView: View {
                             AppearancePicker(selection: $model.appearance)
                                 .padding(18)
                         }
+                    }
+                    GamePageSection(title: L10n.string("ui.settings.language")) {
+                        SettingsCard {
+                            LanguagePicker(selection: $model.language)
+                                .padding(18)
+                            if model.languageNeedsRestart {
+                                SettingsDivider()
+                                languageRestart
+                                    .transition(.opacity)
+                            }
+                        }
+                        .animation(.easeInOut(duration: 0.2), value: model.languageNeedsRestart)
                     }
                     GamePageSection(title: L10n.string("ui.settings.games")) {
                         SettingsCard {
@@ -67,6 +80,20 @@ struct SettingsView: View {
             SettingsBar(showsBackdrop: showsBackdrop, showsTitle: showsTitle)
         }
         .ignoresSafeArea(.container, edges: .top)
+    }
+
+    /// Asks for the restart a newly chosen language waits for.
+    private var languageRestart: some View {
+        let language = model.language.resolved(system: AppLanguage.systemLanguages)
+        return SettingsRow(title: L10n.string("ui.settings.language_restart_title")) {
+            SettingsSymbol(name: "arrow.clockwise", colors: [ObeliskStyle.accent, Color(red: 0.45, green: 0.2, blue: 0.85)])
+        } detail: {
+            Text(L10n.string("ui.settings.language_restart", AppIdentity.name,
+                             L10n.locale.localizedString(forLanguageCode: language) ?? AppLanguage.name(of: language)))
+        } accessory: {
+            SettingsAccentButton(title: L10n.string("ui.settings.restart"), identifier: "settings-restart",
+                                 action: { model.restart() })
+        }
     }
 
     private var automaticUpdates: some View {
@@ -375,6 +402,31 @@ private struct SettingsGlassButton: View {
     }
 }
 
+/// A row's main action, on a capsule of the accent color.
+private struct SettingsAccentButton: View {
+    let title: String
+    var accessibilityLabel: String?
+    let identifier: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.white)
+                .lineLimit(1)
+                .padding(.horizontal, 14)
+                .frame(height: 32)
+                .background(ObeliskStyle.accent, in: .capsule)
+                .contentShape(.capsule)
+        }
+        .obeliskButtonStyle(.plain)
+        .fixedSize()
+        .accessibilityLabel(accessibilityLabel ?? title)
+        .accessibilityIdentifier(identifier)
+    }
+}
+
 /// A key of a keyboard shortcut.
 private struct KeyCap: View {
     let text: String
@@ -444,6 +496,101 @@ private struct AppearancePicker: View {
         .accessibilityLabel(appearance.title)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
         .accessibilityIdentifier("settings-appearance-\(appearance.id)")
+    }
+}
+
+/// The Mac's language, then every language Obelisk is translated into, by its
+/// flag and its own name, the chosen one ringed in the accent color as an
+/// appearance is; the ring slides to a new choice.
+private struct LanguagePicker: View {
+    @Binding var selection: AppLanguage
+    @State private var hovered: AppLanguage?
+    @Namespace private var namespace
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        HStack(spacing: 20) {
+            ForEach(AppLanguage.choices) { option($0) }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(L10n.string("ui.settings.language"))
+    }
+
+    private func option(_ language: AppLanguage) -> some View {
+        let isSelected = language == selection
+        let title = language.code.map(AppLanguage.name(of:)) ?? L10n.string("ui.settings.language_system")
+        return Button {
+            withAnimation(reduceMotion ? nil : ObeliskStyle.selectionAnimation) { selection = language }
+        } label: {
+            VStack(spacing: 9) {
+                LanguageFlag(language: language)
+                    .frame(width: 81, height: 54)
+                    .shadow(color: .black.opacity(0.18), radius: 6, y: 3)
+                    .padding(5)
+                    .overlay {
+                        if isSelected {
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .strokeBorder(ObeliskStyle.accent, lineWidth: 2.5)
+                                .matchedGeometryEffect(id: "selection", in: namespace)
+                        }
+                    }
+                    .scaleEffect(hovered == language && !isSelected && !reduceMotion ? 1.04 : 1)
+                Text(title)
+                    .font(.system(size: 12, weight: isSelected ? .semibold : .medium))
+                    .foregroundStyle(isSelected ? .primary : .secondary)
+            }
+            // The choices share the card's width, as the appearances do.
+            .frame(maxWidth: .infinity)
+            .contentShape(.rect)
+        }
+        .obeliskButtonStyle(.plain)
+        .onHover { hovered = $0 ? language : (hovered == language ? nil : hovered) }
+        .animation(reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 0.75), value: hovered)
+        .accessibilityLabel(title)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+        .accessibilityIdentifier("settings-language-\(language.id)")
+    }
+}
+
+/// A language's flag, two split across the diagonal as the system's
+/// appearance is for a language several countries speak, and for the Mac's
+/// language a globe; on a flag's rounded shape, edged so a white stripe stays
+/// visible.
+private struct LanguageFlag: View {
+    let language: AppLanguage
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: 7, style: .continuous)
+        let flags = language.flags.filter { NSImage(named: $0) != nil }
+        ZStack {
+            if let first = flags.first {
+                Image(first)
+                    .resizable()
+                if let second = flags.dropFirst().first {
+                    // The second flag's middle, where its emblem sits, moves
+                    // to the middle of its half.
+                    GeometryReader { geometry in
+                        Image(second)
+                            .resizable()
+                            .offset(x: geometry.size.width * (1 - (TrailingDiagonalHalf.top + TrailingDiagonalHalf.bottom) / 2) / 2)
+                    }
+                    .mask { TrailingDiagonalHalf() }
+                    // A white edge parts two flags of the same colors.
+                    DiagonalEdge()
+                        .stroke(.white, lineWidth: 2.5)
+                        .shadow(color: .black.opacity(0.35), radius: 1.5)
+                }
+            } else {
+                LinearGradient(colors: [Color(red: 0.38, green: 0.68, blue: 0.98), Color(red: 0.2, green: 0.45, blue: 0.9)],
+                               startPoint: .top, endPoint: .bottom)
+                Image(systemName: language.code == nil ? "globe" : "character.bubble")
+                    .font(.system(size: 22, weight: .medium))
+                    .foregroundStyle(.white)
+            }
+        }
+        .clipShape(shape)
+        .overlay { shape.strokeBorder(.primary.opacity(0.14), lineWidth: 1) }
+        .accessibilityHidden(true)
     }
 }
 
@@ -518,13 +665,31 @@ private struct MiniatureWindow: View {
 
 /// The part of a rectangle past a diagonal from its top to its bottom edge.
 private struct TrailingDiagonalHalf: Shape {
+    /// Where the diagonal meets the top and the bottom edge, from the leading
+    /// one.
+    static let top = 0.62
+    static let bottom = 0.38
+
     func path(in rect: CGRect) -> Path {
         Path { path in
-            path.move(to: CGPoint(x: rect.minX + rect.width * 0.62, y: rect.minY))
+            path.move(to: CGPoint(x: rect.minX + rect.width * Self.top, y: rect.minY))
             path.addLine(to: CGPoint(x: rect.maxX, y: rect.minY))
             path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
-            path.addLine(to: CGPoint(x: rect.minX + rect.width * 0.38, y: rect.maxY))
+            path.addLine(to: CGPoint(x: rect.minX + rect.width * Self.bottom, y: rect.maxY))
             path.closeSubpath()
+        }
+    }
+}
+
+/// The diagonal that bounds `TrailingDiagonalHalf`, past both edges so a
+/// stroke reaches the corners.
+private struct DiagonalEdge: Shape {
+    func path(in rect: CGRect) -> Path {
+        let slope = rect.width * (TrailingDiagonalHalf.bottom - TrailingDiagonalHalf.top) / rect.height
+        return Path { path in
+            path.move(to: CGPoint(x: rect.minX + rect.width * TrailingDiagonalHalf.top - slope * 4, y: rect.minY - 4))
+            path.addLine(to: CGPoint(x: rect.minX + rect.width * TrailingDiagonalHalf.bottom + slope * 4,
+                                     y: rect.maxY + 4))
         }
     }
 }
@@ -587,19 +752,9 @@ private struct SettingsStoreRow: View {
         case .restoring:
             EmptyView()
         case .signedOut:
-            Button(action: open) {
-                Text(L10n.string("ui.account.sign_in"))
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 14)
-                    .frame(height: 32)
-                    .background(ObeliskStyle.accent, in: .capsule)
-                    .contentShape(.capsule)
-            }
-            .obeliskButtonStyle(.plain)
-            .fixedSize()
-            .accessibilityLabel(L10n.string("ui.home.sign_in_store", name))
-            .accessibilityIdentifier("settings-sign-in-\(section.rawValue)")
+            SettingsAccentButton(title: L10n.string("ui.account.sign_in"),
+                                 accessibilityLabel: L10n.string("ui.home.sign_in_store", name),
+                                 identifier: "settings-sign-in-\(section.rawValue)", action: open)
         }
     }
 }
