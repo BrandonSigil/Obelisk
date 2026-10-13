@@ -1,22 +1,21 @@
 //! EGS Cloud as a Cloud sync uses it: the game's Cloud rules, where its saves
 //! live, the complete remote snapshot and its republication.
 use super::*;
-use crate::cloud::sync::{self, Availability, CloudSync, Kind, Storefront, Work};
-use crate::cloud_status::{self, UnavailableReason};
+use crate::cloud::record::{self, Record as _};
+use crate::cloud::sync::{self, Availability, CloudSync, Kind, Storefront};
+use crate::cloud_status::UnavailableReason;
 use crate::supervisor::client::SessionAlive;
-use cloud_vault::{
-    AccountIdentity, Bindings, Manifest, Preferences, RemoteView, StoreScope, Vault,
-};
+use cloud_vault::{Manifest, Preferences, RemoteView, Vault};
 use epic_kit::{
     EpicError,
     client::Client as EpicClient,
     cloud::{CloudGame, CloudRules, ResolvedCloudRules, Snapshot as CloudSnapshot},
 };
-use std::{collections::BTreeMap, path::Path};
+use std::collections::BTreeMap;
 mod remote;
 mod store;
 pub(crate) use remote::CloudRemote;
-use store::Context;
+pub(crate) use store::Context;
 #[cfg(test)]
 mod fake;
 #[cfg(test)]
@@ -34,8 +33,6 @@ pub(crate) fn open<R: CloudRemote>(
     control: Arc<Control>,
     session_id: String,
 ) -> Result<Session<R>> {
-    config.validate(&account)?;
-    store::safe(&config.root)?;
     let adapter = Adapter {
         config,
         account,
@@ -102,40 +99,20 @@ impl sync::Failure for Error {
 
 impl<R: CloudRemote> Storefront for Adapter<R> {
     type Failure = Error;
+    type Record = Context;
     type Link = ();
 
-    fn root(&self) -> &Path {
-        &self.config.root
+    fn configuration(&self) -> &Configuration {
+        &self.config
     }
-    fn scope(&self) -> StoreScope {
-        self.config.scope(&self.account).into()
+    fn account(&self) -> &str {
+        &self.account
     }
-    fn account(&self) -> AccountIdentity {
-        self.account.as_str().into()
+    fn record(&self) -> Option<&Context> {
+        self.context.as_ref()
     }
-    fn load(&mut self) -> Result<()> {
-        self.context = Context::load(&self.config, &self.account)?;
-        Ok(())
-    }
-    fn work(&self) -> Option<Work> {
-        self.context.as_ref().map(Context::work)
-    }
-    fn save(&mut self, work: Work) -> Result<()> {
-        let context = self.context.as_mut().ok_or(Error::Recovery)?;
-        context.pending = work.pending;
-        context.installation_removed = work.installation_removed;
-        context.save()
-    }
-    fn installation_absent(&self) -> Result<bool> {
-        store::absent(&self.config)
-    }
-    fn bindings(
-        &mut self,
-        vault: &Vault,
-        remote: Option<&Manifest>,
-        create: bool,
-    ) -> Result<Bindings> {
-        store::bindings(self.context()?, vault, remote, create)
+    fn record_mut(&mut self) -> &mut Option<Context> {
+        &mut self.context
     }
     /// Without saved rules, nothing tells where the saves live.
     fn offline(&self) -> bool {
@@ -191,7 +168,7 @@ impl<R: CloudRemote> Storefront for Adapter<R> {
             &self.account,
             &rules,
             vault,
-            self.context.as_ref(),
+            self.context.is_some(),
         )? {
             return Ok(Availability::Unavailable(UnavailableReason::Unsupported));
         }
@@ -211,7 +188,7 @@ impl<R: CloudRemote> Storefront for Adapter<R> {
             pending: None,
             installation_removed: false,
         });
-        context.config = self.config.clone();
+        record::rebind(context, self.config.clone());
         context.save()?;
         // Supported publisher rules activate Obelisk's Cloud policy. These are
         // not preferences read from Epic's official launcher; no such account
@@ -339,119 +316,6 @@ fn upload_files(
     Ok(files)
 }
 
-pub(crate) fn pending(root: &Path, account: &str) -> Result<Vec<Configuration>> {
-    store::safe(root)?;
-    let directory = cloud_vault::epic_account_directory(root, account)?;
-    store::safe(&directory)?;
-    if !directory.exists() {
-        return Ok(Vec::new());
-    }
-    let mut configs = Vec::new();
-    for entry in std::fs::read_dir(directory)? {
-        let entry = entry?;
-        if !entry.file_type()?.is_dir() {
-            continue;
-        }
-        // One unreadable game must not hide the others' pending work.
-        match pending_game(root, account, &entry.path()) {
-            Ok(Some(config)) => configs.push(config),
-            Ok(None) => {}
-            Err(error) => eprintln!("Epic Cloud pending work unreadable: {error}"),
-        }
-    }
-    Ok(configs)
-}
-
-fn pending_game(root: &Path, account: &str, directory: &Path) -> Result<Option<Configuration>> {
-    let path = directory.join("epic-context.json");
-    store::safe(&path)?;
-    let Some(context): Option<Context> = cloud_vault::journal::read(&path)? else {
-        return Ok(None);
-    };
-    context.validate(&context.config, account)?;
-    if context.config.root != root || Context::path(&context.config, account)? != path {
-        return Err(Error::Storage);
-    }
-    // Vault work outlives the context marker: an uncertain upload or an
-    // interrupted replacement still needs this game's next sync.
-    let vault = cloud_vault::peek(root, context.config.scope(account))?;
-    Ok(
-        (context.pending.is_some() || vault.pending.is_some() || vault.applying)
-            .then_some(context.config),
-    )
-}
-
-/// One Epic game's Cloud indicator, with the saved configuration that Cloud
-/// maintenance of an uninstalled game needs.
-pub struct EpicIndicator {
-    pub namespace: String,
-    pub app_name: String,
-    pub indicator: cloud_status::Indicator,
-    pub configuration: Option<Configuration>,
-}
-
-/// The Cloud indicators of `games` (namespace, app name), plus every other
-/// game of this account with pending work, such as an uninstalled one.
-/// Nothing here takes a lock: a game or maintenance may be writing meanwhile.
-pub fn indicators(
-    root: &Path,
-    account: &str,
-    games: &[(String, String)],
-) -> Result<Vec<EpicIndicator>> {
-    let mut wanted: std::collections::BTreeSet<(String, String)> = games.iter().cloned().collect();
-    wanted.extend(
-        pending(root, account)?
-            .into_iter()
-            .map(|config| (config.namespace, config.app_name)),
-    );
-    let mut indicators = Vec::new();
-    for (namespace, app_name) in wanted {
-        match indicator(root, account, &namespace, &app_name) {
-            Ok((indicator, configuration)) => indicators.push(EpicIndicator {
-                namespace,
-                app_name,
-                indicator,
-                configuration,
-            }),
-            Err(error) => eprintln!("Epic Cloud indicator of {app_name} unavailable: {error}"),
-        }
-    }
-    Ok(indicators)
-}
-
-fn indicator(
-    root: &Path,
-    account: &str,
-    namespace: &str,
-    app_name: &str,
-) -> Result<(cloud_status::Indicator, Option<Configuration>)> {
-    store::safe(root)?;
-    let scope = cloud_vault::StoreScope::from(cloud_vault::EpicScope {
-        account_id: account.into(),
-        namespace: namespace.into(),
-        app_name: app_name.into(),
-    });
-    let vault = cloud_vault::peek(root, scope.clone())?;
-    // An uninstalled game has neither its installation nor a session to
-    // validate against: check only that the context names this game.
-    let path = scope.directory(root)?.join("epic-context.json");
-    let context: Option<Context> = cloud_vault::journal::read(&path)?;
-    if let Some(context) = &context
-        && (context.account_id != account
-            || context.config.namespace != namespace
-            || context.config.app_name != app_name
-            || context.config.root != root)
-    {
-        return Err(Error::Storage);
-    }
-    let journal = Work::journal(context.as_ref().map(Context::work).as_ref(), false);
-    let record = cloud_status::read(root, &scope)?;
-    Ok((
-        cloud_status::indicator(&scope, &vault, &journal, &record),
-        context.map(|context| context.config),
-    ))
-}
-
 /// Cloud maintenance of one Epic game, run inside Obelisk with the UI's
 /// authenticated client. `idle` proves no Epic launch or supervisor can
 /// start while it runs.
@@ -483,11 +347,8 @@ pub async fn archive(config: Configuration, api: &EpicClient) -> Result<()> {
 
 async fn archive_with(config: Configuration, api: &impl CloudRemote) -> Result<()> {
     let account = api.account_id().await?;
-    config.validate(&account)?;
-    store::safe(&config.root)?;
-    let mut vault = Vault::open(&config.root, config.scope(&account))?;
-    let saved = Context::load(&config, &account)?;
-    let mut context = if let Some(saved) = saved {
+    let (mut vault, saved) = record::locked::<Context>(&config, &account)?;
+    let context = if let Some(saved) = saved {
         saved
     } else {
         let Some(rules) = api
@@ -499,16 +360,16 @@ async fn archive_with(config: Configuration, api: &impl CloudRemote) -> Result<(
             )
             .await?
         else {
-            if has_saved_state(&vault, None) {
+            if record::holds_saves(&vault, false) {
                 return Err(Error::Unsupported);
             }
             return Ok(());
         };
-        if !supports_rules(&config, &account, &rules, &vault, None)? {
+        if !supports_rules(&config, &account, &rules, &vault, false)? {
             return Ok(());
         }
         Context {
-            config,
+            config: config.clone(),
             account_id: account,
             rules,
             pending: None,
@@ -517,58 +378,20 @@ async fn archive_with(config: Configuration, api: &impl CloudRemote) -> Result<(
     };
     // Capture rehashes every save file. The caller shares one runtime with
     // downloads and the UI, so that work does not belong on it.
-    tokio::task::spawn_blocking(move || archive_context(&mut vault, &mut context))
+    tokio::task::spawn_blocking(move || record::archive(&mut vault, context, config))
         .await
         .map_err(|_| Error::Session)?
 }
 
-/// A removed installation keeps already archived files that no longer exist on
-/// disk; an intact one captures the bound set as it stands.
-fn capture_set(vault: &mut Vault, removed: bool, bindings: &Bindings) -> Result<Manifest> {
-    Ok(if removed {
-        vault.capture_preserving_missing(bindings)?
-    } else {
-        vault.capture(bindings)?
-    })
-}
-
-fn archive_context(vault: &mut Vault, context: &mut Context) -> Result<()> {
-    // Archive has no permission to reassign another account's physical saves.
-    let mut bindings = store::bindings(context, vault, None, false)?;
-    bindings.retain(|_, file| file.path.parent().is_some_and(Path::is_dir));
-    capture_set(vault, context.installation_removed, &bindings)?;
-    context.installation_removed = true;
-    context.save()
-}
-
-pub fn removed(config: &Configuration, account: &str) -> Result<()> {
-    config.validate(account)?;
-    store::safe(&config.root)?;
-    let _vault = Vault::open(&config.root, config.scope(account))?;
-    let Some(mut context) = Context::load(config, account)? else {
-        return Ok(());
-    };
-    if !context.absent()? {
-        return Err(Error::Recovery);
-    }
-    context.installation_removed = true;
-    context.save()
-}
-
-fn has_saved_state(vault: &Vault, context: Option<&Context>) -> bool {
-    context.is_some()
-        || vault.pending().is_some()
-        || vault.game_session().is_some()
-        || vault.local().is_some()
-        || vault.baseline().is_some()
-}
-
+/// Whether Obelisk can follow `rules`. Rules it cannot follow leave a game
+/// without Cloud, unless Obelisk holds its saves or `saved` says it has a
+/// record.
 fn supports_rules(
     config: &Configuration,
     account: &str,
     rules: &CloudRules,
     vault: &Vault,
-    saved: Option<&Context>,
+    saved: bool,
 ) -> Result<bool> {
     match rules.resolve(
         &config.cloud_platform(),
@@ -577,7 +400,7 @@ fn supports_rules(
         &config.app_name,
     ) {
         Ok(_) => Ok(true),
-        Err(EpicError::UnsupportedContent) if !has_saved_state(vault, saved) => Ok(false),
+        Err(EpicError::UnsupportedContent) if !record::holds_saves(vault, saved) => Ok(false),
         Err(error) => Err(error.into()),
     }
 }

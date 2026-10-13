@@ -99,6 +99,16 @@ impl FakeSteamCloud {
     pub(crate) fn uploads(&self) -> usize {
         self.state.lock().unwrap().uploads
     }
+
+    /// The Cloud rules and listing Steam gives an uninstall archive, `None`
+    /// without Steam Cloud.
+    pub(crate) fn archive_rules(&self) -> Option<(CloudMetadata, CloudListing)> {
+        let state = self.state.lock().unwrap();
+        state
+            .metadata
+            .clone()
+            .map(|metadata| (metadata, state.listing()))
+    }
 }
 
 impl FakeState {

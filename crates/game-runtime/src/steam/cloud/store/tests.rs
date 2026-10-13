@@ -1,8 +1,8 @@
 use super::*;
+use crate::cloud::record::Record as _;
 use steam_kit::cloud::CloudFile;
 
 const ACCOUNT: u64 = 0x0110_0001_0000_002a;
-const OTHER_ACCOUNT: u64 = 0x0110_0001_0000_002b;
 const APP: u32 = 42;
 const SLOT: &str = "%GameInstall%saves/slot.sav";
 
@@ -49,7 +49,7 @@ impl Fixture {
 }
 
 /// One AutoCloud `savefiles` rule rooted at the install directory.
-pub(super) fn save_rule(path: &str, pattern: &str, recursive: &str) -> CloudMetadata {
+fn save_rule(path: &str, pattern: &str, recursive: &str) -> CloudMetadata {
     CloudMetadata::Object(vec![(
         "savefiles".into(),
         CloudMetadata::Object(vec![(
@@ -73,29 +73,6 @@ fn metadata() -> CloudMetadata {
     save_rule("saves", "*.sav", "1")
 }
 
-#[test]
-fn one_corrupt_store_does_not_hide_other_pending_games() {
-    let fixture = Fixture::new();
-    let mut context = fixture.context();
-    context.needs_work = true;
-    context.save().unwrap();
-    let broken = fixture.config.root.join(ACCOUNT.to_string()).join("41");
-    crate::files::private_directory(&broken).unwrap();
-    fs::write(broken.join("context.json"), b"not valid JSON").unwrap();
-
-    let stores = pending(&fixture.config.root, ACCOUNT);
-
-    assert!(
-        stores.is_ok(),
-        "A corrupt game must not abort account maintenance"
-    );
-    assert_eq!(
-        stores.unwrap().len(),
-        2,
-        "Report the failed game and retain the valid one"
-    );
-}
-
 fn listing() -> CloudListing {
     CloudListing {
         steam_id: ACCOUNT,
@@ -103,6 +80,56 @@ fn listing() -> CloudListing {
         change_number: 7,
         files: Vec::new(),
     }
+}
+
+#[test]
+fn a_record_the_previous_version_saved_keeps_loading() {
+    let fixture = Fixture::new();
+    let config = &fixture.config;
+    let path = directory(config, ACCOUNT).unwrap().join("context.json");
+    let saved = serde_json::json!({
+        "config": {
+            "root": config.root,
+            "home": config.home,
+            "install": config.install,
+            "app_id": APP,
+        },
+        "account_id": ACCOUNT,
+        "metadata": serde_json::to_value(metadata()).unwrap(),
+        "listing": serde_json::to_value(listing()).unwrap(),
+        "remote": {"revision": "8", "files": {}},
+        "bindings": {},
+        "needs_work": true,
+        "desired": {},
+        "transaction": null,
+        "installation_removed": false,
+        "applying": {"remote": {"revision": "8", "files": {}}, "project": true},
+    });
+    write(&path, &saved).unwrap();
+
+    let mut context = Context::load(config, &ACCOUNT).unwrap().unwrap();
+
+    assert!(matches!(
+        context.work().pending,
+        Some(Pending::Applying { project: true, .. })
+    ));
+    context.set_work(Work {
+        pending: Some(Pending::Upload {
+            desired: Manifest::default(),
+        }),
+        installation_removed: false,
+    });
+    context.save().unwrap();
+    let mut written: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    assert_eq!(written["needs_work"], true);
+    assert_eq!(written["desired"], serde_json::json!({}));
+    assert!(written.get("applying").is_none());
+    // The removal fence is never guessed from a record that lacks it.
+    written
+        .as_object_mut()
+        .unwrap()
+        .remove("installation_removed");
+    assert!(serde_json::from_value::<Context>(written).is_err());
 }
 
 #[test]
@@ -168,73 +195,4 @@ fn refreshing_remote_and_local_bindings_never_recreates_removed_install() {
     assert!(!fixture.config.install.exists());
     assert!(matches!(context.ensure_parents(), Err(Failure::Recovery)));
     assert!(!fixture.config.install.exists());
-}
-
-#[test]
-fn fresh_uninstall_archive_keeps_complete_install_saves_after_removal() {
-    let fixture = Fixture::new();
-    fixture.save("slot.sav", b"slot before uninstall");
-    fixture.save("nested/boss.sav", b"boss before uninstall");
-    fixture.save("ignored.txt", b"not a save");
-    assert!(Context::load(&fixture.config, ACCOUNT).unwrap().is_none());
-
-    archive_with_rules(&fixture.config, metadata(), listing()).unwrap();
-
-    let context = Context::load(&fixture.config, ACCOUNT).unwrap().unwrap();
-    assert!(!context.needs_work);
-    assert!(context.desired.is_none());
-    let desired = fixture.vault().local().unwrap().clone();
-    assert_eq!(desired.0.len(), 2);
-    fs::remove_dir_all(&fixture.config.install).unwrap();
-    let vault = fixture.vault();
-    assert_eq!(vault.local(), Some(&desired));
-    assert_eq!(
-        vault.read_content(&desired.0[SLOT]).unwrap(),
-        b"slot before uninstall"
-    );
-    assert_eq!(
-        vault
-            .read_content(&desired.0["%GameInstall%saves/nested/boss.sav"])
-            .unwrap(),
-        b"boss before uninstall"
-    );
-    assert!(vault.pending().is_none());
-    assert!(pending(&fixture.config.root, ACCOUNT).unwrap().is_empty());
-    assert!(!fixture.config.install.exists());
-}
-
-#[test]
-fn context_copied_between_accounts_is_rejected() {
-    let fixture = Fixture::new();
-    fixture.save("slot.sav", b"first account private save");
-    archive_with_rules(&fixture.config, metadata(), listing()).unwrap();
-    let context = Context::load(&fixture.config, ACCOUNT).unwrap().unwrap();
-    assert!(
-        Context::load(&fixture.config, OTHER_ACCOUNT)
-            .unwrap()
-            .is_none()
-    );
-    let foreign_path = directory(&fixture.config, OTHER_ACCOUNT)
-        .unwrap()
-        .join("context.json");
-    write(&foreign_path, &context).unwrap();
-
-    assert!(matches!(
-        Context::load(&fixture.config, OTHER_ACCOUNT),
-        Err(Failure::Storage)
-    ));
-    assert!(matches!(
-        archive(&fixture.config, OTHER_ACCOUNT),
-        Err(Failure::Storage)
-    ));
-    assert!(
-        Vault::open(&fixture.config.root, scope(&fixture.config, OTHER_ACCOUNT))
-            .unwrap()
-            .local()
-            .is_none()
-    );
-    assert_eq!(
-        fs::read(fixture.config.install.join("saves/slot.sav")).unwrap(),
-        b"first account private save"
-    );
 }

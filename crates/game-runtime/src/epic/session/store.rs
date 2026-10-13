@@ -1,11 +1,15 @@
 use super::*;
+use crate::cloud::record;
 pub(super) use crate::cloud::sync::Pending;
-use cloud_vault::{Bindings, SelectedFile, StoreScope, journal};
+use crate::cloud::sync::Work;
+use crate::files::safe_storage_path;
+use cloud_vault::{AccountIdentity, Bindings, SelectedFile, StoreScope, journal};
 use std::{collections::BTreeSet, fs, os::unix::fs::MetadataExt, path::Path};
 
+/// An Epic game's Cloud record, `epic-context.json`.
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(super) struct Context {
+pub(crate) struct Context {
     pub config: Configuration,
     pub rules: CloudRules,
     pub account_id: String,
@@ -18,16 +22,9 @@ impl Context {
         config.validate(account)?;
         let path = StoreScope::from(config.scope(account))
             .directory(&config.root)?
-            .join("epic-context.json");
-        safe(&path)?;
+            .join(Self::FILE);
+        safe_storage_path(&path)?;
         Ok(path)
-    }
-    pub fn load(config: &Configuration, account: &str) -> Result<Option<Self>> {
-        let context: Option<Self> = journal::read(&Self::path(config, account)?)?;
-        if let Some(context) = &context {
-            context.validate(config, account)?;
-        }
-        Ok(context)
     }
     pub fn validate(&self, config: &Configuration, account: &str) -> Result<()> {
         self.config.validate(account)?;
@@ -59,35 +56,63 @@ impl Context {
             &self.config.app_name,
         )?)
     }
-    pub fn work(&self) -> Work {
+}
+
+impl record::Record for Context {
+    type Failure = Error;
+    type Configuration = Configuration;
+    type Account = str;
+    const FILE: &'static str = "epic-context.json";
+
+    fn identity(account: &str) -> AccountIdentity {
+        account.into()
+    }
+    fn scope(config: &Configuration, account: &str) -> Result<StoreScope> {
+        Self::path(config, account)?;
+        Ok(config.scope(account).into())
+    }
+    fn load(config: &Configuration, account: &str) -> Result<Option<Self>> {
+        let context: Option<Self> = journal::read(&Self::path(config, account)?)?;
+        if let Some(context) = &context {
+            context.validate(config, account)?;
+        }
+        Ok(context)
+    }
+    fn save(&self) -> Result<()> {
+        self.validate(&self.config, &self.account_id)?;
+        journal::write(&Self::path(&self.config, &self.account_id)?, self)?;
+        Ok(())
+    }
+    fn check(&self) -> Result<()> {
+        self.validate(&self.config, &self.account_id)
+    }
+    fn account(&self) -> &str {
+        &self.account_id
+    }
+    fn configuration(&self) -> &Configuration {
+        &self.config
+    }
+    fn configuration_mut(&mut self) -> &mut Configuration {
+        &mut self.config
+    }
+    fn work(&self) -> Work {
         Work {
             pending: self.pending.clone(),
             installation_removed: self.installation_removed,
         }
     }
-    pub fn save(&self) -> Result<()> {
-        self.validate(&self.config, &self.account_id)?;
-        journal::write(&Self::path(&self.config, &self.account_id)?, self)?;
-        Ok(())
+    fn set_work(&mut self, work: Work) {
+        self.pending = work.pending;
+        self.installation_removed = work.installation_removed;
     }
-    pub fn absent(&self) -> Result<bool> {
-        absent(&self.config)
+    fn bindings(
+        &mut self,
+        vault: &Vault,
+        remote: Option<&Manifest>,
+        create: bool,
+    ) -> Result<Bindings> {
+        bindings(self, vault, remote, create)
     }
-}
-
-pub(super) fn absent(config: &Configuration) -> Result<bool> {
-    safe(&config.install)?;
-    match fs::symlink_metadata(&config.install) {
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(true),
-        Ok(metadata) if metadata.is_dir() => Ok(false),
-        Ok(_) => Err(Error::Storage),
-        Err(error) => Err(error.into()),
-    }
-}
-
-/// The Steam supervisor's storage guard, which this module shares verbatim.
-pub(super) fn safe(path: &Path) -> Result<()> {
-    crate::steam::cloud::safe_storage_path(path).map_err(|_| Error::Storage)
 }
 
 /// Discover names before ownership activation without reading another account's bytes.
@@ -183,7 +208,7 @@ pub(super) fn bindings(
 }
 
 fn ensure_parent(path: &Path) -> Result<()> {
-    safe(path)?;
+    safe_storage_path(path)?;
     let mut missing = Vec::new();
     let mut current = path;
     loop {
@@ -198,7 +223,7 @@ fn ensure_parent(path: &Path) -> Result<()> {
         }
     }
     for directory in missing.into_iter().rev() {
-        safe(&directory)?;
+        safe_storage_path(&directory)?;
         match fs::create_dir(&directory) {
             Ok(()) => (),
             Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => (),

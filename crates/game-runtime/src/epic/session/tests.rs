@@ -1,20 +1,27 @@
-//! EGS Cloud behind the Cloud sync: the shared suite over an in-memory Epic
-//! Cloud, and what only Epic has: its snapshot filters, size limits, archive
-//! and pending discovery.
+//! EGS Cloud behind the Cloud sync: the shared suites over an in-memory Epic
+//! Cloud, and what only Epic has: its snapshot filters, size limits and
+//! changed Cloud rules.
 use super::fake::{Call, FakeCloud};
 use super::store::Pending;
 use super::*;
-use crate::cloud::sync::tests::{Harness, cloud_suite};
-use crate::cloud_status::Indicator;
+use crate::cloud::record::tests::record_suite;
+use crate::cloud::sync::{
+    Work,
+    tests::{Harness, cloud_suite},
+};
 use crate::supervisor::client::no_other_session;
-use std::{fs, path::PathBuf};
+use cloud_vault::{AccountIdentity, StoreScope};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
 
 const ACCOUNT: &str = "0123456789abcdef0123456789abcdef";
-const OTHER: &str = "abcdef0123456789abcdef0123456789";
 
+/// The game's saves: in the Mac home, or in a Windows build's profile.
 pub(crate) fn rules() -> CloudRules {
     CloudRules {
-        cloud_save_folder: None,
+        cloud_save_folder: Some("{AppData}/Game".into()),
         cloud_save_folder_mac: Some("{Home}/Saves".into()),
         include: vec!["*.sav".into()],
         exclude: Vec::new(),
@@ -78,7 +85,10 @@ impl Harness for EpicGame {
         .unwrap()
     }
     fn save(&self) -> PathBuf {
-        self.config.home.join("Saves").join("slot.sav")
+        match &self.config.prefix {
+            Some(prefix) => crate::wine::profile(prefix).join("AppData/Local/Game/slot.sav"),
+            None => self.config.home.join("Saves").join("slot.sav"),
+        }
     }
     fn slot(&self) -> &'static str {
         "slot.sav"
@@ -111,35 +121,23 @@ impl Harness for EpicGame {
     fn set_rules(&self, available: bool) {
         self.cloud.set_rules(available.then(rules));
     }
-    async fn uninstall(&self) {
-        archive_with(self.config.clone(), self.cloud.as_ref())
-            .await
-            .unwrap();
-        fs::remove_dir_all(&self.config.install).unwrap();
-        removed(&self.config, ACCOUNT).unwrap();
+    fn run_in(&mut self, prefix: &Path) {
+        self.config.platform = "Windows".into();
+        self.config.prefix = Some(prefix.to_owned());
+        fs::create_dir_all(Harness::save(self).parent().unwrap()).unwrap();
+    }
+    async fn archive(&self) -> Result<()> {
+        archive_with(self.config.clone(), self.cloud.as_ref()).await
     }
     async fn maintain(&self, alive: &SessionAlive<'_>) -> Result<()> {
         let control = Arc::clone(&self.control);
         maintain_with(self.config.clone(), Arc::clone(&self.cloud), control, alive).await
     }
-    fn work(&self) -> Option<Work> {
-        Context::load(&self.config, ACCOUNT)
-            .unwrap()
-            .map(|context| context.work())
+    fn configuration(&self) -> Configuration {
+        self.config.clone()
     }
-    fn listed(&self) -> bool {
-        pending(&self.config.root, ACCOUNT)
-            .unwrap()
-            .contains(&self.config)
-    }
-    fn indicator(&self, requested: bool) -> Option<Indicator> {
-        let game = [("namespace".to_owned(), "game".to_owned())];
-        let requested: &[(String, String)] = if requested { &game } else { &[] };
-        indicators(&self.config.root, ACCOUNT, requested)
-            .unwrap()
-            .into_iter()
-            .find(|shown| shown.app_name == self.config.app_name)
-            .map(|shown| shown.indicator)
+    fn account_id(&self) -> &str {
+        ACCOUNT
     }
     fn root(&self) -> PathBuf {
         self.config.root.clone()
@@ -154,6 +152,7 @@ impl Harness for EpicGame {
 
 mod suite {
     super::cloud_suite!(super::EpicGame);
+    super::record_suite!(super::EpicGame);
 }
 
 fn fixture() -> (tempfile::TempDir, Vault, Context) {
@@ -234,114 +233,6 @@ fn uploads_preserve_excluded_remote_bytes_and_apply_managed_deletions() {
     ));
 }
 
-#[test]
-fn partial_uninstall_archives_survivors_preserves_missing_saves_and_keeps_exit_work() {
-    let (_temporary, mut vault, mut context) = fixture();
-    let directory = context.config.home.join("Saves");
-    let first = directory.join("first.sav");
-    let nested = directory.join("nested");
-    fs::create_dir(&nested).unwrap();
-    let second = nested.join("second.sav");
-    fs::write(&first, b"first").unwrap();
-    fs::write(&second, b"second").unwrap();
-    let exit = staged(&vault, "first.sav", b"prior pending exit");
-    context.pending = Some(Pending::Upload {
-        desired: exit.clone(),
-    });
-    archive_context(&mut vault, &mut context).unwrap();
-    assert!(
-        Context::load(&context.config, ACCOUNT)
-            .unwrap()
-            .unwrap()
-            .installation_removed
-    );
-    fs::remove_dir_all(&nested).unwrap();
-    fs::write(&first, b"surviving latest").unwrap();
-    archive_context(&mut vault, &mut context).unwrap();
-    assert!(!nested.exists());
-    let archived = vault.local().unwrap();
-    assert_eq!(
-        vault.read_content(&archived.0["first.sav"]).unwrap(),
-        b"surviving latest"
-    );
-    assert_eq!(
-        vault
-            .read_content(&archived.0["nested/second.sav"])
-            .unwrap(),
-        b"second"
-    );
-    assert_eq!(context.pending.as_ref().unwrap().files(), Some(&exit));
-}
-
-#[test]
-fn pending_discovery_skips_a_context_copied_into_another_account_or_game() {
-    let (_temporary, vault, mut context) = fixture();
-    context.pending = Some(Pending::Upload {
-        desired: staged(&vault, "slot.sav", b"pending"),
-    });
-    context.save().unwrap();
-    let config = context.config.clone();
-    drop(vault);
-    let vault = Vault::open(&config.root, config.scope(OTHER)).unwrap();
-    let copied = Context::path(&config, OTHER).unwrap();
-    fs::copy(Context::path(&config, ACCOUNT).unwrap(), &copied).unwrap();
-    assert!(pending(&config.root, OTHER).unwrap().is_empty());
-    assert!(copied.exists());
-    drop(vault);
-    let mut other_config = config.clone();
-    other_config.app_name = "other-game".into();
-    let _vault = Vault::open(&config.root, other_config.scope(ACCOUNT)).unwrap();
-    fs::copy(
-        Context::path(&config, ACCOUNT).unwrap(),
-        Context::path(&other_config, ACCOUNT).unwrap(),
-    )
-    .unwrap();
-    // One unreadable game never hides another game's pending work.
-    assert_eq!(pending(&config.root, ACCOUNT).unwrap(), [config]);
-}
-
-#[tokio::test]
-async fn uninstall_archive_needs_only_the_epic_storefront_lock() {
-    let game = EpicGame::game();
-    fs::write(Harness::save(&game), b"progress").unwrap();
-    game.cloud.publish(&[("slot.sav", b"progress")]);
-    game.open().prepare(&no_other_session).await.unwrap();
-    let steam_game = Vault::open(
-        &game.config.root,
-        cloud_vault::Scope {
-            steam_id: 0x0110_0001_0000_0001,
-            app_id: 10,
-            cloud_app_id: 10,
-        },
-    )
-    .unwrap();
-
-    archive_with(game.config.clone(), game.cloud.as_ref())
-        .await
-        .unwrap();
-
-    assert!(
-        Context::load(&game.config, ACCOUNT)
-            .unwrap()
-            .unwrap()
-            .installation_removed
-    );
-    let other_epic_game = Vault::open(
-        &game.config.root,
-        cloud_vault::EpicScope {
-            account_id: ACCOUNT.into(),
-            namespace: "namespace".into(),
-            app_name: "other-game".into(),
-        },
-    )
-    .unwrap();
-    assert!(matches!(
-        archive_with(game.config.clone(), game.cloud.as_ref()).await,
-        Err(Error::Busy)
-    ));
-    drop((steam_game, other_epic_game));
-}
-
 #[tokio::test]
 async fn changed_epic_cloud_rules_need_a_dedicated_conversion() {
     let game = EpicGame::game();
@@ -385,42 +276,78 @@ fn unsupported_mac_rules_allow_only_a_new_unmanaged_game_to_start_without_cloud(
     rules.cloud_save_folder_mac = Some("{AppData}/Game".into());
     context.config.root = context.config.root.with_file_name("fresh-archive");
     let mut vault = Vault::open(&context.config.root, context.config.scope(ACCOUNT)).unwrap();
-    assert!(!supports_rules(&context.config, ACCOUNT, &rules, &vault, None).unwrap());
+    assert!(!supports_rules(&context.config, ACCOUNT, &rules, &vault, false).unwrap());
     assert!(matches!(
-        supports_rules(&context.config, ACCOUNT, &rules, &vault, Some(&context)),
+        supports_rules(&context.config, ACCOUNT, &rules, &vault, true),
         Err(Error::Epic(EpicError::UnsupportedContent))
     ));
     vault
         .game_started(&uuid::Uuid::new_v4().to_string())
         .unwrap();
     assert!(matches!(
-        supports_rules(&context.config, ACCOUNT, &rules, &vault, None),
+        supports_rules(&context.config, ACCOUNT, &rules, &vault, false),
         Err(Error::Epic(EpicError::UnsupportedContent))
     ));
 }
 
 #[test]
-fn removal_needs_only_the_epic_storefront_lock() {
-    let (_temporary, vault, context) = fixture();
-    let config = context.config.clone();
-    fs::remove_dir_all(&config.install).unwrap();
-    assert!(matches!(removed(&config, ACCOUNT), Err(Error::Busy)));
-    drop(vault);
-    let steam = cloud_vault::Scope {
-        steam_id: 0x0110_0001_0000_0001,
-        app_id: 10,
-        cloud_app_id: 10,
-    };
-    let _steam_game = Vault::open(&config.root, steam).unwrap();
+fn an_epic_record_the_previous_version_saved_keeps_loading() {
+    let (_temporary, _vault, context) = fixture();
+    let config = &context.config;
+    let saved = serde_json::json!({
+        "config": {
+            "root": config.root,
+            "home": config.home,
+            "install": config.install,
+            "session_directory": config.session_directory,
+            "helper": config.helper,
+            "namespace": "namespace",
+            "catalog_item_id": "catalog",
+            "app_name": "game",
+            "platform": "Mac",
+            "language": "en",
+        },
+        "rules": {
+            "cloud_save_folder": null,
+            "cloud_save_folder_mac": "{Home}/Saves",
+            "include": ["*.sav"],
+            "exclude": ["excluded.sav"],
+        },
+        "account_id": ACCOUNT,
+        "pending": {"phase": "Upload", "desired": {}},
+        "installation_removed": true,
+    });
+    cloud_vault::journal::write(&Context::path(config, ACCOUNT).unwrap(), &saved).unwrap();
 
-    removed(&config, ACCOUNT).unwrap();
+    let loaded = Context::load(config, ACCOUNT).unwrap().unwrap();
 
-    assert!(
-        Context::load(&config, ACCOUNT)
-            .unwrap()
-            .unwrap()
-            .installation_removed
+    assert_eq!(
+        loaded.work(),
+        Work {
+            pending: Some(Pending::Upload {
+                desired: Manifest::default(),
+            }),
+            installation_removed: true,
+        }
     );
+}
+
+#[test]
+fn a_game_without_a_cloud_record_records_its_removal_even_behind_a_symbolic_link() {
+    let game = EpicGame::game();
+    // The Cloud archive refuses a path through a symbolic link, but this
+    // game never gave it saves to keep.
+    let linked = game.config.home.with_file_name("linked");
+    std::os::unix::fs::symlink(&game.config.home, &linked).unwrap();
+    let config = Configuration {
+        install: linked.join("Game"),
+        ..game.config.clone()
+    };
+    fs::remove_dir_all(&game.config.install).unwrap();
+
+    record::removed::<Context>(&config, ACCOUNT).unwrap();
+
+    assert!(Context::load(&config, ACCOUNT).unwrap().is_none());
 }
 
 #[test]

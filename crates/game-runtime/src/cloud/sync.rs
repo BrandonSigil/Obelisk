@@ -1,17 +1,16 @@
 //! One Cloud sync, whatever the storefront: before a launch, after the game
 //! exits, or as Cloud maintenance. This module owns the order of the steps,
 //! the retries and Cloud questions, the choice between local and Cloud saves
-//! and the work left pending. A storefront plugs in as a `Storefront`: its
-//! Cloud rules, where each save lives, a verified remote view and publication.
+//! and the work left pending in the game's Cloud record. A storefront plugs in
+//! as a `Storefront`: the record it holds, its Cloud rules, a verified remote
+//! view and publication.
+use super::record::{self, Configuration as _, Record as _};
 use super::{Choice, Control, Phase, Question, Stop};
 use crate::cloud_status::{self, ProblemKind, UnavailableReason};
 use crate::supervisor::client::SessionAlive;
-use cloud_vault::{
-    AccountIdentity, Bindings, Decision, Manifest, RemoteView, Retry, RetryBudget, StoreScope,
-    Vault,
-};
+use cloud_vault::{Bindings, Decision, Manifest, RemoteView, Retry, RetryBudget, Vault};
 use serde::{Deserialize, Serialize};
-use std::{path::Path, sync::Arc, time::Instant};
+use std::{sync::Arc, time::Instant};
 
 #[cfg(test)]
 pub(crate) mod tests;
@@ -92,18 +91,6 @@ pub(crate) struct Work {
     /// intent, not proof that the installation is absent.
     pub installation_removed: bool,
 }
-impl Work {
-    /// What a game's Cloud indicator reads from this work.
-    pub(crate) fn journal(work: Option<&Self>, uncertain: bool) -> cloud_status::Journal {
-        let pending = work.and_then(|work| work.pending.as_ref());
-        cloud_status::Journal {
-            pending: matches!(pending, Some(Pending::Capture | Pending::Upload { .. })),
-            uncertain,
-            applying: matches!(pending, Some(Pending::Applying { .. })),
-            installation_removed: work.is_some_and(|work| work.installation_removed),
-        }
-    }
-}
 
 /// Whether the storefront's Cloud can sync this game now.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -112,30 +99,22 @@ pub(crate) enum Availability {
     Unavailable(UnavailableReason),
 }
 
-/// What a storefront adds to a Cloud sync. Steps that talk to the storefront
-/// take the attempt's `Link`, which the sync drops after each attempt.
+/// What a storefront adds to a Cloud sync. It holds the game's Cloud record,
+/// which the sync reads and writes. Steps that talk to the storefront take
+/// the attempt's `Link`, which the sync drops after each attempt.
 #[allow(async_fn_in_trait)]
 pub(crate) trait Storefront {
     type Failure: Failure;
+    type Record: record::Record<Failure = Self::Failure>;
     type Link;
 
-    fn root(&self) -> &Path;
-    fn scope(&self) -> StoreScope;
-    fn account(&self) -> AccountIdentity;
-    /// Reads the durable state under the vault's lock.
-    fn load(&mut self) -> Result<(), Self::Failure>;
+    /// Where the game is installed and keeps its saves now.
+    fn configuration(&self) -> &<Self::Record as record::Record>::Configuration;
+    /// The account the sync runs for.
+    fn account(&self) -> &<Self::Record as record::Record>::Account;
     /// `None` until the game's Cloud rules were known once.
-    fn work(&self) -> Option<Work>;
-    fn save(&mut self, work: Work) -> Result<(), Self::Failure>;
-    fn installation_absent(&self) -> Result<bool, Self::Failure>;
-    /// Where each save lives: the local set, and `remote`'s names. `create`
-    /// makes their directories inside an installation that exists.
-    fn bindings(
-        &mut self,
-        vault: &Vault,
-        remote: Option<&Manifest>,
-        create: bool,
-    ) -> Result<Bindings, Self::Failure>;
+    fn record(&self) -> Option<&Self::Record>;
+    fn record_mut(&mut self) -> &mut Option<Self::Record>;
     /// A launch may go on without a sync: it knows where the saves live.
     fn offline(&self) -> bool;
     /// Before garbage collection: every manifest its durable and in-memory
@@ -177,6 +156,11 @@ pub(crate) trait Storefront {
     ) -> Result<(), Self::Failure>;
 }
 
+/// The game's record, which every step after its Cloud rules needs.
+fn held<S: Storefront>(store: &mut S) -> Result<&mut S::Record, S::Failure> {
+    store.record_mut().as_mut().ok_or_else(S::Failure::recovery)
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Purpose {
     Launch,
@@ -213,8 +197,8 @@ impl<S: Storefront> CloudSync<S> {
         control: Arc<Control>,
         session_id: String,
     ) -> Result<Self, S::Failure> {
-        let vault = Vault::open(store.root(), store.scope())?;
-        store.load()?;
+        let (vault, record) = record::locked(store.configuration(), store.account())?;
+        *store.record_mut() = record;
         Ok(Self {
             store,
             vault,
@@ -247,13 +231,13 @@ impl<S: Storefront> CloudSync<S> {
     /// Inside the admission lock: the game is about to run.
     pub(crate) fn started(&mut self) -> Outcome<S> {
         self.control.check()?;
-        let Some(mut work) = self.store.work() else {
+        let Some(mut work) = self.work() else {
             return Ok(());
         };
         // A persisted marker schedules the exit capture even if the
         // supervisor disappears while the game runs.
         work.pending = Some(Pending::Capture);
-        self.store.save(work)?;
+        self.save(work)?;
         self.vault.game_started(&self.session_id)?;
         Ok(())
     }
@@ -295,7 +279,7 @@ impl<S: Storefront> CloudSync<S> {
     pub(crate) async fn maintain(&mut self, alive: &SessionAlive<'_>) -> Outcome<S> {
         self.operation(async |sync| {
             sync.recover_dead_owner(alive)?;
-            let installed = !sync.store.installation_absent()?;
+            let installed = !sync.installation_absent()?;
             sync.run(Purpose::Maintenance { installed }).await
         })
         .await
@@ -321,7 +305,7 @@ impl<S: Storefront> CloudSync<S> {
         if self.guard_held() {
             self.vault.game_exited(&self.session_id)?;
         }
-        if self.store.work().is_none() {
+        if self.work().is_none() {
             return Ok(());
         }
         self.capture_exit()?;
@@ -346,25 +330,46 @@ impl<S: Storefront> CloudSync<S> {
         self.vault.game_session() == Some(self.session_id.as_str())
     }
 
+    /// The work the game's record holds, `None` until its Cloud rules were
+    /// known once.
+    fn work(&self) -> Option<Work> {
+        self.store.record().map(|record| record.work())
+    }
+
+    fn save(&mut self, work: Work) -> Outcome<S> {
+        let record = held(&mut self.store)?;
+        record.set_work(work);
+        record.save()
+    }
+
+    fn installation_absent(&self) -> Result<bool, S::Failure> {
+        Ok(record::absent(self.store.configuration().install())?)
+    }
+
+    /// Where each save lives: the local set, and `remote`'s names. `create`
+    /// makes their directories inside an installation that exists. The
+    /// record keeps what it bound.
+    fn bindings(
+        &mut self,
+        remote: Option<&Manifest>,
+        create: bool,
+    ) -> Result<Bindings, S::Failure> {
+        let record = held(&mut self.store)?;
+        let bindings = record.bindings(&self.vault, remote, create)?;
+        record.save()?;
+        Ok(bindings)
+    }
+
     fn mark(&self, change: impl FnOnce(&mut cloud_status::Record)) {
         // Display state only: a failed write must not fail the sync itself.
-        if let Err(error) = cloud_status::update(self.store.root(), &self.store.scope(), change) {
+        let root = self.store.configuration().root();
+        if let Err(error) = cloud_status::update(root, self.vault.scope(), change) {
             eprintln!("Cloud status not recorded: {error}");
         }
     }
 
     fn has_pending_work(&self) -> bool {
-        self.store.work().is_some_and(|work| work.pending.is_some())
-            || self.vault.pending().is_some()
-    }
-
-    /// Obelisk holds this game's saves, so its Cloud cannot silently vanish.
-    fn saved_state(&self) -> bool {
-        self.store.work().is_some()
-            || self.vault.pending().is_some()
-            || self.vault.game_session().is_some()
-            || self.vault.local().is_some()
-            || self.vault.baseline().is_some()
+        self.work().is_some_and(|work| work.pending.is_some()) || self.vault.pending().is_some()
     }
 
     /// A sync clears the last problem. Otherwise a failed operation leaves a
@@ -389,7 +394,7 @@ impl<S: Storefront> CloudSync<S> {
             }
             self.vault.game_exited(&old)?;
             self.vault.recover_local()?;
-            if self.store.work().is_some() {
+            if self.work().is_some() {
                 self.capture_exit()?;
             }
             return Ok(());
@@ -397,7 +402,6 @@ impl<S: Storefront> CloudSync<S> {
         self.vault.recover_local()?;
         self.recover_applying()?;
         if self
-            .store
             .work()
             .is_some_and(|work| matches!(work.pending, Some(Pending::Capture)))
         {
@@ -409,7 +413,7 @@ impl<S: Storefront> CloudSync<S> {
     /// An interrupted Cloud choice either completed or leaves its local
     /// version to send again.
     fn recover_applying(&mut self) -> Outcome<S> {
-        let Some(mut work) = self.store.work() else {
+        let Some(mut work) = self.work() else {
             return Ok(());
         };
         if let Some(Pending::Applying {
@@ -421,7 +425,7 @@ impl<S: Storefront> CloudSync<S> {
             let completed = self.vault.baseline() == Some(&remote)
                 && (!project || self.vault.local() == Some(&remote.files));
             work.pending = (!completed).then_some(Pending::Upload { desired });
-            self.store.save(work)?;
+            self.save(work)?;
         }
         Ok(())
     }
@@ -430,26 +434,21 @@ impl<S: Storefront> CloudSync<S> {
     /// files already removed keep their archived version and no directory is
     /// recreated.
     fn capture_exit(&mut self) -> Outcome<S> {
-        let mut work = self.store.work().ok_or_else(S::Failure::recovery)?;
+        let mut work = self.work().ok_or_else(S::Failure::recovery)?;
         let removed = work.installation_removed;
-        let mut bindings = self.store.bindings(&self.vault, None, !removed)?;
-        let desired = if removed {
-            bindings.retain(|_, file| file.path.parent().is_some_and(Path::is_dir));
-            self.vault.capture_preserving_missing(&bindings)?
-        } else {
-            self.vault.capture(&bindings)?
-        };
+        let bindings = self.bindings(None, !removed)?;
+        let desired = record::capture(&mut self.vault, bindings, removed)?;
         work.pending = Some(Pending::Upload { desired });
-        self.store.save(work)
+        self.save(work)
     }
 
     /// Launch anyway: ownership still applies offline, and the archive holds
     /// today's saves. Files an uninstall removed keep their archived version.
     fn capture_offline(&mut self) -> Outcome<S> {
-        let Some(work) = self.store.work() else {
+        let Some(work) = self.work() else {
             return Ok(());
         };
-        let bindings = self.store.bindings(&self.vault, None, true)?;
+        let bindings = self.bindings(None, true)?;
         self.vault.activate(&bindings)?;
         if !work.installation_removed {
             self.vault.capture(&bindings)?;
@@ -625,17 +624,17 @@ impl<S: Storefront> CloudSync<S> {
         if reason == UnavailableReason::Disabled {
             if purpose.fresh() {
                 self.capture_offline()?;
-            } else if let Some(mut work) = self.store.work() {
+            } else if let Some(mut work) = self.work() {
                 // Cloud is off, so this save is never sent. It stays in the
                 // archive as the local snapshot, but not as pending work.
                 work.pending = None;
-                self.store.save(work)?;
+                self.save(work)?;
             }
             self.control.show(Phase::Disabled, None);
             return Ok(());
         }
         // Pending work must not pass for a game without Cloud.
-        if self.saved_state() {
+        if record::holds_saves(&self.vault, self.work().is_some()) {
             return Err(S::Failure::unsupported());
         }
         self.control.show(Phase::Unsupported, None);
@@ -647,8 +646,8 @@ impl<S: Storefront> CloudSync<S> {
         if self.vault.pending().is_none() {
             return Err(S::Failure::recovery());
         }
-        self.vault
-            .settle_pending(self.store.account(), current, settled)?;
+        let account = S::Record::identity(self.store.account());
+        self.vault.settle_pending(account, current, settled)?;
         self.store.reconciled()
     }
 
@@ -662,14 +661,12 @@ impl<S: Storefront> CloudSync<S> {
         retrying: bool,
         choice: Option<Choice>,
     ) -> Outcome<S> {
-        let mut work = self.store.work().ok_or_else(S::Failure::recovery)?;
-        if self.store.installation_absent()? {
+        let mut work = self.work().ok_or_else(S::Failure::recovery)?;
+        if self.installation_absent()? {
             return Err(S::Failure::recovery());
         }
         let removed = work.installation_removed;
-        let bindings = self
-            .store
-            .bindings(&self.vault, Some(&remote.files), true)?;
+        let bindings = self.bindings(Some(&remote.files), true)?;
         self.vault.activate(&bindings)?;
         // After a reinstall, missing files keep their archived version: an
         // uninstall never deletes Cloud saves.
@@ -687,7 +684,7 @@ impl<S: Storefront> CloudSync<S> {
             work.pending = Some(Pending::Upload {
                 desired: local.clone(),
             });
-            self.store.save(work.clone())?;
+            self.save(work.clone())?;
         }
         let decision = self.decide(&mut work, &local, remote, choice)?;
         self.control.check()?;
@@ -704,7 +701,7 @@ impl<S: Storefront> CloudSync<S> {
                     remote: remote.clone(),
                     project: true,
                 });
-                self.store.save(work.clone())?;
+                self.save(work.clone())?;
                 let chosen = choice == Some(Choice::Cloud) || removed;
                 self.vault
                     .apply_download(&bindings, remote, remote, chosen)?;
@@ -720,7 +717,7 @@ impl<S: Storefront> CloudSync<S> {
             Decision::Conflict => unreachable!("decide reports conflicts"),
         }
         self.shown = None;
-        self.store.save(Work {
+        self.save(Work {
             pending: None,
             installation_removed: false,
         })
@@ -728,7 +725,7 @@ impl<S: Storefront> CloudSync<S> {
 
     /// The captured saves an exit or an uninstalled game's maintenance sends.
     fn captured_local(&self, purpose: Purpose) -> Result<Manifest, S::Failure> {
-        let work = self.store.work().ok_or_else(S::Failure::recovery)?;
+        let work = self.work().ok_or_else(S::Failure::recovery)?;
         match work.pending.as_ref().and_then(Pending::files) {
             Some(local) => Ok(local.clone()),
             None if purpose == Purpose::Exit => Err(S::Failure::recovery()),
@@ -752,15 +749,13 @@ impl<S: Storefront> CloudSync<S> {
         local: Manifest,
         choice: Option<Choice>,
     ) -> Outcome<S> {
-        let mut work = self.store.work().ok_or_else(S::Failure::recovery)?;
-        let absent = self.store.installation_absent()?;
+        let mut work = self.work().ok_or_else(S::Failure::recovery)?;
+        let absent = self.installation_absent()?;
         let removed = work.installation_removed;
         if absent && !removed {
             return Err(S::Failure::recovery());
         }
-        let bindings = self
-            .store
-            .bindings(&self.vault, Some(&remote.files), !absent)?;
+        let bindings = self.bindings(Some(&remote.files), !absent)?;
         let decision = self.decide(&mut work, &local, remote, choice)?;
         self.control.check()?;
         match decision {
@@ -771,7 +766,7 @@ impl<S: Storefront> CloudSync<S> {
                     remote: remote.clone(),
                     project: !absent,
                 });
-                self.store.save(work.clone())?;
+                self.save(work.clone())?;
                 if absent {
                     // A Cloud choice resolves remote work only. The archived
                     // local version stays, and a reinstall asks again.
@@ -790,7 +785,7 @@ impl<S: Storefront> CloudSync<S> {
             Decision::Conflict => unreachable!("decide reports conflicts"),
         }
         self.shown = None;
-        self.store.save(Work {
+        self.save(Work {
             pending: None,
             installation_removed: removed && absent,
         })
@@ -848,7 +843,7 @@ impl<S: Storefront> CloudSync<S> {
         work.pending = Some(Pending::Upload {
             desired: local.clone(),
         });
-        self.store.save(work.clone())?;
+        self.save(work.clone())?;
         Err(S::Failure::conflict())
     }
 
@@ -863,7 +858,7 @@ impl<S: Storefront> CloudSync<S> {
             work.pending = Some(Pending::Upload {
                 desired: local.clone(),
             });
-            self.store.save(work.clone())?;
+            self.save(work.clone())?;
         }
         self.control.check()?;
         self.store

@@ -291,6 +291,11 @@ impl Vault {
         next.stamped = true;
     }
 
+    /// The game whose saves this vault holds.
+    pub fn scope(&self) -> &StoreScope {
+        &self.scope
+    }
+
     pub fn synced_at(&self) -> Option<u64> {
         self.state.synced_at
     }

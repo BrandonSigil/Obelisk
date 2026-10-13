@@ -3,14 +3,25 @@
 //! storage and upload transactions.
 use super::fake::{FakeSteamCloud, SLOT, save_rule};
 use super::*;
-use crate::cloud::sync::tests::{Harness, answer, cloud_suite};
+use crate::cloud::record::tests::record_suite;
+use crate::cloud::sync::{
+    Work,
+    tests::{Harness, answer, cloud_suite, listed, uninstall, work},
+};
 use crate::cloud::{Choice, Phase};
-use crate::cloud_status::{self, Indicator};
+use crate::cloud_status;
 use crate::supervisor::client::no_other_session;
-use std::path::PathBuf;
+use cloud_vault::{AccountIdentity, StoreScope};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
 use steam_kit::cloud::CloudMetadata;
 
 pub(crate) const ACCOUNT: u64 = 0x0110_0001_0000_002a;
+
+/// The remote name of `slot.sav` under [`roaming_rule`].
+const ROAMING: &str = "%WinAppDataRoaming%Game/slot.sav";
 
 pub(crate) fn credentials() -> Credentials {
     Credentials {
@@ -35,17 +46,16 @@ impl SteamGame {
         }
     }
     /// The adapter and its vault without a sync around them.
-    fn adapter(&self) -> (Adapter<FakeSteamCloud>, Vault) {
-        let vault = Vault::open(&self.config.root, scope(&self.config, ACCOUNT)).unwrap();
-        let mut adapter = Adapter {
+    pub(crate) fn adapter(&self) -> (Adapter<FakeSteamCloud>, Vault) {
+        let (vault, context) = record::locked(&self.config, &ACCOUNT).unwrap();
+        let adapter = Adapter {
             config: self.config.clone(),
             credentials: credentials(),
             remote: self.cloud.handle(),
             preferences: CloudPreferencesCache::default(),
             downloaded: Manifest::default(),
-            context: None,
+            context,
         };
-        adapter.load().unwrap();
         (adapter, vault)
     }
     fn unavailable(&self) -> Option<UnavailableReason> {
@@ -94,19 +104,28 @@ impl Harness for SteamGame {
         .unwrap()
     }
     fn save(&self) -> PathBuf {
-        self.config.install.join("slot.sav")
+        match &self.config.prefix {
+            Some(prefix) => crate::wine::profile(prefix).join("AppData/Roaming/Game/slot.sav"),
+            None => self.config.install.join("slot.sav"),
+        }
     }
     fn slot(&self) -> &'static str {
-        SLOT
+        if self.config.prefix.is_some() {
+            ROAMING
+        } else {
+            SLOT
+        }
     }
     fn install(&self) -> PathBuf {
         self.config.install.clone()
     }
     fn publish(&self, bytes: &[u8]) {
-        self.cloud.publish(SLOT, bytes);
+        // A Windows game's save is published for Windows only.
+        let platforms = if self.config.prefix.is_some() { 1 } else { 2 };
+        self.cloud.publish_for(self.slot(), bytes, platforms);
     }
     fn cloud(&self) -> Option<Vec<u8>> {
-        self.cloud.file(SLOT)
+        self.cloud.file(self.slot())
     }
     fn uploads(&self) -> usize {
         self.cloud.uploads()
@@ -122,12 +141,23 @@ impl Harness for SteamGame {
         Failure::Quota.key().into()
     }
     fn set_rules(&self, available: bool) {
-        self.cloud.set_metadata(available.then(save_rule));
+        let rule = if self.config.prefix.is_some() {
+            roaming_rule
+        } else {
+            save_rule
+        };
+        self.cloud.set_metadata(available.then(rule));
     }
-    async fn uninstall(&self) {
-        store::archive(&self.config, ACCOUNT).unwrap();
-        fs::remove_dir_all(&self.config.install).unwrap();
-        store::removed(&self.config, ACCOUNT).unwrap();
+    fn run_in(&mut self, prefix: &Path) {
+        self.config.prefix = Some(prefix.to_owned());
+        self.cloud.set_metadata(Some(roaming_rule()));
+        fs::create_dir_all(Harness::save(self).parent().unwrap()).unwrap();
+    }
+    async fn archive(&self) -> Result<(), Failure> {
+        match self.cloud.archive_rules() {
+            Some((metadata, listing)) => store::archive_with_rules(&self.config, metadata, listing),
+            None => Ok(()),
+        }
     }
     async fn maintain(&self, alive: &SessionAlive<'_>) -> Result<(), Failure> {
         let target = if self.config.install.exists() {
@@ -138,23 +168,11 @@ impl Harness for SteamGame {
         let control = Arc::clone(&self.control);
         maintain_with(self.cloud.handle(), target, &credentials(), control, alive).await
     }
-    fn work(&self) -> Option<Work> {
-        Context::load(&self.config, ACCOUNT)
-            .unwrap()
-            .map(|context| context.work())
+    fn configuration(&self) -> Config {
+        self.config.clone()
     }
-    fn listed(&self) -> bool {
-        store::pending(&self.config.root, ACCOUNT)
-            .unwrap()
-            .contains(&self.config.app_id)
-    }
-    fn indicator(&self, requested: bool) -> Option<Indicator> {
-        let requested: &[u32] = if requested { &[42] } else { &[] };
-        store::indicators(&self.config.root, ACCOUNT, requested)
-            .unwrap()
-            .into_iter()
-            .find(|(app_id, _)| *app_id == self.config.app_id)
-            .map(|(_, indicator)| indicator)
+    fn account_id(&self) -> &u64 {
+        &ACCOUNT
     }
     fn root(&self) -> PathBuf {
         self.config.root.clone()
@@ -169,6 +187,7 @@ impl Harness for SteamGame {
 
 mod suite {
     super::cloud_suite!(super::SteamGame);
+    super::record_suite!(super::SteamGame);
 }
 
 async fn synced(game: &SteamGame, bytes: &[u8]) {
@@ -202,9 +221,9 @@ async fn playing_with_cloud_turned_off_leaves_no_pending_work() {
     sync.finished(true).await;
 
     assert_eq!(game.control.status().phase, Phase::Disabled);
-    assert_eq!(game.work().unwrap().pending, None);
+    assert_eq!(work(&game).unwrap().pending, None);
     assert_eq!(game.unavailable(), Some(UnavailableReason::Disabled));
-    assert!(!game.listed());
+    assert!(!listed(&game));
 }
 
 #[tokio::test]
@@ -250,7 +269,7 @@ async fn maintenance_refuses_an_uninstalled_exit_save_after_its_cloud_rules_chan
     game.cloud.fail_next_connection(Failure::Quota);
     sync.finished(true).await;
     drop(sync);
-    game.uninstall().await;
+    uninstall(&game).await;
     let mut changed = save_rule();
     if let CloudMetadata::Object(fields) = &mut changed {
         fields.push(("quota".into(), CloudMetadata::Value("1000".into())));
@@ -261,7 +280,7 @@ async fn maintenance_refuses_an_uninstalled_exit_save_after_its_cloud_rules_chan
 
     assert!(matches!(refused, Err(Failure::RulesChanged)));
     assert_eq!(game.cloud.file(SLOT).unwrap(), b"old");
-    assert!(game.listed());
+    assert!(listed(&game));
     assert_eq!(
         Failure::RulesChanged.key(),
         "backend.steam.cloud.rulesChanged"
@@ -352,38 +371,6 @@ fn roaming_rule() -> CloudMetadata {
 }
 
 #[tokio::test]
-async fn a_game_whose_engine_moved_its_prefix_finds_its_saves_there_and_keeps_them_in_the_cloud() {
-    const ROAMING: &str = "%WinAppDataRoaming%Game/slot.sav";
-    let save = |prefix: &Path| crate::wine::profile(prefix).join("AppData/Roaming/Game/slot.sav");
-    let mut game = SteamGame::game();
-    let rosetta = game.config.root.with_file_name("Prefixes/game");
-    game.config.prefix = Some(rosetta.clone());
-    game.cloud.set_metadata(Some(roaming_rule()));
-    fs::create_dir_all(save(&rosetta).parent().unwrap()).unwrap();
-    fs::write(save(&rosetta), b"progress").unwrap();
-    game.cloud.publish_for(ROAMING, b"progress", 1);
-    game.open().prepare(&no_other_session).await.unwrap();
-    let uploads = game.uploads();
-
-    // The Linux engine runs the game in a prefix of its own, still empty.
-    let linux = game
-        .config
-        .root
-        .with_file_name("Prefixes/game-linux/prefix");
-    game.config.prefix = Some(linux.clone());
-    let mut sync = game.open();
-    sync.prepare(&no_other_session).await.unwrap();
-
-    assert_eq!(fs::read(save(&linux)).unwrap(), b"progress");
-    sync.started().unwrap();
-    sync.finished(true).await;
-    assert_eq!(game.cloud.file(ROAMING).as_deref(), Some(&b"progress"[..]));
-    assert_eq!(game.uploads(), uploads);
-    assert_eq!(game.work().unwrap().pending, None);
-    assert_eq!(fs::read(save(&rosetta)).unwrap(), b"progress");
-}
-
-#[tokio::test]
 async fn launching_anyway_past_rules_obelisk_cannot_follow_starts_the_game() {
     let game = SteamGame::game();
     game.cloud.set_metadata(Some(CloudMetadata::Object(vec![(
@@ -398,27 +385,6 @@ async fn launching_anyway_past_rules_obelisk_cannot_follow_starts_the_game() {
     let status = game.control.status();
     assert_eq!(status.phase, Phase::Pending);
     assert_eq!(status.error.as_deref(), Some(Failure::Unsupported.key()));
-}
-
-#[test]
-fn loading_by_app_rejects_a_context_copied_into_another_account_or_app() {
-    let game = SteamGame::game();
-    let context = Context::new(&game.config, ACCOUNT, save_rule());
-    context.save().unwrap();
-    let root = game.config.root.clone();
-
-    assert!(Context::load_app(&root, ACCOUNT, 42).is_ok());
-    for (account, app_id) in [(ACCOUNT + 1, 42), (ACCOUNT, 43)] {
-        let copied = root
-            .join(account.to_string())
-            .join(app_id.to_string())
-            .join("context.json");
-        store::write(&copied, &context).unwrap();
-        assert!(matches!(
-            Context::load_app(&root, account, app_id),
-            Err(Failure::Storage)
-        ));
-    }
 }
 
 #[test]
@@ -464,7 +430,12 @@ fn lost_receipt(game: &SteamGame, phase: steam_kit::cloud::UploadPhase) -> (Path
         account_enabled: Some(true),
         game_enabled: Some(true),
     });
-    let bindings = adapter.bindings(&vault, None, true).unwrap();
+    let bindings = adapter
+        .context
+        .as_mut()
+        .unwrap()
+        .bindings(&vault, None, true)
+        .unwrap();
     let local = vault.capture(&bindings).unwrap();
     let authorization = vault.authorize(ACCOUNT).unwrap();
     let id = vault
@@ -523,7 +494,7 @@ async fn a_lost_receipt_reopens_a_fresh_upload_without_rewriting_the_old_transac
         assert_eq!(game.cloud.file(SLOT).unwrap(), b"new progress");
         assert_eq!(game.cloud.uploads(), 1, "one fresh upload");
         assert_eq!(fs::read(&journal).unwrap(), old_bytes);
-        let saved = Context::load(&game.config, ACCOUNT).unwrap().unwrap();
+        let saved = Context::load(&game.config, &ACCOUNT).unwrap().unwrap();
         assert!(saved.transaction.is_none());
         assert_eq!(saved.work().pending, None);
     }

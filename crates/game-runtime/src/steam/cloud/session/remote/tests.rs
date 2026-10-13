@@ -1,11 +1,9 @@
 //! Verified remote reads: cached bytes are reused only while Steam still lists
 //! them unchanged.
 use super::*;
-use crate::cloud::sync::Storefront;
 use crate::cloud::sync::tests::Harness;
 use crate::steam::cloud::session::fake::{FakeSteamCloud, save_rule};
-use crate::steam::cloud::session::tests::{ACCOUNT, SteamGame, credentials};
-use steam_kit::cloud::CloudPreferencesCache;
+use crate::steam::cloud::session::tests::{ACCOUNT, SteamGame};
 
 const FIRST: &[u8] = b"cloud v1";
 const SECOND: &[u8] = b"cloud v2";
@@ -65,22 +63,8 @@ fn fixture() -> (SteamGame, Adapter<FakeSteamCloud>, Vault, Control) {
     let mut context = super::Context::new(&game.config, ACCOUNT, save_rule());
     context.listing = Source::new().listing;
     context.save().unwrap();
-    let (adapter, vault) = open(&game);
+    let (adapter, vault) = game.adapter();
     (game, adapter, vault, Control::new(|_| {}))
-}
-
-fn open(game: &SteamGame) -> (Adapter<FakeSteamCloud>, Vault) {
-    let vault = Vault::open(&game.config.root, scope(&game.config, ACCOUNT)).unwrap();
-    let mut adapter = Adapter {
-        config: game.config.clone(),
-        credentials: credentials(),
-        remote: game.cloud.handle(),
-        preferences: CloudPreferencesCache::default(),
-        downloaded: Manifest::default(),
-        context: None,
-    };
-    adapter.load().unwrap();
-    (adapter, vault)
 }
 
 #[tokio::test]
@@ -104,7 +88,7 @@ async fn unchanged_files_reuse_verified_bytes_across_retry_and_restart() {
         .set_listing(listing.clone(), remote, &vault)
         .unwrap();
     drop((adapter, vault));
-    let (mut adapter, vault) = open(&game);
+    let (mut adapter, vault) = game.adapter();
     adapter
         .read_remote(&mut source, &vault, &control, &listing)
         .await

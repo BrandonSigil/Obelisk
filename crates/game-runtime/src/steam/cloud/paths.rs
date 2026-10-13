@@ -66,7 +66,7 @@ impl Context {
             .with_file_name(format!("{name}-sdk"))
             .join(self.account_id.to_string())
             .join(self.config.app_id.to_string());
-        super::store::safe(&home)?;
+        crate::files::safe_storage_path(&home)?;
         Ok(home)
     }
     pub fn sdk_paths(&self) -> Result<SdkCloudPaths, Failure> {

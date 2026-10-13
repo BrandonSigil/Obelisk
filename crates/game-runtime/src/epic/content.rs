@@ -2,14 +2,15 @@
 //! saves live, the credentials every account call renews and saves first, and
 //! what Epic's network does for them. Only the network is a seam; tests stand
 //! in for it.
-use super::{Configuration, Epic, Error, IdleGuard, Product, Store};
+use super::{Configuration, Epic, Error, IdleGuard, Product, Store, session::Context};
 use crate::{
     Locations,
-    cloud::Control,
+    cloud::{Control, record},
     cloud_status,
     installations::{self, BoxFuture, Credentials, Receipt, Transfer, blocking},
     sessions::{self, Admission, BeforeBegin, Failure, Storefront as _, Supervised, failed},
 };
+use cloud_vault::{EpicScope, StoreScope};
 use epic_kit::client::Client as EpicClient;
 use obelisk_core::{installation::TransferProgress, transfer::CancelToken};
 use std::{path::Path, sync::Arc};
@@ -170,8 +171,18 @@ impl<N: Network> Content<N> {
         }
     }
 
+    /// Where the Cloud archive keeps the saves of `game` for this account.
+    fn scope(&self, game: &Store) -> StoreScope {
+        EpicScope {
+            account_id: self.account.clone(),
+            namespace: game.namespace.clone(),
+            app_name: game.app_name.clone(),
+        }
+        .into()
+    }
+
     /// What maintenance of `game` syncs: its installation, or, uninstalled,
-    /// the configuration its journal saved, with this Obelisk's paths.
+    /// the configuration its Cloud record names, with this Obelisk's paths.
     async fn maintenance(
         &self,
         game: &Store,
@@ -180,20 +191,15 @@ impl<N: Network> Content<N> {
         if let Some(receipt) = installed {
             return Ok(self.configuration(receipt));
         }
-        let (root, account, wanted) = (
-            self.locations.cloud_archive.clone(),
-            self.account.clone(),
-            (game.namespace.clone(), game.app_name.clone()),
-        );
+        let (root, scope) = (self.locations.cloud_archive.clone(), self.scope(game));
         let saved = blocking(Epic::SESSION_FAILED, move || {
-            super::indicators(&root, &account, &[wanted])
+            record::saved::<Context>(&root, &scope)
         })
         .await?
-        .map_err(failed)?
-        .into_iter()
-        .find(|shown| shown.namespace == game.namespace && shown.app_name == game.app_name)
-        .and_then(|shown| shown.configuration);
-        let mut configuration = saved.ok_or_else(|| failed(Error::Failed))?;
+        .map_err(failed)?;
+        let mut configuration = saved
+            .map(|record| record.config)
+            .ok_or_else(|| failed(Error::Failed))?;
         configuration.root = self.locations.cloud_archive.clone();
         configuration.session_directory = self.locations.epic_sessions.clone();
         configuration.helper = self.locations.helper.clone();
@@ -279,7 +285,7 @@ impl<N: Network> installations::Content<Epic> for Content<N> {
         Box::pin(async move {
             let (config, account) = (self.configuration(receipt), self.account.clone());
             blocking(Epic::SESSION_FAILED, move || {
-                super::removed(&config, &account)
+                record::removed::<Context>(&config, &account)
             })
             .await?
             .map_err(failed)
@@ -321,23 +327,26 @@ impl<N: Network> installations::Content<Epic> for Content<N> {
         &self,
         games: &[Store],
     ) -> Result<Vec<(Store, cloud_status::Indicator)>, Failure> {
-        let games: Vec<_> = games
-            .iter()
-            .map(|game| (game.namespace.clone(), game.app_name.clone()))
-            .collect();
-        Ok(
-            super::indicators(&self.locations.cloud_archive, &self.account, &games)
-                .map_err(failed)?
-                .into_iter()
-                .map(|shown| {
-                    let game = Store {
-                        namespace: shown.namespace,
-                        app_name: shown.app_name,
-                    };
-                    (game, shown.indicator)
-                })
-                .collect(),
+        let scopes: Vec<StoreScope> = games.iter().map(|game| self.scope(game)).collect();
+        let shown = record::indicators::<Context>(
+            &self.locations.cloud_archive,
+            &self.account.as_str().into(),
+            &scopes,
         )
+        .map_err(failed)?;
+        Ok(shown
+            .into_iter()
+            .filter_map(|(scope, indicator)| match scope {
+                StoreScope::Epic(scope) => Some((
+                    Store {
+                        namespace: scope.namespace,
+                        app_name: scope.app_name,
+                    },
+                    indicator,
+                )),
+                StoreScope::Steam(_) => None,
+            })
+            .collect())
     }
 }
 

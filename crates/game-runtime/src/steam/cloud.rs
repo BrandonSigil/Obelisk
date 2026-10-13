@@ -3,16 +3,17 @@
 mod paths;
 mod session;
 mod store;
-pub(crate) fn safe_storage_path(path: &std::path::Path) -> Result<(), crate::Error> {
-    store::safe(path).map_err(Into::into)
-}
 pub use session::maintain;
 pub(crate) use session::{Session, open};
-pub use store::{archive_with_rules, indicators, removed};
+pub(crate) use store::Context;
+pub use store::archive_with_rules;
 
-use crate::cloud::{Control, Stop};
+use crate::cloud::{Control, Stop, record};
 use serde::{Deserialize, Serialize};
-use std::{path::PathBuf, sync::Arc};
+use std::{
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Config {
@@ -36,6 +37,18 @@ impl Config {
                 home: self.home.clone(),
             },
         }
+    }
+}
+
+impl record::Configuration for Config {
+    fn root(&self) -> &Path {
+        &self.root
+    }
+    fn install(&self) -> &Path {
+        &self.install
+    }
+    fn prefix(&self) -> Option<&Path> {
+        self.prefix.as_deref()
     }
 }
 
@@ -167,10 +180,15 @@ impl From<Failure> for crate::Error {
 }
 
 fn scope(config: &Config, account: u64) -> cloud_vault::Scope {
+    app_scope(account, config.app_id)
+}
+
+/// Where the Cloud archive keeps the saves of `app_id` for `account`.
+pub(crate) fn app_scope(account: u64, app_id: u32) -> cloud_vault::Scope {
     cloud_vault::Scope {
         steam_id: account,
-        app_id: config.app_id,
-        cloud_app_id: config.app_id,
+        app_id,
+        cloud_app_id: app_id,
     }
 }
 
@@ -200,5 +218,15 @@ mod tests {
         ] {
             assert_eq!(failure.kind(), kind, "{failure:?}");
         }
+    }
+
+    #[test]
+    fn cloud_failures_name_the_storefront_that_holds_the_saves() {
+        assert!(matches!(
+            Failure::from(cloud_vault::Error::OtherStoreBusy),
+            Failure::SharedSaves
+        ));
+        assert_eq!(Failure::SharedSaves.key(), "backend.cloud.sharedSavesInUse");
+        assert_eq!(Failure::SharedSaves.kind(), Kind::Blocking);
     }
 }

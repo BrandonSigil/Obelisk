@@ -24,11 +24,11 @@ impl Prepared {
             .map_or_else(|| self.run_directory.join("home"), |s| s.home.clone())
     }
     pub fn enable_storage(&mut self, storage: &crate::NativeStorage) -> Result<(), Error> {
-        crate::steam::cloud::safe_storage_path(&storage.home)?;
+        safe_storage_path(&storage.home).map_err(|error| Error::Cloud(error.into()))?;
         let steam = storage.steam_directory();
         let app = storage.cache_directory();
         for path in [app.join("remote"), steam.join("appcache")] {
-            crate::steam::cloud::safe_storage_path(&path)?;
+            safe_storage_path(&path).map_err(|error| Error::Cloud(error.into()))?;
             private_directory(&path)?;
         }
         // The coordinator must publish a complete local projection before a
@@ -72,6 +72,31 @@ pub(crate) fn private_directory(path: &Path) -> Result<(), Error> {
     {
         use std::os::unix::fs::PermissionsExt;
         fs::set_permissions(path, fs::Permissions::from_mode(0o700))?;
+    }
+    Ok(())
+}
+/// Refuses a path for Cloud storage that is relative, climbs out with `..`,
+/// or passes through a symbolic link other than macOS's /var and /tmp.
+pub(crate) fn safe_storage_path(path: &Path) -> cloud_vault::Result<()> {
+    if !path.is_absolute()
+        || path
+            .components()
+            .any(|c| matches!(c, std::path::Component::ParentDir))
+    {
+        return Err(cloud_vault::Error::Invalid);
+    }
+    for parent in path.ancestors() {
+        match fs::symlink_metadata(parent) {
+            Ok(m)
+                if m.file_type().is_symlink()
+                    && ![Path::new("/var"), Path::new("/tmp")].contains(&parent) =>
+            {
+                return Err(cloud_vault::Error::Invalid);
+            }
+            Ok(_) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e.into()),
+        }
     }
     Ok(())
 }

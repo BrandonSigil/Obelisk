@@ -314,6 +314,52 @@ async fn an_uninstalled_game_without_a_saved_context_cannot_sync_and_a_cancelled
 }
 
 #[tokio::test]
+async fn an_uninstalled_game_syncs_the_configuration_its_record_names_with_this_obelisks_paths() {
+    use crate::cloud::record::{self, Record as _};
+    let fixture = Fixture::new();
+    let receipt = fixture.installed("Mac");
+    std::fs::create_dir_all(fixture.locations.home.join("Saves")).unwrap();
+    // An earlier Obelisk, whose sessions and helper lived elsewhere, saved
+    // the record of the game it installed.
+    let mut configuration = fixture.content.configuration(&receipt);
+    configuration.session_directory = fixture.locations.library.join("Older/Sessions");
+    configuration.helper = fixture.locations.library.join("Older/helper");
+    let (vault, _) = record::locked::<Context>(&configuration, ACCOUNT).unwrap();
+    Context {
+        config: configuration.clone(),
+        rules: epic_kit::cloud::CloudRules {
+            cloud_save_folder: None,
+            cloud_save_folder_mac: Some("{Home}/Saves".into()),
+            include: vec!["*.sav".into()],
+            exclude: Vec::new(),
+        },
+        account_id: ACCOUNT.into(),
+        pending: None,
+        installation_removed: true,
+    }
+    .save()
+    .unwrap();
+    drop(vault);
+    std::fs::remove_dir_all(&receipt.directory).unwrap();
+
+    fixture
+        .content
+        .maintain(&game(), None, control())
+        .await
+        .unwrap();
+
+    let maintained = fixture.fake.maintained.lock().unwrap()[0].0.clone();
+    assert_eq!(maintained.install, configuration.install);
+    assert_eq!(maintained.title, "Fixture");
+    assert_eq!(maintained.root, fixture.locations.cloud_archive);
+    assert_eq!(
+        maintained.session_directory,
+        fixture.locations.epic_sessions
+    );
+    assert_eq!(maintained.helper, fixture.locations.helper);
+}
+
+#[tokio::test]
 async fn a_launch_code_that_another_account_signed_is_refused_before_the_game_starts() {
     let fixture = Fixture::new();
     let receipt = fixture.installed("Mac");

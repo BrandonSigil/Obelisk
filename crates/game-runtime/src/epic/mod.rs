@@ -7,7 +7,7 @@ mod session;
 mod windows;
 
 // A Game session's phase is `Phase`; its Cloud sync's phase is `CloudPhase`.
-use crate::cloud::{Control, Phase as CloudPhase};
+use crate::cloud::{Control, Phase as CloudPhase, record};
 use crate::runtimes::Runtime;
 use crate::supervisor::{self, Record, Target};
 pub use crate::supervisor::{FailureReason, Phase};
@@ -15,8 +15,11 @@ pub use client::start;
 pub use launch::serve;
 use obelisk_core::transfer::CancelToken;
 use serde::{Deserialize, Serialize};
-pub use session::{EpicIndicator, archive, indicators, maintain, removed};
-use std::{path::PathBuf, sync::Arc};
+pub use session::{archive, maintain};
+use std::{
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -148,6 +151,18 @@ impl Configuration {
             return Err(Error::Unsupported);
         }
         Ok(())
+    }
+}
+
+impl record::Configuration for Configuration {
+    fn root(&self) -> &Path {
+        &self.root
+    }
+    fn install(&self) -> &Path {
+        &self.install
+    }
+    fn prefix(&self) -> Option<&Path> {
+        self.prefix.as_deref()
     }
 }
 

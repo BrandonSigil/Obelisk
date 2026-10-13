@@ -53,13 +53,6 @@ pub fn epic_account_id(value: &str) -> Result<()> {
     Ok(())
 }
 
-/// Where one Epic account's game journals live. The layout has a single owner;
-/// callers derive it from here rather than re-spelling it.
-pub fn epic_account_directory(root: &Path, account: &str) -> Result<PathBuf> {
-    epic_account_id(account)?;
-    Ok(root.join(EPIC_STORE_DIRECTORY).join(account))
-}
-
 impl EpicScope {
     pub fn validate(&self) -> Result<()> {
         epic_account_id(&self.account_id)?;
@@ -153,10 +146,7 @@ impl StoreScope {
     }
 
     pub(crate) fn account_directory(&self, root: &Path) -> PathBuf {
-        match self {
-            Self::Steam(scope) => root.join(scope.steam_id.to_string()),
-            Self::Epic(scope) => root.join(EPIC_STORE_DIRECTORY).join(&scope.account_id),
-        }
+        self.account().layout(root)
     }
 
     pub(crate) fn account(&self) -> AccountIdentity {
@@ -197,6 +187,23 @@ impl From<&str> for AccountIdentity {
 }
 
 impl AccountIdentity {
+    /// Where this account's game journals live. The layout has a single owner;
+    /// callers derive it from here rather than re-spelling it.
+    pub fn directory(&self, root: &Path) -> Result<PathBuf> {
+        if let Self::Epic(account) = self {
+            epic_account_id(account)?;
+        }
+        Ok(self.layout(root))
+    }
+
+    /// The account's directory, for an identity already validated.
+    fn layout(&self, root: &Path) -> PathBuf {
+        match self {
+            Self::Steam(account) => root.join(account.to_string()),
+            Self::Epic(account) => root.join(EPIC_STORE_DIRECTORY).join(account),
+        }
+    }
+
     // A private permit fingerprint keeps Authorization Copy. It is never an
     // external account identifier or a persisted store identity.
     pub(crate) fn permit_key(&self) -> [u8; 32] {

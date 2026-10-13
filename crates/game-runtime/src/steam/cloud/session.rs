@@ -3,15 +3,15 @@
 //! transactions whose receipt can be settled after a lost reply.
 use super::{store::Context, *};
 use crate::{
-    cloud::sync::{self, Availability, CloudSync, Kind, Storefront, Work},
+    cloud::{
+        record::{self, Record as _},
+        sync::{self, Availability, CloudSync, Kind, Storefront},
+    },
     cloud_status::UnavailableReason,
     protocol::Credentials,
     supervisor::client::SessionAlive,
 };
-use cloud_vault::{
-    AccountIdentity, Bindings, Manifest, Preferences, RemoteView, StoreScope, Vault,
-};
-use std::{fs, path::Path};
+use cloud_vault::{Manifest, Preferences, RemoteView, Vault};
 use steam_kit::{
     cloud::{CloudListing, CloudPreferencesCache, CloudUpload, UploadTransaction},
     cm::SteamConnection,
@@ -45,7 +45,6 @@ pub(crate) fn open_with<R: CloudRemote>(
     session_id: String,
     control: Arc<Control>,
 ) -> Result<Session<R>, Failure> {
-    store::directory(&config, credentials.steam_id)?;
     let adapter = Adapter {
         config,
         credentials,
@@ -152,51 +151,20 @@ impl sync::Failure for Failure {
 
 impl<R: CloudRemote> Storefront for Adapter<R> {
     type Failure = Failure;
+    type Record = Context;
     type Link = R::Connection;
 
-    fn root(&self) -> &Path {
-        &self.config.root
+    fn configuration(&self) -> &Config {
+        &self.config
     }
-    fn scope(&self) -> StoreScope {
-        scope(&self.config, self.credentials.steam_id).into()
+    fn account(&self) -> &u64 {
+        &self.credentials.steam_id
     }
-    fn account(&self) -> AccountIdentity {
-        self.credentials.steam_id.into()
+    fn record(&self) -> Option<&Context> {
+        self.context.as_ref()
     }
-    fn load(&mut self) -> Result<(), Failure> {
-        self.context = Context::load(&self.config, self.credentials.steam_id)?;
-        Ok(())
-    }
-    fn work(&self) -> Option<Work> {
-        self.context.as_ref().map(Context::work)
-    }
-    fn save(&mut self, work: Work) -> Result<(), Failure> {
-        let context = self.context_mut()?;
-        context.set_work(work);
-        context.save()
-    }
-    fn installation_absent(&self) -> Result<bool, Failure> {
-        store::safe(&self.config.install)?;
-        match fs::symlink_metadata(&self.config.install) {
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(true),
-            Ok(_) => Ok(false),
-            Err(error) => Err(error.into()),
-        }
-    }
-    fn bindings(
-        &mut self,
-        vault: &Vault,
-        _: Option<&Manifest>,
-        create: bool,
-    ) -> Result<Bindings, Failure> {
-        // The listing names every remote file, so it alone binds them.
-        let context = self.context_mut()?;
-        context.refresh_bindings(vault.local())?;
-        if create {
-            context.ensure_parents()?;
-        }
-        context.save()?;
-        Ok(context.bindings.clone())
+    fn record_mut(&mut self) -> &mut Option<Context> {
+        &mut self.context
     }
     /// A game Steam has no saved rules for has nothing in the archive yet.
     fn offline(&self) -> bool {
@@ -206,7 +174,7 @@ impl<R: CloudRemote> Storefront for Adapter<R> {
         self.downloaded = Manifest::default();
         // A failed context save can leave newer in-memory values alongside an
         // older durable decision. Keep both until a later save commits.
-        let saved = match Context::load(&self.config, self.credentials.steam_id) {
+        let saved = match Context::load(&self.config, &self.credentials.steam_id) {
             Ok(saved) => saved,
             Err(error) => {
                 eprintln!("Steam Cloud context unreadable: {error}");
@@ -265,14 +233,7 @@ impl<R: CloudRemote> Storefront for Adapter<R> {
                 });
             }
             Some(context) => {
-                // A game a new engine runs saves in that engine's prefix,
-                // still without the saves of the old one. As after a
-                // reinstall, a save missing there keeps its archived version
-                // and is restored, never sent as deleted.
-                if context.config.prefix != self.config.prefix {
-                    context.installation_removed = true;
-                }
-                context.config = self.config.clone();
+                record::rebind(context, self.config.clone());
                 context.metadata = metadata;
             }
             None => {
@@ -449,7 +410,10 @@ pub(crate) async fn maintain_with<R: CloudRemote>(
     let config = match target {
         MaintenanceTarget::Installed(config) => config,
         MaintenanceTarget::Uninstalled { root, app_id } => {
-            Context::load_app(&root, credentials.steam_id, app_id)?.config
+            let scope = app_scope(credentials.steam_id, app_id).into();
+            record::saved::<Context>(&root, &scope)?
+                .ok_or(Failure::Unsupported)?
+                .config
         }
     };
     let id = uuid::Uuid::new_v4().to_string();

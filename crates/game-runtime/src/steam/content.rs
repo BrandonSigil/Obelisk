@@ -4,12 +4,13 @@
 use super::{Product, Steam, cloud as steam_cloud};
 use crate::{
     Locations,
-    cloud::Control,
+    cloud::{Control, record},
     cloud_status,
     installations::{self, BoxFuture, Receipt, Transfer, blocking},
     protocol::Credentials,
     sessions::{self, Admission, Failure, Storefront as _, Supervised, failed},
 };
+use cloud_vault::StoreScope;
 use obelisk_core::{installation::TransferProgress, launch::LaunchTarget, transfer::CancelToken};
 use std::{path::Path, sync::Arc};
 use steam_kit::cloud::{CloudListing, CloudMetadata};
@@ -288,7 +289,7 @@ impl<N: Network> installations::Content<Steam> for Content<N> {
         Box::pin(async move {
             let (config, account) = (self.cloud(receipt), self.account());
             blocking(Steam::SESSION_FAILED, move || {
-                steam_cloud::removed(&config, account)
+                record::removed::<steam_cloud::Context>(&config, &account)
             })
             .await?
             .map_err(key)
@@ -329,7 +330,23 @@ impl<N: Network> installations::Content<Steam> for Content<N> {
         })
     }
     fn indicators(&self, games: &[u32]) -> Result<Vec<(u32, cloud_status::Indicator)>, Failure> {
-        steam_cloud::indicators(&self.locations.cloud_archive, self.account(), games).map_err(key)
+        let scopes: Vec<StoreScope> = games
+            .iter()
+            .map(|app_id| steam_cloud::app_scope(self.account(), *app_id).into())
+            .collect();
+        let shown = record::indicators::<steam_cloud::Context>(
+            &self.locations.cloud_archive,
+            &self.account().into(),
+            &scopes,
+        )
+        .map_err(key)?;
+        Ok(shown
+            .into_iter()
+            .filter_map(|(scope, indicator)| match scope {
+                StoreScope::Steam(scope) => Some((scope.app_id, indicator)),
+                StoreScope::Epic(_) => None,
+            })
+            .collect())
     }
 }
 
