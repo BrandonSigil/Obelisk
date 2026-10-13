@@ -2,6 +2,7 @@
 use crate::{
     Config, Error, HostState,
     protocol::Credentials,
+    runtimes::Runtime,
     supervisor::{self, Record, Target},
 };
 use obelisk_core::transfer::CancelToken;
@@ -251,6 +252,9 @@ impl crate::sessions::Storefront for Steam {
     const BEGINS: bool = false;
     const INVALID_SESSION: &'static str = "backend.steam.runtime.invalidSession";
     const SESSION_FAILED: &'static str = "backend.steam.runtime.startFailed";
+    /// Every Steam game runs beside Obelisk's Steam host, whatever its
+    /// platform or engine.
+    const RUNTIMES: &'static [Runtime] = &[Runtime::SteamComponents];
     fn game(store: &Store) -> u32 {
         store.app_id
     }

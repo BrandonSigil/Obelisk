@@ -6,6 +6,7 @@ pub mod content;
 mod launch;
 mod windows;
 
+use crate::runtimes::Runtime;
 use crate::supervisor::{self, Record};
 pub use crate::supervisor::{FailureReason, Phase};
 pub use client::start;
@@ -134,6 +135,7 @@ impl crate::sessions::Storefront for Gog {
     const BEGINS: bool = false;
     const INVALID_SESSION: &'static str = "backend.gog.invalidSession";
     const SESSION_FAILED: &'static str = "backend.gog.session";
+    const RUNTIMES: &'static [Runtime] = &[];
     fn game(store: &Store) -> String {
         store.product_id.clone()
     }

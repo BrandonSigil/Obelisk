@@ -34,6 +34,10 @@ _Avoid_: bottle, Wine folder
 A program a storefront names to run once in a Wine prefix before its game first starts, such as a DirectX or Visual C++ installer. One that fails runs again on the next launch; the game starts anyway.
 _Avoid_: redistributable (Steam's name for the package, not the run), dependency
 
+**Runtime**:
+What Obelisk downloads beside a game's own files for it to run: Voile for a Windows build, Valve's Steam components for every Steam game. A Transfer gets the missing ones before the game's files, and a launch that still misses one gets it after its Admission, before its game is prepared. A Voile release a newer one replaced goes only once no game of any storefront may still run from it.
+_Avoid_: dependency, prerequisite (a Prerequisite runs inside a Wine prefix)
+
 **Reservation**:
 The exclusive claim a Game session or Cloud maintenance holds on a game's installation. While it exists, no Transfer, uninstall or other launch of that game can start.
 _Avoid_: lock, busy state

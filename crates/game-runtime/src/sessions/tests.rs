@@ -4,6 +4,7 @@ use super::*;
 use crate::{
     HostState,
     epic::Epic,
+    runtimes::tests::{FakeRuntimes, ready, recorded},
     steam::{Steam, Store},
 };
 use std::{
@@ -219,7 +220,7 @@ fn sessions() -> Sessions<Steam> {
 fn recovering(
     recover: impl Fn() -> Result<Option<Arc<dyn Supervised<Steam>>>, String> + Send + Sync + 'static,
 ) -> Sessions<Steam> {
-    Sessions::new(Box::new(recover))
+    Sessions::new(Box::new(recover), ready())
 }
 
 async fn settled(sessions: &Sessions<Steam>) {
@@ -532,7 +533,7 @@ async fn the_reservation_holds_until_the_supervisor_owns_no_process() {
 
 #[tokio::test]
 async fn a_launch_opens_the_start_gate_of_a_waiting_supervisor_unless_its_account_signed_out() {
-    let sessions = Sessions::<Epic>::new(Box::new(|| Ok(None)));
+    let sessions = Sessions::<Epic>::new(Box::new(|| Ok(None)), ready());
     eventually(|| !sessions.state().recovering).await;
     let store = crate::epic::Store {
         namespace: "ns".into(),
@@ -566,7 +567,7 @@ async fn a_launch_opens_the_start_gate_of_a_waiting_supervisor_unless_its_accoun
 
 #[tokio::test]
 async fn a_lost_begin_reply_keeps_the_reservation_until_a_terminal_snapshot() {
-    let sessions = Sessions::<Epic>::new(Box::new(|| Ok(None)));
+    let sessions = Sessions::<Epic>::new(Box::new(|| Ok(None)), ready());
     eventually(|| !sessions.state().recovering).await;
     let store = crate::epic::Store {
         namespace: "ns".into(),
@@ -594,7 +595,7 @@ async fn a_lost_begin_reply_keeps_the_reservation_until_a_terminal_snapshot() {
 
 #[tokio::test]
 async fn epic_sessions_report_epic_failures() {
-    let sessions = Sessions::<Epic>::new(Box::new(|| Ok(None)));
+    let sessions = Sessions::<Epic>::new(Box::new(|| Ok(None)), ready());
     eventually(|| !sessions.state().recovering).await;
     let store = crate::epic::Store {
         namespace: "ns".into(),
@@ -860,64 +861,8 @@ async fn a_rosetta_requirement_is_answered_once_for_its_decision_or_declined() {
 }
 
 #[tokio::test]
-async fn a_runtime_install_shows_which_runtime_downloads_and_stops_with_its_launch() {
-    let sessions = sessions();
-    settled(&sessions).await;
-    let admission = sessions.admit(42, 42).unwrap();
-    let stopped = Arc::new(tokio::sync::Notify::new());
-    let stop = stopped.clone();
-    let install = admission.installing(
-        Runtime::SteamComponents,
-        move || stop.notify_one(),
-        || (1, 4),
-        stopped.notified(),
-    );
-    let cancel = async {
-        eventually(|| {
-            sessions
-                .state()
-                .active
-                .and_then(|active| active.runtime_install)
-                == Some(RuntimeInstall {
-                    runtime: Runtime::SteamComponents,
-                    fraction: 0.25,
-                })
-        })
-        .await;
-        admission.cancel();
-    };
-    tokio::join!(install, cancel);
-    assert!(admission.cancelled());
-    assert!(sessions.state().active.is_none());
-}
-
-#[tokio::test]
-async fn an_admission_shows_the_runtime_install_until_its_game_is_observed() {
-    let sessions = sessions();
-    settled(&sessions).await;
-    let admission = sessions.admit(42, 42).unwrap();
-    let install = RuntimeInstall {
-        runtime: Runtime::Voile,
-        fraction: 0.5,
-    };
-    admission.runtime_install(Some(install));
-    assert_eq!(
-        sessions.state().active.unwrap().runtime_install,
-        Some(install)
-    );
-    admission.runtime_install(None);
-    let changed = sessions.state().revision;
-    let game = steam(42, Phase::Running);
-    let launch = tokio::spawn(admission.follow(game.clone()));
-    let state = sessions.changed(changed).await;
-    assert!(state.revision > changed);
-    game.finish(false);
-    assert_eq!(launch.await.unwrap(), Ok(()));
-}
-
-#[tokio::test]
 async fn the_start_gate_opens_only_after_the_step_before_it_and_never_once_cancelled() {
-    let sessions = Sessions::<Epic>::new(Box::new(|| Ok(None)));
+    let sessions = Sessions::<Epic>::new(Box::new(|| Ok(None)), ready());
     eventually(|| !sessions.state().recovering).await;
     let store = crate::epic::Store {
         namespace: "ns".into(),
@@ -1100,6 +1045,8 @@ type Started<P> = Result<Arc<dyn Supervised<P>>, String>;
 
 /// A storefront's handover the test scripts, which records its steps.
 struct Scripted<P: Provider> {
+    /// The platform of the build it starts: a Mac one unless the test says.
+    platform: &'static str,
     steps: Arc<Mutex<Vec<&'static str>>>,
     /// Preparing waits until the test notifies it.
     held: Option<Arc<tokio::sync::Notify>>,
@@ -1112,6 +1059,7 @@ struct Scripted<P: Provider> {
 impl<P: Provider> Scripted<P> {
     fn starting(supervisor: Started<P>) -> Self {
         Self {
+            platform: "macos",
             steps: Arc::default(),
             held: None,
             prepared: Ok(()),
@@ -1126,8 +1074,8 @@ impl<P: Provider> Scripted<P> {
 
 impl<P: Storefront> Handover<P> for Scripted<P> {
     type Prepared = ();
-    fn voile(&self) -> Option<std::path::PathBuf> {
-        None
+    fn platform(&self) -> &str {
+        self.platform
     }
     fn prepare(&self) -> BoxFuture<'_, Result<(), Failure>> {
         Box::pin(async move {
@@ -1161,7 +1109,7 @@ impl<P: Storefront> Handover<P> for Scripted<P> {
 #[tokio::test]
 async fn a_handover_prepares_starts_the_supervisor_and_opens_its_start_gate_after_the_step_before_it()
  {
-    let sessions = Sessions::<Epic>::new(Box::new(|| Ok(None)));
+    let sessions = Sessions::<Epic>::new(Box::new(|| Ok(None)), ready());
     eventually(|| !sessions.state().recovering).await;
     let store = crate::epic::Store {
         namespace: "ns".into(),
@@ -1271,4 +1219,158 @@ async fn cancelling_a_launch_reaches_its_supervisor_while_it_starts() {
         ["prepare", "start", "start cancelled"]
     );
     assert!(!sessions.state().busy());
+}
+
+/// Epic Game sessions with nothing left to recover, which get their
+/// runtimes from `runtimes`, and the game their launches start.
+async fn epic_launches(runtimes: Arc<Runtimes>) -> (Sessions<Epic>, crate::epic::Store) {
+    let sessions = Sessions::<Epic>::new(Box::new(|| Ok(None)), runtimes);
+    eventually(|| !sessions.state().recovering).await;
+    let store = crate::epic::Store {
+        namespace: "ns".into(),
+        app_name: "app".into(),
+    };
+    (sessions, store)
+}
+
+#[tokio::test]
+async fn a_launch_gets_the_runtimes_its_build_needs_and_shows_their_download_before_it_prepares() {
+    let runtimes = FakeRuntimes::new(&[], |_| {});
+    runtimes.hold();
+    let (sessions, store) = epic_launches(Runtimes::from_source(runtimes.clone())).await;
+    let game = Fake::<Epic>::with("account".into(), store.clone(), Phase::Preparing);
+    let mut handover = Scripted::starting(Ok(game.clone() as Arc<dyn Supervised<Epic>>));
+    handover.platform = "Windows";
+    let held = Arc::new(tokio::sync::Notify::new());
+    handover.held = Some(held.clone());
+    let steps = handover.steps();
+    let admission = sessions.admit(store, "account".into()).unwrap();
+
+    let launch = tokio::spawn(admission.hand_off(handover));
+    let install = || {
+        sessions
+            .state()
+            .active
+            .and_then(|active| active.runtime_install)
+    };
+    eventually(|| {
+        install()
+            == Some(RuntimeInstall {
+                runtime: Runtime::Voile,
+                fraction: 0.5,
+            })
+    })
+    .await;
+    assert!(steps.lock().unwrap().is_empty(), "nothing is prepared yet");
+
+    runtimes.release();
+    eventually(|| steps.lock().unwrap().contains(&"prepare")).await;
+    assert_eq!(install(), None, "the download no longer shows");
+    assert_eq!(runtimes.in_place(), [Runtime::Voile]);
+    held.notify_one();
+    eventually(|| game.read(|state| state.begins) == 1).await;
+    game.finish(false);
+    assert_eq!(launch.await.unwrap(), Ok(()));
+}
+
+#[tokio::test]
+async fn cancelling_a_launch_while_a_runtime_downloads_cancels_it_and_gives_the_reservation_back() {
+    let runtimes = FakeRuntimes::new(&[], |_| {});
+    runtimes.hold();
+    let (sessions, store) = epic_launches(Runtimes::from_source(runtimes.clone())).await;
+    let mut handover = Scripted::starting(Err("never started".into()));
+    handover.platform = "Windows";
+    let steps = handover.steps();
+    let admission = sessions.admit(store, "account".into()).unwrap();
+    let canceller = admission.canceller();
+
+    let launch = tokio::spawn(admission.hand_off(handover));
+    eventually(|| {
+        sessions
+            .state()
+            .active
+            .is_some_and(|active| active.runtime_install.is_some())
+    })
+    .await;
+    canceller.cancel();
+
+    assert_eq!(launch.await.unwrap(), Err(Failure::Cancelled));
+    assert!(steps.lock().unwrap().is_empty(), "nothing is prepared");
+    assert!(runtimes.in_place().is_empty());
+    assert!(!sessions.state().busy());
+}
+
+#[tokio::test]
+async fn a_runtime_that_fails_to_download_refuses_the_launch_before_it_prepares() {
+    let runtimes = FakeRuntimes::new(&[], |_| {});
+    let failure = Failure::Failed("backend.voile.downloadFailed".into());
+    runtimes.fail(failure.clone());
+    let (sessions, store) = epic_launches(Runtimes::from_source(runtimes)).await;
+    let mut handover = Scripted::starting(Err("never started".into()));
+    handover.platform = "Windows";
+    let steps = handover.steps();
+
+    let outcome = sessions
+        .admit(store, "account".into())
+        .unwrap()
+        .hand_off(handover)
+        .await;
+
+    assert_eq!(outcome, Err(failure));
+    assert!(steps.lock().unwrap().is_empty(), "nothing is prepared");
+    assert!(!sessions.state().busy());
+}
+
+#[tokio::test]
+async fn a_launch_keeps_the_replaced_voile_releases_while_another_storefronts_game_may_run_from_one()
+ {
+    let (events, record) = recorded();
+    let runtimes = Runtimes::from_source(FakeRuntimes::new(
+        &[Runtime::SteamComponents, Runtime::Voile],
+        record,
+    ));
+    // An Epic game an earlier Obelisk started still runs.
+    let store = crate::epic::Store {
+        namespace: "ns".into(),
+        app_name: "app".into(),
+    };
+    let recovered = Fake::<Epic>::with("account".into(), store, Phase::Running);
+    let found = recovered.clone();
+    let epic_sessions = Sessions::<Epic>::new(
+        Box::new(move || Ok(Some(found.clone() as Arc<dyn Supervised<Epic>>))),
+        runtimes.clone(),
+    );
+    let steam_sessions = Sessions::<Steam>::new(Box::new(|| Ok(None)), runtimes);
+    settled(&steam_sessions).await;
+    eventually(|| {
+        epic_sessions
+            .state()
+            .active
+            .is_some_and(|active| active.observed)
+    })
+    .await;
+    let launch = |game: Arc<Fake<Steam>>| {
+        let mut handover = Scripted::starting(Ok(game as Arc<dyn Supervised<Steam>>));
+        handover.platform = "windows";
+        steam_sessions.admit(42, 42).unwrap().hand_off(handover)
+    };
+
+    let game = steam(42, Phase::Running);
+    let first = tokio::spawn(launch(game.clone()));
+    eventually(|| running(&steam_sessions)).await;
+    assert!(
+        events.lock().unwrap().is_empty(),
+        "the Epic game may run from one"
+    );
+    game.finish(false);
+    assert_eq!(first.await.unwrap(), Ok(()));
+
+    recovered.finish(false);
+    eventually(|| !epic_sessions.state().busy()).await;
+    let game = steam(42, Phase::Running);
+    let second = tokio::spawn(launch(game.clone()));
+    eventually(|| running(&steam_sessions)).await;
+    assert_eq!(*events.lock().unwrap(), ["remove replaced"]);
+    game.finish(false);
+    assert_eq!(second.await.unwrap(), Ok(()));
 }

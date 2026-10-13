@@ -7,7 +7,7 @@
 use crate::{
     CloudChoice, CloudIndicator, EpicSession, GameSessionError, GameTransfer, GogSession,
     ObeliskLocations, SteamCredentials, SteamSession, StorefrontSessions,
-    game_session::{Storefronts, blocking},
+    game_session::{Storefronts, blocking, shares_runtimes},
 };
 use game_runtime::{
     Locations, epic, gog,
@@ -424,6 +424,10 @@ fn account<S: Named>(
 where
     S::Account: std::fmt::Display,
 {
+    debug_assert!(
+        shares_runtimes(locations),
+        "an account's installations name the runtime places of their sessions"
+    );
     let queueing = installations::Queueing {
         queue: crate::downloads::queue().clone(),
         account: account.to_string(),

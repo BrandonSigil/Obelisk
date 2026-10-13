@@ -6,7 +6,7 @@ use crate::{
     Locations,
     cloud::Control,
     cloud_status,
-    installations::{self, BoxFuture, Receipt, Runtime, Runtimes, Transfer, blocking},
+    installations::{self, BoxFuture, Receipt, Transfer, blocking},
     protocol::Credentials,
     sessions::{self, Admission, Failure, Storefront as _, Supervised, failed},
 };
@@ -152,7 +152,6 @@ pub struct Content<N: Network> {
     network: Arc<N>,
     credentials: Credentials,
     locations: Locations,
-    runtimes: Runtimes,
 }
 
 impl<N: Network> Content<N> {
@@ -160,7 +159,6 @@ impl<N: Network> Content<N> {
         Self {
             network,
             credentials,
-            runtimes: Runtimes::new(&locations),
             locations,
         }
     }
@@ -209,33 +207,28 @@ fn cloud_failure(failure: steam_cloud::Failure) -> Failure {
 }
 
 impl<N: Network> installations::Content<Steam> for Content<N> {
-    /// Picks the build first, then gets Valve's Steam components, and Voile
-    /// for a Windows build, unless they are in place, then the game's files.
+    /// A Transfer without a platform installs the build Steam picks.
+    fn begin<'a>(
+        &'a self,
+        transfer: &'a Transfer<Steam>,
+    ) -> BoxFuture<'a, Result<String, Failure>> {
+        Box::pin(async move {
+            match &transfer.platform {
+                Some(platform) => Ok(platform.clone()),
+                None => {
+                    self.network
+                        .platform(transfer.product.app_id, &transfer.product.language)
+                        .await
+                }
+            }
+        })
+    }
     fn download<'a>(
         &'a self,
         transfer: &'a Transfer<Steam>,
     ) -> BoxFuture<'a, Result<Receipt<Steam>, Failure>> {
         Box::pin(async move {
-            self.runtimes.begin();
-            let platform = match &transfer.platform {
-                Some(platform) => platform.clone(),
-                None => {
-                    self.network
-                        .platform(transfer.product.app_id, &transfer.product.language)
-                        .await?
-                }
-            };
-            let mut needed = vec![Runtime::SteamComponents];
-            if installations::needs_voile(&platform) {
-                needed.push(Runtime::Voile);
-            }
-            let game = transfer.progress_name();
-            self.runtimes.get(&game, &needed).await?;
-            let transfer = Transfer {
-                platform: Some(platform),
-                ..transfer.clone()
-            };
-            let installed = self.network.download(&transfer).await?;
+            let installed = self.network.download(transfer).await?;
             Ok(Receipt {
                 product: Product {
                     app_id: installed.app_id,
@@ -250,10 +243,9 @@ impl<N: Network> installations::Content<Steam> for Content<N> {
         })
     }
     fn progress(&self) -> Option<TransferProgress> {
-        self.runtimes.progress().or_else(|| self.network.progress())
+        self.network.progress()
     }
     fn cancel(&self) {
-        self.runtimes.cancel();
         self.network.cancel();
     }
     fn update_available<'a>(
@@ -371,18 +363,8 @@ struct Handover {
 
 impl sessions::Handover<Steam> for Handover {
     type Prepared = super::Request;
-    fn voile(&self) -> Option<PathBuf> {
-        let game = crate::profile::Game::Steam {
-            app_id: self.app_id,
-        };
-        let windows =
-            crate::wine::Installation::of(&self.locations, game, &self.platform, &self.install);
-        matches!(windows, Ok(Some(_))).then(|| self.locations.voile.clone())
-    }
-    /// Every Steam game runs beside Obelisk's Steam host, whatever its
-    /// platform or engine.
-    fn steam_components(&self) -> Option<PathBuf> {
-        Some(self.locations.steam_runtime_package.clone())
+    fn platform(&self) -> &str {
+        &self.platform
     }
     fn prepare(&self) -> BoxFuture<'_, Result<super::Request, Failure>> {
         let (locations, app_id) = (self.locations.clone(), self.app_id);

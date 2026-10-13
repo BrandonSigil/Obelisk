@@ -4144,7 +4144,10 @@ open class StorefrontSessions: StorefrontSessionsProtocol, @unchecked Sendable {
         return try! rustCall { uniffi_obelisk_bridge_fn_clone_storefrontsessions(self.handle, $0) }
     }
     /**
-     * Starts by recovering the session a previous Obelisk left running.
+     * Starts by recovering the session a previous Obelisk left running. Its
+     * launches and Transfers get their runtimes into the places `locations`
+     * names, and the installations given it read them back from their own
+     * locations: those must name the same places.
      */
 public convenience init(storefront: SessionStorefront, locations: ObeliskLocations) {
     let handle =
@@ -13702,7 +13705,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_obelisk_bridge_checksum_constructor_epicsession_sign_in() != 3967) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_obelisk_bridge_checksum_constructor_storefrontsessions_new() != 8407) {
+    if (uniffi_obelisk_bridge_checksum_constructor_storefrontsessions_new() != 58149) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_obelisk_bridge_checksum_constructor_gogsession_restore() != 909) {

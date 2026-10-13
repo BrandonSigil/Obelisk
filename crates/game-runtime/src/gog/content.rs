@@ -4,15 +4,12 @@
 use super::{Configuration, Error, Gog, Product};
 use crate::{
     Locations, cloud_status,
-    installations::{self, BoxFuture, Credentials, Receipt, Runtime, Runtimes, Transfer, blocking},
+    installations::{self, BoxFuture, Credentials, Receipt, Transfer, blocking},
     sessions::{self, Admission, Failure, Storefront as _, Supervised, failed},
 };
 use gog_kit::client::Client as GogClient;
 use obelisk_core::{installation::TransferProgress, transfer::CancelToken};
-use std::{
-    path::{Path, PathBuf},
-    sync::Arc,
-};
+use std::{path::Path, sync::Arc};
 
 /// What an account's installations ask of GOG's network. Every call may wait
 /// on it.
@@ -95,7 +92,6 @@ pub struct Content<N: Network> {
     /// The language whose depots Transfers install, such as `fr-FR`.
     language: String,
     locations: Locations,
-    runtimes: Runtimes,
 }
 
 impl<N: Network> Content<N> {
@@ -109,7 +105,6 @@ impl<N: Network> Content<N> {
             network,
             credentials: Credentials::new(saved, Gog::SESSION_FAILED),
             language,
-            runtimes: Runtimes::new(&locations),
             locations,
         }
     }
@@ -145,19 +140,18 @@ impl<N: Network> Content<N> {
 }
 
 impl<N: Network> installations::Content<Gog> for Content<N> {
-    /// Gets Voile for a Windows build unless it is in place, then the
-    /// game's files.
+    fn begin<'a>(&'a self, transfer: &'a Transfer<Gog>) -> BoxFuture<'a, Result<String, Failure>> {
+        Box::pin(async move {
+            // As every GOG account call: renewed and saved credentials first.
+            self.credentials.prepare(self.network.prepare()).await?;
+            Ok(transfer.platform.clone())
+        })
+    }
     fn download<'a>(
         &'a self,
         transfer: &'a Transfer<Gog>,
     ) -> BoxFuture<'a, Result<Receipt<Gog>, Failure>> {
         Box::pin(async move {
-            self.runtimes.begin();
-            // As every GOG account call: renewed and saved credentials first.
-            self.credentials.prepare(self.network.prepare()).await?;
-            let needed = installations::needs_voile(&transfer.platform).then_some(Runtime::Voile);
-            let game = transfer.progress_name();
-            self.runtimes.get(&game, needed.as_slice()).await?;
             let installed = self.network.download(transfer, &self.language).await;
             self.credentials.save_later();
             let installed = installed?;
@@ -174,11 +168,10 @@ impl<N: Network> installations::Content<Gog> for Content<N> {
         })
     }
     fn progress(&self) -> Option<TransferProgress> {
-        self.runtimes.progress().or_else(|| self.network.progress())
+        self.network.progress()
     }
     fn cancel(&self) {
         self.credentials.cancel();
-        self.runtimes.cancel();
         self.network.cancel();
     }
     fn update_available<'a>(
@@ -244,11 +237,8 @@ struct Handover<N: Network> {
 impl<N: Network> sessions::Handover<Gog> for Handover<N> {
     /// The account, and how a Windows build runs.
     type Prepared = (String, Option<crate::wine::Config>);
-    fn voile(&self) -> Option<PathBuf> {
-        self.configuration
-            .prefix
-            .is_some()
-            .then(|| self.locations.voile.clone())
+    fn platform(&self) -> &str {
+        &self.configuration.platform
     }
     fn prepare(&self) -> BoxFuture<'_, Result<Self::Prepared, Failure>> {
         Box::pin(async move {

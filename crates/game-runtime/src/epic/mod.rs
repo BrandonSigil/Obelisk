@@ -8,6 +8,7 @@ mod windows;
 
 // A Game session's phase is `Phase`; its Cloud sync's phase is `CloudPhase`.
 use crate::cloud::{Control, Phase as CloudPhase};
+use crate::runtimes::Runtime;
 use crate::supervisor::{self, Record, Target};
 pub use crate::supervisor::{FailureReason, Phase};
 pub use client::start;
@@ -237,6 +238,7 @@ impl crate::sessions::Storefront for Epic {
     const BEGINS: bool = true;
     const INVALID_SESSION: &'static str = "backend.epic.cloud.invalidSession";
     const SESSION_FAILED: &'static str = "backend.epic.cloud.failed";
+    const RUNTIMES: &'static [Runtime] = &[];
     fn game(store: &Store) -> Store {
         store.clone()
     }

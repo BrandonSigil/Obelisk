@@ -4,6 +4,7 @@
 //! per storefront.
 use super::*;
 use crate::{
+    runtimes::{Runtimes, tests::FakeRuntimes},
     sessions::{Observation, Supervised},
     steam::{Product, Steam, Store},
     supervisor::{FailureReason, Phase},
@@ -42,6 +43,11 @@ struct Script {
     checks: Vec<u32>,
     /// Holding the storefront holds only its downloads: launches go on.
     launches_free: bool,
+    /// The build Steam picks for a Transfer without a platform; the Mac one
+    /// without it.
+    picked: Option<String>,
+    /// The next Transfer fails as it begins.
+    begin_failure: Option<Failure>,
 }
 
 struct Fake {
@@ -88,6 +94,20 @@ impl Fake {
 struct Content(Arc<Fake>);
 
 impl super::Content<Steam> for Content {
+    fn begin<'a>(
+        &'a self,
+        transfer: &'a Transfer<Steam>,
+    ) -> BoxFuture<'a, Result<String, Failure>> {
+        Box::pin(async move {
+            self.0.with(|script| {
+                if let Some(failure) = script.begin_failure.take() {
+                    return Err(failure);
+                }
+                let picked = script.picked.clone().unwrap_or_else(|| "macos".into());
+                Ok(transfer.platform.clone().unwrap_or(picked))
+            })
+        })
+    }
     fn download<'a>(
         &'a self,
         transfer: &'a Transfer<Steam>,
@@ -119,8 +139,7 @@ impl super::Content<Steam> for Content {
                 .with(|script| script.downloads.pop_front())
                 .unwrap_or(Ok(()));
             outcome?;
-            // Steam picks the native build of a game that ships one.
-            let platform = transfer.platform.clone().unwrap_or_else(|| "macos".into());
+            let platform = transfer.platform.clone().expect("a settled platform");
             let directory = transfer
                 .directory
                 .join(format!("steam-{}-{platform}", transfer.game()));
@@ -362,6 +381,7 @@ struct Fixture {
     _root: tempfile::TempDir,
     root: PathBuf,
     fake: Arc<Fake>,
+    runtimes: Arc<FakeRuntimes>,
     sessions: Arc<Sessions<Steam>>,
     queue: Arc<DownloadQueue>,
     installations: Installations<Steam>,
@@ -386,9 +406,15 @@ fn queueing(queue: &Arc<DownloadQueue>) -> Queueing<Steam> {
 }
 
 impl Fixture {
-    /// An account with Portal 2 installed for macOS, and `receipts` written
-    /// before the installations load.
+    /// An account with Portal 2 installed for macOS when `installed`, and
+    /// every runtime in place.
     async fn new(installed: bool) -> Self {
+        Self::with_runtimes(installed, &[Runtime::SteamComponents, Runtime::Voile]).await
+    }
+
+    /// As `new`, with only the runtimes `present` in place: a download of
+    /// another is recorded with the storefront's calls.
+    async fn with_runtimes(installed: bool, present: &[Runtime]) -> Self {
         let directory = tempfile::tempdir().unwrap();
         let root = directory.path().canonicalize().unwrap();
         let games = root.join("Games/Steam");
@@ -399,9 +425,16 @@ impl Fixture {
             std::fs::create_dir_all(&installation).unwrap();
             save(&file, &[receipt(&installation, "macos")]).unwrap();
         }
-        let sessions = Arc::new(Sessions::new(Box::new(|| Ok(None))));
-        eventually(|| !sessions.state().recovering).await;
         let fake = Fake::new();
+        let calls = fake.clone();
+        let runtimes = FakeRuntimes::new(present, move |runtime| {
+            calls.with(|script| script.calls.push(runtime))
+        });
+        let sessions = Arc::new(Sessions::new(
+            Box::new(|| Ok(None)),
+            Runtimes::from_source(runtimes.clone()),
+        ));
+        eventually(|| !sessions.state().recovering).await;
         let queue = DownloadQueue::new();
         let installations = Installations::new(
             Arc::new(Content(fake.clone())),
@@ -416,6 +449,7 @@ impl Fixture {
             _root: directory,
             root,
             fake,
+            runtimes,
             sessions,
             queue,
             installations,
@@ -1530,183 +1564,139 @@ async fn the_account_asks_one_cloud_question_whichever_sync_asks_it_until_it_is_
     eventually(|| sync().is_none()).await;
 }
 
-/// What `FakeRuntimes` does, shared with each of its downloads.
-struct FakeRuntime {
-    present: Vec<Runtime>,
-    /// The next download's failure.
-    failure: Option<Failure>,
-    /// Downloads wait until they are cancelled.
-    held: bool,
-    record: Arc<dyn Fn(String) + Send + Sync>,
-}
+#[tokio::test]
+async fn a_windows_transfer_gets_its_runtimes_before_its_files() {
+    for (platform, calls) in [
+        ("windows", vec!["steam components", "voile", "download:620"]),
+        ("macos", vec!["steam components", "download:620"]),
+    ] {
+        let fixture = Fixture::with_runtimes(false, &[]).await;
 
-/// Runtimes a test stands in for. Those `present` are in place; a download
-/// of another records its name through `record`, then fails as `fail` says,
-/// waits until cancelled once `hold` is called, or else puts its runtime in
-/// place.
-pub(crate) struct FakeRuntimes(Arc<Mutex<FakeRuntime>>);
+        fixture.installations.install(fixture.offer(platform));
+        idle(&fixture.installations).await;
 
-impl FakeRuntimes {
-    pub(crate) fn new(
-        present: &[Runtime],
-        record: impl Fn(String) + Send + Sync + 'static,
-    ) -> Arc<Self> {
-        Arc::new(Self(Arc::new(Mutex::new(FakeRuntime {
-            present: present.to_vec(),
-            failure: None,
-            held: false,
-            record: Arc::new(record),
-        }))))
+        assert_eq!(fixture.fake.calls(), calls, "{platform}");
+        assert_eq!(fixture.installations.state().receipts.len(), 1);
     }
-    pub(crate) fn fail(&self, failure: Failure) {
-        self.0.lock().unwrap().failure = Some(failure);
-    }
-    pub(crate) fn hold(&self) {
-        self.0.lock().unwrap().held = true;
-    }
-    pub(crate) fn present(&self) -> Vec<Runtime> {
-        self.0.lock().unwrap().present.clone()
-    }
-}
-
-pub(crate) fn runtime_name(runtime: Runtime) -> String {
-    match runtime {
-        Runtime::Voile => "voile".into(),
-        Runtime::SteamComponents => "steam components".into(),
-    }
-}
-
-impl RuntimeSource for FakeRuntimes {
-    fn present(&self, runtime: Runtime) -> bool {
-        self.0.lock().unwrap().present.contains(&runtime)
-    }
-    fn download(&self, runtime: Runtime) -> Arc<dyn RuntimeDownload> {
-        Arc::new(FakeDownload {
-            runtime,
-            state: self.0.clone(),
-            cancel: obelisk_core::transfer::CancelToken::new(),
-        })
-    }
-}
-
-struct FakeDownload {
-    runtime: Runtime,
-    state: Arc<Mutex<FakeRuntime>>,
-    cancel: obelisk_core::transfer::CancelToken,
-}
-
-impl RuntimeDownload for FakeDownload {
-    fn progress(&self) -> (u64, u64) {
-        (5, 10)
-    }
-    fn cancel(&self) {
-        self.cancel.cancel();
-    }
-    fn run(&self) -> BoxFuture<'_, Result<(), Failure>> {
-        Box::pin(async move {
-            let (record, failure, held) = {
-                let mut state = self.state.lock().unwrap();
-                (state.record.clone(), state.failure.take(), state.held)
-            };
-            record(runtime_name(self.runtime));
-            if held {
-                self.cancel.cancelled().await;
-                return Err(Failure::Cancelled);
-            }
-            if let Some(failure) = failure {
-                return Err(failure);
-            }
-            self.state.lock().unwrap().present.push(self.runtime);
-            Ok(())
-        })
-    }
-}
-
-fn recorded() -> (
-    Arc<Mutex<Vec<String>>>,
-    impl Fn(String) + Send + Sync + 'static,
-) {
-    let events = Arc::new(Mutex::new(Vec::new()));
-    let recording = events.clone();
-    (events, move |event| recording.lock().unwrap().push(event))
 }
 
 #[tokio::test]
-async fn a_transfer_gets_only_the_runtimes_not_in_place_in_order() {
-    let (events, record) = recorded();
-    let fake = FakeRuntimes::new(&[Runtime::Voile], record);
-    let runtimes = Runtimes::from_source(fake.clone());
-    runtimes.begin();
-    let needed = [Runtime::SteamComponents, Runtime::Voile];
+async fn a_transfer_without_a_platform_gets_the_runtimes_of_the_build_steam_picked() {
+    let fixture = Fixture::with_runtimes(false, &[Runtime::SteamComponents]).await;
+    fixture
+        .fake
+        .with(|script| script.picked = Some("windows".into()));
 
-    runtimes.get("620", &needed).await.unwrap();
-    runtimes.get("620", &needed).await.unwrap();
+    fixture.installations.install(Offer {
+        platform: None,
+        ..fixture.offer("windows")
+    });
+    idle(&fixture.installations).await;
 
-    assert_eq!(*events.lock().unwrap(), ["steam components"]);
-    assert_eq!(fake.present(), [Runtime::Voile, Runtime::SteamComponents]);
-    // Once done, the game's own progress shows.
-    assert_eq!(runtimes.progress(), None);
+    assert_eq!(fixture.fake.calls(), ["voile", "download:620"]);
+    assert_eq!(
+        fixture.fake.with(|script| script.transfers.clone()),
+        [fixture.transfer("windows")],
+        "the game's files are the build Steam picked"
+    );
+    assert_eq!(fixture.receipt().platform, "windows");
 }
 
 #[tokio::test]
-async fn a_runtime_download_shows_as_its_transfer_and_cancelling_stops_it() {
-    let (events, record) = recorded();
-    let fake = FakeRuntimes::new(&[], record);
-    fake.hold();
-    let runtimes = Arc::new(Runtimes::from_source(fake.clone()));
-    runtimes.begin();
-    let getting = {
-        let runtimes = runtimes.clone();
-        tokio::spawn(async move { runtimes.get("620", &[Runtime::Voile]).await })
-    };
-    eventually(|| runtimes.progress().is_some()).await;
-    let shown = runtimes.progress().unwrap();
+async fn a_runtime_download_shows_as_the_transfer_and_cancelling_the_transfer_stops_it_before_its_files()
+ {
+    let fixture = Fixture::with_runtimes(false, &[Runtime::SteamComponents]).await;
+    fixture.runtimes.hold();
+    fixture.installations.install(fixture.offer("windows"));
+    eventually(|| {
+        fixture
+            .installations
+            .state()
+            .transfer
+            .is_some_and(|transfer| transfer.message == "model.game.installingVoile")
+    })
+    .await;
+    let shown = fixture.installations.state().transfer.unwrap();
     assert_eq!(shown.game, "620");
     assert_eq!(shown.state, TransferState::Downloading);
     assert_eq!((shown.completed_bytes, shown.total_bytes), (5, 10));
-    assert_eq!(shown.message, "model.game.installingVoile");
 
-    runtimes.cancel();
+    fixture.installations.cancel(&620);
+    idle(&fixture.installations).await;
 
-    assert_eq!(getting.await.unwrap(), Err(Failure::Cancelled));
-    let stopped = runtimes.progress().unwrap();
+    let state = fixture.installations.state();
+    let stopped = state.transfer.unwrap();
     assert_eq!(stopped.state, TransferState::Cancelled);
     // Voile's bytes stay out of the stopped Transfer, where they would read
     // as the game's.
     assert_eq!((stopped.completed_bytes, stopped.total_bytes), (0, 0));
-    assert_eq!(*events.lock().unwrap(), ["voile"]);
-    assert!(fake.present().is_empty());
-    // A cancellation holds until the next Transfer starts.
     assert_eq!(
-        runtimes.get("620", &[Runtime::Voile]).await,
-        Err(Failure::Cancelled)
+        fixture.fake.calls(),
+        ["voile"],
+        "no game file was asked for"
     );
-    runtimes.begin();
-    assert_eq!(runtimes.progress(), None);
+    assert!(!fixture.runtimes.in_place().contains(&Runtime::Voile));
+    assert_eq!(state.report, None);
 }
 
 #[tokio::test]
-async fn a_failed_runtime_download_ends_the_transfer_with_its_own_failure() {
-    let (events, record) = recorded();
-    let fake = FakeRuntimes::new(&[], record);
-    fake.fail(Failure::Failed(
-        "backend.steam.components.downloadFailed".into(),
-    ));
-    let runtimes = Runtimes::from_source(fake.clone());
-    runtimes.begin();
+async fn a_runtime_that_fails_to_download_fails_the_transfer_with_its_key_before_its_files() {
+    let fixture = Fixture::with_runtimes(false, &[Runtime::SteamComponents]).await;
+    fixture
+        .runtimes
+        .fail(Failure::Failed("backend.voile.downloadFailed".into()));
 
-    let got = runtimes
-        .get("620", &[Runtime::SteamComponents, Runtime::Voile])
-        .await;
+    fixture.installations.install(fixture.offer("windows"));
+    idle(&fixture.installations).await;
 
+    let state = fixture.installations.state();
     assert_eq!(
-        got,
-        Err(Failure::Failed(
-            "backend.steam.components.downloadFailed".into()
-        ))
+        state.report,
+        Some(Report::Storefront("backend.voile.downloadFailed".into()))
     );
-    assert_eq!(*events.lock().unwrap(), ["steam components"]);
-    let stopped = runtimes.progress().unwrap();
+    let stopped = state.transfer.unwrap();
     assert_eq!(stopped.state, TransferState::Failed);
-    assert_eq!(stopped.message, "backend.steam.components.downloadFailed");
+    assert_eq!(stopped.message, "backend.voile.downloadFailed");
+    assert_eq!((stopped.completed_bytes, stopped.total_bytes), (0, 0));
+    assert_eq!(fixture.fake.calls(), ["voile"]);
+    assert_eq!(state.last_download, Some(fixture.transfer("windows")));
+}
+
+#[tokio::test]
+async fn a_transfer_whose_begin_fails_gets_no_runtime_and_no_files() {
+    let fixture = Fixture::with_runtimes(false, &[]).await;
+    fixture.fake.with(|script| {
+        script.begin_failure = Some(Failure::Failed("backend.steam.content.network".into()))
+    });
+
+    fixture.installations.install(fixture.offer("windows"));
+    idle(&fixture.installations).await;
+
+    let state = fixture.installations.state();
+    assert_eq!(
+        state.report,
+        Some(Report::Storefront("backend.steam.content.network".into()))
+    );
+    assert_eq!(state.transfer.unwrap().state, TransferState::Failed);
+    assert_eq!(fixture.fake.calls(), Vec::<String>::new());
+    assert!(fixture.runtimes.in_place().is_empty());
+}
+
+#[tokio::test]
+async fn the_transfer_after_one_cancelled_during_its_runtimes_gets_them_again() {
+    let fixture = Fixture::with_runtimes(false, &[Runtime::SteamComponents]).await;
+    fixture.runtimes.hold();
+    fixture.installations.install(fixture.offer("windows"));
+    eventually(|| fixture.fake.calls() == ["voile"]).await;
+    fixture.installations.cancel(&620);
+    idle(&fixture.installations).await;
+
+    fixture.runtimes.release();
+    fixture.installations.install(fixture.offer("windows"));
+    idle(&fixture.installations).await;
+
+    assert_eq!(fixture.fake.calls(), ["voile", "voile", "download:620"]);
+    let state = fixture.installations.state();
+    assert_eq!(state.transfer.unwrap().state, TransferState::Complete);
+    assert_eq!(state.receipts.len(), 1);
 }

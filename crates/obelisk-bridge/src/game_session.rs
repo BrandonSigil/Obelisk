@@ -3,11 +3,15 @@
 //! the state and forwards the player's answers.
 use crate::{ObeliskLocations, SteamHostState, steam_chat::SteamGameInvite};
 use game_runtime::{
-    cloud, epic, gog, protocol,
+    Locations, cloud, epic, gog, protocol,
+    runtimes::{self, Runtimes},
     sessions::{self, Failure, Sessions, Storefront, Supervised},
     steam, supervisor,
 };
-use std::{path::Path, sync::Arc};
+use std::{
+    path::{Path, PathBuf},
+    sync::{Arc, OnceLock},
+};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Enum)]
 pub enum GamePhase {
@@ -37,11 +41,11 @@ pub enum RuntimeComponent {
     /// Valve's Steam components, which Obelisk's Steam host loads.
     SteamComponents,
 }
-impl From<sessions::Runtime> for RuntimeComponent {
-    fn from(runtime: sessions::Runtime) -> Self {
+impl From<runtimes::Runtime> for RuntimeComponent {
+    fn from(runtime: runtimes::Runtime) -> Self {
         match runtime {
-            sessions::Runtime::Voile => Self::Voile,
-            sessions::Runtime::SteamComponents => Self::SteamComponents,
+            runtimes::Runtime::Voile => Self::Voile,
+            runtimes::Runtime::SteamComponents => Self::SteamComponents,
         }
     }
 }
@@ -642,21 +646,63 @@ fn invalid_session<P: Storefront>(_: &Sessions<P>) -> &'static str {
     P::INVALID_SESSION
 }
 
+/// The runtimes every storefront's Game sessions and Transfers share, and the
+/// places the first sessions named for them.
+static RUNTIMES: OnceLock<((PathBuf, PathBuf), Arc<Runtimes>)> = OnceLock::new();
+
+/// Where `locations` puts the runtimes: Voile's folder and Valve's Steam
+/// components.
+fn runtime_places(locations: &Locations) -> (PathBuf, PathBuf) {
+    (
+        locations.voile.clone(),
+        locations.steam_runtime_package.clone(),
+    )
+}
+
+/// The shared runtimes, in the places the first sessions' `locations` name.
+/// The sessions of every other storefront name the same places.
+fn runtimes(locations: &Locations) -> Arc<Runtimes> {
+    let (places, runtimes) =
+        RUNTIMES.get_or_init(|| (runtime_places(locations), Runtimes::new(locations)));
+    debug_assert_eq!(
+        *places,
+        runtime_places(locations),
+        "every storefront's sessions name the same runtime places"
+    );
+    runtimes.clone()
+}
+
+/// Whether `locations` names the places of the shared runtimes, as an
+/// account's installations must: they get their runtimes through their
+/// sessions, and their launches read them from `locations`.
+pub(crate) fn shares_runtimes(locations: &Locations) -> bool {
+    RUNTIMES
+        .get()
+        .is_none_or(|(places, _)| *places == runtime_places(locations))
+}
+
 #[uniffi::export(async_runtime = "tokio")]
 impl StorefrontSessions {
-    /// Starts by recovering the session a previous Obelisk left running.
+    /// Starts by recovering the session a previous Obelisk left running. Its
+    /// launches and Transfers get their runtimes into the places `locations`
+    /// names, and the installations given it read them back from their own
+    /// locations: those must name the same places.
     #[uniffi::constructor]
     pub fn new(storefront: SessionStorefront, locations: ObeliskLocations) -> Arc<Self> {
         let helper = Path::new(&locations.helper);
+        let runtimes = runtimes(&(&locations).into());
         Self::with(match storefront {
             SessionStorefront::Steam => Storefronts::Steam(Arc::new(Sessions::new(
                 supervisor_recovery(Path::new(&locations.steam_sessions), helper),
+                runtimes,
             ))),
             SessionStorefront::Epic => Storefronts::Epic(Arc::new(Sessions::new(
                 supervisor_recovery(Path::new(&locations.epic_sessions), helper),
+                runtimes,
             ))),
             SessionStorefront::Gog => Storefronts::Gog(Arc::new(Sessions::new(
                 supervisor_recovery(Path::new(&locations.gog_sessions), helper),
+                runtimes,
             ))),
         })
     }
@@ -989,10 +1035,12 @@ mod tests {
 
     #[tokio::test]
     async fn another_storefronts_sessions_refuse_steam_controls() {
-        let sessions =
-            StorefrontSessions::with(Storefronts::Gog(Arc::new(Sessions::new(Box::new(|| {
-                Ok(None)
-            })))));
+        let root = tempfile::tempdir().unwrap();
+        let runtimes = Runtimes::new(&Locations::new(root.path(), root.path(), root.path()));
+        let sessions = StorefrontSessions::with(Storefronts::Gog(Arc::new(Sessions::new(
+            Box::new(|| Ok(None)),
+            runtimes,
+        ))));
         let refused = |result: Result<(), GameSessionError>| match result {
             Err(GameSessionError::Failure { reason }) => reason,
             other => panic!("{other:?}"),
@@ -1015,8 +1063,11 @@ mod tests {
 
     #[tokio::test]
     async fn steam_sessions_refuse_controls_without_a_running_game() {
+        let root = tempfile::tempdir().unwrap();
+        let runtimes = Runtimes::new(&Locations::new(root.path(), root.path(), root.path()));
         let sessions = StorefrontSessions::with(Storefronts::Steam(Arc::new(Sessions::new(
             Box::new(|| Ok(None)),
+            runtimes,
         ))));
         let refused = |result: Result<(), GameSessionError>| match result {
             Err(GameSessionError::Failure { reason }) => reason,

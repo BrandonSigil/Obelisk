@@ -2,9 +2,10 @@
 //! network the test stands in for and real files in a temporary library.
 use super::*;
 use crate::{
-    installations::{
-        Content as _,
-        tests::{FakeRuntimes, eventually},
+    installations::{Content as _, tests::eventually},
+    runtimes::{
+        Runtimes,
+        tests::{FakeRuntimes, ready, recorded},
     },
     sessions::Sessions,
 };
@@ -137,17 +138,11 @@ struct Fixture {
     _root: tempfile::TempDir,
     locations: Locations,
     fake: Arc<Fake>,
-    runtimes: Arc<FakeRuntimes>,
     content: Content<Fake>,
 }
 
 impl Fixture {
-    /// Voile is in place.
     fn new() -> Self {
-        Self::with_runtimes(&[Runtime::Voile])
-    }
-
-    fn with_runtimes(present: &[Runtime]) -> Self {
         let root = tempfile::tempdir().unwrap();
         let library = root.path().canonicalize().unwrap();
         let locations = Locations::new(
@@ -158,21 +153,17 @@ impl Fixture {
         std::fs::create_dir_all(&locations.cloud_archive).unwrap();
         let fake = Arc::new(Fake::default());
         let saves = fake.clone();
-        let mut content = Content::new(
+        let content = Content::new(
             fake.clone(),
             Arc::new(move || saves.call("saved")),
             ACCOUNT.into(),
             "fr".into(),
             locations.clone(),
         );
-        let calls = fake.clone();
-        let runtimes = FakeRuntimes::new(present, move |runtime| calls.call(&runtime));
-        content.runtimes = Runtimes::from_source(runtimes.clone());
         Self {
             _root: root,
             locations,
             fake,
-            runtimes,
             content,
         }
     }
@@ -227,6 +218,7 @@ async fn every_account_call_renews_and_saves_the_credentials_first() {
     let fixture = Fixture::new();
     let transfer = fixture.transfer("Mac");
 
+    assert_eq!(fixture.content.begin(&transfer).await.unwrap(), "Mac");
     let receipt = fixture.content.download(&transfer).await.unwrap();
 
     assert_eq!(receipt.product, product());
@@ -254,19 +246,18 @@ async fn every_account_call_renews_and_saves_the_credentials_first() {
 }
 
 #[tokio::test]
-async fn a_transfer_cancelled_while_its_credentials_renew_never_starts() {
+async fn a_transfer_cancelled_while_its_credentials_renew_never_begins() {
     let fixture = Fixture::new();
     let transfer = fixture.transfer("Mac");
     *fixture.fake.held.lock().unwrap() = true;
 
-    let (downloaded, ()) = tokio::join!(fixture.content.download(&transfer), async {
+    let (begun, ()) = tokio::join!(fixture.content.begin(&transfer), async {
         eventually(|| fixture.fake.calls().contains(&"prepare".to_string())).await;
         fixture.content.cancel();
         fixture.fake.released.notify_one();
     });
 
-    assert_eq!(downloaded, Err(Failure::Cancelled));
-    assert!(!fixture.fake.calls().contains(&"download".to_string()));
+    assert_eq!(begun, Err(Failure::Cancelled));
 }
 
 #[tokio::test]
@@ -332,7 +323,7 @@ async fn a_launch_code_that_another_account_signed_is_refused_before_the_game_st
         .lock()
         .unwrap()
         .extend([ACCOUNT.to_string(), STRANGER.to_string()]);
-    let sessions = Sessions::<Epic>::new(Box::new(|| Ok(None)));
+    let sessions = Sessions::<Epic>::new(Box::new(|| Ok(None)), ready());
     eventually(|| !sessions.state().recovering).await;
     let admission = sessions.admit(game(), ACCOUNT.into()).unwrap();
 
@@ -350,6 +341,50 @@ async fn a_launch_code_that_another_account_signed_is_refused_before_the_game_st
         sessions.state().active.is_none(),
         "a refused launch gives its Reservation back"
     );
+}
+
+#[tokio::test]
+async fn a_windows_launch_gets_voile_before_it_is_prepared_and_a_mac_launch_gets_none() {
+    let fixture = Fixture::new();
+    let (events, record) = recorded();
+    let runtimes = FakeRuntimes::new(&[], record);
+    runtimes.hold();
+    let sessions = Sessions::<Epic>::new(
+        Box::new(|| Ok(None)),
+        Runtimes::from_source(runtimes.clone()),
+    );
+    eventually(|| !sessions.state().recovering).await;
+    let admission = sessions.admit(game(), ACCOUNT.into()).unwrap();
+    let canceller = admission.canceller();
+    let windows = fixture.installed("Windows");
+
+    let (launched, ()) = tokio::join!(fixture.content.launch(&windows, admission), async {
+        eventually(|| !events.lock().unwrap().is_empty()).await;
+        canceller.cancel();
+    });
+
+    assert_eq!(launched, Err(Failure::Cancelled), "nothing is prepared");
+    assert_eq!(*events.lock().unwrap(), ["voile"]);
+
+    // Downloads no longer wait: one the Mac build got would show.
+    runtimes.release();
+    // A launch code of another account stops the Mac launch once prepared.
+    fixture
+        .fake
+        .accounts
+        .lock()
+        .unwrap()
+        .extend([ACCOUNT.to_string(), STRANGER.to_string()]);
+    let admission = sessions.admit(game(), ACCOUNT.into()).unwrap();
+    let launched = fixture
+        .content
+        .launch(&fixture.installed("Mac"), admission)
+        .await;
+    assert_eq!(
+        launched,
+        Err(Failure::Failed("backend.epic.unauthorized".into()))
+    );
+    assert_eq!(*events.lock().unwrap(), ["voile"], "a Mac build needs none");
 }
 
 #[test]
@@ -397,7 +432,7 @@ async fn an_older_receipt_learns_its_catalog_item_from_the_installation_itself()
     let mut older = serde_json::to_value([&receipt]).unwrap();
     older[0].as_object_mut().unwrap().remove("catalogItemId");
     std::fs::write(&file, serde_json::to_vec(&older).unwrap()).unwrap();
-    let sessions = Arc::new(Sessions::<Epic>::new(Box::new(|| Ok(None))));
+    let sessions = Arc::new(Sessions::<Epic>::new(Box::new(|| Ok(None)), ready()));
 
     let installations = crate::installations::Installations::new(
         Arc::new(Content::new(
@@ -427,47 +462,5 @@ async fn an_older_receipt_learns_its_catalog_item_from_the_installation_itself()
     assert_eq!(
         saved[0].product.catalog_item_id, "catalog",
         "the file keeps what it learnt"
-    );
-}
-
-#[tokio::test]
-async fn a_windows_transfer_gets_voile_before_the_game_and_a_mac_one_does_not() {
-    for (platform, downloads) in [
-        ("Windows", vec!["voile", "download"]),
-        ("Mac", vec!["download"]),
-    ] {
-        let fixture = Fixture::with_runtimes(&[]);
-
-        fixture
-            .content
-            .download(&fixture.transfer(platform))
-            .await
-            .unwrap();
-
-        let calls: Vec<_> = fixture
-            .fake
-            .calls()
-            .into_iter()
-            .filter(|call| call == "voile" || call.starts_with("download"))
-            .collect();
-        assert_eq!(calls, downloads, "{platform}");
-    }
-}
-
-#[tokio::test]
-async fn voile_that_fails_to_download_fails_the_transfer_before_the_game() {
-    let fixture = Fixture::with_runtimes(&[]);
-    let failure = Failure::Failed("backend.voile.downloadFailed".into());
-    fixture.runtimes.fail(failure.clone());
-
-    let downloaded = fixture.content.download(&fixture.transfer("Windows")).await;
-
-    assert_eq!(downloaded, Err(failure));
-    assert!(
-        !fixture
-            .fake
-            .calls()
-            .iter()
-            .any(|call| call.starts_with("download"))
     );
 }

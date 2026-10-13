@@ -2,11 +2,12 @@
 //! network the test stands in for and real folders in a temporary library.
 use super::*;
 use crate::{
-    installations::{
-        Content as _, Installations, Offer, Queueing,
-        tests::{FakeRuntimes, eventually},
-    },
+    installations::{Content as _, Installations, Offer, Queueing, tests::eventually},
     queue::DownloadQueue,
+    runtimes::{
+        Runtimes,
+        tests::{FakeRuntimes, ready, recorded},
+    },
     sessions::Sessions,
 };
 use std::sync::Mutex;
@@ -21,6 +22,8 @@ struct Fake {
     /// Renewing credentials waits until the test releases it.
     held: Mutex<bool>,
     released: Notify,
+    /// The account signed out: asking for it fails.
+    signed_out: Mutex<bool>,
 }
 
 impl Fake {
@@ -45,7 +48,10 @@ impl Network for Fake {
     fn account_id(&self) -> BoxFuture<'_, Result<String, Failure>> {
         Box::pin(async move {
             self.call("account");
-            Ok(ACCOUNT.into())
+            match *self.signed_out.lock().unwrap() {
+                true => Err(Failure::Failed("backend.gog.unauthorized".into())),
+                false => Ok(ACCOUNT.into()),
+            }
         })
     }
     fn download<'a>(
@@ -94,17 +100,11 @@ struct Fixture {
     _root: tempfile::TempDir,
     locations: Locations,
     fake: Arc<Fake>,
-    runtimes: Arc<FakeRuntimes>,
     content: Content<Fake>,
 }
 
 impl Fixture {
-    /// Voile is in place.
     fn new() -> Self {
-        Self::with_runtimes(&[Runtime::Voile])
-    }
-
-    fn with_runtimes(present: &[Runtime]) -> Self {
         let root = tempfile::tempdir().unwrap();
         let library = root.path().canonicalize().unwrap();
         let locations = Locations::new(
@@ -114,20 +114,16 @@ impl Fixture {
         );
         let fake = Arc::new(Fake::default());
         let saves = fake.clone();
-        let mut content = Content::new(
+        let content = Content::new(
             fake.clone(),
             Arc::new(move || saves.call("saved")),
             "fr-FR".into(),
             locations.clone(),
         );
-        let calls = fake.clone();
-        let runtimes = FakeRuntimes::new(present, move |runtime| calls.call(&runtime));
-        content.runtimes = Runtimes::from_source(runtimes.clone());
         Self {
             _root: root,
             locations,
             fake,
-            runtimes,
             content,
         }
     }
@@ -169,6 +165,7 @@ fn witcher() -> Product {
 async fn a_transfer_saves_renewed_credentials_first_and_installs_the_language() {
     let fixture = Fixture::new();
     let transfer = fixture.transfer("windows");
+    assert_eq!(fixture.content.begin(&transfer).await.unwrap(), "windows");
     let receipt = fixture.content.download(&transfer).await.unwrap();
     assert_eq!(receipt.product, witcher());
     assert_eq!(receipt.name, "The Witcher");
@@ -186,14 +183,14 @@ async fn a_transfer_saves_renewed_credentials_first_and_installs_the_language() 
 }
 
 #[tokio::test]
-async fn a_transfer_cancelled_while_credentials_renew_never_starts() {
+async fn a_transfer_cancelled_while_its_credentials_renew_never_begins() {
     let fixture = Arc::new(Fixture::new());
     *fixture.fake.held.lock().unwrap() = true;
-    let running = {
+    let beginning = {
         let fixture = fixture.clone();
         tokio::spawn(async move {
             let transfer = fixture.transfer("macos");
-            fixture.content.download(&transfer).await
+            fixture.content.begin(&transfer).await
         })
     };
     while fixture.fake.calls().is_empty() {
@@ -201,14 +198,50 @@ async fn a_transfer_cancelled_while_credentials_renew_never_starts() {
     }
     fixture.content.cancel();
     fixture.fake.released.notify_one();
-    assert_eq!(running.await.unwrap(), Err(Failure::Cancelled));
-    assert!(
-        !fixture
-            .fake
-            .calls()
-            .iter()
-            .any(|call| call.starts_with("download"))
+    assert_eq!(beginning.await.unwrap(), Err(Failure::Cancelled));
+}
+
+#[tokio::test]
+async fn a_windows_launch_gets_voile_before_it_is_prepared_and_a_mac_launch_gets_none() {
+    let fixture = Fixture::new();
+    let (events, record) = recorded();
+    let runtimes = FakeRuntimes::new(&[], record);
+    runtimes.hold();
+    let sessions = Sessions::<Gog>::new(
+        Box::new(|| Ok(None)),
+        Runtimes::from_source(runtimes.clone()),
     );
+    eventually(|| !sessions.state().recovering).await;
+    let admission = sessions
+        .admit(witcher().product_id, ACCOUNT.into())
+        .unwrap();
+    let canceller = admission.canceller();
+    let windows = fixture.receipt("windows");
+
+    let (launched, ()) = tokio::join!(fixture.content.launch(&windows, admission), async {
+        eventually(|| !events.lock().unwrap().is_empty()).await;
+        canceller.cancel();
+    });
+
+    assert_eq!(launched, Err(Failure::Cancelled), "nothing is prepared");
+    assert_eq!(*events.lock().unwrap(), ["voile"]);
+
+    // Downloads no longer wait: one the Mac build got would show.
+    runtimes.release();
+    // The signed-out account stops the Mac launch once prepared.
+    *fixture.fake.signed_out.lock().unwrap() = true;
+    let admission = sessions
+        .admit(witcher().product_id, ACCOUNT.into())
+        .unwrap();
+    let launched = fixture
+        .content
+        .launch(&fixture.receipt("macos"), admission)
+        .await;
+    assert_eq!(
+        launched,
+        Err(Failure::Failed("backend.gog.unauthorized".into()))
+    );
+    assert_eq!(*events.lock().unwrap(), ["voile"], "a Mac build needs none");
 }
 
 #[tokio::test]
@@ -265,48 +298,6 @@ fn only_a_windows_build_runs_in_its_own_prefix() {
 }
 
 #[tokio::test]
-async fn a_windows_transfer_gets_voile_before_the_game_and_a_mac_one_does_not() {
-    for (platform, downloads) in [
-        ("windows", vec!["voile", "download fr-FR"]),
-        ("macos", vec!["download fr-FR"]),
-    ] {
-        let fixture = Fixture::with_runtimes(&[]);
-
-        fixture
-            .content
-            .download(&fixture.transfer(platform))
-            .await
-            .unwrap();
-
-        let calls: Vec<_> = fixture
-            .fake
-            .calls()
-            .into_iter()
-            .filter(|call| call == "voile" || call.starts_with("download"))
-            .collect();
-        assert_eq!(calls, downloads, "{platform}");
-    }
-}
-
-#[tokio::test]
-async fn voile_that_fails_to_download_fails_the_transfer_before_the_game() {
-    let fixture = Fixture::with_runtimes(&[]);
-    let failure = Failure::Failed("backend.voile.downloadFailed".into());
-    fixture.runtimes.fail(failure.clone());
-
-    let downloaded = fixture.content.download(&fixture.transfer("windows")).await;
-
-    assert_eq!(downloaded, Err(failure));
-    assert!(
-        !fixture
-            .fake
-            .calls()
-            .iter()
-            .any(|call| call.starts_with("download"))
-    );
-}
-
-#[tokio::test]
 async fn an_installed_build_updates_in_place_and_another_platform_installs_beside_it() {
     let fixture = Fixture::new();
     let library = fixture.locations.library.clone();
@@ -321,7 +312,7 @@ async fn an_installed_build_updates_in_place_and_another_platform_installs_besid
         "totalBytes": 100
     }]);
     std::fs::write(&file, serde_json::to_vec(&written).unwrap()).unwrap();
-    let sessions = Arc::new(Sessions::<Gog>::new(Box::new(|| Ok(None))));
+    let sessions = Arc::new(Sessions::<Gog>::new(Box::new(|| Ok(None)), ready()));
     eventually(|| !sessions.state().recovering).await;
     let installations = Installations::new(
         Arc::new(fixture.content),

@@ -11,9 +11,13 @@ mod receipt;
 use crate::{
     cloud, cloud_status,
     queue::{self, DownloadQueue, Owner},
+    runtimes::{self, Runtime},
     sessions::{self, Admission, Canceller, Failure, Sessions},
 };
-use obelisk_core::{installation::TransferProgress, transfer::TransferState};
+use obelisk_core::{
+    installation::TransferProgress,
+    transfer::{CancelToken, TransferState},
+};
 pub use receipt::{Offer, PlatformChoice, Receipt, Transfer};
 use receipt::{load, save};
 use serde::{Serialize, de::DeserializeOwned};
@@ -75,12 +79,21 @@ pub trait Storefront: sessions::Storefront {
 /// their Cloud saves live, and what its session does for them. Steam's and
 /// Epic's are `steam::content` and `epic::content`.
 pub trait Content<S: Storefront>: Send + Sync {
-    /// Runs one Transfer and returns the receipt of the completed installation.
+    /// Starts `transfer` before its runtimes: renews and saves the account's
+    /// credentials for a storefront whose session rotates them, and returns
+    /// the platform of the build it installs, the one it names or else the
+    /// one the storefront picks.
+    fn begin<'a>(&'a self, transfer: &'a Transfer<S>) -> BoxFuture<'a, Result<String, Failure>>;
+    /// Downloads the game's files of `transfer`, whose platform is settled
+    /// and whose runtimes are in place, and returns the receipt of the
+    /// completed installation.
     fn download<'a>(
         &'a self,
         transfer: &'a Transfer<S>,
     ) -> BoxFuture<'a, Result<Receipt<S>, Failure>>;
+    /// The progress of the game's files.
     fn progress(&self) -> Option<TransferProgress>;
+    /// Stops the Transfer's account calls and the download of its files.
     fn cancel(&self);
     /// Whether the storefront offers a newer build than the one `receipt`
     /// installed. It asks the storefront, never reads the game's files.
@@ -278,8 +291,8 @@ struct Inner<S: Storefront> {
     signed_out: bool,
     /// A DEBUG diagnostic fences the storefront like a Game session would.
     diagnostic: bool,
-    /// The player stopped the Transfer.
-    transfer_cancelled: bool,
+    /// Stops the Transfer under way, its runtimes included.
+    transfer_cancel: CancelToken,
     /// The player stopped the launch still preparing.
     launch_cancelled: bool,
     /// Cancels the launch still preparing.
@@ -364,7 +377,7 @@ impl<S: Storefront> Owner for Shared<S> {
             self.update(|inner| {
                 if let Err(Failure::Failed(key)) = outcome
                     && !automatic
-                    && !inner.transfer_cancelled
+                    && !inner.transfer_cancel.is_cancelled()
                     && !inner.signed_out
                 {
                     inner.state.report = Some(Report::Storefront(key));
@@ -377,7 +390,9 @@ impl<S: Storefront> Owner for Shared<S> {
     fn stop(&self, id: u64) {
         let stopping = self.update(|inner| {
             let stopping = inner.running == Some(id);
-            inner.transfer_cancelled |= stopping;
+            if stopping {
+                inner.transfer_cancel.cancel();
+            }
             stopping
         });
         if stopping {
@@ -481,7 +496,7 @@ impl<S: Storefront> Shared<S> {
     /// snapshot arrives.
     fn begin_in(&self, inner: &mut Inner<S>, id: u64, transfer: &Transfer<S>) {
         inner.running = Some(id);
-        inner.transfer_cancelled = false;
+        inner.transfer_cancel = CancelToken::new();
         inner.state.last_download = Some(transfer.clone());
         inner.state.transfer_game = Some(transfer.game());
         inner.state.transfer = Some(TransferProgress::new(transfer.progress_name()));
@@ -672,10 +687,12 @@ impl<S: Storefront> Shared<S> {
         Some(available)
     }
 
-    /// Runs the Transfer `begin_in` announced, whose turn came in the queue.
+    /// Runs the Transfer `begin_in` announced, whose turn came in the queue:
+    /// the storefront begins it, its runtimes come, then the game's files.
     async fn perform(self: &Arc<Self>, transfer: &Transfer<S>) -> Result<Receipt<S>, Failure> {
         let name = transfer.progress_name();
-        if self.inner.lock().unwrap().transfer_cancelled {
+        let cancel = self.inner.lock().unwrap().transfer_cancel.clone();
+        if cancel.is_cancelled() {
             self.update(|inner| {
                 if let Some(progress) = &mut inner.state.transfer {
                     progress.state = TransferState::Cancelled;
@@ -684,33 +701,64 @@ impl<S: Storefront> Shared<S> {
             });
             return Err(Failure::Cancelled);
         }
-        let polling = {
-            let (shared, name) = (self.clone(), name.clone());
-            runtime().spawn(async move {
-                loop {
-                    if let Some(progress) = shared.content.progress()
-                        && progress.game == name
-                        && active(progress.state)
-                    {
-                        shared.update(|inner| {
-                            if inner.state.transfer.as_ref() != Some(&progress) {
-                                inner.state.transfer = Some(progress);
-                            }
-                        });
+        // How the Transfer stopped while it got a runtime.
+        let mut stopped = None;
+        let result = async {
+            let platform = self.content.begin(transfer).await?;
+            let got = self
+                .sessions
+                .runtimes()
+                .get::<S>(&platform, &cancel, |progress| {
+                    self.update(|inner| inner.state.transfer = Some(shown(&name, progress)));
+                })
+                .await;
+            if let Err(failure) = &got {
+                // No bytes: once the Transfer stops, they would read as the
+                // game's own.
+                let (state, message) = match failure {
+                    Failure::Cancelled => (TransferState::Cancelled, String::new()),
+                    Failure::Failed(key) => (TransferState::Failed, key.clone()),
+                };
+                stopped = Some(TransferProgress {
+                    state,
+                    message,
+                    ..TransferProgress::new(&name)
+                });
+            }
+            got?;
+            let transfer = Transfer {
+                platform: platform.into(),
+                ..transfer.clone()
+            };
+            let polling = {
+                let (shared, name) = (self.clone(), name.clone());
+                runtime().spawn(async move {
+                    loop {
+                        if let Some(progress) = shared.content.progress()
+                            && progress.game == name
+                            && active(progress.state)
+                        {
+                            shared.update(|inner| {
+                                if inner.state.transfer.as_ref() != Some(&progress) {
+                                    inner.state.transfer = Some(progress);
+                                }
+                            });
+                        }
+                        tokio::time::sleep(PROGRESS).await;
                     }
-                    tokio::time::sleep(PROGRESS).await;
-                }
-            })
-        };
-        let result = self.content.download(transfer).await;
-        polling.abort();
+                })
+            };
+            let downloaded = self.content.download(&transfer).await;
+            polling.abort();
+            downloaded
+        }
+        .await;
         let outcome = match result {
             // A receipt that arrives after its cancellation is refused.
-            Ok(_) if self.inner.lock().unwrap().transfer_cancelled => Err(Failure::Cancelled),
+            Ok(_) if cancel.is_cancelled() => Err(Failure::Cancelled),
             Ok(receipt) => Ok(receipt),
             Err(failure) => {
-                let cancelled =
-                    failure == Failure::Cancelled || self.inner.lock().unwrap().transfer_cancelled;
+                let cancelled = failure == Failure::Cancelled || cancel.is_cancelled();
                 Err(if cancelled {
                     Failure::Cancelled
                 } else {
@@ -723,9 +771,8 @@ impl<S: Storefront> Shared<S> {
             Err(Failure::Cancelled) => TransferState::Cancelled,
             Err(_) => TransferState::Failed,
         };
-        let last = self
-            .content
-            .progress()
+        let last = stopped
+            .or_else(|| self.content.progress())
             .filter(|progress| progress.game == name && progress.state == settled);
         self.update(|inner| {
             if let Ok(receipt) = &outcome {
@@ -1026,7 +1073,7 @@ impl<S: Storefront> Installations<S> {
             },
             signed_out: false,
             diagnostic: false,
-            transfer_cancelled: false,
+            transfer_cancel: CancelToken::new(),
             launch_cancelled: false,
             launch: None,
             warnings: 0,
@@ -1440,7 +1487,7 @@ impl<S: Storefront> Installations<S> {
     pub fn signed_out(&self) {
         let (launch, maintenance) = self.shared.update(|inner| {
             inner.signed_out = true;
-            inner.transfer_cancelled = true;
+            inner.transfer_cancel.cancel();
             inner.launch_cancelled = true;
             let maintenance = inner
                 .maintenance
@@ -1642,218 +1689,20 @@ fn removal_reason(failure: obelisk_core::installation::RemovalFailure) -> Failur
     })
 }
 
-/// A runtime a build needs to launch: a Transfer gets the ones not in place
-/// yet before its game's files.
-pub use crate::sessions::Runtime;
-
-/// Whether a build of `platform` runs in Wine, and so needs Voile.
-pub(crate) fn needs_voile(platform: &str) -> bool {
-    platform.eq_ignore_ascii_case("windows")
-}
-
-/// One runtime's download, which the Transfer that needs it runs, cancels
-/// and watches.
-pub trait RuntimeDownload: Send + Sync {
-    /// The bytes received so far, and the total.
-    fn progress(&self) -> (u64, u64);
-    fn cancel(&self);
-    /// A failure is the runtime's own localization key.
-    fn run(&self) -> BoxFuture<'_, Result<(), Failure>>;
-}
-
-/// Where Transfers find the runtimes: whether one is in place, and its
-/// download. Tests stand in for it.
-pub trait RuntimeSource: Send + Sync {
-    /// It reads a few files, never a whole runtime.
-    fn present(&self, runtime: Runtime) -> bool;
-    fn download(&self, runtime: Runtime) -> Arc<dyn RuntimeDownload>;
-}
-
-/// The runtimes a storefront's Transfers get before their game's files, so
-/// the game launches without waiting for them. Cancelling the Transfer
-/// cancels the download under way, and the next Transfer that needs the
-/// runtime starts it again.
-pub struct Runtimes {
-    source: Arc<dyn RuntimeSource>,
-    getting: Mutex<Getting>,
-}
-
-#[derive(Default)]
-struct Getting {
-    /// The Transfer under way was cancelled.
-    cancelled: bool,
-    /// The download under way, and the name the Transfer's progress gives
-    /// its game.
-    current: Option<(String, Runtime, Arc<dyn RuntimeDownload>)>,
-    /// How the last download stopped, until the next Transfer starts.
-    stopped: Option<TransferProgress>,
-}
-
-impl Runtimes {
-    /// Gets the runtimes into the places `locations` names, where launches
-    /// read them.
-    pub fn new(locations: &crate::Locations) -> Self {
-        Self::from_source(Arc::new(Downloads(locations.clone())))
-    }
-
-    pub(crate) fn from_source(source: Arc<dyn RuntimeSource>) -> Self {
-        Self {
-            source,
-            getting: Mutex::new(Getting::default()),
-        }
-    }
-
-    /// A Transfer starts: the cancellation and outcome of the one before no
-    /// longer count.
-    pub fn begin(&self) {
-        *self.getting.lock().unwrap() = Getting::default();
-    }
-
-    /// Gets each runtime of `needed` that is not in place, in order, while
-    /// the Transfer's progress for `game` shows it. The first failure ends
-    /// the Transfer.
-    pub async fn get(&self, game: &str, needed: &[Runtime]) -> Result<(), Failure> {
-        for &runtime in needed {
-            let source = self.source.clone();
-            if blocking(storage_failed(runtime), move || source.present(runtime)).await? {
-                continue;
-            }
-            let download = self.source.download(runtime);
-            {
-                let mut getting = self.getting.lock().unwrap();
-                if getting.cancelled {
-                    return Err(Failure::Cancelled);
-                }
-                getting.current = Some((game.to_owned(), runtime, download.clone()));
-            }
-            let outcome = download.run().await;
-            let mut getting = self.getting.lock().unwrap();
-            getting.current = None;
-            let outcome = match outcome {
-                Err(_) if getting.cancelled => Err(Failure::Cancelled),
-                outcome => outcome,
-            };
-            if let Err(failure) = &outcome {
-                // No bytes: once the Transfer stops, they would read as the
-                // game's own.
-                let mut stopped = shown(game, runtime, (0, 0));
-                (stopped.state, stopped.message) = match failure {
-                    Failure::Cancelled => (TransferState::Cancelled, String::new()),
-                    Failure::Failed(key) => (TransferState::Failed, key.clone()),
-                };
-                getting.stopped = Some(stopped);
-            }
-            outcome?;
-        }
-        match self.getting.lock().unwrap().cancelled {
-            true => Err(Failure::Cancelled),
-            false => Ok(()),
-        }
-    }
-
-    /// The Transfer's progress while it gets a runtime, then how that
-    /// stopped if it did not finish.
-    pub fn progress(&self) -> Option<TransferProgress> {
-        let getting = self.getting.lock().unwrap();
-        match &getting.current {
-            Some((game, runtime, download)) => Some(shown(game, *runtime, download.progress())),
-            None => getting.stopped.clone(),
-        }
-    }
-
-    /// Cancels the Transfer's download under way, and any it would start.
-    pub fn cancel(&self) {
-        let mut getting = self.getting.lock().unwrap();
-        getting.cancelled = true;
-        if let Some((_, _, download)) = &getting.current {
-            download.cancel();
-        }
-    }
-}
-
 /// A runtime's download as its Transfer's progress: the bytes received, and
 /// the runtime the game page names.
-fn shown(game: &str, runtime: Runtime, (received, total): (u64, u64)) -> TransferProgress {
+fn shown(game: &str, progress: runtimes::Progress) -> TransferProgress {
     TransferProgress {
         state: TransferState::Downloading,
-        completed_bytes: received,
-        total_bytes: total,
-        network_bytes: received,
-        message: match runtime {
+        completed_bytes: progress.received,
+        total_bytes: progress.total,
+        network_bytes: progress.received,
+        message: match progress.runtime {
             Runtime::Voile => "model.game.installingVoile",
             Runtime::SteamComponents => "model.game.installingSteamComponents",
         }
         .into(),
         ..TransferProgress::new(game)
-    }
-}
-
-fn storage_failed(runtime: Runtime) -> String {
-    match runtime {
-        Runtime::Voile => crate::voile::Failure::Storage.to_string(),
-        Runtime::SteamComponents => crate::valve::Failure::Storage.to_string(),
-    }
-}
-
-/// The runtimes Obelisk downloads, in the places its launches read them.
-struct Downloads(crate::Locations);
-
-impl RuntimeSource for Downloads {
-    fn present(&self, runtime: Runtime) -> bool {
-        match runtime {
-            Runtime::Voile => crate::voile::runtime(&self.0.voile).is_some(),
-            Runtime::SteamComponents => crate::valve::installed(&self.0.steam_runtime_package),
-        }
-    }
-    fn download(&self, runtime: Runtime) -> Arc<dyn RuntimeDownload> {
-        match runtime {
-            Runtime::Voile => Arc::new(Download {
-                install: crate::voile::Install::new(),
-                path: self.0.voile.clone(),
-            }),
-            Runtime::SteamComponents => Arc::new(Download {
-                install: crate::valve::Install::new(),
-                path: self.0.steam_runtime_package.clone(),
-            }),
-        }
-    }
-}
-
-/// One runtime's install into `path`.
-struct Download<I> {
-    install: I,
-    path: PathBuf,
-}
-
-impl RuntimeDownload for Download<crate::voile::Install> {
-    fn progress(&self) -> (u64, u64) {
-        self.install.progress()
-    }
-    fn cancel(&self) {
-        self.install.cancel();
-    }
-    /// Keeps the releases it replaces: a Windows game may run from one.
-    fn run(&self) -> BoxFuture<'_, Result<(), Failure>> {
-        Box::pin(async move {
-            let archive = crate::sessions::development_archive();
-            self.install
-                .add(&self.path, archive.as_deref())
-                .await
-                .map(drop)
-                .map_err(Into::into)
-        })
-    }
-}
-
-impl RuntimeDownload for Download<crate::valve::Install> {
-    fn progress(&self) -> (u64, u64) {
-        self.install.progress()
-    }
-    fn cancel(&self) {
-        self.install.cancel();
-    }
-    fn run(&self) -> BoxFuture<'_, Result<(), Failure>> {
-        Box::pin(async move { self.install.run(&self.path).await.map_err(Into::into) })
     }
 }
 

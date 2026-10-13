@@ -5,6 +5,7 @@
 //! the game and its processes; this module observes it and forwards answers.
 use crate::{
     cloud::{Choice, Phase as CloudPhase, Status as CloudStatus},
+    runtimes::{self, Runtime, Runtimes},
     supervisor::{self, FailureReason, Phase, Provider, Record},
 };
 use obelisk_core::transfer::CancelToken;
@@ -31,6 +32,9 @@ pub trait Storefront: Provider {
     const INVALID_SESSION: &'static str;
     /// A failed session that reported no reason.
     const SESSION_FAILED: &'static str;
+    /// The runtimes every build of the storefront needs, whatever its
+    /// platform.
+    const RUNTIMES: &'static [Runtime];
     fn game(store: &Self::Store) -> Self::Game;
 }
 
@@ -142,18 +146,14 @@ pub type BeforeBegin = Box<dyn FnOnce() + Send>;
 pub type BoxFuture<'a, T> = std::pin::Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
 /// A storefront's part of handing an admitted game to a new supervisor.
-/// `Admission::hand_off` runs it in order: the runtimes the game needs,
+/// `Admission::hand_off` runs it in order: the runtimes its `platform` needs,
 /// `prepare`, then `start`.
 pub trait Handover<P: Storefront>: Send + Sync + 'static {
     /// What `prepare` readies for `start`.
     type Prepared: Send + 'static;
-    /// Voile, which a Windows game needs in place before it is prepared.
-    fn voile(&self) -> Option<std::path::PathBuf>;
-    /// The payload of Valve's Steam components, which a game Obelisk's Steam
-    /// host runs needs in place before it is prepared.
-    fn steam_components(&self) -> Option<std::path::PathBuf> {
-        None
-    }
+    /// The platform of the build it starts, which decides the runtimes it
+    /// needs before it is prepared.
+    fn platform(&self) -> &str;
     /// Readies the game, such as its Wine prefix, which may take minutes, and
     /// then the short-lived credentials it starts with. A failure is definite.
     fn prepare(&self) -> BoxFuture<'_, Result<Self::Prepared, Failure>>;
@@ -192,24 +192,6 @@ pub(crate) fn failed(error: impl std::fmt::Display) -> Failure {
     Failure::Failed(error.to_string())
 }
 
-impl From<crate::voile::Failure> for Failure {
-    fn from(failure: crate::voile::Failure) -> Self {
-        match failure {
-            crate::voile::Failure::Cancelled => Self::Cancelled,
-            failure => failed(failure),
-        }
-    }
-}
-
-impl From<crate::valve::Failure> for Failure {
-    fn from(failure: crate::valve::Failure) -> Self {
-        match failure {
-            crate::valve::Failure::Cancelled => Self::Cancelled,
-            failure => failed(failure),
-        }
-    }
-}
-
 /// What a handoff to a new supervisor returned instead of its session.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Handoff {
@@ -220,21 +202,23 @@ pub enum Handoff {
     Lost(String),
 }
 
-/// A runtime a launch downloads before its game is prepared, unless its
-/// Transfer got it already.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Runtime {
-    /// Voile, the Wine runtime Windows games run in.
-    Voile,
-    /// Valve's Steam components, which Obelisk's Steam host loads.
-    SteamComponents,
-}
-
 /// How much of a runtime has downloaded while the launch waits for it.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct RuntimeInstall {
     pub runtime: Runtime,
     pub fraction: f64,
+}
+impl From<runtimes::Progress> for RuntimeInstall {
+    fn from(progress: runtimes::Progress) -> Self {
+        let fraction = match progress.total {
+            0 => 0.0,
+            total => (progress.received as f64 / total as f64).min(1.0),
+        };
+        Self {
+            runtime: progress.runtime,
+            fraction,
+        }
+    }
 }
 
 /// One Game session as Obelisk presents it.
@@ -410,6 +394,7 @@ struct Shared<P: Storefront> {
     inner: Mutex<Inner<P>>,
     published: watch::Sender<State<P>>,
     recover: Recovery<P>,
+    runtimes: Arc<Runtimes>,
 }
 impl<P: Storefront> Shared<P> {
     fn update<T>(&self, change: impl FnOnce(&mut Inner<P>) -> T) -> T {
@@ -559,7 +544,6 @@ impl<P: Storefront> Shared<P> {
             }
             self.update(|inner| {
                 if let Some(active) = &inner.active {
-                    session.runtime_install = active.runtime_install;
                     let started = matches!(
                         session.phase,
                         Phase::Running | Phase::Finalizing | Phase::Finished
@@ -569,10 +553,7 @@ impl<P: Storefront> Shared<P> {
                     });
                 }
                 inner.active = Some(session.clone());
-                inner.last = Some(Session {
-                    runtime_install: None,
-                    ..session
-                });
+                inner.last = Some(session);
                 inner.recovering = false;
                 inner.recovery_failed = false;
             });
@@ -619,8 +600,9 @@ pub struct Sessions<P: Storefront> {
 
 impl<P: Storefront> Sessions<P> {
     /// Starts by recovering a session a previous Obelisk left running: the
-    /// storefront stays reserved until recovery settles.
-    pub fn new(recover: Recovery<P>) -> Self {
+    /// storefront stays reserved until recovery settles. Its launches get
+    /// their runtimes from `runtimes`.
+    pub fn new(recover: Recovery<P>, runtimes: Arc<Runtimes>) -> Self {
         let operation = Operation::new();
         let inner = Inner {
             revision: 1,
@@ -639,6 +621,18 @@ impl<P: Storefront> Sessions<P> {
             inner: Mutex::new(inner),
             published,
             recover,
+            runtimes: runtimes.clone(),
+        });
+        // A game an earlier Obelisk started may run from a replaced release;
+        // once recovered, it shows as any observed session. Every game this
+        // process starts runs from the pinned one, and a launch is observed
+        // only after its handoff, so it never counts itself.
+        let watched = Arc::downgrade(&shared);
+        runtimes.watch_sessions(move || {
+            watched.upgrade().is_some_and(|shared| {
+                let state = shared.published.borrow();
+                state.recovering || state.active.as_ref().is_some_and(|active| active.observed)
+            })
         });
         let recovering = shared.clone();
         std::thread::spawn(move || {
@@ -650,6 +644,12 @@ impl<P: Storefront> Sessions<P> {
 
     pub fn state(&self) -> State<P> {
         self.shared.published.borrow().clone()
+    }
+
+    /// The runtimes its launches get, which the storefront's Transfers get
+    /// too.
+    pub(crate) fn runtimes(&self) -> &Arc<Runtimes> {
+        &self.shared.runtimes
     }
 
     /// Waits for a revision newer than `after`, or returns at once.
@@ -903,7 +903,7 @@ impl<P: Storefront> Canceller<P> {
     }
 
     /// How much of a runtime has downloaded while the launch waits for it.
-    pub fn runtime_install(&self, install: Option<RuntimeInstall>) {
+    fn runtime_install(&self, install: Option<RuntimeInstall>) {
         self.shared.update(|inner| {
             if inner.current(&self.operation)
                 && let Some(active) = &mut inner.active
@@ -912,100 +912,6 @@ impl<P: Storefront> Canceller<P> {
             }
         });
     }
-
-    /// Installs Voile unless it is in place, showing its download on the
-    /// admitted session, then removes the releases it replaces. Cancelling
-    /// the launch cancels the install.
-    pub async fn install_voile(&self, voile: &std::path::Path) -> Result<(), Failure> {
-        if crate::voile::runtime(voile).is_some() {
-            let root = voile.to_owned();
-            let _ = tokio::task::spawn_blocking(move || crate::voile::remove_replaced(&root)).await;
-            return Ok(());
-        }
-        let install = Arc::new(crate::voile::Install::new());
-        let (cancel, watched) = (install.clone(), install.clone());
-        let installed = self
-            .installing(
-                Runtime::Voile,
-                move || cancel.cancel(),
-                move || watched.progress(),
-                install.run(voile, development_archive().as_deref()),
-            )
-            .await;
-        installed.map(drop).map_err(Into::into)
-    }
-
-    /// Downloads Valve's Steam components into `payload` unless it already
-    /// holds them intact, showing the download on the admitted session.
-    /// Cancelling the launch cancels the download.
-    pub async fn install_steam_components(&self, payload: &std::path::Path) -> Result<(), Failure> {
-        let checked = payload.to_owned();
-        if tokio::task::spawn_blocking(move || crate::valve::installed(&checked))
-            .await
-            .unwrap_or(false)
-        {
-            return Ok(());
-        }
-        let install = Arc::new(crate::valve::Install::new());
-        let (cancel, watched) = (install.clone(), install.clone());
-        self.installing(
-            Runtime::SteamComponents,
-            move || cancel.cancel(),
-            move || watched.progress(),
-            install.run(payload),
-        )
-        .await
-        .map_err(Into::into)
-    }
-
-    /// Runs `install` of `runtime`, cancelled with the launch, while the
-    /// admitted session shows what `progress` reports: the bytes received,
-    /// then the total.
-    async fn installing<T>(
-        &self,
-        runtime: Runtime,
-        cancel: impl Fn() + Send + Sync + 'static,
-        progress: impl Fn() -> (u64, u64) + Send + 'static,
-        install: impl Future<Output = T>,
-    ) -> T {
-        self.on_cancel(cancel);
-        self.runtime_install(Some(RuntimeInstall {
-            runtime,
-            fraction: 0.0,
-        }));
-        let admitted = self.clone();
-        let watching = tokio::spawn(async move {
-            loop {
-                let (received, total) = progress();
-                if total > 0 {
-                    admitted.runtime_install(Some(RuntimeInstall {
-                        runtime,
-                        fraction: (received as f64 / total as f64).min(1.0),
-                    }));
-                }
-                tokio::time::sleep(PACE).await;
-            }
-        });
-        let installed = install.await;
-        watching.abort();
-        self.runtime_install(None);
-        installed
-    }
-}
-
-/// A local copy of the pinned Voile release, which replaces its download in
-/// development builds while the release is private.
-pub(crate) fn development_archive() -> Option<std::path::PathBuf> {
-    development_copy("OBELISK_VOILE_ARCHIVE")
-}
-
-fn development_copy(variable: &str) -> Option<std::path::PathBuf> {
-    if !cfg!(debug_assertions) {
-        return None;
-    }
-    std::env::var_os(variable)
-        .filter(|archive| !archive.is_empty())
-        .map(Into::into)
 }
 
 impl<P: Storefront> std::ops::Deref for Admission<P> {
@@ -1022,32 +928,30 @@ impl<P: Storefront> Admission<P> {
     }
 
     /// Hands the admitted game to a new supervisor through `handover`, then
-    /// follows its session until it is finished. A failure or cancellation
-    /// before the supervisor starts refuses the launch and gives the
-    /// Reservation back; once it starts, only its session does.
+    /// follows its session until it is finished. The runtimes its build
+    /// misses come first, their download showing on the session. A failure
+    /// or cancellation before the supervisor starts refuses the launch and
+    /// gives the Reservation back; once it starts, only its session does.
     pub async fn hand_off<H: Handover<P>>(self, handover: H) -> Result<(), Failure> {
         let admission = self.canceller();
         let before_begin = handover.before_begin();
         let handoff = async move {
-            if let Some(voile) = handover.voile() {
-                admission
-                    .install_voile(&voile)
-                    .await
-                    .map_err(Handoff::Refused)?;
-            }
-            if let Some(payload) = handover.steam_components() {
-                admission
-                    .install_steam_components(&payload)
-                    .await
-                    .map_err(Handoff::Refused)?;
-            }
+            let cancel = CancelToken::new();
+            let token = cancel.clone();
+            admission.on_cancel(move || token.cancel());
+            let got = admission
+                .shared
+                .runtimes
+                .get_for_launch::<P>(handover.platform(), &cancel, |progress| {
+                    admission.runtime_install(Some(progress.into()))
+                })
+                .await;
+            admission.runtime_install(None);
+            got.map_err(Handoff::Refused)?;
             let prepared = handover.prepare().await.map_err(Handoff::Refused)?;
             if admission.cancelled() {
                 return Err(Handoff::Refused(Failure::Cancelled));
             }
-            let cancel = CancelToken::new();
-            let token = cancel.clone();
-            admission.on_cancel(move || token.cancel());
             tokio::task::spawn_blocking(move || handover.start(prepared, cancel))
                 .await
                 .map_err(|_| Handoff::Lost(P::SESSION_FAILED.to_owned()))?
