@@ -449,7 +449,8 @@ final class GameActionTests: XCTestCase {
         // The game exits: its session settles its Cloud saves, then ends.
         fixture.sessions.fake.show(.steam(appID: 620, id: running.id, phase: .finalizing))
         try await eventually { fixture.sessions.quitRequest == nil }
-        XCTAssertEqual(installations.selectedAction?.kind, .waiting(.launch))
+        XCTAssertEqual(installations.selectedAction?.kind, .waiting(.closing))
+        XCTAssertEqual(installations.selectedAction?.title, L10n.string("model.game.closing"))
     }
 
     func testAMacGameIsAskedToQuitAsItsOwnQuitMenuWould() async throws {

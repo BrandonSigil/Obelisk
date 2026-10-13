@@ -45,8 +45,10 @@ struct GameAction {
     /// What the game waits for.
     enum Wait: Equatable {
         case uninstall
-        /// Its launch, or this account's Game session before or after its game runs.
+        /// Its launch, or this account's Game session before its game runs.
         case launch
+        /// This account's Game session after its game exited, until it ends.
+        case closing
         /// Its launch's Transfer, until that Transfer's turn comes.
         case verification
     }
@@ -190,7 +192,7 @@ struct GameActions<Store: InstallationStorefront> {
         if uninstalling == game { return .waiting(.uninstall) }
         if isLaunching { return .waiting(verifying ? .verification : .launch) }
         if queued.contains(game) { return .queued }
-        if session != nil { return .waiting(.launch) }
+        if let session { return .waiting(session.ended ? .closing : .launch) }
         if receipt != nil { return update ? .download(.update) : .launch }
         return .download(resumable == game && installations.canModify(game) ? .resume : .install)
     }
@@ -209,6 +211,7 @@ struct GameActions<Store: InstallationStorefront> {
         case .transferring(.launch), .waiting(.verification): L10n.string("model.game.verifying")
         case .waiting(.uninstall): L10n.string("model.game.uninstalling")
         case .waiting(.launch): L10n.string("model.game.launching")
+        case .waiting(.closing): L10n.string("model.game.closing")
         case .step(.cloudSync): L10n.string("ui.cloud.sync_short")
         case .step(.runtime(.voile)): L10n.string("model.game.installingVoile")
         case .step(.runtime(.steamComponents)): L10n.string("model.game.installingSteamComponents")

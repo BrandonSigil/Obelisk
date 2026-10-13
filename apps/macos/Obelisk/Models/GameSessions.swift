@@ -226,6 +226,8 @@ final class GameSessions<Store: GameStorefront> {
         let game: Store.GameID
         let account: Store.AccountID
         let running: Bool
+        /// Its game exited and the session settles before it ends.
+        let ended: Bool
         /// The runtime the launch waits for, while it downloads.
         let runtime: RuntimeComponent?
     }
@@ -297,7 +299,9 @@ final class GameSessions<Store: GameStorefront> {
         // Repeated states do not invalidate unchanged presentation.
         if self.active != active { self.active = active }
         let activeGame = active.map {
-            ActiveGame(game: $0.game, account: $0.account, running: $0.running, runtime: $0.runtimeInstall?.component)
+            ActiveGame(game: $0.game, account: $0.account, running: $0.running,
+                       ended: $0.phase == .finalizing || $0.phase == .finished,
+                       runtime: $0.runtimeInstall?.component)
         }
         if self.activeGame != activeGame { self.activeGame = activeGame }
         if isRecovering != state.recovering { isRecovering = state.recovering }
