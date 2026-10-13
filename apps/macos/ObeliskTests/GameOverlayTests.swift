@@ -216,8 +216,9 @@ final class GameOverlayTests: XCTestCase {
 
         let now = UInt64(Date().timeIntervalSince1970)
         state.receivedInvites = [
-            SteamReceivedInvite(friendSteamId: ChatBridgeTestSession.friendID, invite: .lobby(lobbyId: 1), receivedAt: now - 120),
-            SteamReceivedInvite(friendSteamId: 76_561_198_000_000_009, invite: .connect(connect: "+connect 1"),
+            SteamReceivedInvite(friendSteamId: ChatBridgeTestSession.friendID, appId: 620, invite: .lobby(lobbyId: 1),
+                                receivedAt: now - 120),
+            SteamReceivedInvite(friendSteamId: 76_561_198_000_000_009, appId: 620, invite: .connect(connect: "+connect 1"),
                                 receivedAt: now - 3_600),
         ]
         sessions.fake.show(state)

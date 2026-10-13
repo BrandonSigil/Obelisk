@@ -53,7 +53,8 @@ final class AppModel {
     @ObservationIgnored let libraryCache: LibraryCache
     @ObservationIgnored private let defaults: UserDefaults
 
-    /// The test host's models register no Shift-Tab and open no overlay.
+    /// The test host's models register no Shift-Tab, open no overlay and post
+    /// no notification.
     init(directory: URL = AppIdentity.libraryDirectory, defaults: UserDefaults = .standard, steam: SteamModel? = nil,
          epic: EpicModel? = nil, gog: GogModel? = nil, downloads: DownloadsModel? = nil,
          overlay: GameOverlayEnvironment = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil
@@ -70,6 +71,7 @@ final class AppModel {
         self.gog = gog ?? GogModel(directory: directory, libraryCache: libraryCache)
         self.overlay = GameOverlayController(steam: self.steam, epic: self.epic, gog: self.gog, environment: overlay)
         self.steam.overlay = self.overlay
+        self.steam.notifier = overlay.notifier
         self.downloads = downloads ?? DownloadsModel()
         self.downloads.progress = { [weak self] item in self?.downloadTransfer(item) }
         applyAutomaticUpdates()

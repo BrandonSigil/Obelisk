@@ -505,35 +505,6 @@ final class SteamChatIntegrationTests: XCTestCase {
     }
 
     @MainActor
-    func testOwnGameIsAskedForWhileTheAccountPlays() async throws {
-        let session = ChatBridgeTestSession()
-        let sessions = SteamGameSessions()
-        let chat = SteamChatModel(ownGameInterval: .milliseconds(40), isApplicationActive: false)
-        let model = friendsTestModel(connect: { _ in session }, gameSessions: sessions, chat: chat)
-        await model.start()
-        defer { model.signOut() }
-        try await eventually { model.isConnected && model.friends != nil }
-        XCTAssertEqual(session.ownGameRefreshes, 0)
-        model.openFriends()
-        try await eventually { session.ownGameRefreshes == 1 }
-
-        sessions.fake.show(.steam(appID: 620, accountID: FriendsWireFixture.accountID + 1))
-        try await eventually { sessions.active != nil }
-        try await Task.sleep(for: .milliseconds(120))
-        XCTAssertEqual(session.ownGameRefreshes, 1, "Another account's game leaves this one alone")
-
-        // The game may open its lobby long after launch.
-        sessions.fake.show(.steam(appID: 620, accountID: FriendsWireFixture.accountID))
-        try await eventually { session.ownGameRefreshes >= 4 }
-        sessions.fake.show(nil)
-        try await eventually { sessions.active == nil }
-        try await Task.sleep(for: .milliseconds(60))
-        let stopped = session.ownGameRefreshes
-        try await Task.sleep(for: .milliseconds(120))
-        XCTAssertEqual(session.ownGameRefreshes, stopped)
-    }
-
-    @MainActor
     func testRequestsInFlightEndWithTheirSession() async throws {
         let session = ChatBridgeTestSession()
         let chat = SteamChatModel(isApplicationActive: true)
@@ -810,7 +781,6 @@ final class ChatBridgeTestSession: SteamSessionProtocol, @unchecked Sendable {
     private var _reportedInvites: [ReportedInvite] = []
     private var _sent: [String] = []
     private var _onlineRequests = 0
-    private var _ownGameRefreshes = 0
     private var _historyRequests = 0
     private var _sessionRequests = 0
     private var _sessions: [SteamChatSession] = []
@@ -826,7 +796,6 @@ final class ChatBridgeTestSession: SteamSessionProtocol, @unchecked Sendable {
     var reportedInvites: [ReportedInvite] { lock.withLock { _reportedInvites } }
     var sent: [String] { lock.withLock { _sent } }
     var onlineRequests: Int { lock.withLock { _onlineRequests } }
-    var ownGameRefreshes: Int { lock.withLock { _ownGameRefreshes } }
     var historyRequests: Int { lock.withLock { _historyRequests } }
     var sessionRequests: Int { lock.withLock { _sessionRequests } }
     var sessions: [SteamChatSession] {
@@ -871,7 +840,6 @@ final class ChatBridgeTestSession: SteamSessionProtocol, @unchecked Sendable {
         return await chat.nextChat(afterSequence: afterSequence)
     }
     func nextOwnGame(afterRevision: UInt64) async -> SteamOwnGame { await chat.nextOwnGame(afterRevision: afterRevision) }
-    func refreshOwnGame() async throws { lock.withLock { _ownGameRefreshes += 1 } }
     func activeSessions() async throws -> [SteamChatSession] {
         lock.withLock { _sessionRequests += 1; return _sessions }
     }
@@ -897,6 +865,20 @@ final class ChatBridgeTestSession: SteamSessionProtocol, @unchecked Sendable {
     func inviteIntoGame(friendSteamId: UInt64, appId: UInt32, invite: SteamGameInvite) async throws {
         if let failure = inviteFailure { throw failure }
         lock.withLock { _reportedInvites.append(ReportedInvite(friend: friendSteamId, appId: appId, invite: invite)) }
+    }
+    func nextInvites(afterRevision: UInt64) async -> SteamReceivedInvites {
+        await chat.nextInvites(afterRevision: afterRevision)
+    }
+    /// What Steam tells of a friend's game, to join it.
+    var friendGames: @Sendable (UInt64) throws -> SteamJoinTarget {
+        get { lock.withLock { _friendGames } }
+        set { lock.withLock { _friendGames = newValue } }
+    }
+    private var _friendGames: @Sendable (UInt64) throws -> SteamJoinTarget = { _ in
+        throw SteamError.Failure(reason: "backend.steam.join.unavailable")
+    }
+    func friendGame(friendSteamId: UInt64) async throws -> SteamJoinTarget {
+        try friendGames(friendSteamId)
     }
 }
 

@@ -9,6 +9,7 @@ pub mod cm;
 pub mod content;
 pub mod friends;
 pub mod install_script;
+pub mod invites;
 mod kv;
 pub mod language;
 pub mod launch;

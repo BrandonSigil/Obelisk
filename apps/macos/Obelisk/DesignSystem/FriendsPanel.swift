@@ -110,6 +110,7 @@ private struct FriendsList: View {
                     .background(ObeliskStyle.accent.opacity(0.06))
                     .accessibilityIdentifier("friends-connection-status")
             }
+            if let invitations = chat?.invitations { joinStatus(invitations) }
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 4) {
                     if let accessory, picker == nil {
@@ -174,6 +175,31 @@ private struct FriendsList: View {
         .onChange(of: focus.target) { _, target in focusedControl = target }
         .onChange(of: focusedControl) { _, target in if let target { focus.target = target } }
         .onExitCommand(perform: dismiss)
+    }
+
+    /// A friend's game being looked up to join it, or why it could not be.
+    @ViewBuilder
+    private func joinStatus(_ invitations: SteamReceivedInvitations) -> some View {
+        if let join = invitations.friendJoin {
+            HStack(spacing: 10) {
+                switch join {
+                case .looking:
+                    ProgressView().controlSize(.small)
+                    Text(L10n.string("ui.invites.joiningFriend")).frame(maxWidth: .infinity, alignment: .leading)
+                case .failed(let failure):
+                    Label(failure, systemImage: "exclamationmark.circle").frame(maxWidth: .infinity, alignment: .leading)
+                    Button { invitations.friendJoin = nil } label: { Image(systemName: "xmark") }
+                        .obeliskButtonStyle(.plain)
+                        .accessibilityLabel(L10n.string("ui.overlay.invites.dismiss"))
+                }
+            }
+            .font(.system(size: 12))
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 22).padding(.vertical, 12)
+            .background(ObeliskStyle.accent.opacity(0.06))
+            .accessibilityElement(children: .combine)
+            .accessibilityIdentifier("friends-join-status")
+        }
     }
 
     private var header: some View {
@@ -349,8 +375,10 @@ struct FriendRow: View {
 }
 
 /// A Steam friend's row: it opens their conversation, and its button and
-/// menu offer the game the account can invite them into. In the game's
-/// picker, the row itself invites, and tells once it did.
+/// menu offer the game the account can invite them into, or join the one
+/// they invited it into. Its menu joins the game they play, as Steam's "Join
+/// Game" does. In the game's picker, the row itself invites, and tells once
+/// it did.
 private struct FriendChatRow: View {
     let friend: FriendPresentation
     let steamID: UInt64
@@ -364,6 +392,8 @@ private struct FriendChatRow: View {
         let invited = picking && chat.pickerInvited.contains(steamID)
         // Online, but Steam's chat reconnects: the picker waits for it.
         let waiting = picking && offer == nil && friend.presence.isOnline
+        let trailing = trailing(offer: offer, invited: invited, waiting: waiting)
+        let canJoinGame = joinable.map { chat.invitations?.availability(appId: $0).canJoin == true } ?? false
         Button {
             // A friend the picker cannot invite, offline for one, still opens.
             if picking, let offer {
@@ -371,16 +401,21 @@ private struct FriendChatRow: View {
             } else if !waiting { open() }
         } label: {
             FriendRow(friend: friend, avatars: avatars, unread: chat.unread[steamID] ?? 0)
-                .padding(.trailing, offer == nil && !waiting ? 0 : !picking ? 40 : invited ? 170 : 120)
+                .padding(.trailing, trailing.width)
         }
         .buttonStyle(FriendRowButtonStyle())
         .pointerCursor()
         .overlay(alignment: .trailing) {
             Group {
-                if let offer {
-                    if picking { pickerControl(offer, invited: invited) } else { inviteButton(offer) }
-                } else if waiting {
-                    unavailableControl
+                switch trailing {
+                case .join(let invite, let invitations):
+                    InvitationJoinButton(invite: invite, invitations: invitations, friendName: friend.displayName,
+                                         identifier: "friends-row-join-\(steamID)")
+                        .focusable(false)
+                case .invite(let offer): inviteButton(offer)
+                case .picker(let offer, let invited): pickerControl(offer, invited: invited)
+                case .unavailable: unavailableControl
+                case .empty: EmptyView()
                 }
             }
             .padding(.trailing, 10)
@@ -390,10 +425,17 @@ private struct FriendChatRow: View {
             if let offer, !invited {
                 Button(offer.menuTitle, systemImage: "gamecontroller") { invite(offer) }
             }
+            if let joinable {
+                Button(L10n.string("ui.invites.joinGame"), systemImage: "play") { join(joinable) }
+                    .disabled(!canJoinGame)
+            }
         }
         .accessibilityActions {
             Button(L10n.string("ui.chat.sendMessage"), action: open)
             if let offer, !invited { Button(offer.menuTitle) { invite(offer) } }
+            if let joinable, canJoinGame {
+                Button(L10n.string("ui.invites.joinGame")) { join(joinable) }
+            }
         }
         .accessibilityIdentifier("friends-row-\(steamID)")
     }
@@ -466,10 +508,82 @@ private struct FriendChatRow: View {
             .accessibilityIdentifier("friends-row-invite-unavailable-\(steamID)")
     }
 
+    /// The Steam game the friend plays, which Steam's "Join Game" would join.
+    private var joinable: UInt32? {
+        guard !picking, friend.presence.isOnline, let id = friend.activity?.id else { return nil }
+        return UInt32(id)
+    }
+
+    private func join(_ appId: UInt32) {
+        chat.invitations?.joinFriend(steamID, appId: appId)
+    }
+
+    /// What the row shows at its trailing edge, and the room it leaves for it.
+    private enum Trailing {
+        /// A friend's invitation, in place of the invite button while it can
+        /// be joined, or while there is nothing to invite them into.
+        case join(SteamReceivedInvite, SteamReceivedInvitations)
+        case invite(SteamInviteOffer)
+        case picker(SteamInviteOffer, invited: Bool)
+        /// The picker's Invite while Steam's chat reconnects.
+        case unavailable
+        case empty
+
+        var width: CGFloat {
+            switch self {
+            case .join: 110
+            case .invite: 40
+            case .picker(_, let invited): invited ? 170 : 120
+            case .unavailable: 120
+            case .empty: 0
+            }
+        }
+    }
+
+    private func trailing(offer: SteamInviteOffer?, invited: Bool, waiting: Bool) -> Trailing {
+        if !picking, let invitations = chat.invitations, let invite = invitations.invite(from: steamID),
+           offer == nil || invitations.availability(appId: invite.appId).canJoin {
+            return .join(invite, invitations)
+        }
+        if let offer { return picking ? .picker(offer, invited: invited) : .invite(offer) }
+        return waiting ? .unavailable : .empty
+    }
+
     /// Outside the picker, the conversation opens to show the outcome.
     private func invite(_ offer: SteamInviteOffer) {
         chat.invite(steamID, to: offer)
         if !picking { open() }
+    }
+}
+
+/// Joins a friend's invitation; greyed, with why, while Play is unavailable.
+struct InvitationJoinButton: View {
+    let invite: SteamReceivedInvite
+    let invitations: SteamReceivedInvitations
+    let friendName: String
+    let identifier: String
+
+    var body: some View {
+        let availability = invitations.availability(appId: invite.appId)
+        let accepting = invitations.accepting == SteamReceivedInvitations.Key(invite)
+        Button { Task { _ = await invitations.accept(invite) } } label: {
+            HStack(spacing: 6) {
+                if accepting { ProgressView().controlSize(.mini).tint(.white) }
+                else { Image(systemName: "play.fill") }
+                Text(L10n.string("ui.overlay.invites.join"))
+            }
+            .font(.system(size: 12, weight: .semibold)).foregroundStyle(.white)
+            .padding(.horizontal, 12).frame(height: 28)
+            .background(LinearGradient(colors: ObeliskStyle.launchGradient, startPoint: .leading, endPoint: .trailing),
+                        in: Capsule())
+            .opacity(availability.canJoin ? 1 : 0.45)
+            .contentShape(Capsule())
+        }
+        .obeliskButtonStyle(.plain)
+        .disabled(!availability.canJoin || invitations.accepting != nil)
+        .help(availability.reason ?? "")
+        .accessibilityLabel(L10n.string("ui.overlay.invites.joinNamed", friendName))
+        .accessibilityIdentifier(identifier)
     }
 }
 
@@ -552,6 +666,13 @@ extension FriendPresentation {
 
     /// Nil for a friend of another storefront.
     var steamID: UInt64? { id.account.storeID == "steam" ? UInt64(id.friendID) : nil }
+}
+
+extension FriendsPresentationState {
+    /// The Steam friend `steamID`, when the list shows them.
+    func friend(_ steamID: UInt64) -> FriendPresentation? {
+        friends.first { $0.steamID == steamID }
+    }
 }
 
 extension SteamInviteOffer {

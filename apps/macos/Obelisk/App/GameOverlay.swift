@@ -91,6 +91,8 @@ struct GameOverlayEnvironment {
     var presenter: any OverlayPresenter
     /// Tells of an invitation over the game while the overlay is closed.
     var toaster: any OverlayToastPresenter
+    /// Tells of an invitation while no game runs; the test host posts none.
+    var notifier: (any SteamInviteNotifying)? = nil
     /// The application in front now.
     var frontmost: @MainActor () -> OverlayApplication?
     /// Where Voile's runtimes are installed.
@@ -101,7 +103,7 @@ struct GameOverlayEnvironment {
     static var live: GameOverlayEnvironment {
         GameOverlayEnvironment(
             hotKey: CarbonOverlayHotKey(), presenter: GameOverlayPanelPresenter(),
-            toaster: OverlayToastPanelPresenter(),
+            toaster: OverlayToastPanelPresenter(), notifier: SteamInviteNotifier(),
             frontmost: { NSWorkspace.shared.frontmostApplication.map(OverlayApplication.init) },
             voile: ObeliskLocations.live.voile, observesActivations: true
         )
@@ -307,9 +309,10 @@ final class GameOverlayController {
         return steam.purchase.pending
     }
 
-    /// Friends' invitations into the running Steam game.
+    /// Friends' invitations, while a Steam game runs: those into it join it
+    /// at once.
     var receivedInvites: [SteamReceivedInvite] {
-        guard let session, case .steam = session.game, steam.invitations.session == session.id else { return [] }
+        guard let session, case .steam = session.game else { return [] }
         return steam.invitations.invites
     }
 
@@ -318,22 +321,26 @@ final class GameOverlayController {
         steamFriend(invite.friendSteamId)
     }
 
-    /// A friend's invitation reached the running game: the player hears of
-    /// it, without leaving the game.
-    func announce(_ invite: SteamReceivedInvite) {
+    /// A friend's invitation arrived while a Steam game runs: the player
+    /// hears of it without leaving the game, or sees it in the open overlay.
+    /// False when no Steam game runs, so another notice tells of it.
+    func announce(_ invite: SteamReceivedInvite) -> Bool {
         follow(runningSession)
-        guard let session, case .steam = session.game, !isPresented else { return }
+        guard let session, case .steam = session.game else { return false }
+        guard !isPresented else { return true }
         let friend = sender(of: invite)
+        let name = friend?.displayName ?? L10n.string("ui.overlay.invites.someone")
         let toast = OverlayToast(
             friend: friend,
-            message: L10n.string("ui.overlay.invites.toast", friend?.displayName ?? L10n.string("ui.overlay.invites.someone"),
-                                 gameTitle),
+            message: steam.gameName(appId: invite.appId).map { L10n.string("ui.overlay.invites.toast", name, $0) }
+                ?? L10n.string("ui.chat.invite.receivedUnknown", name),
             hint: L10n.string("ui.overlay.invites.toastHint")
         )
         avatars.activate(account: friends?.account)
         environment.toaster.show(toast, avatars: avatars, over: gameApplication) { [weak self] in
             self?.present(.home, userInitiated: true)
         }
+        return true
     }
 
     /// Joins `invite`: once the game is told, the player is back in it.
@@ -437,7 +444,7 @@ final class GameOverlayController {
 
     private func steamFriend(_ steamId: UInt64) -> FriendPresentation? {
         guard case .steam? = session?.game else { return nil }
-        return steam.friends?.friends.first { $0.steamID == steamId }
+        return steam.friends?.friend(steamId)
     }
 
     /// Cookies that sign a Steam page in as the Steam account; a page of

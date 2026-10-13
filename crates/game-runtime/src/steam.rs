@@ -58,6 +58,24 @@ pub enum Control {
     AuthorizeMicroTxn { order_id: u64, approve: bool },
 }
 
+/// What a Steam game joins as it starts, as Steam's client starts a game
+/// from an invitation it accepted (steamui's `steam://joinlobby` and
+/// `steam://rungame`): the lobby or connect string a running game accepts.
+pub type Join = crate::protocol::InviteTarget;
+
+impl Join {
+    /// The arguments it adds after the game's own, for a build of
+    /// `platform`: `+connect_lobby <lobby>`, or the connect string split as
+    /// that platform's command line does, never through a shell.
+    pub fn arguments(&self, platform: &str) -> Vec<String> {
+        match self {
+            Self::Lobby { lobby_id } => vec!["+connect_lobby".into(), lobby_id.to_string()],
+            Self::Connect { connect } => obelisk_core::launch::parse_arguments(connect, platform)
+                .unwrap_or_else(|_| connect.split_whitespace().map(str::to_owned).collect()),
+        }
+    }
+}
+
 pub type Snapshot = Record<Steam>;
 pub type Client = supervisor::Client<Steam>;
 pub type IdleGuard = supervisor::IdleGuard<Steam>;
@@ -227,6 +245,7 @@ impl crate::installations::Storefront for Steam {
     /// None while Steam picks the build the account can install, the native
     /// one first.
     type Platform = Option<String>;
+    type Join = Join;
     const RECEIPTS_UNAVAILABLE: &'static str = "model.steam.receiptsUnavailable";
     const RECEIPTS_NOT_SAVED: &'static str = "model.steam.receiptsNotSaved";
     const GAMES_DIRECTORY: &'static str = "Games/Steam";
@@ -305,5 +324,50 @@ impl crate::sessions::Sessions<Steam> {
         approve: bool,
     ) -> Result<(), crate::sessions::Failure> {
         self.control(id, Control::AuthorizeMicroTxn { order_id, approve })
+    }
+}
+
+#[cfg(test)]
+mod join_tests {
+    use super::Join;
+
+    #[test]
+    fn a_join_adds_what_steams_client_adds_to_the_command_line() {
+        let lobby = Join::Lobby {
+            lobby_id: 109_775_244_421_126_053,
+        };
+        assert!(lobby.valid());
+        assert_eq!(
+            lobby.arguments("windows"),
+            ["+connect_lobby", "109775244421126053"]
+        );
+        let connect = Join::Connect {
+            connect: r#"+connect "10.0.0.1:27015" +password "two words""#.into(),
+        };
+        for platform in ["windows", "macos"] {
+            assert_eq!(
+                connect.arguments(platform),
+                ["+connect", "10.0.0.1:27015", "+password", "two words"],
+                "{platform}"
+            );
+        }
+        // A Mac command line it cannot read splits on spaces.
+        let unbalanced = Join::Connect {
+            connect: "+connect 'x y".into(),
+        };
+        assert_eq!(unbalanced.arguments("macos"), ["+connect", "'x", "y"]);
+        for invalid in [
+            Join::Lobby {
+                lobby_id: 76_561_197_960_265_729,
+            },
+            Join::Connect {
+                connect: String::new(),
+            },
+            Join::Connect {
+                connect: "a".repeat(256),
+            },
+        ] {
+            assert!(!invalid.valid(), "{invalid:?}");
+        }
     }
 }

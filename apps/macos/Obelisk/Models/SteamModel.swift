@@ -85,8 +85,12 @@ final class SteamModel {
     let libraryPlatforms = SteamLibraryPlatforms()
     /// Chat and game invitations, through the session the friends list follows.
     let chat: SteamChatModel
-    /// Friends' invitations into the running game.
+    /// Friends' invitations, into the running game or another.
     let invitations: SteamReceivedInvitations
+    /// Tells of an invitation while no running game shows the overlay.
+    @ObservationIgnored var notifier: (any SteamInviteNotifying)? {
+        didSet { notifier?.answer = { [weak self] answer, invite in self?.answerNotice(answer, invite) } }
+    }
     /// The in-game purchase the running game waits on.
     let purchase: SteamPurchaseAuthorization
     /// Where the account's last library is kept between launches. The
@@ -172,13 +176,17 @@ final class SteamModel {
         self.rosetta = SteamRosettaModel(sessions: gameSessions)
         self.installations = SteamInstallations(sessions: gameSessions, cloud: cloud)
         self.chat = chat ?? SteamChatModel()
-        self.invitations = SteamReceivedInvitations(sessions: gameSessions)
+        self.invitations = SteamReceivedInvitations(sessions: gameSessions, installations: installations)
         self.purchase = SteamPurchaseAuthorization(sessions: gameSessions)
         wakeObserver = SystemWakeObservation { [weak self] in
             Task { @MainActor [weak self] in self?.retryFriends() }
         }
         installations.selection = { [weak self] in self?.installationSelection }
         self.chat.gameName = { [weak self] in self?.gameName(appId: $0) }
+        self.chat.invitations = invitations
+        invitations.friendMayPlay = { [weak self] in self?.friendMayPlay($0, $1) ?? true }
+        invitations.onReceived = { [weak self] in self?.announce($0) }
+        invitations.onGone = { [weak self] in self?.notifier?.withdraw($0) }
         observeGameSessions()
     }
 
@@ -449,6 +457,7 @@ final class SteamModel {
             friends = Self.emptyFriends(accountID: credentials.steamId)
             // Rust's session logged on Online; the chat follows it from here.
             chat.connect(connected, account: credentials.steamId)
+            invitations.connect(connected, account: credentials.steamId)
             followGameSession(account: credentials.steamId)
             observeFriends(connected, generation: current)
             login = nil
@@ -615,16 +624,13 @@ final class SteamModel {
     private func followGameSession(account: UInt64?) {
         let active = gameSessions.active
         let playing = account != nil && active?.account == account ? active : nil
-        chat.setPlaying(playing != nil)
         let running = playing?.running == true ? playing : nil
         if chat.followGame(session: running?.id, appId: running?.game ?? 0, request: running?.inviteRequest,
                            lobby: running?.lobbyId) {
             openInvitePicker()
         }
         followOverlayRequest(of: running)
-        if let invite = invitations.follow(session: running?.id, invites: running?.receivedInvites ?? []).first {
-            overlay?.announce(invite)
-        }
+        invitations.follow(session: running?.id, invites: running?.receivedInvites ?? [])
         if purchase.follow(session: running?.id, microTxn: running?.microTxn), let pending = purchase.pending {
             overlay?.present(.microTxn(orderId: pending.orderId))
         }
@@ -651,13 +657,45 @@ final class SteamModel {
             chat.closeInvitePicker()
             return
         }
-        chat.refreshOwnGame()
+    }
+
+    /// Tells of the newest of `invites` that just arrived: over the running
+    /// game when its overlay can show, else in a macOS notification.
+    private func announce(_ invites: [SteamReceivedInvite]) {
+        guard let invite = invites.first else { return }
+        if overlay?.announce(invite) == true { return }
+        let name = friends?.friend(invite.friendSteamId)?.displayName ?? L10n.string("ui.overlay.invites.someone")
+        notifier?.notify(invite, friend: name, game: gameName(appId: invite.appId))
+    }
+
+    /// The player answered an invitation's notification.
+    private func answerNotice(_ answer: SteamInviteAnswer, _ invite: SteamReceivedInvite) {
+        switch answer {
+        case .join:
+            // A notice outlives its invitation: only one still listed joins.
+            guard let listed = invitations.listed(invite) else { return }
+            let invitations = invitations
+            Task { _ = await invitations.accept(listed) }
+        case .dismiss:
+            invitations.dismiss(invite)
+        case .open:
+            overlay?.showLibrary()
+            openFriends()
+        }
+    }
+
+    /// Whether the friends list lets `friend` still play `appId`, for the
+    /// invitations: one it does not know yet, or shows online without a
+    /// Steam game, may.
+    private func friendMayPlay(_ friend: UInt64, _ appId: UInt32) -> Bool {
+        guard let presentation = friends?.friend(friend), presentation.presence != .unknown else { return true }
+        guard presentation.presence.isOnline else { return false }
+        return presentation.activity.flatMap { UInt32($0.id) }.map { $0 == appId } ?? true
     }
 
     func openFriends() {
         guard friends != nil else { return }
         isFriendsPresented = true
-        chat.refreshOwnGame()
     }
 
     func closeFriends() {
@@ -718,6 +756,7 @@ final class SteamModel {
             transport = reconnected
             libraryPlatforms.cancel()
             chat.connect(session, account: account)
+            invitations.connect(session, account: account)
             Task { [weak self] in
                 guard let self else { return }
                 await self.reloadGames(session, generation: current)
@@ -729,6 +768,7 @@ final class SteamModel {
             transport = nil
             libraryPlatforms.cancel()
             chat.suspend()
+            invitations.suspend()
         }
     }
 
@@ -772,7 +812,10 @@ final class SteamModel {
         }
         presentation.lastKnownOnlineCount = snapshot.connection == .ready
             ? presentation.onlineCount : friends?.lastKnownOnlineCount
-        if friends != presentation { friends = presentation }
+        if friends != presentation {
+            friends = presentation
+            invitations.friendsChanged()
+        }
     }
 
     func signOut() {
@@ -791,7 +834,7 @@ final class SteamModel {
         session?.shutdown()
         chat.reset()
         followedOverlay = SessionSequence()
-        invitations.follow(session: nil, invites: [])
+        invitations.reset()
         purchase.follow(session: nil, microTxn: nil)
         sessionCredentials = nil
         webSignIn = nil

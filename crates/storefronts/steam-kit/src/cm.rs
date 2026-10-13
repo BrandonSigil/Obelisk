@@ -22,7 +22,7 @@ use tokio::task::JoinHandle;
 use tokio::time::{Instant, timeout, timeout_at};
 use tokio_tungstenite::tungstenite::{Message as WsMessage, protocol::WebSocketConfig};
 
-use crate::{chat, friends, kv, own_game, proto};
+use crate::{chat, friends, invites, kv, own_game, proto};
 pub mod achievements;
 mod cloud;
 mod pics;
@@ -363,18 +363,23 @@ pub struct SteamConnection {
     logged_on: Arc<AtomicBool>,
 }
 
-/// Pushes only a chat-enabled session receives: friends chat notifications and
-/// the account's own game. They end with the connection, like the friends list.
+/// Pushes only a chat-enabled session receives: friends chat notifications,
+/// the account's and its friends' games, and the invitations friends send
+/// it. They end with the connection, like the friends list.
 #[derive(Clone, Default)]
 struct Social {
     chat: chat::ChatEventSource,
     own_game: own_game::OwnGameSource,
+    invites: invites::InviteSource,
+    friend_games: own_game::FriendGames,
 }
 
 impl Social {
     fn disconnect(&self) {
         self.chat.disconnect();
         self.own_game.disconnect();
+        self.invites.disconnect();
+        self.friend_games.disconnect();
     }
 }
 
@@ -1249,14 +1254,23 @@ async fn connection_worker(
                         if packet.kind == SERVICE_NOTIFICATION {
                             if let Some(method) = &packet.header.target_name {
                                 social.chat.receive(method, &packet.body);
+                                social.invites.receive_notification(method, &packet.body);
                             }
+                            continue;
+                        }
+                        if matches!(packet.kind, invites::CHAT_INVITE | invites::INVITE_TO_GAME) {
+                            social.invites.receive_packet(packet.kind, packet.header.routing_appid, &packet.body);
                             continue;
                         }
                         hydration.apply(friends, packet.kind, &packet.body);
                         if packet.kind == PERSONA_STATE
                             && let Some(steam_id) = heartbeat_header.as_ref().and_then(|header| header.steam_id)
                         {
-                            social.own_game.receive(steam_id, &packet.body);
+                            // Malformed optional persona updates are ignored.
+                            if let Ok(state) = proto::PersonaState::decode(&packet.body[..]) {
+                                social.own_game.receive_state(steam_id, &state);
+                                social.friend_games.receive(steam_id, &state);
+                            }
                             if let Some(update) = persona_profile(&packet.body, steam_id) {
                                 profile.send_modify(|state| {
                                     if let ProfileState::Ready(snapshot) = state {

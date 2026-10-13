@@ -191,7 +191,8 @@ pub(crate) struct InviteToLobby {
     pub steam_id_user_invited: u64,
 }
 
-/// CMsgClientInviteToGame, steammessages_clientserver.proto.
+/// CMsgClientInviteToGame, steammessages_clientserver.proto. Steam forwards
+/// it to the friend invited, with the inviter as `steam_id_src`.
 #[derive(Clone, PartialEq, prost::Message)]
 pub(crate) struct InviteToGame {
     #[prost(fixed64, tag = "1")]
@@ -200,6 +201,25 @@ pub(crate) struct InviteToGame {
     pub steam_id_src: u64,
     #[prost(string, tag = "3")]
     pub connect_string: String,
+    /// Set only by Remote Play Together.
+    #[prost(string, tag = "4")]
+    pub remote_play: String,
+}
+
+/// CMsgClientChatInvite, steammessages_clientserver.proto: how a lobby
+/// invitation reaches the friend invited.
+#[derive(Clone, PartialEq, prost::Message)]
+pub(crate) struct ChatInvite {
+    #[prost(fixed64, tag = "1")]
+    pub steam_id_invited: u64,
+    #[prost(fixed64, tag = "2")]
+    pub steam_id_chat: u64,
+    #[prost(fixed64, tag = "3")]
+    pub steam_id_patron: u64,
+    #[prost(int32, tag = "4")]
+    pub chatroom_type: i32,
+    #[prost(fixed64, tag = "7")]
+    pub game_id: u64,
 }
 
 // FriendMessages services, steammessages_friendmessages.steamclient.proto.

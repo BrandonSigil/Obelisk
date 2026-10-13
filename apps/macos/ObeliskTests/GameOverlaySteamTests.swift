@@ -8,6 +8,7 @@ final class GameOverlaySteamTests: XCTestCase {
     private static let peakLobby: UInt64 = 109_775_244_421_126_053
     private static let alice = ChatBridgeTestSession.friendID
     private static let stranger: UInt64 = 76_561_198_000_000_009
+    private static let other: UInt64 = 76_561_198_000_000_010
     private static let account = FriendsWireFixture.accountID
     private static let game = OverlayApplication(pid: 4_242, bundleIdentifier: "com.zagrios.obelisk.game.peak")
 
@@ -168,11 +169,14 @@ final class GameOverlaySteamTests: XCTestCase {
         defer { model.signOut() }
         let overlay = fixture.overlay
         let toaster = fixture.toaster
-        let old = SteamReceivedInvite(friendSteamId: Self.stranger, invite: .connect(connect: "+connect 10.0.0.1"),
-                                      receivedAt: 1_000)
-        let alice = SteamReceivedInvite(friendSteamId: Self.alice, invite: .lobby(lobbyId: Self.peakLobby),
-                                        receivedAt: 2_000)
-        let later = SteamReceivedInvite(friendSteamId: Self.stranger, invite: .lobby(lobbyId: 7), receivedAt: 3_000)
+        let now = UInt64(Date().timeIntervalSince1970)
+        let peakApp = Self.peak.appId
+        let old = SteamReceivedInvite(friendSteamId: Self.stranger, appId: peakApp, invite: .connect(connect: "+connect 10.0.0.1"),
+                                      receivedAt: now - 600)
+        let alice = SteamReceivedInvite(friendSteamId: Self.alice, appId: peakApp, invite: .lobby(lobbyId: Self.peakLobby),
+                                        receivedAt: now - 500)
+        let later = SteamReceivedInvite(friendSteamId: Self.other, appId: peakApp, invite: .lobby(lobbyId: 7),
+                                        receivedAt: now - 400)
 
         // Invitations the session showed when first seen are listed, not toasted.
         sessions.fake.show(peak(nil, invites: [old]))
@@ -206,7 +210,8 @@ final class GameOverlaySteamTests: XCTestCase {
         // Dismissed until its friend sends it again.
         overlay.dismiss(old)
         XCTAssertEqual(overlay.receivedInvites, [later, alice])
-        let resent = SteamReceivedInvite(friendSteamId: old.friendSteamId, invite: old.invite, receivedAt: 4_000)
+        let resent = SteamReceivedInvite(friendSteamId: old.friendSteamId, appId: peakApp, invite: old.invite,
+                                         receivedAt: now - 300)
         sessions.fake.show(peak(nil, invites: [resent, later, alice], lobby: 1))
         try await eventually { overlay.receivedInvites == [resent, later, alice] }
 

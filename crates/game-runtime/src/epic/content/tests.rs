@@ -373,7 +373,7 @@ async fn a_launch_code_that_another_account_signed_is_refused_before_the_game_st
     eventually(|| !sessions.state().recovering).await;
     let admission = sessions.admit(game(), ACCOUNT.into()).unwrap();
 
-    let launched = fixture.content.launch(&receipt, admission).await;
+    let launched = fixture.content.launch(&receipt, admission, None).await;
 
     assert_eq!(
         launched,
@@ -404,7 +404,7 @@ async fn a_windows_launch_gets_voile_before_it_is_prepared_and_a_mac_launch_gets
     let canceller = admission.canceller();
     let windows = fixture.installed("Windows");
 
-    let (launched, ()) = tokio::join!(fixture.content.launch(&windows, admission), async {
+    let (launched, ()) = tokio::join!(fixture.content.launch(&windows, admission, None), async {
         eventually(|| !events.lock().unwrap().is_empty()).await;
         canceller.cancel();
     });
@@ -424,7 +424,7 @@ async fn a_windows_launch_gets_voile_before_it_is_prepared_and_a_mac_launch_gets
     let admission = sessions.admit(game(), ACCOUNT.into()).unwrap();
     let launched = fixture
         .content
-        .launch(&fixture.installed("Mac"), admission)
+        .launch(&fixture.installed("Mac"), admission, None)
         .await;
     assert_eq!(
         launched,

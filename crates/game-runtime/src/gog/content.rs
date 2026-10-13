@@ -172,6 +172,7 @@ impl<N: Network> installations::Content<Gog> for Content<N> {
         &'a self,
         receipt: &'a Receipt<Gog>,
         admission: Admission<Gog>,
+        _: Option<&'a std::convert::Infallible>,
     ) -> BoxFuture<'a, Result<(), Failure>> {
         Box::pin(async move {
             admission

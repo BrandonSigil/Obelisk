@@ -1,7 +1,7 @@
 import SwiftUI
 
-/// Friends' invitations into the running Steam game: the player joins one,
-/// back in the game at once, or dismisses it.
+/// Friends' invitations while a Steam game runs: the player joins one into
+/// that game, back in it at once, or dismisses one.
 struct OverlayInvitations: View {
     let overlay: GameOverlayController
     /// The friends column's narrow rows put their buttons under the text.
@@ -36,6 +36,7 @@ private struct OverlayInvitationRow: View {
         let invitations = overlay.steam.invitations
         let accepting = invitations.accepting == key
         let failure = invitations.failures[key]
+        let availability = invitations.availability(appId: invite.appId)
         let name = friend?.displayName ?? L10n.string("ui.overlay.invites.someone")
         let summary = HStack(spacing: 12) {
             if let friend {
@@ -53,7 +54,7 @@ private struct OverlayInvitationRow: View {
                     .font(.system(size: 13, weight: .semibold))
                     .lineLimit(1)
                 TimelineView(.everyMinute) { context in
-                    Text(L10n.string("ui.overlay.invites.subtitle", overlay.gameTitle,
+                    Text(L10n.string("ui.overlay.invites.subtitle", overlay.steam.gameName(appId: invite.appId) ?? L10n.string("ui.invites.unknownGame"),
                                      Self.received(invite, now: context.date)))
                 }
                 .font(.system(size: 11))
@@ -95,7 +96,8 @@ private struct OverlayInvitationRow: View {
                 .contentShape(Capsule())
             }
             .obeliskButtonStyle(.plain)
-            .disabled(invitations.accepting != nil)
+            .disabled(invitations.accepting != nil || !availability.canJoin)
+            .help(availability.reason ?? "")
             .accessibilityLabel(L10n.string("ui.overlay.invites.joinNamed", name))
             .accessibilityIdentifier("game-overlay-invite-join-\(invite.friendSteamId)")
         }

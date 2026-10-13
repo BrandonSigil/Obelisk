@@ -1,7 +1,13 @@
-//! The account's own game as Steam reports it to the UI session, and whether
+//! The account's own game as Steam pushes it to the UI session, and whether
 //! that game can invite a friend right now. The friends list never includes
 //! the account itself, so its persona feeds this separate watch channel.
-use std::time::Duration;
+//! Asking Steam for the account's own persona makes its game drop out and
+//! come back, which tells every friend again that it started: Obelisk never
+//! asks, and only reads what Steam pushes.
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex, PoisonError},
+};
 
 use prost::Message;
 use tokio::sync::watch;
@@ -10,7 +16,8 @@ use crate::{friends, proto};
 
 pub(crate) const RICH_PRESENCE: u32 = 4096;
 /// EClientPersonaStateFlag Status | PlayerName | Presence | GameExtraInfo |
-/// GameDataBlob | RichPresence (SteamKit enums.steamd).
+/// GameDataBlob | RichPresence (SteamKit enums.steamd), as fixtures push them.
+#[cfg(any(test, debug_assertions))]
 pub(crate) const REQUESTED: u32 = friends::STATUS
     | friends::PLAYER_NAME
     | friends::PRESENCE
@@ -81,16 +88,8 @@ impl OwnGame {
 }
 
 #[derive(Clone)]
-struct State {
-    game: OwnGame,
-    /// Persona packets about the account's game, changed or not, so a caller
-    /// can tell a fresh answer from the state it already had.
-    received: u64,
-}
-
-#[derive(Clone)]
 pub struct OwnGameSource {
-    state: watch::Sender<State>,
+    game: watch::Sender<OwnGame>,
 }
 
 impl Default for OwnGameSource {
@@ -102,15 +101,12 @@ impl Default for OwnGameSource {
 impl OwnGameSource {
     pub fn new() -> Self {
         Self {
-            state: watch::channel(State {
-                game: OwnGame {
-                    revision: 1,
-                    connected: true,
-                    app_id: 0,
-                    lobby_id: 0,
-                    connect: None,
-                },
-                received: 0,
+            game: watch::channel(OwnGame {
+                revision: 1,
+                connected: true,
+                app_id: 0,
+                lobby_id: 0,
+                connect: None,
             })
             .0,
         }
@@ -119,9 +115,13 @@ impl OwnGameSource {
     /// Applies a ClientPersonaState packet's entry for `account_id`, if any.
     /// Malformed optional packets are ignored.
     pub fn receive(&self, account_id: u64, body: &[u8]) {
-        let Ok(state) = proto::PersonaState::decode(body) else {
-            return;
-        };
+        if let Ok(state) = proto::PersonaState::decode(body) {
+            self.receive_state(account_id, &state);
+        }
+    }
+
+    /// Applies a decoded ClientPersonaState's entry for `account_id`, if any.
+    pub(crate) fn receive_state(&self, account_id: u64, state: &proto::PersonaState) {
         if state.status_flags & (friends::STATUS | RICH_PRESENCE) == 0 {
             return;
         }
@@ -132,60 +132,44 @@ impl OwnGameSource {
         else {
             return;
         };
-        self.state.send_if_modified(|current| {
-            if !current.game.connected {
+        self.game.send_if_modified(|current| {
+            if !current.connected {
                 return false;
             }
-            current.received += 1;
-            let mut next = current.game.clone();
+            let mut next = current.clone();
             apply(&mut next, state.status_flags, persona);
-            if next != current.game {
-                next.revision += 1;
-                current.game = next;
+            if next == *current {
+                return false;
             }
+            next.revision += 1;
+            *current = next;
             true
         });
     }
 
     pub fn snapshot(&self) -> OwnGame {
-        self.state.borrow().game.clone()
-    }
-
-    pub(crate) fn received(&self) -> u64 {
-        self.state.borrow().received
-    }
-
-    /// The state once a packet after `after_received` arrived, or the latest
-    /// one when none does within `wait`.
-    pub(crate) async fn fresh(&self, after_received: u64, wait: Duration) -> OwnGame {
-        let ready = obelisk_core::watch::next_matching(self.state.subscribe(), |state| {
-            state.received != after_received || !state.game.connected
-        });
-        match tokio::time::timeout(wait, ready).await {
-            Ok(Ok(state) | Err(state)) => state.game,
-            Err(_) => self.snapshot(),
-        }
+        self.game.borrow().clone()
     }
 
     /// Waits for a revision other than `after_revision`; disconnection wakes
     /// every wait.
     pub async fn next(&self, after_revision: u64) -> OwnGame {
-        match obelisk_core::watch::next_matching(self.state.subscribe(), |state| {
-            state.game.revision != after_revision || !state.game.connected
+        match obelisk_core::watch::next_matching(self.game.subscribe(), |game| {
+            game.revision != after_revision || !game.connected
         })
         .await
         {
-            Ok(state) | Err(state) => state.game,
+            Ok(game) | Err(game) => game,
         }
     }
 
     pub fn disconnect(&self) {
-        self.state.send_if_modified(|current| {
-            if !current.game.connected {
+        self.game.send_if_modified(|current| {
+            if !current.connected {
                 return false;
             }
-            current.game = OwnGame {
-                revision: current.game.revision + 1,
+            *current = OwnGame {
+                revision: current.revision + 1,
                 connected: false,
                 app_id: 0,
                 lobby_id: 0,
@@ -193,6 +177,84 @@ impl OwnGameSource {
             };
             true
         });
+    }
+}
+
+/// The games the account's friends play, as Steam pushes their personas:
+/// what Steam's "Join Game" joins, their lobby or rich presence `connect`.
+/// Asking Steam for a friend's persona answers first with an empty one, which
+/// would read as offline, so only pushes count.
+#[derive(Clone)]
+pub struct FriendGames {
+    state: Arc<Mutex<FriendGamesState>>,
+}
+
+struct FriendGamesState {
+    connected: bool,
+    games: HashMap<u64, OwnGame>,
+}
+
+impl Default for FriendGames {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl FriendGames {
+    /// More friends than any account has; a flood cannot grow it further.
+    const MAX: usize = 10_000;
+
+    pub fn new() -> Self {
+        Self {
+            state: Arc::new(Mutex::new(FriendGamesState {
+                connected: true,
+                games: HashMap::new(),
+            })),
+        }
+    }
+
+    /// Applies a ClientPersonaState's entries for anyone but `account_id`,
+    /// the account itself.
+    pub(crate) fn receive(&self, account_id: u64, state: &proto::PersonaState) {
+        if state.status_flags & (friends::STATUS | RICH_PRESENCE) == 0 {
+            return;
+        }
+        let mut current = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        if !current.connected {
+            return;
+        }
+        for persona in &state.friends {
+            if !friends::individual(persona.friend_id, account_id)
+                || (current.games.len() >= Self::MAX
+                    && !current.games.contains_key(&persona.friend_id))
+            {
+                continue;
+            }
+            let game = current.games.entry(persona.friend_id).or_insert(OwnGame {
+                revision: 0,
+                connected: true,
+                app_id: 0,
+                lobby_id: 0,
+                connect: None,
+            });
+            apply(game, state.status_flags, persona);
+        }
+    }
+
+    /// `friend`'s game as Steam last pushed it.
+    pub fn game(&self, friend: u64) -> Option<OwnGame> {
+        let state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        state
+            .connected
+            .then(|| state.games.get(&friend).cloned())
+            .flatten()
+    }
+
+    pub fn disconnect(&self) {
+        self.state
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .connected = false;
     }
 }
 
@@ -421,21 +483,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn observers_wake_on_change_and_disconnect_and_fresh_waits_are_bounded() {
+    async fn observers_wake_on_change_and_disconnect() {
         let source = OwnGameSource::new();
-        let received = source.received();
-        // An unchanged answer still counts as fresh.
-        let fresh = tokio::spawn({
-            let source = source.clone();
-            async move { source.fresh(received, Duration::from_secs(5)).await }
-        });
-        tokio::task::yield_now().await;
+        // An unchanged persona changes no revision.
         source.receive(ACCOUNT, &persona(REQUESTED, playing(0, 0, None)));
-        assert_eq!(fresh.await.unwrap().revision, 1);
-        let stale = source
-            .fresh(source.received(), Duration::from_millis(10))
-            .await;
-        assert_eq!(stale.revision, 1);
+        assert_eq!(source.snapshot().revision, 1);
 
         let waiting = tokio::spawn({
             let source = source.clone();
@@ -453,5 +505,43 @@ mod tests {
         let ended = waiting.await.unwrap();
         assert!(!ended.connected);
         assert_eq!(ended.invite(), GameInvite::None);
+    }
+
+    #[test]
+    fn friends_games_follow_their_pushed_personas() {
+        const FRIEND: u64 = ACCOUNT + 1;
+        let games = FriendGames::new();
+        let friend = |persona: proto::Persona| proto::PersonaState {
+            status_flags: REQUESTED,
+            friends: vec![proto::Persona {
+                friend_id: FRIEND,
+                ..persona
+            }],
+        };
+        games.receive(ACCOUNT, &friend(playing(620, 9, Some("+join"))));
+        assert_eq!(
+            games.game(FRIEND).map(|game| game.invite()),
+            Some(GameInvite::Lobby { lobby_id: 9 })
+        );
+        // The account's own persona is not a friend's game.
+        let own =
+            proto::PersonaState::decode(&persona(REQUESTED, playing(730, 3, None))[..]).unwrap();
+        games.receive(ACCOUNT, &own);
+        assert_eq!(games.game(ACCOUNT), None);
+        games.receive(ACCOUNT, &friend(playing(620, 0, Some("+join"))));
+        assert_eq!(
+            games.game(FRIEND).map(|game| game.invite()),
+            Some(GameInvite::Connect {
+                connect: "+join".into()
+            })
+        );
+        // Steam pushes an offline friend without any field: no game left.
+        games.receive(ACCOUNT, &friend(proto::Persona::default()));
+        assert_eq!(
+            games.game(FRIEND).map(|game| game.invite()),
+            Some(GameInvite::None)
+        );
+        games.disconnect();
+        assert_eq!(games.game(FRIEND), None);
     }
 }

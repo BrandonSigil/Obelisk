@@ -117,7 +117,8 @@ struct FriendConversationView: View {
                     case .separator(_, let date, let showsDay):
                         ChatSeparator(date: date, showsDay: showsDay)
                     case .line(let line):
-                        ChatLineView(line: line, friendName: friend.displayName, gameNames: gameNames(of: line))
+                        ChatLineView(line: line, friendName: friend.displayName, friendSteamID: steamID,
+                                     gameNames: gameNames(of: line), invitations: chat.invitations)
                     }
                 }
                 if conversation.isFriendTyping {
@@ -305,8 +306,11 @@ private struct ChatSeparator: View {
 private struct ChatLineView: View {
     let line: SteamChatLine
     let friendName: String
+    let friendSteamID: UInt64
     /// The games the line names, when known.
     let gameNames: [UInt32: String]
+    /// Joins the invitation the line carries.
+    let invitations: SteamReceivedInvitations?
 
     var body: some View {
         switch line.content {
@@ -326,7 +330,8 @@ private struct ChatLineView: View {
                                                                                          locale: L10n.locale)))
                         case .invitation(let invitation):
                             ChatInvitationCard(invitation: invitation, fromMe: fromMe, friendName: friendName,
-                                               gameName: invitation.appId.flatMap { gameNames[$0] })
+                                               gameName: invitation.appId.flatMap { gameNames[$0] },
+                                               join: fromMe ? nil : joinable, invitations: invitations)
                         }
                     }
                 }
@@ -342,6 +347,15 @@ private struct ChatLineView: View {
                 .padding(.vertical, 6)
                 .accessibilityIdentifier("friends-conversation-invite-sent")
         }
+    }
+}
+
+extension ChatLineView {
+    /// The friend's invitation the line carries, as the player can join it.
+    private var joinable: SteamReceivedInvite? {
+        guard let target = line.joinTarget else { return nil }
+        return SteamReceivedInvite(friendSteamId: friendSteamID, appId: target.appId, invite: target.invite,
+                                   receivedAt: UInt64(line.timestamp))
     }
 }
 
@@ -375,35 +389,61 @@ private struct ChatBubble: View {
     }
 }
 
-/// An invitation Steam wrote into the conversation. Joining from Obelisk
-/// comes later; the card only tells what happened.
+/// An invitation Steam wrote into the conversation. A friend's joins their
+/// game while it lasts, as Valve's chat lets it.
 private struct ChatInvitationCard: View {
     let invitation: SteamChatInvitation
     let fromMe: Bool
     let friendName: String
     let gameName: String?
+    /// The friend's invitation, to join.
+    var join: SteamReceivedInvite?
+    var invitations: SteamReceivedInvitations?
 
     var body: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "gamecontroller.fill")
-                .font(.system(size: 15)).foregroundStyle(.white)
-                .frame(width: 34, height: 34)
-                .background(LinearGradient(colors: ObeliskStyle.launchGradient, startPoint: .leading, endPoint: .trailing),
-                            in: RoundedRectangle(cornerRadius: 9))
-                .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(.system(size: 12, weight: .semibold)).fixedSize(horizontal: false, vertical: true)
-                if fromMe, let gameName {
-                    Text(gameName).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1)
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 10) {
+                Image(systemName: "gamecontroller.fill")
+                    .font(.system(size: 15)).foregroundStyle(.white)
+                    .frame(width: 34, height: 34)
+                    .background(LinearGradient(colors: ObeliskStyle.launchGradient, startPoint: .leading, endPoint: .trailing),
+                                in: RoundedRectangle(cornerRadius: 9))
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title).font(.system(size: 12, weight: .semibold)).fixedSize(horizontal: false, vertical: true)
+                    if fromMe, let gameName {
+                        Text(gameName).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1)
+                    }
                 }
             }
+            if let join, let invitations { joinControl(join, invitations: invitations) }
         }
         .padding(10)
         .frame(maxWidth: 280, alignment: .leading)
         .background(.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 14))
         .overlay { RoundedRectangle(cornerRadius: 14).strokeBorder(.primary.opacity(0.1), lineWidth: 1) }
-        .accessibilityElement(children: .combine)
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("friends-conversation-invitation")
+    }
+
+    /// Join while the invitation lasts; its failure, or why Play is
+    /// unavailable, shows under it.
+    @ViewBuilder
+    private func joinControl(_ invite: SteamReceivedInvite, invitations: SteamReceivedInvitations) -> some View {
+        if invitations.isCurrent(invite) {
+            VStack(alignment: .leading, spacing: 6) {
+                InvitationJoinButton(invite: invite, invitations: invitations, friendName: friendName,
+                                     identifier: "friends-conversation-invitation-join")
+                if let message = invitations.failures[SteamReceivedInvitations.Key(invite)]
+                    ?? invitations.availability(appId: invite.appId).reason {
+                    Text(message).font(.system(size: 11)).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        } else {
+            Text(L10n.string("ui.invites.expired")).font(.system(size: 11)).foregroundStyle(.secondary)
+                .accessibilityIdentifier("friends-conversation-invitation-expired")
+        }
     }
 
     private var title: String {

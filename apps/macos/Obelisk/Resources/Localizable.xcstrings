@@ -103,6 +103,23 @@
         }
       }
     },
+    "backend.steam.join.unavailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This game cannot be joined right now."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cette partie ne peut pas être rejointe pour le moment."
+          }
+        }
+      }
+    },
     "backend.steam.runtime.cancelled": {
       "extractionState": "manual",
       "localizations": {
@@ -12056,6 +12073,142 @@
           "stringUnit": {
             "state": "translated",
             "value": "Maj+Tab pour répondre"
+          }
+        }
+      }
+    },
+    "ui.invites.joinGame": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Join Game"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Rejoindre la partie"
+          }
+        }
+      }
+    },
+    "ui.invites.notification": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Invites you to play %@"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Vous invite à jouer à %@"
+          }
+        }
+      }
+    },
+    "ui.invites.notificationUnknown": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Invites you to play"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Vous invite à jouer"
+          }
+        }
+      }
+    },
+    "ui.invites.notInstalled": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Install the game to join."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Installez le jeu pour rejoindre la partie."
+          }
+        }
+      }
+    },
+    "ui.invites.unavailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "You can join once no other game is running or starting."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Vous pourrez rejoindre une fois qu’aucun autre jeu n’est lancé."
+          }
+        }
+      }
+    },
+    "ui.invites.expired": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This invitation has expired."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cette invitation a expiré."
+          }
+        }
+      }
+    },
+    "ui.invites.joiningFriend": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Finding your friend’s game…"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Recherche de la partie de votre ami…"
+          }
+        }
+      }
+    },
+    "ui.invites.unknownGame": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A Steam game"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Un jeu Steam"
           }
         }
       }

@@ -28,7 +28,8 @@ use crate::{
         CancelToken, CdnAuthorization, ContentClient, ContentError, DepotDownload,
         DepotInstallation,
     },
-    own_game::{GameInvite, OwnGame, OwnGameSource},
+    invites::{InviteSource, ReceivedInvites},
+    own_game::{FriendGames, GameInvite, OwnGame, OwnGameSource},
 };
 mod cloud;
 
@@ -39,9 +40,6 @@ pub use obelisk_core::{installation::TransferProgress, transfer::TransferState};
 const APP_INFO_TTL: Duration = Duration::from_secs(60);
 /// Valve's web chat tells a friend about typing at most this often.
 const TYPING_INTERVAL: Duration = Duration::from_secs(10);
-/// How long an invitation waits for Steam's fresh view of the account's game
-/// before trusting the last one.
-const OWN_GAME_FRESHNESS: Duration = Duration::from_secs(3);
 
 pub use crate::cm::OwnedGameInfo as OwnedGame;
 pub use crate::cm::achievements::Achievement;
@@ -185,6 +183,8 @@ pub struct Client {
     friends: crate::friends::FriendsEventSource,
     chat: ChatEventSource,
     own_game: OwnGameSource,
+    invites: InviteSource,
+    friend_games: FriendGames,
     /// When each friend last heard that the account is typing.
     typing: Mutex<HashMap<u64, Instant>>,
     connection_abort: tokio::task::AbortHandle,
@@ -224,6 +224,8 @@ impl Client {
             friends: cm.friends_source(),
             chat: cm.chat_source(),
             own_game: cm.own_game_source(),
+            invites: cm.invite_source(),
+            friend_games: cm.friend_games_source(),
             typing: Mutex::new(HashMap::new()),
             connection_abort: cm.abort_handle(),
             cloud_authorized: std::sync::atomic::AtomicBool::new(true),
@@ -251,9 +253,6 @@ impl Client {
             .await
             .map_err(ClientConnectError::from)?;
         cm.set_online().await.map_err(ClientConnectError::from)?;
-        cm.refresh_own_game()
-            .await
-            .map_err(ClientConnectError::from)?;
         Ok(Self::from_connection(http, cm, refresh_token.into()))
     }
 
@@ -366,12 +365,32 @@ impl Client {
         self.cm.ack(friend, timestamp).await.map_err(Into::into)
     }
 
-    pub async fn next_own_game(&self, after_revision: u64) -> OwnGame {
-        self.own_game.next(after_revision).await
+    /// The invitations friends sent, once they differ from `after_revision`
+    /// or the session ends.
+    pub async fn next_invites(&self, after_revision: u64) -> ReceivedInvites {
+        self.invites.next(after_revision).await
     }
 
-    pub async fn refresh_own_game(&self) -> Result<(), ClientError> {
-        self.cm.refresh_own_game().await.map_err(Into::into)
+    /// The game `friend` plays, as Steam tells it now, and how Steam's "Join
+    /// Game" would join it: its lobby, else its rich presence `connect`
+    /// string. A friend in no game that takes players has none.
+    pub async fn friend_game(&self, friend: u64) -> Result<(u32, GameInvite), ClientError> {
+        if !self.cm.logged_on() {
+            return Err(crate::cm::CmError::Disconnected.into());
+        }
+        let game = self
+            .friend_games
+            .game(friend)
+            .ok_or(crate::cm::SocialError::JoinUnavailable)?;
+        let invite = game.invite();
+        if !invite.sendable() {
+            return Err(crate::cm::SocialError::JoinUnavailable.into());
+        }
+        Ok((game.app_id, invite))
+    }
+
+    pub async fn next_own_game(&self, after_revision: u64) -> OwnGame {
+        self.own_game.next(after_revision).await
     }
 
     /// Invites `friend` into the account's current game, `app_id`, the way
@@ -381,9 +400,7 @@ impl Client {
         friend: u64,
         app_id: u32,
     ) -> Result<GameInviteKind, ClientError> {
-        let received = self.own_game.received();
-        self.cm.refresh_own_game().await?;
-        let game = self.own_game.fresh(received, OWN_GAME_FRESHNESS).await;
+        let game = self.own_game.snapshot();
         if !game.connected {
             return Err(crate::cm::CmError::Disconnected.into());
         }
@@ -427,6 +444,8 @@ impl Client {
         self.friends.disconnect(false);
         self.chat.disconnect();
         self.own_game.disconnect();
+        self.invites.disconnect();
+        self.friend_games.disconnect();
         self.connection_abort.abort();
         self.downloads.cancel();
     }

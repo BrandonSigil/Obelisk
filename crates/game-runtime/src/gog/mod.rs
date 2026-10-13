@@ -178,6 +178,8 @@ pub struct Product {
 impl crate::installations::Storefront for Gog {
     type Product = Product;
     type Platform = String;
+    /// Nothing joins a game through this storefront.
+    type Join = std::convert::Infallible;
     const RECEIPTS_UNAVAILABLE: &'static str = "model.gog.receiptsUnavailable";
     const RECEIPTS_NOT_SAVED: &'static str = "model.gog.receiptsNotSaved";
     const GAMES_DIRECTORY: &'static str = "Games/GOG";

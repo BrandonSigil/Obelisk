@@ -218,10 +218,14 @@ impl super::Content<Steam> for Content {
         &'a self,
         receipt: &'a Receipt<Steam>,
         admission: Admission<Steam>,
+        join: Option<&'a crate::steam::Join>,
     ) -> BoxFuture<'a, Result<(), Failure>> {
         Box::pin(async move {
             let free = self.0.with(|script| {
-                script.calls.push(format!("launch:{}", receipt.game()));
+                script.calls.push(match join {
+                    Some(join) => format!("launch:{}:{join:?}", receipt.game()),
+                    None => format!("launch:{}", receipt.game()),
+                });
                 script.launches_free
             });
             if !free {
@@ -790,6 +794,32 @@ async fn an_unverified_installation_is_verified_before_it_launches_and_a_failure
         ))
     );
     assert!(!fixture.sessions.state().busy());
+}
+
+#[tokio::test]
+async fn a_join_launches_its_game_joining_what_it_names_after_the_verification() {
+    let fixture = Fixture::new(true).await;
+    fixture.fake.with(|script| {
+        script
+            .downloads
+            .push_back(Err(Failure::Failed("backend.steam.content.network".into())))
+    });
+    fixture.installations.install(fixture.offer("macos"));
+    idle(&fixture.installations).await;
+
+    let lobby = crate::steam::Join::Lobby {
+        lobby_id: 109_775_244_421_126_053,
+    };
+    fixture.installations.join("620-macos", lobby.clone());
+    eventually(|| !fixture.installations.state().launching).await;
+    assert_eq!(
+        fixture.fake.calls(),
+        [
+            "download:620".to_owned(),
+            "download:620".to_owned(),
+            format!("launch:620:{lobby:?}")
+        ]
+    );
 }
 
 #[tokio::test]

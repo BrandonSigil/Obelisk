@@ -388,6 +388,116 @@ async fn notifications_reach_the_chat_stream_until_the_session_ends() {
     assert!(!game.await.unwrap().connected);
 }
 
+#[tokio::test]
+async fn invitations_reach_the_invite_stream_from_every_channel() {
+    const LOBBY: u64 = 109_775_244_421_126_053;
+    let (client, mut server) = session().await;
+    let client = Arc::new(client);
+    let waiting = tokio::spawn({
+        let client = Arc::clone(&client);
+        async move { client.next_invites(1).await }
+    });
+    server
+        .send(
+            crate::invites::CHAT_INVITE,
+            proto::Header::default(),
+            &crate::invites::fixture::lobby_invite(FRIEND, LOBBY, 3_527_290),
+        )
+        .await;
+    let invites = waiting.await.unwrap();
+    assert_eq!(invites.invites.len(), 1);
+    assert_eq!(invites.invites[0].app_id, 3_527_290);
+    // Steam's chat copy of the same invitation adds nothing.
+    server
+        .send(
+            146,
+            proto::Header {
+                target_name: Some(crate::chat::INCOMING_MESSAGE.into()),
+                ..Default::default()
+            },
+            &crate::chat::fixture::incoming_message(
+                FRIEND,
+                1,
+                &format!("[lobbyinvite appid=\"3527290\" lobbyid=\"{LOBBY}\"][/lobbyinvite]"),
+                1_700_000_000,
+                5,
+                false,
+            ),
+        )
+        .await;
+    let waiting = tokio::spawn({
+        let client = Arc::clone(&client);
+        let revision = invites.revision;
+        async move { client.next_invites(revision).await }
+    });
+    // A connect invitation names its game in the header only.
+    server
+        .send(
+            crate::invites::INVITE_TO_GAME,
+            proto::Header {
+                routing_appid: Some(620),
+                ..Default::default()
+            },
+            &crate::invites::fixture::connect_invite(FRIEND + 1, "+connect 10.0.0.1"),
+        )
+        .await;
+    let invites = waiting.await.unwrap();
+    assert_eq!(invites.invites.len(), 2);
+    assert_eq!(invites.invites[0].friend, FRIEND + 1);
+    assert_eq!(invites.invites[0].app_id, 620);
+}
+
+/// The friend's game once Steam pushed `persona`; nothing is asked of Steam.
+async fn friend_game(persona: Vec<u8>) -> Result<(u32, crate::own_game::GameInvite), String> {
+    let (client, mut server) = session().await;
+    server
+        .send(PERSONA_STATE, proto::Header::default(), &persona)
+        .await;
+    // The account's own persona, read after the friend's, is not its game.
+    server
+        .send(
+            PERSONA_STATE,
+            proto::Header::default(),
+            &own_persona(730, 9, None),
+        )
+        .await;
+    client.next_own_game(1).await;
+    let game = client
+        .friend_game(FRIEND)
+        .await
+        .map_err(|error| error.to_string());
+    assert!(server.quiet().await, "Steam is never asked");
+    game
+}
+
+#[tokio::test]
+async fn a_friends_game_is_joined_by_its_lobby_else_its_connect_string() {
+    use crate::own_game::{GameInvite, fixture::persona};
+    const LOBBY: u64 = 0x0186_0000_0000_0042;
+    assert_eq!(
+        friend_game(persona(FRIEND, 620, LOBBY, Some("+join 7"))).await,
+        Ok((620, GameInvite::Lobby { lobby_id: LOBBY }))
+    );
+    assert_eq!(
+        friend_game(persona(FRIEND, 620, 0, Some("+join 7"))).await,
+        Ok((
+            620,
+            GameInvite::Connect {
+                connect: "+join 7".into()
+            }
+        ))
+    );
+    for unjoinable in [
+        persona(FRIEND, 620, 0, None),
+        persona(FRIEND, 0, LOBBY, Some("+x")),
+    ] {
+        assert_eq!(
+            friend_game(unjoinable).await,
+            Err("backend.steam.join.unavailable".into())
+        );
+    }
+}
+
 /// Invites the friend into app 620. The caller keeps the session alive, since
 /// dropping it would abort the worker before the invitation is written.
 fn invite(client: &Arc<Client>) -> tokio::task::JoinHandle<Result<GameInviteKind, String>> {
@@ -400,25 +510,27 @@ fn invite(client: &Arc<Client>) -> tokio::task::JoinHandle<Result<GameInviteKind
     })
 }
 
-/// The account's own game, as Steam answers the refresh an invitation sends.
-async fn answer_refresh(server: &mut test_server::TestServer, persona: Vec<u8>) {
-    let refresh = server.request(FRIEND_DATA_REQUEST).await;
-    // persona_state_requested 1 = 4883, friends 2 = the account.
-    let mut expected = vec![0x08, 0x93, 0x26];
-    expected.extend(fixed64(0x11, ACCOUNT));
-    assert_eq!(&refresh.body[..], expected);
+/// The account's own game, as Steam pushes it: an invitation never asks,
+/// since asking makes the game drop out for every friend.
+async fn push_own_game(client: &Client, server: &mut test_server::TestServer, persona: Vec<u8>) {
     server
         .send(PERSONA_STATE, proto::Header::default(), &persona)
         .await;
+    client.next_own_game(1).await;
 }
 
 #[tokio::test]
 async fn a_lobby_invitation_is_routed_to_the_game() {
     let (client, mut server) = session().await;
     let client = Arc::new(client);
-    let inviting = invite(&client);
     const LOBBY: u64 = 0x0186_0000_0000_0042;
-    answer_refresh(&mut server, own_persona(620, LOBBY, Some("+connect"))).await;
+    push_own_game(
+        &client,
+        &mut server,
+        own_persona(620, LOBBY, Some("+connect")),
+    )
+    .await;
+    let inviting = invite(&client);
     let invite = server.request(6621).await;
     assert_eq!(invite.header.routing_appid, Some(620));
     assert_eq!(invite.header.job_source, None);
@@ -433,8 +545,8 @@ async fn a_lobby_invitation_is_routed_to_the_game() {
 async fn a_connect_invitation_names_both_accounts() {
     let (client, mut server) = session().await;
     let client = Arc::new(client);
+    push_own_game(&client, &mut server, own_persona(620, 0, Some("+join 7"))).await;
     let inviting = invite(&client);
-    answer_refresh(&mut server, own_persona(620, 0, Some("+join 7"))).await;
     let invite = server.request(7005).await;
     assert_eq!(invite.header.routing_appid, Some(620));
     assert_eq!(invite.header.job_source, None);
@@ -455,8 +567,8 @@ async fn no_invitation_leaves_when_the_game_cannot_take_one() {
     ] {
         let (client, mut server) = session().await;
         let client = Arc::new(client);
+        push_own_game(&client, &mut server, persona).await;
         let inviting = invite(&client);
-        answer_refresh(&mut server, persona).await;
         assert_eq!(
             inviting.await.unwrap().unwrap_err(),
             "backend.steam.invite.unavailable"

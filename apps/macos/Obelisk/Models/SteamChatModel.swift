@@ -22,6 +22,9 @@ struct SteamChatLine: Identifiable, Equatable, Sendable {
     let content: Content
     /// A message's BBCode as it shows, rendered once its conversation keeps it.
     fileprivate(set) var contents: [SteamChatContent] = []
+    /// The game and lobby or `connect` string of the invitation it carries,
+    /// read as Steam reads it.
+    fileprivate(set) var joinTarget: SteamJoinTarget?
 
     init(id: ID, timestamp: UInt32, content: Content) {
         self.id = id
@@ -81,7 +84,12 @@ struct SteamConversation: Equatable, Sendable {
         let known = Set(lines.map(\.id))
         let new = added.filter { !known.contains($0.id) }.map { line in
             var line = line
-            if case .message(_, let bbcode) = line.content { line.contents = SteamBBCode.render(bbcode) }
+            if case .message(_, let bbcode) = line.content {
+                line.contents = SteamBBCode.render(bbcode)
+                if line.contents.contains(where: { if case .invitation = $0 { true } else { false } }) {
+                    line.joinTarget = steamChatInvite(bbcode: bbcode)
+                }
+            }
             return line
         }
         guard !new.isEmpty else { return false }
@@ -149,6 +157,8 @@ final class SteamChatModel {
 
     /// Names the account's game, from its library or a friend playing it.
     @ObservationIgnored var gameName: @MainActor (UInt32) -> String? = { _ in nil }
+    /// The invitations friends sent, which a conversation and a friend's row join.
+    @ObservationIgnored var invitations: SteamReceivedInvitations?
     @ObservationIgnored private var session: (any SteamSessionProtocol)?
     @ObservationIgnored private var account: UInt64?
     @ObservationIgnored private var generation = 0
@@ -159,19 +169,12 @@ final class SteamChatModel {
     @ObservationIgnored private var notes = 0
     @ObservationIgnored private let typingTimeout: Duration
     @ObservationIgnored private var activity: ApplicationActivityObservation?
-    /// A Game session of the account is running.
-    @ObservationIgnored private var isPlaying = false
-    @ObservationIgnored private var gameRefreshes: Task<Void, Never>?
-    @ObservationIgnored private var ownGameRequested: ContinuousClock.Instant?
-    @ObservationIgnored private let ownGameInterval: Duration
     /// The running game's session and the last invite request it showed.
     @ObservationIgnored private var followedRequest = SessionSequence()
 
     /// Tests tell activity themselves instead of following the application.
-    init(typingTimeout: Duration = .seconds(11), ownGameInterval: Duration = .seconds(20),
-         isApplicationActive: Bool? = nil) {
+    init(typingTimeout: Duration = .seconds(11), isApplicationActive: Bool? = nil) {
         self.typingTimeout = typingTimeout
-        self.ownGameInterval = ownGameInterval
         self.isApplicationActive = isApplicationActive ?? NSApplication.shared.isActive
         guard isApplicationActive == nil else { return }
         activity = ApplicationActivityObservation { [weak self] active in
@@ -190,7 +193,6 @@ final class SteamChatModel {
         let current = generation
         observations = [observeChat(session, generation: current), observeOwnGame(session, generation: current)]
         reload(session, generation: current)
-        followOwnGame()
     }
 
     /// The session ended; its replacement keeps the conversations.
@@ -218,9 +220,6 @@ final class SteamChatModel {
         generation += 1
         observations.forEach { $0.cancel() }
         observations = []
-        gameRefreshes?.cancel()
-        gameRefreshes = nil
-        ownGameRequested = nil
         typingExpiries.values.forEach { $0.cancel() }
         typingExpiries = [:]
         for (friend, conversation) in conversations {
@@ -239,46 +238,6 @@ final class SteamChatModel {
     func setOnline() {
         guard let session else { return }
         Task { try? await session.setOnline() }
-    }
-
-    /// Steam may never tell this session about the account's own game, and a
-    /// game opens its lobby some time after launch, so the model asks while
-    /// the account plays.
-    func setPlaying(_ playing: Bool) {
-        guard playing != isPlaying else { return }
-        isPlaying = playing
-        followOwnGame()
-    }
-
-    /// Asks again what the account's game offers, as the panel or a
-    /// conversation opens.
-    func refreshOwnGame() {
-        guard let session else { return }
-        let now = ContinuousClock.now
-        if let requested = ownGameRequested, now - requested < .seconds(5) { return }
-        ownGameRequested = now
-        Task { try? await session.refreshOwnGame() }
-    }
-
-    private func followOwnGame() {
-        gameRefreshes?.cancel()
-        gameRefreshes = nil
-        guard isPlaying, session != nil else { return }
-        let current = generation
-        let interval = ownGameInterval
-        gameRefreshes = Task { [weak self] in
-            while !Task.isCancelled {
-                guard self?.refreshWhilePlaying(generation: current) == true else { return }
-                try? await Task.sleep(for: interval)
-            }
-        }
-    }
-
-    private func refreshWhilePlaying(generation current: Int) -> Bool {
-        guard current == generation, isPlaying else { return false }
-        ownGameRequested = nil
-        refreshOwnGame()
-        return true
     }
 
     // MARK: Observation
@@ -373,7 +332,6 @@ final class SteamChatModel {
         visibleFriend = friend
         if conversations[friend]?.isLoaded != true { loadLatest(friend, replacing: false) }
         acknowledgeIfReading(friend)
-        refreshOwnGame()
     }
 
     func hide(_ friend: UInt64) {

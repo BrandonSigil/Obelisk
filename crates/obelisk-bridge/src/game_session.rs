@@ -248,7 +248,7 @@ impl Bridged for steam::Steam {
             .invites
             .iter()
             .cloned()
-            .map(Into::into)
+            .map(|invite| SteamReceivedInvite::into_game(store.app_id, invite))
             .collect()
     }
     fn micro_txn(store: &steam::Store) -> Option<SteamMicroTxn> {
@@ -410,20 +410,25 @@ impl From<game_runtime::OverlayRequest> for SteamOverlayRequest {
     }
 }
 
-/// An invitation a friend sent into the running game. Accepting it hands it
-/// to the game with `StorefrontSessions::accept_invite`.
+/// An invitation a friend sent into a game, as the running game's Steam or
+/// the account's session received it. The running game takes one into it
+/// with `StorefrontSessions::accept_invite`; another game joins it as it
+/// starts, with `AccountInstallations::join`.
 #[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
 pub struct SteamReceivedInvite {
     pub friend_steam_id: u64,
+    pub app_id: u32,
     /// Never `None`.
     pub invite: SteamGameInvite,
-    /// When the game's Steam last told of it, in seconds since the Unix epoch.
+    /// When it was last received, in seconds since the Unix epoch.
     pub received_at: u64,
 }
-impl From<game_runtime::ReceivedInvite> for SteamReceivedInvite {
-    fn from(invite: game_runtime::ReceivedInvite) -> Self {
+impl SteamReceivedInvite {
+    /// An invitation the running game of `app_id` received.
+    fn into_game(app_id: u32, invite: game_runtime::ReceivedInvite) -> Self {
         Self {
             friend_steam_id: invite.friend,
+            app_id,
             invite: invite.target.into(),
             received_at: invite.received_at,
         }
@@ -794,13 +799,8 @@ impl StorefrontSessions {
         invite: SteamGameInvite,
     ) -> Result<(), GameSessionError> {
         self.steam(move |sessions| {
-            let target = match invite {
-                SteamGameInvite::Lobby { lobby_id } => protocol::InviteTarget::Lobby { lobby_id },
-                SteamGameInvite::Connect { connect } => protocol::InviteTarget::Connect { connect },
-                SteamGameInvite::None => {
-                    return Err(Failure::Failed(steam::Steam::INVALID_SESSION.into()));
-                }
-            };
+            let target = protocol::InviteTarget::try_from(invite)
+                .map_err(|()| Failure::Failed(steam::Steam::INVALID_SESSION.into()))?;
             sessions.accept_invite(&session_id, friend_steam_id, target)
         })
         .await
@@ -1012,6 +1012,7 @@ mod tests {
             [
                 SteamReceivedInvite {
                     friend_steam_id: FRIEND,
+                    app_id: 620,
                     invite: SteamGameInvite::Connect {
                         connect: "+connect 10.0.0.1".into()
                     },
@@ -1019,6 +1020,7 @@ mod tests {
                 },
                 SteamReceivedInvite {
                     friend_steam_id: FRIEND + 1,
+                    app_id: 620,
                     invite: SteamGameInvite::Lobby { lobby_id: LOBBY },
                     received_at: 1_790_000_000,
                 },

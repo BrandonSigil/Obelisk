@@ -8,6 +8,7 @@ use crate::{
     CloudChoice, CloudIndicator, EpicSession, GameSessionError, GameTransfer, GogSession,
     ObeliskLocations, SteamCredentials, SteamSession, StorefrontSessions,
     game_session::{Storefronts, blocking, shares_runtimes},
+    steam_chat::SteamGameInvite,
 };
 use game_runtime::{
     Locations, epic, gog,
@@ -607,6 +608,20 @@ impl AccountInstallations {
     /// Launches `installation`, verifying it first only when it needs it.
     pub fn launch(&self, installation: String) {
         each!(self, installations => installations.launch(&installation))
+    }
+
+    /// Launches the Steam `installation` as `launch` does, its game joining
+    /// `invite`: a friend's lobby or rich presence `connect` string.
+    pub fn join(&self, installation: String, invite: SteamGameInvite) {
+        let Account::Steam(installations) = &self.account else {
+            return;
+        };
+        let Ok(join) = steam::Join::try_from(invite) else {
+            return;
+        };
+        if join.valid() {
+            installations.join(&installation, join);
+        }
     }
 
     pub fn uninstall(&self, installation: String) {

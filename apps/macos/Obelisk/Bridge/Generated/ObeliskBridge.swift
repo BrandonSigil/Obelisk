@@ -664,6 +664,12 @@ public protocol AccountInstallationsProtocol: AnyObject, Sendable {
     func install(offer: GameOffer) 
     
     /**
+     * Launches the Steam `installation` as `launch` does, its game joining
+     * `invite`: a friend's lobby or rich presence `connect` string.
+     */
+    func join(installation: String, invite: SteamGameInvite) 
+    
+    /**
      * Launches `installation`, verifying it first only when it needs it.
      */
     func launch(installation: String) 
@@ -909,6 +915,20 @@ open func install(offer: GameOffer)  {try! rustCall() {
     uniffi_obelisk_bridge_fn_method_accountinstallations_install(
             self.uniffiCloneHandle(),
         FfiConverterTypeGameOffer_lower(offer),uniffiCallStatus
+    )
+}
+}
+    
+    /**
+     * Launches the Steam `installation` as `launch` does, its game joining
+     * `invite`: a friend's lobby or rich presence `connect` string.
+     */
+open func join(installation: String, invite: SteamGameInvite)  {try! rustCall() {
+        uniffiCallStatus in
+    uniffi_obelisk_bridge_fn_method_accountinstallations_join(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(installation),
+        FfiConverterTypeSteamGameInvite_lower(invite),uniffiCallStatus
     )
 }
 }
@@ -2646,11 +2666,28 @@ public func FfiConverterTypeLibraryCache_lower(_ value: LibraryCache) -> UInt64 
  */
 public protocol SteamChatFixtureProtocol: AnyObject, Sendable {
     
+    /**
+     * A connect invitation into `app_id`, its header's routing AppID.
+     */
+    func connectInvite(friendSteamId: UInt64, appId: UInt32, connect: String) 
+    
     func disconnect() 
+    
+    /**
+     * A friend's chat message, as Steam writes it for an invitation too.
+     */
+    func incomingInvitation(friendSteamId: UInt64, message: String, timestamp: UInt32, ordinal: UInt32) 
     
     func incomingMessage(friendSteamId: UInt64, message: String, timestamp: UInt32, ordinal: UInt32, fromMe: Bool) 
     
+    /**
+     * A lobby invitation, as Steam sends it apart from the chat.
+     */
+    func lobbyInvite(friendSteamId: UInt64, lobbyId: UInt64, appId: UInt32) 
+    
     func nextChat(afterSequence: UInt64) async  -> SteamChatEvents
+    
+    func nextInvites(afterRevision: UInt64) async  -> SteamReceivedInvites
     
     func nextOwnGame(afterRevision: UInt64) async  -> SteamOwnGame
     
@@ -2731,10 +2768,39 @@ public convenience init(accountId: UInt64) {
     
 
     
+    /**
+     * A connect invitation into `app_id`, its header's routing AppID.
+     */
+open func connectInvite(friendSteamId: UInt64, appId: UInt32, connect: String)  {try! rustCall() {
+        uniffiCallStatus in
+    uniffi_obelisk_bridge_fn_method_steamchatfixture_connect_invite(
+            self.uniffiCloneHandle(),
+        FfiConverterUInt64.lower(friendSteamId),
+        FfiConverterUInt32.lower(appId),
+        FfiConverterString.lower(connect),uniffiCallStatus
+    )
+}
+}
+    
 open func disconnect()  {try! rustCall() {
         uniffiCallStatus in
     uniffi_obelisk_bridge_fn_method_steamchatfixture_disconnect(
             self.uniffiCloneHandle(),uniffiCallStatus
+    )
+}
+}
+    
+    /**
+     * A friend's chat message, as Steam writes it for an invitation too.
+     */
+open func incomingInvitation(friendSteamId: UInt64, message: String, timestamp: UInt32, ordinal: UInt32)  {try! rustCall() {
+        uniffiCallStatus in
+    uniffi_obelisk_bridge_fn_method_steamchatfixture_incoming_invitation(
+            self.uniffiCloneHandle(),
+        FfiConverterUInt64.lower(friendSteamId),
+        FfiConverterString.lower(message),
+        FfiConverterUInt32.lower(timestamp),
+        FfiConverterUInt32.lower(ordinal),uniffiCallStatus
     )
 }
 }
@@ -2752,6 +2818,20 @@ open func incomingMessage(friendSteamId: UInt64, message: String, timestamp: UIn
 }
 }
     
+    /**
+     * A lobby invitation, as Steam sends it apart from the chat.
+     */
+open func lobbyInvite(friendSteamId: UInt64, lobbyId: UInt64, appId: UInt32)  {try! rustCall() {
+        uniffiCallStatus in
+    uniffi_obelisk_bridge_fn_method_steamchatfixture_lobby_invite(
+            self.uniffiCloneHandle(),
+        FfiConverterUInt64.lower(friendSteamId),
+        FfiConverterUInt64.lower(lobbyId),
+        FfiConverterUInt32.lower(appId),uniffiCallStatus
+    )
+}
+}
+    
 open func nextChat(afterSequence: UInt64)async  -> SteamChatEvents  {
     return
         try!  await uniffiRustCallAsync(
@@ -2764,6 +2844,23 @@ open func nextChat(afterSequence: UInt64)async  -> SteamChatEvents  {
             completeFunc: ffi_obelisk_bridge_rust_future_complete_rust_buffer,
             freeFunc: ffi_obelisk_bridge_rust_future_free_rust_buffer,
             liftFunc: FfiConverterTypeSteamChatEvents_lift,
+            errorHandler: nil
+            
+        )
+}
+    
+open func nextInvites(afterRevision: UInt64)async  -> SteamReceivedInvites  {
+    return
+        try!  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_obelisk_bridge_fn_method_steamchatfixture_next_invites(
+                        self.uniffiCloneHandle(),FfiConverterUInt64.lower(afterRevision)
+                )
+            },
+            pollFunc: ffi_obelisk_bridge_rust_future_poll_rust_buffer,
+            completeFunc: ffi_obelisk_bridge_rust_future_complete_rust_buffer,
+            freeFunc: ffi_obelisk_bridge_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterTypeSteamReceivedInvites_lift,
             errorHandler: nil
             
         )
@@ -3525,6 +3622,12 @@ public protocol SteamSessionProtocol: AnyObject, Sendable {
     func activeSessions() async throws  -> [SteamChatSession]
     
     /**
+     * The game `friend_steam_id` plays and how to join it now. Fails with
+     * `backend.steam.join.unavailable` when it takes no one.
+     */
+    func friendGame(friendSteamId: UInt64) async throws  -> SteamJoinTarget
+    
+    /**
      * Invites into `invite`, which the account's running game of `app_id`
      * reported itself. Fails with `backend.steam.invite.unavailable` for an
      * invitation Steam cannot carry or while the account plays another game.
@@ -3543,6 +3646,11 @@ public protocol SteamSessionProtocol: AnyObject, Sendable {
     func nextChat(afterSequence: UInt64) async  -> SteamChatEvents
     
     /**
+     * Suspends until the invitations friends sent change or the session ends.
+     */
+    func nextInvites(afterRevision: UInt64) async  -> SteamReceivedInvites
+    
+    /**
      * Suspends until the own game's revision differs or the session ends.
      */
     func nextOwnGame(afterRevision: UInt64) async  -> SteamOwnGame
@@ -3551,8 +3659,6 @@ public protocol SteamSessionProtocol: AnyObject, Sendable {
      * Up to `count` (at most 50) messages before `before`, or the latest ones.
      */
     func recentMessages(friendSteamId: UInt64, before: SteamChatPosition?, count: UInt32) async throws  -> SteamChatHistory
-    
-    func refreshOwnGame() async throws 
     
     func sendMessage(friendSteamId: UInt64, text: String) async throws  -> SteamSentMessage
     
@@ -3926,6 +4032,26 @@ open func activeSessions()async throws  -> [SteamChatSession]  {
 }
     
     /**
+     * The game `friend_steam_id` plays and how to join it now. Fails with
+     * `backend.steam.join.unavailable` when it takes no one.
+     */
+open func friendGame(friendSteamId: UInt64)async throws  -> SteamJoinTarget  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_obelisk_bridge_fn_method_steamsession_friend_game(
+                        self.uniffiCloneHandle(),FfiConverterUInt64.lower(friendSteamId)
+                )
+            },
+            pollFunc: ffi_obelisk_bridge_rust_future_poll_rust_buffer,
+            completeFunc: ffi_obelisk_bridge_rust_future_complete_rust_buffer,
+            freeFunc: ffi_obelisk_bridge_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterTypeSteamJoinTarget_lift,
+            errorHandler: FfiConverterTypeSteamError_lift
+        )
+}
+    
+    /**
      * Invites into `invite`, which the account's running game of `app_id`
      * reported itself. Fails with `backend.steam.invite.unavailable` for an
      * invitation Steam cannot carry or while the account plays another game.
@@ -3987,6 +4113,26 @@ open func nextChat(afterSequence: UInt64)async  -> SteamChatEvents  {
 }
     
     /**
+     * Suspends until the invitations friends sent change or the session ends.
+     */
+open func nextInvites(afterRevision: UInt64)async  -> SteamReceivedInvites  {
+    return
+        try!  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_obelisk_bridge_fn_method_steamsession_next_invites(
+                        self.uniffiCloneHandle(),FfiConverterUInt64.lower(afterRevision)
+                )
+            },
+            pollFunc: ffi_obelisk_bridge_rust_future_poll_rust_buffer,
+            completeFunc: ffi_obelisk_bridge_rust_future_complete_rust_buffer,
+            freeFunc: ffi_obelisk_bridge_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterTypeSteamReceivedInvites_lift,
+            errorHandler: nil
+            
+        )
+}
+    
+    /**
      * Suspends until the own game's revision differs or the session ends.
      */
 open func nextOwnGame(afterRevision: UInt64)async  -> SteamOwnGame  {
@@ -4021,22 +4167,6 @@ open func recentMessages(friendSteamId: UInt64, before: SteamChatPosition?, coun
             completeFunc: ffi_obelisk_bridge_rust_future_complete_rust_buffer,
             freeFunc: ffi_obelisk_bridge_rust_future_free_rust_buffer,
             liftFunc: FfiConverterTypeSteamChatHistory_lift,
-            errorHandler: FfiConverterTypeSteamError_lift
-        )
-}
-    
-open func refreshOwnGame()async throws   {
-    return
-        try  await uniffiRustCallAsync(
-            rustFutureFunc: {
-                uniffi_obelisk_bridge_fn_method_steamsession_refresh_own_game(
-                        self.uniffiCloneHandle()
-                )
-            },
-            pollFunc: ffi_obelisk_bridge_rust_future_poll_void,
-            completeFunc: ffi_obelisk_bridge_rust_future_complete_void,
-            freeFunc: ffi_obelisk_bridge_rust_future_free_void,
-            liftFunc: { $0 },
             errorHandler: FfiConverterTypeSteamError_lift
         )
 }
@@ -8486,6 +8616,70 @@ public func FfiConverterTypeSteamInviteRequest_lower(_ value: SteamInviteRequest
 
 
 /**
+ * A game and how to join it: a friend's lobby or rich presence `connect`
+ * string, as an invitation or Steam's "Join Game" names it.
+ */
+public struct SteamJoinTarget: Equatable, Hashable {
+    public var appId: UInt32
+    /**
+     * Never `None`.
+     */
+    public var invite: SteamGameInvite
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(appId: UInt32, 
+        /**
+         * Never `None`.
+         */invite: SteamGameInvite) {
+        self.appId = appId
+        self.invite = invite
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension SteamJoinTarget: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeSteamJoinTarget: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SteamJoinTarget {
+        return
+            try SteamJoinTarget(
+                appId: FfiConverterUInt32.read(from: &buf), 
+                invite: FfiConverterTypeSteamGameInvite.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: SteamJoinTarget, into buf: inout [UInt8]) {
+        FfiConverterUInt32.write(value.appId, into: &buf)
+        FfiConverterTypeSteamGameInvite.write(value.invite, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSteamJoinTarget_lift(_ buf: RustBuffer) throws -> SteamJoinTarget {
+    return try FfiConverterTypeSteamJoinTarget.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSteamJoinTarget_lower(_ value: SteamJoinTarget) -> RustBuffer {
+    return FfiConverterTypeSteamJoinTarget.lower(value)
+}
+
+
+/**
  * A purchase the running game asks the player to confirm, answered with
  * `StorefrontSessions::authorize_micro_txn`. Steam tells no price here.
  */
@@ -8797,30 +8991,34 @@ public func FfiConverterTypeSteamProfile_lower(_ value: SteamProfile) -> RustBuf
 
 
 /**
- * An invitation a friend sent into the running game. Accepting it hands it
- * to the game with `StorefrontSessions::accept_invite`.
+ * An invitation a friend sent into a game, as the running game's Steam or
+ * the account's session received it. The running game takes one into it
+ * with `StorefrontSessions::accept_invite`; another game joins it as it
+ * starts, with `AccountInstallations::join`.
  */
 public struct SteamReceivedInvite: Equatable, Hashable {
     public var friendSteamId: UInt64
+    public var appId: UInt32
     /**
      * Never `None`.
      */
     public var invite: SteamGameInvite
     /**
-     * When the game's Steam last told of it, in seconds since the Unix epoch.
+     * When it was last received, in seconds since the Unix epoch.
      */
     public var receivedAt: UInt64
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(friendSteamId: UInt64, 
+    public init(friendSteamId: UInt64, appId: UInt32, 
         /**
          * Never `None`.
          */invite: SteamGameInvite, 
         /**
-         * When the game's Steam last told of it, in seconds since the Unix epoch.
+         * When it was last received, in seconds since the Unix epoch.
          */receivedAt: UInt64) {
         self.friendSteamId = friendSteamId
+        self.appId = appId
         self.invite = invite
         self.receivedAt = receivedAt
     }
@@ -8842,6 +9040,7 @@ public struct FfiConverterTypeSteamReceivedInvite: FfiConverterRustBuffer {
         return
             try SteamReceivedInvite(
                 friendSteamId: FfiConverterUInt64.read(from: &buf), 
+                appId: FfiConverterUInt32.read(from: &buf), 
                 invite: FfiConverterTypeSteamGameInvite.read(from: &buf), 
                 receivedAt: FfiConverterUInt64.read(from: &buf)
         )
@@ -8849,6 +9048,7 @@ public struct FfiConverterTypeSteamReceivedInvite: FfiConverterRustBuffer {
 
     public static func write(_ value: SteamReceivedInvite, into buf: inout [UInt8]) {
         FfiConverterUInt64.write(value.friendSteamId, into: &buf)
+        FfiConverterUInt32.write(value.appId, into: &buf)
         FfiConverterTypeSteamGameInvite.write(value.invite, into: &buf)
         FfiConverterUInt64.write(value.receivedAt, into: &buf)
     }
@@ -8867,6 +9067,68 @@ public func FfiConverterTypeSteamReceivedInvite_lift(_ buf: RustBuffer) throws -
 #endif
 public func FfiConverterTypeSteamReceivedInvite_lower(_ value: SteamReceivedInvite) -> RustBuffer {
     return FfiConverterTypeSteamReceivedInvite.lower(value)
+}
+
+
+/**
+ * The invitations friends sent the account's session, newest first, at most
+ * one per friend.
+ */
+public struct SteamReceivedInvites: Equatable, Hashable {
+    public var revision: UInt64
+    public var connected: Bool
+    public var invites: [SteamReceivedInvite]
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(revision: UInt64, connected: Bool, invites: [SteamReceivedInvite]) {
+        self.revision = revision
+        self.connected = connected
+        self.invites = invites
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension SteamReceivedInvites: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeSteamReceivedInvites: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SteamReceivedInvites {
+        return
+            try SteamReceivedInvites(
+                revision: FfiConverterUInt64.read(from: &buf), 
+                connected: FfiConverterBool.read(from: &buf), 
+                invites: FfiConverterSequenceTypeSteamReceivedInvite.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: SteamReceivedInvites, into buf: inout [UInt8]) {
+        FfiConverterUInt64.write(value.revision, into: &buf)
+        FfiConverterBool.write(value.connected, into: &buf)
+        FfiConverterSequenceTypeSteamReceivedInvite.write(value.invites, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSteamReceivedInvites_lift(_ buf: RustBuffer) throws -> SteamReceivedInvites {
+    return try FfiConverterTypeSteamReceivedInvites.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSteamReceivedInvites_lower(_ value: SteamReceivedInvites) -> RustBuffer {
+    return FfiConverterTypeSteamReceivedInvites.lower(value)
 }
 
 
@@ -12448,6 +12710,30 @@ fileprivate struct FfiConverterOptionTypeSteamInviteRequest: FfiConverterRustBuf
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterOptionTypeSteamJoinTarget: FfiConverterRustBuffer {
+    typealias SwiftType = SteamJoinTarget?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypeSteamJoinTarget.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypeSteamJoinTarget.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterOptionTypeSteamMicroTxn: FfiConverterRustBuffer {
     typealias SwiftType = SteamMicroTxn?
 
@@ -13479,6 +13765,18 @@ public func steamNews(appId: UInt32)async throws  -> [SteamNews]  {
             errorHandler: FfiConverterTypeSteamError_lift
         )
 }
+/**
+ * The invitation a friends chat message carries, read as Steam's chat reads
+ * its `[lobbyinvite]` and `[gameinvite]` tags; none for Remote Play.
+ */
+public func steamChatInvite(bbcode: String) -> SteamJoinTarget?  {
+    return try!  FfiConverterOptionTypeSteamJoinTarget.lift(try! rustCall() {
+        uniffiCallStatus in
+    uniffi_obelisk_bridge_fn_func_steam_chat_invite(
+        FfiConverterString.lower(bbcode),uniffiCallStatus
+    )
+})
+}
 
 private enum InitializationResult {
     case ok
@@ -13523,6 +13821,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_obelisk_bridge_checksum_func_steam_news() != 39231) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_obelisk_bridge_checksum_func_steam_chat_invite() != 53466) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_obelisk_bridge_checksum_method_library_add_local_game() != 39029) {
@@ -13681,6 +13982,9 @@ private let initializationResult: InitializationResult = {
     if (uniffi_obelisk_bridge_checksum_method_accountinstallations_install() != 48233) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_obelisk_bridge_checksum_method_accountinstallations_join() != 43648) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_obelisk_bridge_checksum_method_accountinstallations_launch() != 1866) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -13786,6 +14090,9 @@ private let initializationResult: InitializationResult = {
     if (uniffi_obelisk_bridge_checksum_method_steamsession_active_sessions() != 4743) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_obelisk_bridge_checksum_method_steamsession_friend_game() != 41688) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_obelisk_bridge_checksum_method_steamsession_invite_into_game() != 13368) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -13795,13 +14102,13 @@ private let initializationResult: InitializationResult = {
     if (uniffi_obelisk_bridge_checksum_method_steamsession_next_chat() != 57601) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_obelisk_bridge_checksum_method_steamsession_next_invites() != 53541) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_obelisk_bridge_checksum_method_steamsession_next_own_game() != 22844) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_obelisk_bridge_checksum_method_steamsession_recent_messages() != 52) {
-        return InitializationResult.apiChecksumMismatch
-    }
-    if (uniffi_obelisk_bridge_checksum_method_steamsession_refresh_own_game() != 25775) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_obelisk_bridge_checksum_method_steamsession_send_message() != 10510) {
@@ -13813,13 +14120,25 @@ private let initializationResult: InitializationResult = {
     if (uniffi_obelisk_bridge_checksum_method_steamsession_set_online() != 17400) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_obelisk_bridge_checksum_method_steamchatfixture_connect_invite() != 34020) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_obelisk_bridge_checksum_method_steamchatfixture_disconnect() != 21972) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_obelisk_bridge_checksum_method_steamchatfixture_incoming_invitation() != 2401) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_obelisk_bridge_checksum_method_steamchatfixture_incoming_message() != 62956) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_obelisk_bridge_checksum_method_steamchatfixture_lobby_invite() != 16995) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_obelisk_bridge_checksum_method_steamchatfixture_next_chat() != 26475) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_obelisk_bridge_checksum_method_steamchatfixture_next_invites() != 34285) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_obelisk_bridge_checksum_method_steamchatfixture_next_own_game() != 52730) {

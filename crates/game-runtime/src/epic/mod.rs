@@ -265,6 +265,8 @@ impl crate::sessions::Storefront for Epic {
 impl crate::installations::Storefront for Epic {
     type Product = Product;
     type Platform = String;
+    /// Nothing joins a game through this storefront.
+    type Join = std::convert::Infallible;
     const RECEIPTS_UNAVAILABLE: &'static str = "model.epic.receiptsUnavailable";
     const RECEIPTS_NOT_SAVED: &'static str = "model.epic.receiptsNotSaved";
     const GAMES_DIRECTORY: &'static str = "Games/Epic";

@@ -347,7 +347,7 @@ async fn a_launch_gets_steam_components_for_every_build_and_voile_for_a_windows_
     let admission = sessions.admit(620, 42).unwrap();
     let launched = fixture
         .content
-        .launch(&fixture.installed("macos"), admission)
+        .launch(&fixture.installed("macos"), admission, None)
         .await;
     assert_eq!(
         launched,
@@ -359,7 +359,7 @@ async fn a_launch_gets_steam_components_for_every_build_and_voile_for_a_windows_
     let admission = sessions.admit(620, 42).unwrap();
     let canceller = admission.canceller();
     let windows = fixture.installed("windows");
-    let (launched, ()) = tokio::join!(fixture.content.launch(&windows, admission), async {
+    let (launched, ()) = tokio::join!(fixture.content.launch(&windows, admission, None), async {
         eventually(|| events.lock().unwrap().len() == 2).await;
         canceller.cancel();
     });

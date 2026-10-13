@@ -257,9 +257,10 @@ impl<N: Network> installations::Content<Steam> for Content<N> {
         &'a self,
         receipt: &'a Receipt<Steam>,
         admission: Admission<Steam>,
+        join: Option<&'a super::Join>,
     ) -> BoxFuture<'a, Result<(), Failure>> {
         Box::pin(async move {
-            let target = self
+            let mut target = self
                 .network
                 .launch_target(
                     receipt.product.app_id,
@@ -267,6 +268,9 @@ impl<N: Network> installations::Content<Steam> for Content<N> {
                     Path::new(&receipt.directory),
                 )
                 .await?;
+            if let Some(join) = join {
+                target.arguments.extend(join.arguments(&receipt.platform));
+            }
             admission
                 .hand_off(Handover {
                     locations: self.locations.clone(),

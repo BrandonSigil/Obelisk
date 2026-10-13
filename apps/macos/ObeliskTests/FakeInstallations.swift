@@ -14,6 +14,7 @@ final class FakeInstallations<Store: InstallationStorefront>: InstallationsBacke
         case checkUpdates
         case automaticUpdates(Bool)
         case launch(InstallationReceipt<Store.GameID>)
+        case join(InstallationReceipt<Store.GameID>, SteamGameInvite)
         case uninstall(InstallationReceipt<Store.GameID>)
         case signedOut
         case maintain(Store.GameID, installed: InstallationReceipt<Store.GameID>?)
@@ -70,6 +71,9 @@ final class FakeInstallations<Store: InstallationStorefront>: InstallationsBacke
     func checkUpdates() { record(.checkUpdates) }
     func setAutomaticUpdates(_ enabled: Bool) { record(.automaticUpdates(enabled)) }
     func launch(_ receipt: InstallationReceipt<Store.GameID>) { record(.launch(receipt)) }
+    func join(_ receipt: InstallationReceipt<Store.GameID>, invite: SteamGameInvite) {
+        record(.join(receipt, invite))
+    }
     func uninstall(_ receipt: InstallationReceipt<Store.GameID>) { record(.uninstall(receipt)) }
     func signedOut() { record(.signedOut) }
     func maintainCloud(_ game: Store.GameID, installed: InstallationReceipt<Store.GameID>?) {

@@ -258,6 +258,7 @@ impl<N: Network> installations::Content<Epic> for Content<N> {
         &'a self,
         receipt: &'a Receipt<Epic>,
         admission: Admission<Epic>,
+        _: Option<&'a std::convert::Infallible>,
     ) -> BoxFuture<'a, Result<(), Failure>> {
         Box::pin(async move {
             let outcome = admission

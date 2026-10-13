@@ -63,96 +63,374 @@ struct SessionSequence {
     }
 }
 
-/// Invitations friends sent into the account's running Steam game, as its
-/// Steam received them: the player joins one, or dismisses it here only.
+/// How the player can join a game a friend invited them into, or why not now.
+enum SteamJoinAvailability: Equatable {
+    /// The account's running game takes it in.
+    case running
+    /// The game starts, joining it.
+    case launch
+    /// No build of the game is installed.
+    case notInstalled
+    /// Another game runs or starts, or Steam is offline: Play is unavailable too.
+    case unavailable
+
+    var canJoin: Bool { self == .running || self == .launch }
+
+    /// Why the player cannot join now.
+    var reason: String? {
+        switch self {
+        case .running, .launch: nil
+        case .notInstalled: L10n.string("ui.invites.notInstalled")
+        case .unavailable: L10n.string("ui.invites.unavailable")
+        }
+    }
+}
+
+/// Invitations friends sent the account, as its Steam session and its running
+/// game's Steam received them: the player joins one, or dismisses it here
+/// only. Steam never withdraws one, so as Valve's chat does, an invitation
+/// goes after six hours, once its friend plays something else or goes
+/// offline, and when that friend sends another.
 @MainActor @Observable
 final class SteamReceivedInvitations {
     /// An invitation, whenever its friend sent it.
     struct Key: Hashable {
         let friend: UInt64
+        let appId: UInt32
         let invite: SteamGameInvite
 
         init(_ invite: SteamReceivedInvite) {
             friend = invite.friendSteamId
+            appId = invite.appId
             self.invite = invite.invite
         }
     }
 
-    /// The running game's invitations the player did not dismiss, newest first.
+    /// How long an invitation lasts, as in Valve's chat.
+    static let lifetime: TimeInterval = 6 * 60 * 60
+    /// How long the same invitation from the same friend counts as one: the
+    /// account's session and the running game's Steam both receive it.
+    static let repeatWindow: UInt64 = 120
+
+    /// Joining a friend's game from the friends list.
+    enum FriendJoin: Equatable {
+        /// The game the friend plays is being looked up.
+        case looking(friend: UInt64)
+        /// Why it could not be joined, until the player reads it.
+        case failed(String)
+    }
+
+    /// The invitations the player can still join or dismiss, newest first,
+    /// at most one per friend.
     private(set) var invites: [SteamReceivedInvite] = []
     /// The invitation being joined.
     private(set) var accepting: Key?
     /// Why joining an invitation failed.
     private(set) var failures: [Key: String] = [:]
-    /// The running game's session.
+    /// The account's running game's session.
     private(set) var session: String?
+    var friendJoin: FriendJoin?
+    /// Invitations that just showed for the first time, newest first, for
+    /// their notice.
+    @ObservationIgnored var onReceived: (@MainActor ([SteamReceivedInvite]) -> Void)?
+    /// Invitations that no longer show: joined, dismissed, expired or gone
+    /// with their account.
+    @ObservationIgnored var onGone: (@MainActor ([SteamReceivedInvite]) -> Void)?
+    /// Whether the friends list lets a friend still play an app. Valve's
+    /// chat drops an invitation once its friend plays another game; the list
+    /// may lag behind the invitation, so a friend it does not know yet, or
+    /// shows online without a game, still counts.
+    @ObservationIgnored var friendMayPlay: (@MainActor (_ friend: UInt64, _ appId: UInt32) -> Bool)?
 
     @ObservationIgnored private let sessions: SteamGameSessions
+    @ObservationIgnored private let installations: SteamInstallations
+    @ObservationIgnored private let now: () -> Date
+    /// The account's Steam session, which asks for a friend's game.
+    @ObservationIgnored private var steam: (any SteamSessionProtocol)?
+    @ObservationIgnored private var account: UInt64?
+    /// Invitations that arrived but have not shown yet.
+    @ObservationIgnored private var unannounced: Set<Key> = []
+    @ObservationIgnored private var observation: Task<Void, Never>?
+    @ObservationIgnored private var expiry: Task<Void, Never>?
+    /// When `expiry` shows the list again: its oldest invitation's receipt.
+    @ObservationIgnored private var expiryOf: UInt64?
+    /// What the account's session received, and the running game's Steam.
     @ObservationIgnored private var received: [SteamReceivedInvite] = []
-    /// When each dismissed invitation was received: sent again, it shows again.
+    @ObservationIgnored private var inGame: [SteamReceivedInvite] = []
+    /// When each dismissed or joined invitation was received: sent again, it
+    /// shows again.
     @ObservationIgnored private var dismissed: [Key: UInt64] = [:]
 
-    init(sessions: SteamGameSessions) {
+    init(sessions: SteamGameSessions, installations: SteamInstallations, now: @escaping () -> Date = Date.init) {
         self.sessions = sessions
+        self.installations = installations
+        self.now = now
     }
 
-    /// Follows the running game's session `id` and its invitations. Returns
-    /// those it did not show before, newest first; none when the session is
-    /// first seen, such as one recovered.
-    @discardableResult
-    func follow(session id: String?, invites: [SteamReceivedInvite]) -> [SteamReceivedInvite] {
+    // MARK: Sources
+
+    /// Follows the invitations `session` of `account` receives; a new
+    /// session of the same account keeps the ones already known.
+    func connect(_ session: any SteamSessionProtocol, account: UInt64) {
+        if self.account != account { reset() }
+        self.account = account
+        observation?.cancel()
+        steam = session
+        observation = Task { [weak self] in
+            var revision: UInt64 = 0
+            while !Task.isCancelled {
+                let snapshot = await session.nextInvites(afterRevision: revision)
+                guard let self, !Task.isCancelled else { return }
+                revision = snapshot.revision
+                self.receive(snapshot.invites)
+                guard snapshot.connected else { return }
+            }
+        }
+    }
+
+    /// The session ended; its replacement keeps the invitations.
+    func suspend() {
+        observation?.cancel()
+        observation = nil
+        steam = nil
+        if case .looking = friendJoin { friendJoin = nil }
+    }
+
+    /// Forgets every invitation, at sign-out or account change.
+    func reset() {
+        suspend()
+        account = nil
+        received = []
+        dismissed = [:]
+        unannounced = []
+        if !failures.isEmpty { failures = [:] }
+        if friendJoin != nil { friendJoin = nil }
+        leaveSession()
+        show()
+    }
+
+    private func receive(_ invites: [SteamReceivedInvite]) {
+        let known = Dictionary((received + inGame).map { (Key($0), $0.receivedAt) }, uniquingKeysWith: max)
+        let arrived = invites.filter { invite in
+            known[Key(invite)].map { $0 + Self.repeatWindow < invite.receivedAt } ?? true
+        }
+        // The session's list keeps one per friend; one that left it stays.
+        received = Self.newestPerFriend(invites + received)
+        arrive(arrived)
+        show()
+    }
+
+    /// Follows the running game's session `id` and the invitations its Steam
+    /// received. Those it did not show before are told of, except when the
+    /// session is first seen, such as one recovered.
+    func follow(session id: String?, invites: [SteamReceivedInvite]) {
         guard let id else {
-            if session != nil { session = nil }
-            received = []
-            dismissed = [:]
-            if accepting != nil { accepting = nil }
-            if !failures.isEmpty { failures = [:] }
+            // Called on every change of the Game sessions, a runtime's
+            // progress included: nothing changes while no game ran.
+            guard session != nil else { return }
+            leaveSession()
             show()
-            return []
+            return
         }
         let firstSight = session != id
-        let known = Set(received.map(Key.init))
+        let known = Set((inGame + received).map(Key.init))
         if firstSight {
             session = id
-            dismissed = [:]
             if accepting != nil { accepting = nil }
-            if !failures.isEmpty { failures = [:] }
         }
-        received = invites
+        inGame = invites
+        if !firstSight { arrive(invites.filter { !known.contains(Key($0)) }) }
         show()
-        return firstSight ? [] : invites.filter { !known.contains(Key($0)) }
     }
 
-    /// Hides `invite` until its friend sends it again.
+    private func leaveSession() {
+        if session != nil { session = nil }
+        inGame = []
+        if accepting != nil { accepting = nil }
+    }
+
+    /// The friends list changed: an invitation whose friend left its game goes.
+    func friendsChanged() { show() }
+
+    /// Invitations to tell of once they show; an old failure no longer holds.
+    private func arrive(_ invites: [SteamReceivedInvite]) {
+        for invite in invites {
+            let key = Key(invite)
+            unannounced.insert(key)
+            if failures[key] != nil { failures[key] = nil }
+        }
+    }
+
+    // MARK: The player's actions
+
+    /// Hides `invite` until its friend sends it again. A chat card's copy of
+    /// an invitation in the list hides that one too.
     func dismiss(_ invite: SteamReceivedInvite) {
         let key = Key(invite)
-        dismissed[key] = invite.receivedAt
-        failures[key] = nil
+        let listed = (received + inGame).filter { Key($0) == key }.map(\.receivedAt)
+        dismissed[key] = ([dismissed[key] ?? 0, invite.receivedAt] + listed).max()
+        if failures[key] != nil { failures[key] = nil }
         show()
     }
 
-    /// Joins `invite`; true once the game is told.
+    /// How the player joins a friend's game `appId` now.
+    func availability(appId: UInt32) -> SteamJoinAvailability {
+        if let session, let active = sessions.active, active.id == session, active.running, active.game == appId {
+            return .running
+        }
+        guard installations.isConnected else { return .unavailable }
+        guard installations.receipt(for: appId, preferring: SteamGames.nativePlatform) != nil else { return .notInstalled }
+        return installations.canLaunch(appId) ? .launch : .unavailable
+    }
+
+    /// Whether `invite`, such as one a chat card shows, can still be joined.
+    func isCurrent(_ invite: SteamReceivedInvite) -> Bool {
+        now().timeIntervalSince1970 - TimeInterval(invite.receivedAt) < Self.lifetime
+            && friendMayPlay?(invite.friendSteamId, invite.appId) ?? true
+    }
+
+    /// The listed invitation that `invite`, such as one a notice carries,
+    /// names: nil once it went.
+    func listed(_ invite: SteamReceivedInvite) -> SteamReceivedInvite? {
+        invites.first { Key($0) == Key(invite) }
+    }
+
+    /// Joins `invite` while it lasts: the running game takes it in, or its
+    /// game starts joining it. True once the game is told or starts.
     func accept(_ invite: SteamReceivedInvite) async -> Bool {
-        guard let session, accepting == nil else { return false }
+        guard isCurrent(invite) else { return false }
+        return await join(invite)
+    }
+
+    /// Joins the game `friend` plays now, as Steam's "Join Game" does: the
+    /// invitation they sent into it, else the lobby or `connect` string Steam
+    /// shows of them.
+    func joinFriend(_ friend: UInt64, appId: UInt32) {
+        if case .looking = friendJoin { return }
+        guard accepting == nil, availability(appId: appId).canJoin else { return }
+        friendJoin = nil
+        if let invite = invites.first(where: { $0.friendSteamId == friend && $0.appId == appId }) {
+            Task { [weak self] in
+                guard let self, !(await self.accept(invite)) else { return }
+                self.friendJoin = .failed(self.failure(joining: invite))
+            }
+            return
+        }
+        guard let steam else { return }
+        let looking = FriendJoin.looking(friend: friend)
+        friendJoin = looking
+        Task { [weak self] in
+            do {
+                let target = try await steam.friendGame(friendSteamId: friend)
+                guard let self, self.friendJoin == looking else { return }
+                self.friendJoin = nil
+                let invite = SteamReceivedInvite(friendSteamId: friend, appId: target.appId, invite: target.invite,
+                                                 receivedAt: Self.seconds(self.now()))
+                if !(await self.join(invite)) { self.friendJoin = .failed(self.failure(joining: invite)) }
+            } catch {
+                guard let self, self.friendJoin == looking else { return }
+                self.friendJoin = .failed(SteamModel.message(error))
+            }
+        }
+    }
+
+    /// The invitation `friend` sent that the player can still join, if any.
+    func invite(from friend: UInt64) -> SteamReceivedInvite? {
+        invites.first { $0.friendSteamId == friend }
+    }
+
+    private func join(_ invite: SteamReceivedInvite) async -> Bool {
+        guard accepting == nil else { return false }
         let key = Key(invite)
-        accepting = key
-        failures[key] = nil
-        do {
-            try await sessions.acceptInvite(sessionId: session, friendSteamId: invite.friendSteamId, invite: invite.invite)
-            guard self.session == session else { return false }
-            accepting = nil
+        switch availability(appId: invite.appId) {
+        case .running:
+            guard let session else { return false }
+            accepting = key
+            if failures[key] != nil { failures[key] = nil }
+            do {
+                try await sessions.acceptInvite(sessionId: session, friendSteamId: invite.friendSteamId, invite: invite.invite)
+                guard self.session == session else { return false }
+                accepting = nil
+                dismiss(invite)
+                return true
+            } catch {
+                guard self.session == session else { return false }
+                accepting = nil
+                failures[key] = SteamModel.message(error)
+                return false
+            }
+        case .launch:
+            guard let receipt = installations.receipt(for: invite.appId, preferring: SteamGames.nativePlatform) else {
+                return false
+            }
+            if failures[key] != nil { failures[key] = nil }
+            installations.join(receipt, invite: invite.invite)
+            // Rust starts the launch at once, or refuses it.
+            guard installations.isLaunching, installations.launchGame == invite.appId else {
+                failures[key] = L10n.string("ui.invites.unavailable")
+                return false
+            }
+            dismiss(invite)
             return true
-        } catch {
-            guard self.session == session else { return false }
-            accepting = nil
-            failures[key] = SteamModel.message(error)
+        case .notInstalled, .unavailable:
             return false
         }
     }
 
+    private func failure(joining invite: SteamReceivedInvite) -> String {
+        failures[Key(invite)] ?? availability(appId: invite.appId).reason ?? L10n.string("backend.steam.join.unavailable")
+    }
+
+    // MARK: What shows
+
     private func show() {
-        let visible = received.filter { invite in dismissed[Key(invite)].map { $0 < invite.receivedAt } ?? true }
+        let previous = invites
+        let all = received + inGame
+        let visible = Self.newestPerFriend(all).filter { invite in
+            dismissed[Key(invite)].map { $0 < invite.receivedAt } ?? true
+        }
+        .filter(isCurrent)
         if invites != visible { invites = visible }
+        scheduleExpiry()
+        let shown = Set(visible.map(Key.init))
+        let gone = previous.filter { !shown.contains(Key($0)) }
+        if !gone.isEmpty { onGone?(gone) }
+        // An invitation tells of itself once it shows, even if the friends
+        // list caught up with its friend's game only later.
+        let announced = visible.filter { unannounced.contains(Key($0)) }
+        unannounced = unannounced.subtracting(announced.map(Key.init)).intersection(all.map(Key.init))
+        if !announced.isEmpty { onReceived?(announced) }
+    }
+
+    /// Shows the list again as its oldest invitation expires.
+    private func scheduleExpiry() {
+        let oldest = invites.map(\.receivedAt).min()
+        guard oldest != expiryOf else { return }
+        expiryOf = oldest
+        expiry?.cancel()
+        guard let oldest else { expiry = nil; return }
+        let delay = TimeInterval(oldest) + Self.lifetime - now().timeIntervalSince1970
+        expiry = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(max(delay, 0) + 1))
+            guard let self, !Task.isCancelled else { return }
+            self.expiryOf = nil
+            self.show()
+        }
+    }
+
+    /// The newest invitation of each friend, newest first; the first of two
+    /// received at once.
+    private static func newestPerFriend(_ invites: [SteamReceivedInvite]) -> [SteamReceivedInvite] {
+        var newest: [UInt64: SteamReceivedInvite] = [:]
+        for invite in invites {
+            if let known = newest[invite.friendSteamId], known.receivedAt >= invite.receivedAt { continue }
+            newest[invite.friendSteamId] = invite
+        }
+        return newest.values.sorted { ($0.receivedAt, $0.friendSteamId) > ($1.receivedAt, $1.friendSteamId) }
+    }
+
+    private static func seconds(_ date: Date) -> UInt64 {
+        UInt64(max(date.timeIntervalSince1970, 0))
     }
 }
 

@@ -3,13 +3,10 @@
 //! clientserver friends, MMS and base protobufs; EMsgs follow SteamKit's emsg.steamd.
 use rsa::rand_core::{OsRng, RngCore};
 
-use super::{
-    CmError, FRIEND_DATA_REQUEST, SERVICE_REQUEST, SteamConnection, chat, own_game, proto,
-};
+use super::{CmError, SERVICE_REQUEST, SteamConnection, chat, invites, own_game, proto};
 
 const CHANGE_STATUS: u32 = 716;
 const MMS_INVITE_TO_LOBBY: u32 = 6621;
-const INVITE_TO_GAME: u32 = 7005;
 /// EPersonaState::Online.
 const ONLINE: u32 = 1;
 /// EResult values a chat request reports to the person (SteamKit eresult.steamd).
@@ -35,6 +32,8 @@ pub enum SocialError {
     InvalidRecipient,
     #[error("backend.steam.invite.unavailable")]
     InviteUnavailable,
+    #[error("backend.steam.join.unavailable")]
+    JoinUnavailable,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -85,6 +84,14 @@ impl SteamConnection {
         self.social.own_game.clone()
     }
 
+    pub(crate) fn invite_source(&self) -> invites::InviteSource {
+        self.social.invites.clone()
+    }
+
+    pub(crate) fn friend_games_source(&self) -> own_game::FriendGames {
+        self.social.friend_games.clone()
+    }
+
     /// Shows the account Online. Steam keeps the status for the session, so a
     /// caller sends it again after anything else changed it, such as a game.
     pub(crate) async fn set_online(&self) -> Result<(), CmError> {
@@ -95,20 +102,6 @@ impl SteamConnection {
             },
             None,
             None,
-        )
-        .await
-    }
-
-    /// Asks for the account's own game, lobby and rich presence; the answer
-    /// reaches the own-game source like any persona update.
-    pub(crate) async fn refresh_own_game(&self) -> Result<(), CmError> {
-        self.ensure_logged_on()?;
-        self.send(
-            FRIEND_DATA_REQUEST,
-            &proto::FriendDataRequest {
-                persona_state_requested: own_game::REQUESTED,
-                friends: vec![self.steam_id],
-            },
         )
         .await
     }
@@ -283,11 +276,12 @@ impl SteamConnection {
             }
             own_game::GameInvite::Connect { connect } => {
                 self.send_unjobbed(
-                    INVITE_TO_GAME,
+                    invites::INVITE_TO_GAME,
                     &proto::InviteToGame {
                         steam_id_dest: friend,
                         steam_id_src: self.steam_id,
                         connect_string: connect.clone(),
+                        remote_play: String::new(),
                     },
                     None,
                     Some(app_id),

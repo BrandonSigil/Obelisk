@@ -156,6 +156,9 @@ protocol InstallationsBackend<Store>: AnyObject {
     /// Launches `receipt`'s installation, updating or repairing it first
     /// when it needs it.
     func launch(_ receipt: InstallationReceipt<Store.GameID>)
+    /// Launches `receipt`'s Steam installation as `launch` does, its game
+    /// joining `invite`.
+    func join(_ receipt: InstallationReceipt<Store.GameID>, invite: SteamGameInvite)
     func uninstall(_ receipt: InstallationReceipt<Store.GameID>)
     func signedOut()
     /// Syncs the game's Cloud saves: those of `installed`, or an uninstalled
@@ -509,6 +512,15 @@ final class GameInstallations<Store: InstallationStorefront> {
     }
 }
 
+extension GameInstallations where Store == SteamGames {
+    /// Launches a Steam installation as `launch` does, its game joining
+    /// `invite`, a friend's lobby or `connect` string.
+    func join(_ receipt: Receipt, invite: SteamGameInvite) {
+        guard account != nil, canLaunch(receipt.gameID), receipts.contains(receipt) else { return }
+        act { $0.join(receipt, invite: invite) }
+    }
+}
+
 extension SteamGames: InstallationStorefront {
     static let nativePlatform = "macos"
     static func game(_ id: String) -> UInt32? { UInt32(id) }
@@ -564,6 +576,7 @@ final class NoInstallations<Store: InstallationStorefront>: InstallationsBackend
     func checkUpdates() {}
     func setAutomaticUpdates(_ enabled: Bool) {}
     func launch(_ receipt: InstallationReceipt<Store.GameID>) {}
+    func join(_ receipt: InstallationReceipt<Store.GameID>, invite: SteamGameInvite) {}
     func uninstall(_ receipt: InstallationReceipt<Store.GameID>) {}
     func signedOut() {}
     func maintainCloud(_ game: Store.GameID, installed: InstallationReceipt<Store.GameID>?) {}
@@ -598,6 +611,9 @@ final class RustInstallations<Store: InstallationStorefront>: InstallationsBacke
     func checkUpdates() { core.checkUpdates() }
     func setAutomaticUpdates(_ enabled: Bool) { core.setAutomaticUpdates(enabled: enabled) }
     func launch(_ receipt: InstallationReceipt<Store.GameID>) { core.launch(installation: receipt.id) }
+    func join(_ receipt: InstallationReceipt<Store.GameID>, invite: SteamGameInvite) {
+        core.join(installation: receipt.id, invite: invite)
+    }
     func uninstall(_ receipt: InstallationReceipt<Store.GameID>) { core.uninstall(installation: receipt.id) }
     func signedOut() { core.signedOut() }
     func maintainCloud(_ game: Store.GameID, installed: InstallationReceipt<Store.GameID>?) {

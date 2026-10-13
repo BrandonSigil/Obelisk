@@ -60,6 +60,8 @@ pub trait Storefront: sessions::Storefront {
     const GAMES_DIRECTORY: &'static str;
     /// The storefront, as the download queue shows it.
     const QUEUE: queue::Storefront;
+    /// What a launch may ask its game to join, such as a friend's lobby.
+    type Join: Clone + fmt::Debug + Send + Sync + 'static;
 
     /// The game `product` names.
     fn product_game(product: &Self::Product) -> Self::Game;
@@ -111,12 +113,13 @@ pub trait Content<S: Storefront>: Send + Sync {
         let _ = connection;
         Box::pin(std::future::pending())
     }
-    /// Hands a verified installation to its supervisor for its admission, and
-    /// returns once the session is finished.
+    /// Hands a verified installation to its supervisor for its admission, its
+    /// game joining `join` when set, and returns once the session is finished.
     fn launch<'a>(
         &'a self,
         receipt: &'a Receipt<S>,
         admission: Admission<S>,
+        join: Option<&'a S::Join>,
     ) -> BoxFuture<'a, Result<(), Failure>>;
     /// Saves the game's Cloud archive before its files go.
     fn archive<'a>(&'a self, receipt: &'a Receipt<S>) -> BoxFuture<'a, Result<(), Failure>>;
@@ -1374,6 +1377,16 @@ impl<S: Storefront> Installations<S> {
     /// started, or when the storefront offers a newer build; a storefront
     /// that cannot tell in time leaves the installed build to start.
     pub fn launch(&self, receipt: &str) {
+        self.start(receipt, None);
+    }
+
+    /// Launches the installation `receipt` names as `launch` does, its game
+    /// joining `join`, such as the lobby a friend invited the account into.
+    pub fn join(&self, receipt: &str, join: S::Join) {
+        self.start(receipt, Some(join));
+    }
+
+    fn start(&self, receipt: &str, join: Option<S::Join>) {
         let shared = &self.shared;
         let admission = shared.update(|inner| {
             let receipt = inner.receipt(receipt)?;
@@ -1440,7 +1453,10 @@ impl<S: Storefront> Installations<S> {
                     return Err(Failure::Cancelled);
                 }
                 shared.update(|inner| inner.state.verifying_before_launch = false);
-                shared.content.launch(&ready, admission).await
+                shared
+                    .content
+                    .launch(&ready, admission, join.as_ref())
+                    .await
             }
             .await;
             let was_running = running.is_finished();

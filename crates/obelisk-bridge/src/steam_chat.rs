@@ -3,9 +3,9 @@
 //! tells Swift it fell behind and must reload the history it shows.
 use std::sync::Arc;
 
-use steam_kit::{chat, own_game};
+use steam_kit::{chat, invites, own_game};
 
-use crate::{SteamError, SteamSession};
+use crate::{SteamError, SteamSession, game_session::SteamReceivedInvite};
 
 #[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
 pub struct SteamChatMessage {
@@ -134,6 +134,53 @@ pub enum SteamGameInvite {
     Connect { connect: String },
 }
 
+/// A game and how to join it: a friend's lobby or rich presence `connect`
+/// string, as an invitation or Steam's "Join Game" names it.
+#[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
+pub struct SteamJoinTarget {
+    pub app_id: u32,
+    /// Never `None`.
+    pub invite: SteamGameInvite,
+}
+
+/// The invitations friends sent the account's session, newest first, at most
+/// one per friend.
+#[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
+pub struct SteamReceivedInvites {
+    pub revision: u64,
+    pub connected: bool,
+    pub invites: Vec<SteamReceivedInvite>,
+}
+
+impl From<invites::ReceivedInvites> for SteamReceivedInvites {
+    fn from(received: invites::ReceivedInvites) -> Self {
+        Self {
+            revision: received.revision,
+            connected: received.connected,
+            invites: received
+                .invites
+                .into_iter()
+                .map(|invite| SteamReceivedInvite {
+                    friend_steam_id: invite.friend,
+                    app_id: invite.app_id,
+                    invite: invite.invite.into(),
+                    received_at: invite.received_at,
+                })
+                .collect(),
+        }
+    }
+}
+
+/// The invitation a friends chat message carries, read as Steam's chat reads
+/// its `[lobbyinvite]` and `[gameinvite]` tags; none for Remote Play.
+#[uniffi::export]
+pub fn steam_chat_invite(bbcode: String) -> Option<SteamJoinTarget> {
+    invites::chat_invite(&bbcode).map(|(app_id, invite)| SteamJoinTarget {
+        app_id,
+        invite: invite.into(),
+    })
+}
+
 /// The account's own game, and the invitation it can send right now.
 #[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
 pub struct SteamOwnGame {
@@ -169,6 +216,19 @@ impl From<game_runtime::protocol::InviteTarget> for SteamGameInvite {
         match target {
             game_runtime::protocol::InviteTarget::Lobby { lobby_id } => Self::Lobby { lobby_id },
             game_runtime::protocol::InviteTarget::Connect { connect } => Self::Connect { connect },
+        }
+    }
+}
+
+/// `None` names nothing to join.
+impl TryFrom<SteamGameInvite> for game_runtime::protocol::InviteTarget {
+    type Error = ();
+
+    fn try_from(invite: SteamGameInvite) -> Result<Self, ()> {
+        match invite {
+            SteamGameInvite::None => Err(()),
+            SteamGameInvite::Lobby { lobby_id } => Ok(Self::Lobby { lobby_id }),
+            SteamGameInvite::Connect { connect } => Ok(Self::Connect { connect }),
         }
     }
 }
@@ -270,8 +330,19 @@ impl SteamSession {
         self.client().next_own_game(after_revision).await.into()
     }
 
-    pub async fn refresh_own_game(&self) -> Result<(), SteamError> {
-        Ok(self.client().refresh_own_game().await?)
+    /// Suspends until the invitations friends sent change or the session ends.
+    pub async fn next_invites(&self, after_revision: u64) -> SteamReceivedInvites {
+        self.client().next_invites(after_revision).await.into()
+    }
+
+    /// The game `friend_steam_id` plays and how to join it now. Fails with
+    /// `backend.steam.join.unavailable` when it takes no one.
+    pub async fn friend_game(&self, friend_steam_id: u64) -> Result<SteamJoinTarget, SteamError> {
+        let (app_id, invite) = self.client().friend_game(friend_steam_id).await?;
+        Ok(SteamJoinTarget {
+            app_id,
+            invite: invite.into(),
+        })
     }
 
     /// Fails with `backend.steam.invite.unavailable` unless the account plays
@@ -311,6 +382,7 @@ pub struct SteamChatFixture {
     account_id: u64,
     chat: chat::ChatEventSource,
     own_game: own_game::OwnGameSource,
+    invites: invites::InviteSource,
 }
 
 #[cfg(debug_assertions)]
@@ -322,7 +394,47 @@ impl SteamChatFixture {
             account_id,
             chat: chat::ChatEventSource::new(),
             own_game: own_game::OwnGameSource::new(),
+            invites: invites::InviteSource::new(),
         })
+    }
+
+    /// A friend's chat message, as Steam writes it for an invitation too.
+    pub fn incoming_invitation(
+        &self,
+        friend_steam_id: u64,
+        message: String,
+        timestamp: u32,
+        ordinal: u32,
+    ) {
+        let body = chat::fixture::incoming_message(
+            friend_steam_id,
+            chat::CHAT_MESSAGE,
+            &message,
+            timestamp,
+            ordinal,
+            false,
+        );
+        self.chat.receive(chat::INCOMING_MESSAGE, &body);
+        self.invites
+            .receive_notification(chat::INCOMING_MESSAGE, &body);
+    }
+
+    /// A lobby invitation, as Steam sends it apart from the chat.
+    pub fn lobby_invite(&self, friend_steam_id: u64, lobby_id: u64, app_id: u32) {
+        self.invites.receive_packet(
+            invites::CHAT_INVITE,
+            None,
+            &invites::fixture::lobby_invite(friend_steam_id, lobby_id, app_id),
+        );
+    }
+
+    /// A connect invitation into `app_id`, its header's routing AppID.
+    pub fn connect_invite(&self, friend_steam_id: u64, app_id: u32, connect: String) {
+        self.invites.receive_packet(
+            invites::INVITE_TO_GAME,
+            Some(app_id),
+            &invites::fixture::connect_invite(friend_steam_id, &connect),
+        );
     }
 
     pub fn incoming_message(
@@ -372,6 +484,11 @@ impl SteamChatFixture {
     pub fn disconnect(&self) {
         self.chat.disconnect();
         self.own_game.disconnect();
+        self.invites.disconnect();
+    }
+
+    pub async fn next_invites(&self, after_revision: u64) -> SteamReceivedInvites {
+        self.invites.next(after_revision).await.into()
     }
 
     pub async fn next_chat(&self, after_sequence: u64) -> SteamChatEvents {
@@ -433,5 +550,33 @@ mod tests {
         fixture.disconnect();
         assert!(!fixture.next_chat(3).await.connected);
         assert!(!fixture.next_own_game(game.revision).await.connected);
+    }
+
+    #[tokio::test]
+    async fn invitations_cross_the_bridge_once_whatever_their_channel() {
+        const LOBBY: u64 = 109_775_244_421_126_053;
+        let tag = format!("[lobbyinvite appid=\"3527290\" lobbyid=\"{LOBBY}\"][/lobbyinvite]");
+        let target = SteamJoinTarget {
+            app_id: 3_527_290,
+            invite: SteamGameInvite::Lobby { lobby_id: LOBBY },
+        };
+        assert_eq!(steam_chat_invite(tag.clone()), Some(target.clone()));
+        assert_eq!(steam_chat_invite("hi".into()), None);
+
+        let fixture = SteamChatFixture::new(ACCOUNT);
+        fixture.incoming_invitation(FRIEND, tag, 10, 1);
+        fixture.lobby_invite(FRIEND, LOBBY, 3_527_290);
+        let invites = fixture.next_invites(1).await;
+        assert_eq!(invites.revision, 2);
+        assert_eq!(invites.invites.len(), 1);
+        assert_eq!(invites.invites[0].friend_steam_id, FRIEND);
+        assert_eq!(invites.invites[0].app_id, target.app_id);
+        assert_eq!(invites.invites[0].invite, target.invite);
+
+        fixture.connect_invite(ACCOUNT + 1, 620, "+connect 1".into());
+        let invites = fixture.next_invites(2).await;
+        assert_eq!(invites.invites[0].app_id, 620);
+        fixture.disconnect();
+        assert!(!fixture.next_invites(invites.revision).await.connected);
     }
 }
