@@ -49,28 +49,29 @@ final class SteamFriendsIntegrationTests: XCTestCase {
     }
 
     @MainActor
-    func testDisconnectKeepsStaleRowsAndReconnectReplacesWithFullEmptyList() async {
-        let first = FriendsBridgeTestSession(hydrated: true)
-        let connections = FriendsTestConnections(first: first)
-        let model = friendsTestModel(connect: { try await connections.connect($0) })
+    func testADroppedConnectionKeepsStaleRowsAndTheNextOneReplacesThemOnceHydrated() async {
+        let session = FriendsBridgeTestSession(hydrated: true)
+        let model = friendsTestModel(session: session)
         await model.start()
         defer { model.signOut() }
-        await first.settle()
+        await session.settle()
         model.openFriends()
-        first.fixture.disconnect(authenticationRequired: false)
-        await connections.waitForRequest(2)
+        session.fixture.disconnect(authenticationRequired: false)
+        await session.settle()
         XCTAssertEqual(model.friends?.connection, .interrupted)
         XCTAssertEqual(model.friends?.friends.count, 1)
         XCTAssertEqual(model.friends?.friends.first?.presence, .online)
         XCTAssertTrue(model.isFriendsPresented)
 
-        let second = FriendsBridgeTestSession()
-        second.fixture.receive(kind: 767, body: Data([0x08, 0x00]))
-        await connections.release(2, session: second)
-        await second.settle()
+        session.fixture.reconnect()
+        await session.settle()
+        XCTAssertEqual(model.friends?.connection, .interrupted, "A new connection's list replaces nothing until it loaded")
+        XCTAssertEqual(model.friends?.friends.count, 1)
+        session.fixture.receive(kind: 767, body: Data([0x08, 0x00]))
+        await session.settle()
         XCTAssertEqual(model.friends?.connection, .connected)
         XCTAssertEqual(model.friends?.friends.count, 0)
-        XCTAssertEqual(first.shutdownCount, 1)
+        XCTAssertEqual(session.shutdownCount, 0)
     }
 
     @MainActor
@@ -91,152 +92,127 @@ final class SteamFriendsIntegrationTests: XCTestCase {
     }
 
     @MainActor
-    func testLateAccountAReconnectionCannotAffectAccountB() async {
-        let first = FriendsBridgeTestSession(hydrated: true)
-        let connections = FriendsTestConnections(first: first)
-        let modelA = friendsTestModel(connect: { try await connections.connect($0) })
-        await modelA.start()
+    func testASignedOutAccountsSessionCannotAffectTheNextAccount() async {
+        let gamesOfA = FriendsTestLibraryRequest()
+        let first = FriendsBridgeTestSession(hydrated: true, games: { try await gamesOfA.request() })
+        let connections = FriendsTestConnections()
+        let model = friendsTestModel(connect: { try await connections.connect($0) })
+        let start = Task { await model.start() }
+        await connections.waitForRequest(1)
+        await connections.release(1, session: first)
+        await gamesOfA.waitUntilRequested()
         await first.settle()
-        first.fixture.disconnect(authenticationRequired: false)
-        await connections.waitForRequest(2)
-        modelA.signOut()
+        model.signOut()
         // Sign-out advances the authentication generation once, then restarts
         // QR sign-in, which advances it again. Wait for that restart so the
         // handoff below uses the generation the model actually reached.
-        await waitForSignInRestart(modelA)
+        await waitForSignInRestart(model)
 
         let accountB = FriendsWireFixture.accountID + 1
         let second = FriendsBridgeTestSession(accountID: accountB, hydrated: true)
         // Hand off a new authenticated account exactly as login polling does.
         let switchAccount = Task {
-            await modelA.connect(
+            await model.connect(
                 SteamCredentials(accountName: "Fixture B", steamId: accountB, refreshToken: "fixture-only-never-sent"),
                 generation: 2, persist: false
             )
         }
-        await connections.waitForRequest(3)
-        await connections.release(3, session: second)
+        await connections.waitForRequest(2)
+        await connections.release(2, session: second)
         await switchAccount.value
-        defer { modelA.signOut() }
+        defer { model.signOut() }
         await second.settle()
-        let late = FriendsBridgeTestSession(hydrated: true)
-        await connections.release(2, session: late)
-        await late.waitForShutdown()
-        XCTAssertEqual(modelA.friends?.account.accountID, String(accountB))
-        XCTAssertEqual(modelA.friends?.friends.count, 1)
-        XCTAssertEqual(late.shutdownCount, 1)
+
+        // Account A's session connects again, and its library request fails late.
+        first.fixture.reconnect()
+        first.fixture.receive(kind: 767, body: Data([0x08, 0x00]))
+        await gamesOfA.reject()
+        await start.value
+        XCTAssertEqual(model.friends?.account.accountID, String(accountB))
+        XCTAssertEqual(model.friends?.friends.count, 1)
+        XCTAssertEqual(model.friends?.connection, .connected)
+        XCTAssertNil(model.errorMessage)
+        XCTAssertGreaterThanOrEqual(first.shutdownCount, 1)
+        XCTAssertEqual(second.shutdownCount, 0)
     }
 
     @MainActor
-    func testAuthenticationRejectionDoesNotReconnect() async {
-        let first = FriendsBridgeTestSession(hydrated: true)
-        let connections = FriendsTestConnections(first: first)
-        let model = friendsTestModel(connect: { try await connections.connect($0) })
+    func testAuthenticationRequiredAsksToSignInAgainEvenAfterARetry() async {
+        let session = FriendsBridgeTestSession(hydrated: true)
+        let model = friendsTestModel(session: session)
         await model.start()
         defer { model.signOut() }
-        await first.settle()
-        first.fixture.disconnect(authenticationRequired: true)
-        await first.waitForShutdown()
+        await session.settle()
+        session.fixture.disconnect(authenticationRequired: true)
+        await session.settle()
         XCTAssertEqual(model.friends?.connection, .authenticationRequired)
         XCTAssertEqual(model.friends?.friends.count, 1)
-        let beforeRetry = await connections.count
-        XCTAssertEqual(beforeRetry, 1)
         model.retryFriends()
-        let afterRetry = await connections.count
-        XCTAssertEqual(afterRetry, 1)
+        await session.settle()
+        XCTAssertEqual(model.friends?.connection, .authenticationRequired)
+        XCTAssertEqual(model.friends?.friends.count, 1)
     }
 
     @MainActor
-    func testReconnectStopsAfterThreeFailuresAndRetainsStaleFriends() async {
-        let first = FriendsBridgeTestSession(hydrated: true)
-        let connections = FriendsTestConnections(first: first)
-        let delays = FriendsTestReconnectDelays()
-        let model = friendsTestModel(
-            connect: { try await connections.connect($0) },
-            reconnectDelay: { await delays.record($0) }
-        )
+    func testAReconnectionThatGaveUpShowsItsFailureAndKeepsStaleFriends() async {
+        let session = FriendsBridgeTestSession(hydrated: true)
+        let model = friendsTestModel(session: session)
         await model.start()
         defer { model.signOut() }
-        await first.settle()
-        first.fixture.disconnect(authenticationRequired: false)
+        await session.settle()
+        session.fixture.disconnect(authenticationRequired: false)
+        await session.settle()
+        XCTAssertEqual(model.friends?.connection, .interrupted)
 
-        for request in 2...3 {
-            await connections.waitForRequest(request)
-            XCTAssertEqual(model.friends?.connection, .interrupted)
-            await connections.reject(request, error: FriendsTestFailure.unexpected)
-        }
-        await connections.waitForRequest(4)
-        let exhausted = expectation(description: "Reconnect exhaustion is published")
-        withObservationTracking {
-            _ = model.friends?.connection
-        } onChange: { exhausted.fulfill() }
-        await connections.reject(4, error: FriendsTestFailure.unexpected)
-        await fulfillment(of: [exhausted], timeout: 3)
-
+        session.fixture.unreachable()
+        await session.settle()
         XCTAssertEqual(model.friends?.connection, .failed(L10n.string("model.friends.reconnectFailed")))
         XCTAssertEqual(model.friends?.friends.first?.displayName, "Alice")
         XCTAssertEqual(model.friends?.friends.first?.presence, .online)
-        let attempts = await delays.attempts
-        let connectionCount = await connections.count
-        XCTAssertEqual(attempts, [0, 1, 2])
-        XCTAssertEqual(connectionCount, 4)
-        XCTAssertEqual(first.shutdownCount, 1)
+        XCTAssertEqual(session.shutdownCount, 0)
     }
 
     @MainActor
-    func testAuthenticationRejectedDuringReconnectEndsRetryCycle() async {
-        let first = FriendsBridgeTestSession(hydrated: true)
-        let connections = FriendsTestConnections(first: first)
-        let delays = FriendsTestReconnectDelays()
-        let model = friendsTestModel(
-            connect: { try await connections.connect($0) },
-            reconnectDelay: { await delays.record($0) }
-        )
+    func testRetryAndWakeAskTheSessionToReconnect() async throws {
+        let session = FriendsBridgeTestSession(hydrated: true)
+        let model = friendsTestModel(session: session)
         await model.start()
         defer { model.signOut() }
-        await first.settle()
-        first.fixture.disconnect(authenticationRequired: false)
-        await connections.waitForRequest(2)
+        await session.settle()
 
-        let rejected = expectation(description: "Authentication rejection is published")
-        withObservationTracking {
-            _ = model.friends?.connection
-        } onChange: { rejected.fulfill() }
-        await connections.reject(2, error: SteamError.AuthenticationRequired)
-        await fulfillment(of: [rejected], timeout: 3)
-
-        XCTAssertEqual(model.friends?.connection, .authenticationRequired)
-        XCTAssertEqual(model.friends?.friends.count, 1)
         model.retryFriends()
-        let attempts = await delays.attempts
-        let connectionCount = await connections.count
-        XCTAssertEqual(attempts, [0])
-        XCTAssertEqual(connectionCount, 2)
+        XCTAssertEqual(session.reconnectRequests, 1)
+        await session.settle()
+        XCTAssertEqual(model.friends?.connection, .interrupted)
+        NSWorkspace.shared.notificationCenter.post(name: NSWorkspace.didWakeNotification, object: nil)
+        try await eventually { session.reconnectRequests == 2 }
+        XCTAssertEqual(session.shutdownCount, 0)
     }
 
     @MainActor
-    func testReconnectReloadsLibraryWhenInitialRequestIsStillSuspended() async {
+    func testANewConnectionReloadsTheLibraryWhileTheFirstRequestIsStillSuspended() async {
         let initialGames = FriendsTestLibraryRequest()
-        let first = FriendsBridgeTestSession(hydrated: true, games: { try await initialGames.request() })
-        let connections = FriendsTestConnections(first: first)
-        let model = friendsTestModel(connect: { try await connections.connect($0) })
+        let session = FriendsBridgeTestSession(hydrated: true, games: { try await initialGames.request() })
+        let model = friendsTestModel(session: session)
         let start = Task { await model.start() }
         defer { model.signOut() }
         await initialGames.waitUntilRequested()
-        await first.settle()
+        await session.settle()
         XCTAssertTrue(model.isLoadingGames)
 
-        first.fixture.disconnect(authenticationRequired: false)
-        await connections.waitForRequest(2)
+        session.fixture.disconnect(authenticationRequired: false)
+        await session.settle()
         let recoveredGame = SteamGame(appId: 620, name: "Portal 2", iconHash: "", lastPlayed: 0, playtimeMinutes: 0)
-        let replacement = FriendsBridgeTestSession(hydrated: true, games: { [recoveredGame] })
-        let libraryRecovered = expectation(description: "Replacement transport reloads the library")
+        session.loadGames = { [recoveredGame] }
+        let libraryRecovered = expectation(description: "The new connection reloads the library")
         withObservationTracking {
             _ = model.games
         } onChange: { libraryRecovered.fulfill() }
-        await connections.release(2, session: replacement)
+        session.fixture.reconnect()
         await fulfillment(of: [libraryRecovered], timeout: 3)
-        await replacement.settle()
+        session.fixture.receive(kind: 767, body: FriendsWireFixture.fullList)
+        session.fixture.receive(kind: 766, body: FriendsWireFixture.initialPersona)
+        await session.settle()
 
         XCTAssertEqual(model.games.map(\.appId), [620])
         XCTAssertFalse(model.isLoadingGames)
@@ -245,65 +221,54 @@ final class SteamFriendsIntegrationTests: XCTestCase {
         await start.value
         XCTAssertEqual(model.games.map(\.appId), [620])
         XCTAssertFalse(model.isLoadingGames)
-        XCTAssertNil(model.errorMessage, "A failure from the previous transport must not overwrite recovery")
-        let connectionCount = await connections.count
-        XCTAssertEqual(connectionCount, 2)
+        XCTAssertNil(model.errorMessage, "A failure through the dropped connection must not overwrite recovery")
     }
 
     @MainActor
-    func testReconnectBindsInstallationsToTheReplacementSession() async {
-        let first = FriendsBridgeTestSession(hydrated: true)
-        let connections = FriendsTestConnections(first: first)
+    func testAReconnectionKeepsTheAccountsInstallationsUntilSignOut() async {
+        let session = FriendsBridgeTestSession(hydrated: true)
+        let backend = FakeInstallations<SteamGames>()
         var bound: [any SteamSessionProtocol] = []
-        let model = friendsTestModel(connect: { try await connections.connect($0) },
-                                     installations: { session, _, _, _ in
-                                         bound.append(session)
-                                         return FakeInstallations<SteamGames>()
-                                     })
+        let model = friendsTestModel(session: session, installations: { session, _, _, _ in
+            bound.append(session)
+            return backend
+        })
         await model.start()
-        defer { model.signOut() }
-        await first.settle()
+        await session.settle()
 
-        first.fixture.disconnect(authenticationRequired: false)
-        await connections.waitForRequest(2)
-        let replacement = FriendsBridgeTestSession(hydrated: true)
-        let reconnected = expectation(description: "The replacement session is connected")
-        withObservationTracking {
-            _ = model.friends?.connection
-        } onChange: { reconnected.fulfill() }
-        await connections.release(2, session: replacement)
-        await fulfillment(of: [reconnected], timeout: 3)
-        await replacement.settle()
+        session.fixture.disconnect(authenticationRequired: false)
+        await session.settle()
+        session.fixture.reconnect()
+        await session.settle()
+        XCTAssertEqual(bound.count, 1)
+        XCTAssertTrue(bound.first === session)
+        XCTAssertFalse(backend.actions.contains(.signedOut), "Transfers keep going through the account's session")
 
-        XCTAssertEqual(bound.count, 2)
-        XCTAssertTrue(bound.first === first)
-        XCTAssertTrue(bound.last === replacement, "Transfers must not go through the shut-down session")
+        model.signOut()
+        XCTAssertEqual(backend.actions.filter { $0 == .signedOut }.count, 1)
     }
 
     @MainActor
     func testTheLibraryDownloadsNothingWhileTheSessionReconnects() async {
-        let first = FriendsBridgeTestSession(hydrated: true)
-        let connections = FriendsTestConnections(first: first)
+        let session = FriendsBridgeTestSession(hydrated: true)
         let backend = FakeInstallations<SteamGames>()
-        let model = friendsTestModel(connect: { try await connections.connect($0) },
-                                     installations: SteamModel.installations(backend))
+        let model = friendsTestModel(session: session, installations: SteamModel.installations(backend))
         await model.start()
         defer { model.signOut() }
-        await first.settle()
+        await session.settle()
         let portal = SteamGame(appId: 620, name: "Portal 2", iconHash: "", lastPlayed: 0, playtimeMinutes: 0)
         let download = { GameActions(model.installations, in: .library)(model.librarySelection(portal)) }
         XCTAssertTrue(download().isAvailable)
 
-        first.fixture.disconnect(authenticationRequired: false)
-        await connections.waitForRequest(2)
+        session.fixture.disconnect(authenticationRequired: false)
+        await session.settle()
         XCTAssertEqual(download().kind, .download(.install))
-        XCTAssertFalse(download().isAvailable, "The shut-down session installs nothing")
+        XCTAssertFalse(download().isAvailable, "Nothing downloads without a CM connection")
         download().perform()
         XCTAssertEqual(backend.actions, [])
 
-        let replacement = FriendsBridgeTestSession(hydrated: true)
-        await connections.release(2, session: replacement)
-        await replacement.settle()
+        session.fixture.reconnect()
+        await session.settle()
         XCTAssertTrue(download().isAvailable)
     }
 
@@ -339,7 +304,6 @@ func friendsTestModel(
     session: FriendsBridgeTestSession? = nil,
     accountID: UInt64 = FriendsWireFixture.accountID,
     connect: (@Sendable (SteamCredentials) async throws -> any SteamSessionProtocol)? = nil,
-    reconnectDelay: @escaping @Sendable (Int) async throws -> Void = { _ in try Task.checkCancellation() },
     installations: SteamModel.MakeInstallations? = nil,
     gameSessions: SteamGameSessions = .shared,
     chat: SteamChatModel? = nil,
@@ -352,7 +316,6 @@ func friendsTestModel(
         news: { _ in [] },
         webCookies: webCookies,
         beginLogin: offlineLogin,
-        reconnectDelay: reconnectDelay,
         gameSessions: gameSessions,
         installations: installations,
         chat: chat ?? SteamChatModel(isApplicationActive: false)
@@ -389,6 +352,8 @@ private func waitForSignInRestart(
     }
 }
 
+/// A Steam session whose states come from the debug Account session
+/// fixture, through Rust's own conversion. Nothing reaches Steam.
 final class FriendsBridgeTestSession: SteamSessionProtocol, @unchecked Sendable {
     let fixture: SteamFriendsFixture
     private let requests = FriendsTestSignals<UInt64>()
@@ -397,16 +362,24 @@ final class FriendsBridgeTestSession: SteamSessionProtocol, @unchecked Sendable 
     private var waiting = 0
     private var maximumWaiting = 0
     private var shutdowns = 0
-    private let loadGames: @Sendable () async throws -> [SteamGame]
+    private var reconnects = 0
+    private var _loadGames: @Sendable () async throws -> [SteamGame]
     var maximumSimultaneousWaits: Int { lock.withLock { maximumWaiting } }
     var shutdownCount: Int { lock.withLock { shutdowns } }
+    /// How many times the model asked the session to connect again.
+    var reconnectRequests: Int { lock.withLock { reconnects } }
+    /// What the library request answers, from now on.
+    var loadGames: @Sendable () async throws -> [SteamGame] {
+        get { lock.withLock { _loadGames } }
+        set { lock.withLock { _loadGames = newValue } }
+    }
 
     init(
         accountID: UInt64 = FriendsWireFixture.accountID,
         hydrated: Bool = false,
         games: @escaping @Sendable () async throws -> [SteamGame] = { [] }
     ) {
-        loadGames = games
+        _loadGames = games
         fixture = SteamFriendsFixture(accountId: accountID)
         if hydrated {
             fixture.receive(kind: 767, body: FriendsWireFixture.fullList)
@@ -423,14 +396,16 @@ final class FriendsBridgeTestSession: SteamSessionProtocol, @unchecked Sendable 
     }
     func shutdown() {
         lock.withLock { shutdowns += 1 }
-        fixture.disconnect(authenticationRequired: false)
-        Task { await events.signal("shutdown") }
+        fixture.close()
+    }
+    func reconnect() {
+        lock.withLock { reconnects += 1 }
+        fixture.retry()
     }
     func settle() async {
         let snapshot = await fixture.nextFriends(afterRevision: 0)
         await requests.wait(snapshot.revision)
     }
-    func waitForShutdown() async { await events.wait("shutdown") }
     func waitForNoWaiters() async {
         if lock.withLock({ waiting == 0 }) { return }
         await events.wait("finished-after-shutdown")
@@ -454,15 +429,12 @@ actor FriendsTestSignals<Key: Hashable & Sendable> {
 }
 
 private actor FriendsTestConnections {
-    private let first: FriendsBridgeTestSession?
     private var pending: [Int: CheckedContinuation<any SteamSessionProtocol, any Error>] = [:]
     private let requests = FriendsTestSignals<Int>()
-    private(set) var count = 0
-    init(first: FriendsBridgeTestSession? = nil) { self.first = first }
+    private var count = 0
     func connect(_ credentials: SteamCredentials) async throws -> any SteamSessionProtocol {
         count += 1
         let number = count
-        if number == 1, let first { return first }
         return try await withCheckedThrowingContinuation { continuation in
             pending[number] = continuation
             Task { await requests.signal(number) }
@@ -472,14 +444,6 @@ private actor FriendsTestConnections {
     func release(_ number: Int, session: any SteamSessionProtocol) {
         pending.removeValue(forKey: number)?.resume(returning: session)
     }
-    func reject(_ number: Int, error: any Error) {
-        pending.removeValue(forKey: number)?.resume(throwing: error)
-    }
-}
-
-private actor FriendsTestReconnectDelays {
-    private(set) var attempts: [Int] = []
-    func record(_ attempt: Int) { attempts.append(attempt) }
 }
 
 private actor FriendsTestLibraryRequest {

@@ -471,7 +471,8 @@ pub struct AccountInstallations {
 #[uniffi::export(async_runtime = "tokio")]
 impl AccountInstallations {
     /// The installations of the Steam account `session` signed in, whose
-    /// receipts `receipts` keeps.
+    /// receipts `receipts` keeps, for the whole sign-in: they reach Steam
+    /// through the session's CM connection of the moment.
     #[uniffi::constructor]
     pub fn steam(
         session: Arc<SteamSession>,
@@ -486,7 +487,7 @@ impl AccountInstallations {
         let locations: Locations = (&locations).into();
         let steam_id = credentials.steam_id;
         let content = steam::content::Content::new(
-            session.client.clone(),
+            session.account.clone(),
             game_runtime::protocol::Credentials {
                 steam_id,
                 account_name: credentials.account_name,

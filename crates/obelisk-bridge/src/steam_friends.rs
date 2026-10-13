@@ -2,6 +2,7 @@
 //! snapshots coalesce bursts without dropping the final state.
 use std::sync::Arc;
 
+use game_runtime::steam::account_session::{Phase, State};
 use obelisk_core::transfer::CancelToken;
 use steam_kit::friends;
 
@@ -40,9 +41,15 @@ impl From<friends::FriendPresence> for SteamFriendPresence {
 pub enum SteamFriendsConnection {
     Loading,
     Ready,
+    /// The CM connection dropped, and the session connects again.
     Disconnected,
     AuthenticationRequired,
     Error,
+    /// Every attempt to connect again failed; a retry or the Mac's wake
+    /// tries again.
+    Unreachable,
+    /// The session was shut down.
+    Stopped,
 }
 
 impl From<friends::FriendsConnection> for SteamFriendsConnection {
@@ -74,18 +81,33 @@ pub struct SteamFriend {
 
 #[derive(Clone, Debug, uniffi::Record)]
 pub struct SteamFriendsSnapshot {
+    /// The session's revision, which grows across its CM connections.
     pub revision: u64,
     pub account_id: u64,
     pub connection: SteamFriendsConnection,
+    /// The session's CM connection: 0 for the first, one more for each that
+    /// replaced a dropped one.
+    pub transport: u64,
     pub friends: Vec<SteamFriend>,
 }
 
-impl From<friends::FriendsSnapshot> for SteamFriendsSnapshot {
-    fn from(snapshot: friends::FriendsSnapshot) -> Self {
+/// The session's state, as the friends list shows it: the connection its
+/// friends tell while it is up, else where the session stands.
+impl From<State> for SteamFriendsSnapshot {
+    fn from(state: State) -> Self {
+        let snapshot = state.friends;
+        let connection = match state.phase {
+            Phase::Connected => snapshot.connection.into(),
+            Phase::Reconnecting => SteamFriendsConnection::Disconnected,
+            Phase::Unreachable => SteamFriendsConnection::Unreachable,
+            Phase::AuthenticationRequired => SteamFriendsConnection::AuthenticationRequired,
+            Phase::Closed => SteamFriendsConnection::Stopped,
+        };
         Self {
-            revision: snapshot.revision,
+            revision: state.revision,
             account_id: snapshot.account_id,
-            connection: snapshot.connection.into(),
+            connection,
+            transport: state.transport,
             friends: snapshot
                 .friends
                 .into_iter()
@@ -136,12 +158,49 @@ impl SteamConnectionAttempt {
     }
 }
 
-/// Debug-only controlled CM event source. It uses the production reducer and
-/// watch subscription, letting macOS tests exercise raw packets across UniFFI.
+/// Debug-only controlled Account session. Its friends go through the
+/// production reducer and its states through the production conversion,
+/// letting macOS tests exercise raw packets and reconnections across UniFFI.
 #[cfg(debug_assertions)]
 #[derive(uniffi::Object)]
 pub struct SteamFriendsFixture {
-    source: friends::FriendsEventSource,
+    account_id: u64,
+    /// The friends of the CM connection of the moment.
+    source: std::sync::Mutex<friends::FriendsEventSource>,
+    state: tokio::sync::watch::Sender<State>,
+}
+
+#[cfg(debug_assertions)]
+impl SteamFriendsFixture {
+    /// Publishes the source's friends, the session standing as `phase` with
+    /// `transport`, when anything changed.
+    fn publish(&self, source: &friends::FriendsEventSource, phase: Phase, transport: u64) {
+        let friends = source.snapshot();
+        self.state.send_if_modified(|state| {
+            if (state.phase, state.transport, &state.friends) == (phase, transport, &friends) {
+                return false;
+            }
+            *state = State {
+                revision: state.revision + 1,
+                phase,
+                transport,
+                friends,
+            };
+            true
+        });
+    }
+
+    fn source(&self) -> std::sync::MutexGuard<'_, friends::FriendsEventSource> {
+        self.source
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// Publishes the same friends, the session standing as `phase`.
+    fn stand(&self, phase: Phase) {
+        let transport = self.state.borrow().transport;
+        self.publish(&self.source(), phase, transport);
+    }
 }
 
 #[cfg(debug_assertions)]
@@ -149,20 +208,138 @@ pub struct SteamFriendsFixture {
 impl SteamFriendsFixture {
     #[uniffi::constructor]
     pub fn new(account_id: u64) -> Arc<Self> {
+        let source = friends::FriendsEventSource::new(account_id);
+        let (state, _) = tokio::sync::watch::channel(State {
+            revision: 1,
+            phase: Phase::Connected,
+            transport: 0,
+            friends: source.snapshot(),
+        });
         Arc::new(Self {
-            source: friends::FriendsEventSource::new(account_id),
+            account_id,
+            source: std::sync::Mutex::new(source),
+            state,
         })
     }
 
+    /// The CM connection of the moment receives a packet.
     pub fn receive(&self, kind: u32, body: Vec<u8>) {
-        self.source.apply_packet(kind, &body);
+        let source = self.source();
+        source.apply_packet(kind, &body);
+        let (phase, transport) = {
+            let state = self.state.borrow();
+            (state.phase, state.transport)
+        };
+        self.publish(&source, phase, transport);
     }
 
+    /// The CM connection drops and the session connects again, or Steam
+    /// asks the account to sign in again.
     pub fn disconnect(&self, authentication_required: bool) {
-        self.source.disconnect(authentication_required);
+        let source = self.source();
+        source.disconnect(authentication_required);
+        let transport = self.state.borrow().transport;
+        let phase = if authentication_required {
+            Phase::AuthenticationRequired
+        } else {
+            Phase::Reconnecting
+        };
+        self.publish(&source, phase, transport);
+    }
+
+    /// A new CM connection replaces the one that dropped, its friends still
+    /// loading.
+    pub fn reconnect(&self) {
+        let mut source = self.source();
+        *source = friends::FriendsEventSource::new(self.account_id);
+        let transport = self.state.borrow().transport + 1;
+        self.publish(&source, Phase::Connected, transport);
+    }
+
+    /// Every attempt to connect again failed.
+    pub fn unreachable(&self) {
+        self.stand(Phase::Unreachable);
+    }
+
+    /// The player's retry, or the Mac's wake: the session connects again,
+    /// unless its account must sign in again or it closed.
+    pub fn retry(&self) {
+        if self.state.borrow().retries() {
+            self.stand(Phase::Reconnecting);
+        }
+    }
+
+    /// The session is shut down.
+    pub fn close(&self) {
+        self.stand(Phase::Closed);
     }
 
     pub async fn next_friends(&self, after_revision: u64) -> SteamFriendsSnapshot {
-        self.source.next(after_revision).await.into()
+        let ready = obelisk_core::watch::next_matching(self.state.subscribe(), |state| {
+            state.follows(after_revision)
+        })
+        .await;
+        match ready {
+            Ok(state) | Err(state) => state.into(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn state(phase: Phase, connection: friends::FriendsConnection) -> State {
+        let mut snapshot = friends::FriendsEventSource::new(7).snapshot();
+        snapshot.connection = connection;
+        State {
+            revision: 12,
+            phase,
+            transport: 2,
+            friends: snapshot,
+        }
+    }
+
+    #[test]
+    fn each_session_phase_crosses_as_the_friends_connection_swift_shows() {
+        use friends::FriendsConnection as Friends;
+        let crossed =
+            |phase, connection| SteamFriendsSnapshot::from(state(phase, connection)).connection;
+
+        assert_eq!(
+            crossed(Phase::Connected, Friends::Loading),
+            SteamFriendsConnection::Loading
+        );
+        assert_eq!(
+            crossed(Phase::Connected, Friends::Ready),
+            SteamFriendsConnection::Ready
+        );
+        assert_eq!(
+            crossed(Phase::Connected, Friends::Error),
+            SteamFriendsConnection::Error
+        );
+        assert_eq!(
+            crossed(Phase::Reconnecting, Friends::Disconnected),
+            SteamFriendsConnection::Disconnected
+        );
+        assert_eq!(
+            crossed(Phase::Unreachable, Friends::Disconnected),
+            SteamFriendsConnection::Unreachable
+        );
+        assert_eq!(
+            crossed(Phase::AuthenticationRequired, Friends::Ready),
+            SteamFriendsConnection::AuthenticationRequired
+        );
+        assert_eq!(
+            crossed(Phase::Closed, Friends::Ready),
+            SteamFriendsConnection::Stopped
+        );
+
+        let snapshot = SteamFriendsSnapshot::from(state(Phase::Connected, Friends::Ready));
+        assert_eq!(
+            (snapshot.revision, snapshot.account_id, snapshot.transport),
+            (12, 7, 2),
+            "the session's revision and connection, the friends' account"
+        );
     }
 }

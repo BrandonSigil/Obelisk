@@ -37,6 +37,13 @@ pub trait Network: Send + Sync + 'static {
         &'a self,
         receipt: &'a Receipt<Steam>,
     ) -> BoxFuture<'a, Result<bool, Failure>>;
+    /// Waits until it reaches Steam through another CM connection than
+    /// `connection`, and returns that one's number. A client alone never
+    /// does: only the account session connects again.
+    fn reconnected(&self, connection: u64) -> BoxFuture<'_, u64> {
+        let _ = connection;
+        Box::pin(std::future::pending())
+    }
     /// What starts the game installed in `install`.
     fn launch_target<'a>(
         &'a self,
@@ -242,6 +249,9 @@ impl<N: Network> installations::Content<Steam> for Content<N> {
         receipt: &'a Receipt<Steam>,
     ) -> BoxFuture<'a, Result<bool, Failure>> {
         self.network.update_available(receipt)
+    }
+    fn reconnected(&self, connection: u64) -> BoxFuture<'_, u64> {
+        self.network.reconnected(connection)
     }
     fn launch<'a>(
         &'a self,

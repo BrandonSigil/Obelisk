@@ -188,12 +188,12 @@ impl From<own_game::OwnGame> for SteamOwnGame {
 impl SteamSession {
     /// Shows the account Online again, for instance after a game ended.
     pub async fn set_online(&self) -> Result<(), SteamError> {
-        Ok(self.client.set_online().await?)
+        Ok(self.client().set_online().await?)
     }
 
     /// Suspends until chat events follow `after_sequence` or the session ends.
     pub async fn next_chat(&self, after_sequence: u64) -> SteamChatEvents {
-        self.client.next_chat(after_sequence).await.into()
+        self.client().next_chat(after_sequence).await.into()
     }
 
     pub async fn send_message(
@@ -201,7 +201,7 @@ impl SteamSession {
         friend_steam_id: u64,
         text: String,
     ) -> Result<SteamSentMessage, SteamError> {
-        let sent = self.client.send_message(friend_steam_id, &text).await?;
+        let sent = self.client().send_message(friend_steam_id, &text).await?;
         Ok(SteamSentMessage {
             timestamp: sent.timestamp,
             ordinal: sent.ordinal,
@@ -212,7 +212,7 @@ impl SteamSession {
 
     /// Throttled per friend in Rust; calling on every keystroke is fine.
     pub async fn send_typing(&self, friend_steam_id: u64) -> Result<(), SteamError> {
-        Ok(self.client.send_typing(friend_steam_id).await?)
+        Ok(self.client().send_typing(friend_steam_id).await?)
     }
 
     /// Up to `count` (at most 50) messages before `before`, or the latest ones.
@@ -223,7 +223,7 @@ impl SteamSession {
         count: u32,
     ) -> Result<SteamChatHistory, SteamError> {
         let history = self
-            .client
+            .client()
             .recent_messages(
                 friend_steam_id,
                 before.map(|position| (position.timestamp, position.ordinal)),
@@ -247,7 +247,7 @@ impl SteamSession {
 
     pub async fn active_sessions(&self) -> Result<Vec<SteamChatSession>, SteamError> {
         Ok(self
-            .client
+            .client()
             .active_sessions()
             .await?
             .into_iter()
@@ -262,16 +262,16 @@ impl SteamSession {
 
     /// Marks the conversation read up to `timestamp` in every session.
     pub async fn ack(&self, friend_steam_id: u64, timestamp: u32) -> Result<(), SteamError> {
-        Ok(self.client.ack(friend_steam_id, timestamp).await?)
+        Ok(self.client().ack(friend_steam_id, timestamp).await?)
     }
 
     /// Suspends until the own game's revision differs or the session ends.
     pub async fn next_own_game(&self, after_revision: u64) -> SteamOwnGame {
-        self.client.next_own_game(after_revision).await.into()
+        self.client().next_own_game(after_revision).await.into()
     }
 
     pub async fn refresh_own_game(&self) -> Result<(), SteamError> {
-        Ok(self.client.refresh_own_game().await?)
+        Ok(self.client().refresh_own_game().await?)
     }
 
     /// Fails with `backend.steam.invite.unavailable` unless the account plays
@@ -281,7 +281,9 @@ impl SteamSession {
         friend_steam_id: u64,
         app_id: u32,
     ) -> Result<(), SteamError> {
-        self.client.invite_to_game(friend_steam_id, app_id).await?;
+        self.client()
+            .invite_to_game(friend_steam_id, app_id)
+            .await?;
         Ok(())
     }
 
@@ -294,7 +296,7 @@ impl SteamSession {
         app_id: u32,
         invite: SteamGameInvite,
     ) -> Result<(), SteamError> {
-        self.client
+        self.client()
             .invite_into_game(friend_steam_id, app_id, &invite.into())
             .await?;
         Ok(())

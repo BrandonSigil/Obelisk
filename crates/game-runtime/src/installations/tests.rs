@@ -39,6 +39,9 @@ struct Script {
     newer: Vec<u32>,
     /// Update checks cannot reach the storefront.
     unreachable: bool,
+    /// Update checks wait while the test holds them, with the answer they
+    /// had when asked.
+    checks_held: bool,
     /// The game each update check asked about.
     checks: Vec<u32>,
     /// Holding the storefront holds only its downloads: launches go on.
@@ -54,6 +57,8 @@ struct Fake {
     script: Mutex<Script>,
     released: Condvar,
     cancelled: AtomicBool,
+    /// The number of the storefront session's connection of the moment.
+    connection: watch::Sender<u64>,
 }
 
 impl Fake {
@@ -62,6 +67,7 @@ impl Fake {
             script: Mutex::new(Script::default()),
             released: Condvar::new(),
             cancelled: AtomicBool::new(false),
+            connection: watch::channel(0).0,
         })
     }
     fn with<T>(&self, change: impl FnOnce(&mut Script) -> T) -> T {
@@ -77,12 +83,24 @@ impl Fake {
         self.with(|script| script.held = false);
         self.released.notify_all();
     }
+    fn release_checks(&self) {
+        self.with(|script| script.checks_held = false);
+        self.released.notify_all();
+    }
+    /// The storefront session connects again, through a new connection.
+    fn reconnects(&self) {
+        self.connection.send_modify(|connection| *connection += 1);
+    }
     /// Waits while the test holds the storefront, off the async runtime.
     async fn wait(self: &Arc<Self>) {
+        self.wait_while(|script| script.held).await;
+    }
+    /// Waits while `held` and nothing cancelled, off the async runtime.
+    async fn wait_while(self: &Arc<Self>, held: fn(&Script) -> bool) {
         let fake = self.clone();
         tokio::task::spawn_blocking(move || {
             let mut script = fake.script.lock().unwrap();
-            while script.held && !fake.cancelled.load(Ordering::Acquire) {
+            while held(&script) && !fake.cancelled.load(Ordering::Acquire) {
                 script = fake.released.wait(script).unwrap();
             }
         })
@@ -173,13 +191,27 @@ impl super::Content<Steam> for Content {
         receipt: &'a Receipt<Steam>,
     ) -> BoxFuture<'a, Result<bool, Failure>> {
         Box::pin(async move {
-            self.0.with(|script| {
+            let (answer, held) = self.0.with(|script| {
                 script.checks.push(receipt.game());
-                if script.unreachable {
-                    return Err(Failure::Failed("backend.steam.content.network".into()));
-                }
-                Ok(script.newer.contains(&receipt.game()))
-            })
+                let answer = if script.unreachable {
+                    Err(Failure::Failed("backend.steam.content.network".into()))
+                } else {
+                    Ok(script.newer.contains(&receipt.game()))
+                };
+                (answer, script.checks_held)
+            });
+            if held {
+                self.0.wait_while(|script| script.checks_held).await;
+            }
+            answer
+        })
+    }
+    fn reconnected(&self, connection: u64) -> BoxFuture<'_, u64> {
+        let connections = self.0.connection.subscribe();
+        Box::pin(async move {
+            match obelisk_core::watch::next_matching(connections, |now| *now != connection).await {
+                Ok(now) | Err(now) => now,
+            }
         })
     }
     fn launch<'a>(
@@ -809,6 +841,29 @@ async fn an_update_check_names_each_installation_with_a_newer_build_until_its_tr
     fixture.installations.update("620-macos");
     idle(&fixture.installations).await;
     assert!(fixture.installations.state().updates.is_empty());
+}
+
+#[tokio::test]
+async fn a_session_that_connects_again_is_asked_for_newer_builds_at_once_after_any_check_under_way()
+{
+    let fixture = Fixture::new(true).await;
+    let checks = || fixture.fake.with(|script| script.checks.clone());
+    fixture.fake.with(|script| script.checks_held = true);
+    fixture.installations.check_updates();
+    eventually(|| checks() == [620]).await;
+
+    // The check under way asked through the old connection.
+    fixture.fake.reconnects();
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    fixture.fake.with(|script| script.newer.push(620));
+    fixture.fake.release_checks();
+    eventually(|| fixture.installations.state().updates == ["620-macos"]).await;
+    assert_eq!(checks(), [620, 620]);
+
+    fixture.installations.check_updates();
+    assert_eq!(checks(), [620, 620], "a check just ran");
+    fixture.fake.reconnects();
+    eventually(|| checks() == [620, 620, 620]).await;
 }
 
 #[tokio::test]

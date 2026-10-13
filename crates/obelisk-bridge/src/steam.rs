@@ -1,6 +1,7 @@
 //! Asynchronous, account-scoped Steam API for Swift. Secrets cross this seam only
 //! for authentication and the macOS Keychain; they are never part of a catalog.
 use crate::{LibraryCache, library_cache::SteamLibrary};
+use game_runtime::{protocol::Credentials, steam::account_session::AccountSession};
 use std::{path::Path, sync::Arc};
 use steam_kit::{auth, client};
 use tokio::sync::Mutex;
@@ -235,10 +236,17 @@ pub struct SteamGameDetails {
 }
 #[derive(uniffi::Object)]
 pub struct SteamSession {
-    /// Shared with the account's installations.
-    pub(crate) client: Arc<client::Client>,
+    /// Shared with the account's installations for the whole sign-in.
+    pub(crate) account: Arc<AccountSession>,
     /// Where the account's library is kept as it loads.
     library: Option<SteamLibrary>,
+}
+
+impl SteamSession {
+    /// The account's CM connection of the moment.
+    pub(crate) fn client(&self) -> Arc<client::Client> {
+        self.account.current()
+    }
 }
 
 #[derive(Clone, Debug, uniffi::Record)]
@@ -261,16 +269,17 @@ impl SteamSession {
         if token.steam_id != credentials.steam_id {
             return Err(auth::AuthError::Protocol.into());
         }
-        Ok(Arc::new(Self {
-            client: Arc::new(
-                client::Client::connect(&token.account_name, token.steam_id, &token.refresh_token)
-                    .await?,
-            ),
-            library: library.map(|library| library.steam(token.steam_id)),
-        }))
+        let library = library.map(|library| library.steam(token.steam_id));
+        let account = AccountSession::connect(Credentials {
+            steam_id: token.steam_id,
+            account_name: token.account_name,
+            refresh_token: token.refresh_token,
+        })
+        .await?;
+        Ok(Arc::new(Self { account, library }))
     }
     pub async fn games(&self) -> Result<Vec<SteamGame>, SteamError> {
-        let games = self.client.games().await?;
+        let games = self.client().games().await?;
         Ok(match &self.library {
             Some(library) => library.games(games),
             None => games.into_iter().map(Into::into).collect(),
@@ -282,22 +291,24 @@ impl SteamSession {
         language: String,
     ) -> Result<Vec<SteamAchievement>, SteamError> {
         Ok(self
-            .client
+            .client()
             .achievements(app_id, &language)
             .await?
             .into_iter()
             .map(Into::into)
             .collect())
     }
-    /// Suspends on the CM watch channel; no content-query mutex is held.
+    /// The session's state after `after_revision`: its friends and how it
+    /// stands with Steam, across its CM connections. No content-query mutex
+    /// is held.
     pub async fn next_friends(&self, after_revision: u64) -> crate::SteamFriendsSnapshot {
-        self.client.next_friends(after_revision).await.into()
+        self.account.next(after_revision).await.into()
     }
 
     /// Cookies that sign Steam's sites in as this session's account.
     pub async fn web_cookies(&self) -> Result<Vec<SteamWebCookie>, SteamError> {
         Ok(self
-            .client
+            .client()
             .web_cookies()
             .await?
             .into_iter()
@@ -310,12 +321,19 @@ impl SteamSession {
             .collect())
     }
 
-    /// Also wakes UniFFI futures, whose Swift wrappers do not cancel Rust awaits.
+    /// Stops reconnecting and ends the CM connection. Also wakes UniFFI
+    /// futures, whose Swift wrappers do not cancel Rust awaits.
     pub fn shutdown(&self) {
-        self.client.shutdown();
+        self.account.close();
+    }
+    /// Replaces the CM connection, live or not, and connects again, as on the
+    /// player's retry or the Mac's wake. Nothing once Steam asked the account
+    /// to sign in again.
+    pub fn reconnect(&self) {
+        self.account.reconnect();
     }
     pub async fn profile(&self) -> Result<SteamProfile, SteamError> {
-        let profile = self.client.profile().await?;
+        let profile = self.client().profile().await?;
         Ok(SteamProfile {
             display_name: profile.display_name,
             avatar_url: profile.avatar_url,
@@ -325,13 +343,13 @@ impl SteamSession {
     /// It downloads a verified backup; no Cloud mutation or game launch occurs.
     pub async fn cloud_backup(&self, app_id: u32, directory: String) -> Result<String, SteamError> {
         Ok(self
-            .client
+            .client()
             .cloud_backup(app_id, Path::new(&directory))
             .await?)
     }
     /// Returns only Cloud preferences and source revision, never roaming data.
     pub async fn cloud_preferences(&self, app_id: u32) -> Result<String, SteamError> {
-        let preferences = self.client.cloud_preferences(app_id).await?;
+        let preferences = self.client().cloud_preferences(app_id).await?;
         serde_json::to_string(&preferences).map_err(|_| SteamError::Failure {
             reason: "Invalid Cloud preference report".into(),
         })
@@ -341,7 +359,7 @@ impl SteamSession {
         &self,
         app_ids: Vec<u32>,
     ) -> Result<Vec<SteamGamePlatforms>, SteamError> {
-        let games = self.client.platforms(&app_ids).await?;
+        let games = self.client().platforms(&app_ids).await?;
         let platforms = games
             .iter()
             .map(|game| SteamGamePlatforms {
@@ -359,7 +377,7 @@ impl SteamSession {
         app_id: u32,
         language: String,
     ) -> Result<SteamGameDetails, SteamError> {
-        let details = self.client.details(app_id, &language).await?;
+        let details = self.client().details(app_id, &language).await?;
         Ok(SteamGameDetails {
             app_id: details.app_id,
             name: details.name,
@@ -382,16 +400,16 @@ impl SteamSession {
         directory: String,
     ) -> Result<String, SteamError> {
         Ok(self
-            .client
+            .client()
             .cloud_interruption_probe(app_id, Path::new(&directory))
             .await?)
     }
 
     pub async fn cloud_sdk_candidates(&self) -> Result<String, SteamError> {
-        Ok(self.client.cloud_sdk_candidates().await?)
+        Ok(self.client().cloud_sdk_candidates().await?)
     }
     pub async fn cloud_autocloud_metadata(&self) -> Result<String, SteamError> {
-        Ok(self.client.cloud_autocloud_metadata().await?)
+        Ok(self.client().cloud_autocloud_metadata().await?)
     }
     pub async fn cloud_transfer_probe(
         &self,
@@ -399,7 +417,7 @@ impl SteamSession {
         directory: String,
     ) -> Result<String, SteamError> {
         Ok(self
-            .client
+            .client()
             .cloud_transfer_probe(app_id, Path::new(&directory))
             .await?)
     }

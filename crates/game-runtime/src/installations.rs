@@ -103,6 +103,14 @@ pub trait Content<S: Storefront>: Send + Sync {
         &'a self,
         receipt: &'a Receipt<S>,
     ) -> BoxFuture<'a, Result<bool, Failure>>;
+    /// Waits until the storefront's session reaches it through another
+    /// connection than `connection`, and returns that one's number; the
+    /// first is 0. Only Steam's account session connects again by itself:
+    /// the others never return.
+    fn reconnected(&self, connection: u64) -> BoxFuture<'_, u64> {
+        let _ = connection;
+        Box::pin(std::future::pending())
+    }
     /// Hands a verified installation to its supervisor for its admission, and
     /// returns once the session is finished.
     fn launch<'a>(
@@ -308,6 +316,8 @@ struct Inner<S: Storefront> {
     answered: Option<(String, u64)>,
     /// An update check asks the storefront now.
     checking_updates: bool,
+    /// The session connected again while it asked: another check follows.
+    check_again: bool,
     /// When the last update check finished.
     updates_checked: Option<Instant>,
     /// The player wants each newer build installed as soon as it is known.
@@ -680,6 +690,72 @@ impl<S: Storefront> Shared<S> {
         if available {
             inner.state.updates.push(id);
         }
+    }
+
+    /// Asks whether each installation has a newer build, unless a check ran
+    /// less than ten minutes ago. Once the session connected `again`, it
+    /// asks at once, as a new sign-in would, or as soon as the check under
+    /// way ends.
+    fn check_updates(self: &Arc<Self>, again: bool) {
+        let started = self.update(|inner| {
+            if inner.signed_out {
+                return None;
+            }
+            if inner.checking_updates {
+                inner.check_again |= again;
+                return None;
+            }
+            let recent = inner
+                .updates_checked
+                .is_some_and(|checked| checked.elapsed() < UPDATE_CHECK);
+            if recent && !again {
+                return None;
+            }
+            inner.checking_updates = true;
+            Some(inner.state.receipts.clone())
+        });
+        let Some(receipts) = started else {
+            return;
+        };
+        let shared = self.clone();
+        runtime().spawn(async move {
+            // Every installation is asked at once, each within its timeout.
+            let mut checks = tokio::task::JoinSet::new();
+            for receipt in receipts {
+                // An interrupted Transfer is repaired before its game launches.
+                if receipt.needs_verification {
+                    continue;
+                }
+                let shared = shared.clone();
+                checks.spawn(async move {
+                    let available = shared.ask_update(&receipt).await;
+                    (receipt, available)
+                });
+            }
+            let mut found = Vec::new();
+            while let Some(checked) = checks.join_next().await {
+                if let Ok((receipt, Some(available))) = checked {
+                    found.push((receipt, available));
+                }
+            }
+            let again = shared.update(|inner| {
+                inner.checking_updates = false;
+                inner.updates_checked = Some(Instant::now());
+                inner.automatic_skipped.clear();
+                for (receipt, available) in found {
+                    // A Transfer replaced the receipt meanwhile: its answer is
+                    // about the build it replaced.
+                    if inner.state.receipts.contains(&receipt) {
+                        Shared::mark_update(inner, receipt.id(), available);
+                    }
+                }
+                std::mem::take(&mut inner.check_again)
+            });
+            shared.update_automatically();
+            if again {
+                shared.check_updates(true);
+            }
+        });
     }
 
     /// Asks whether `receipt`'s installation has a newer build, and records it.
@@ -1083,6 +1159,7 @@ impl<S: Storefront> Installations<S> {
             maintenances: 0,
             answered: None,
             checking_updates: false,
+            check_again: false,
             updates_checked: None,
             automatic_updates: false,
             automatic_skipped: Vec::new(),
@@ -1153,11 +1230,23 @@ impl<S: Storefront> Installations<S> {
                 shared.queueing.queue.advance();
             }
         });
+        // A session that connected again is asked for newer builds at once,
+        // as a new sign-in would be.
+        let weak = Arc::downgrade(&shared);
+        let content = shared.content.clone();
+        let reconnections = runtime().spawn(async move {
+            let mut connection = 0;
+            loop {
+                connection = content.reconnected(connection).await;
+                let Some(shared) = weak.upgrade() else { return };
+                shared.check_updates(true);
+            }
+        });
         shared
             .watchers
             .lock()
             .unwrap()
-            .extend([sessions_watcher, updater]);
+            .extend([sessions_watcher, updater, reconnections]);
         Self { shared }
     }
 
@@ -1277,55 +1366,7 @@ impl<S: Storefront> Installations<S> {
     /// most once every ten minutes; the state then names those that do. An
     /// installation it cannot tell about keeps what was known.
     pub fn check_updates(&self) {
-        let shared = &self.shared;
-        let started = shared.update(|inner| {
-            let recent = inner
-                .updates_checked
-                .is_some_and(|checked| checked.elapsed() < UPDATE_CHECK);
-            if inner.signed_out || inner.checking_updates || recent {
-                return None;
-            }
-            inner.checking_updates = true;
-            Some(inner.state.receipts.clone())
-        });
-        let Some(receipts) = started else {
-            return;
-        };
-        let shared = shared.clone();
-        runtime().spawn(async move {
-            // Every installation is asked at once, each within its timeout.
-            let mut checks = tokio::task::JoinSet::new();
-            for receipt in receipts {
-                // An interrupted Transfer is repaired before its game launches.
-                if receipt.needs_verification {
-                    continue;
-                }
-                let shared = shared.clone();
-                checks.spawn(async move {
-                    let available = shared.ask_update(&receipt).await;
-                    (receipt, available)
-                });
-            }
-            let mut found = Vec::new();
-            while let Some(checked) = checks.join_next().await {
-                if let Ok((receipt, Some(available))) = checked {
-                    found.push((receipt, available));
-                }
-            }
-            shared.update(|inner| {
-                inner.checking_updates = false;
-                inner.updates_checked = Some(Instant::now());
-                inner.automatic_skipped.clear();
-                for (receipt, available) in found {
-                    // A Transfer replaced the receipt meanwhile: its answer is
-                    // about the build it replaced.
-                    if inner.state.receipts.contains(&receipt) {
-                        Shared::mark_update(inner, receipt.id(), available);
-                    }
-                }
-            });
-            shared.update_automatically();
-        });
+        self.shared.check_updates(false);
     }
 
     /// Launches the installation `receipt` names. A Transfer runs first,

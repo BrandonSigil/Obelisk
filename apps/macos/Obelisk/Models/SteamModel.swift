@@ -97,6 +97,10 @@ final class SteamModel {
         didSet { if cachedAccount != oldValue { libraryChanges &+= 1 } }
     }
     @ObservationIgnored private var session: (any SteamSessionProtocol)?
+    /// The session's CM connection of the moment, as it last published it;
+    /// nil while it reconnects, after it gave up, or once Steam asked to sign
+    /// in again.
+    @ObservationIgnored private var transport: UInt64?
     @ObservationIgnored private var login: (any SteamLoginProtocol)?
     private var steamId: UInt64? { sessionCredentials?.steamId }
     /// The saved session's restoration; true when it ended without a newer
@@ -110,12 +114,10 @@ final class SteamModel {
     @ObservationIgnored private var loginTask: Task<Void, Never>?
     @ObservationIgnored private var profileTask: Task<Void, Never>?
     @ObservationIgnored private var friendsTask: Task<Void, Never>?
-    @ObservationIgnored private var friendsObservationGeneration = 0
     /// The connected account; observed because `isConnected` derives from it.
     private var sessionCredentials: SteamCredentials? {
         didSet { if sessionCredentials?.steamId != oldValue?.steamId { libraryChanges &+= 1 } }
     }
-    @ObservationIgnored private let reconnectDelay: @Sendable (Int) async throws -> Void
     @ObservationIgnored private var wakeObserver: SystemWakeObservation?
     @ObservationIgnored private var connectionTask: Task<any SteamSessionProtocol, Error>?
     @ObservationIgnored private var pollingActive = false
@@ -142,9 +144,6 @@ final class SteamModel {
             }
         },
         localeIdentifier: String = Locale.preferredLanguages.first ?? Locale.current.identifier,
-        reconnectDelay: @escaping @Sendable (Int) async throws -> Void = { attempt in
-            try await Task.sleep(for: .seconds(1 << attempt))
-        },
         gameSessions: SteamGameSessions = .shared,
         libraryCache: LibraryCache? = nil,
         installations makeInstallations: MakeInstallations? = nil,
@@ -157,7 +156,6 @@ final class SteamModel {
         self.loadWebCookies = webCookies
         self.beginLogin = beginLogin
         self.language = steamLanguage(locale: localeIdentifier)
-        self.reconnectDelay = reconnectDelay
         self.gameSessions = gameSessions
         self.libraryCache = libraryCache
         let locations = ObeliskLocations.of(library: directory)
@@ -444,6 +442,7 @@ final class SteamModel {
             else { libraryPlatforms.reset() }
             cachedAccount = nil
             session = connected
+            transport = 0
             sessionCredentials = credentials
             displayName = nil
             avatarURL = nil
@@ -482,7 +481,7 @@ final class SteamModel {
     }
 
     func refresh() {
-        guard let session, !isLoadingGames else { return }
+        guard let session, transport != nil, !isLoadingGames else { return }
         let current = generation
         Task { await reloadGames(session, generation: current) }
     }
@@ -513,9 +512,10 @@ final class SteamModel {
         ]
         let arguments = ProcessInfo.processInfo.arguments
         let probe = probes.first { arguments.contains($0.flag) } ?? probes[probes.count - 1]
+        let transport = self.transport
         guard let index = arguments.firstIndex(of: probe.flag),
               arguments.count > index + 2, let appID = UInt32(arguments[index + 1]),
-              appID != 0, current == generation, session === connected,
+              appID != 0, current == generation, transport != nil,
               let native = connected as? SteamSession else { return }
         let directory = URL(fileURLWithPath: arguments[index + 2], isDirectory: true)
         let report = directory.appending(path: probe.report)
@@ -542,12 +542,12 @@ final class SteamModel {
             default:
                 json = try await native.cloudBackup(appId: appID, directory: directory.path)
             }
-            guard current == generation, session === connected else { return }
+            guard current == generation, self.transport == transport else { return }
             try Data(json.utf8).write(to: report, options: .atomic)
             try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: report.path)
         } catch {
             // Steam errors contain only typed diagnostics, not request URLs.
-            guard current == generation, session === connected else { return }
+            guard current == generation, self.transport == transport else { return }
             let data = try? JSONSerialization.data(withJSONObject: ["status": "failed", "reason": error.localizedDescription])
             try? data?.write(to: report, options: .atomic)
         }
@@ -555,12 +555,13 @@ final class SteamModel {
     #endif
 
     private func reloadGames(_ session: any SteamSessionProtocol, generation current: Int) async {
-        guard current == generation && self.session === session && !Task.isCancelled else { return }
+        let transport = self.transport
+        guard current == generation && transport != nil && !Task.isCancelled else { return }
         libraryPlatforms.cancel()
         isLoadingGames = true
         do {
             let loaded = try await session.games()
-            guard current == generation && self.session === session else { return }
+            guard current == generation && self.transport == transport else { return }
             if games != loaded { games = loaded }
             if let selected = selectedGame, let updated = loaded.first(where: { $0.appId == selected.appId }) {
                 selectedGame = updated
@@ -568,20 +569,21 @@ final class SteamModel {
             isLoadingGames = false
             libraryPlatforms.load(appIds: loaded.map(\.appId), session: session)
         } catch {
-            guard current == generation && self.session === session else { return }
+            guard current == generation && self.transport == transport else { return }
             isLoadingGames = false
             errorMessage = Self.message(error)
         }
-        guard current == generation && self.session === session && !Task.isCancelled else { return }
+        guard current == generation && self.transport == transport && !Task.isCancelled else { return }
         reloadProfile(session, generation: current)
     }
 
     private func reloadProfile(_ session: any SteamSessionProtocol, generation current: Int) {
+        let transport = self.transport
         profileTask?.cancel()
         profileTask = Task {
             do {
                 let profile = try await session.profile()
-                guard current == generation && self.session === session && !Task.isCancelled else { return }
+                guard current == generation && self.transport == transport && !Task.isCancelled else { return }
                 displayName = profile.displayName
                 avatarURL = profile.avatarUrl.flatMap(URL.init(string:))
             } catch {
@@ -662,106 +664,71 @@ final class SteamModel {
         isFriendsPresented = false
     }
 
-    /// Only explicit retry or system wake can restart an exhausted reconnect cycle.
+    /// The player's retry, or the Mac's wake, asks the session to connect
+    /// again: only these restart a reconnection that gave up. The session
+    /// decides whether it may, and its next state shows it.
     func retryFriends() {
-        guard isConnected, sessionCredentials != nil,
-              friends?.connection != .authenticationRequired else { return }
-        stopFriends()
-        friends?.connection = .interrupted
-        let previous = session
-        dropSession(previous)
-        observeFriends(previous, generation: generation)
-    }
-
-    /// Shuts `session` down and forgets it until a reconnection replaces it.
-    private func dropSession(_ session: (any SteamSessionProtocol)?) {
-        session?.shutdown()
-        libraryPlatforms.cancel()
-        chat.suspend()
-        self.session = nil
+        guard isConnected, let session else { return }
+        session.reconnect()
     }
 
     private func stopFriends() {
-        friendsObservationGeneration += 1
         friendsTask?.cancel()
         friendsTask = nil
     }
 
-    private func observeFriends(_ initial: (any SteamSessionProtocol)?, generation current: Int) {
-        friendsObservationGeneration += 1
-        let observation = friendsObservationGeneration
-        let connect = connectSession
-        let delay = reconnectDelay
+    /// Follows the session's friends and connection until it stops. The
+    /// session connects again by itself; what follows its CM connection is
+    /// in `follow`.
+    private func observeFriends(_ session: any SteamSessionProtocol, generation current: Int) {
         guard let credentials = sessionCredentials else { return }
         friendsTask = Task { [weak self] in
-            var active = initial
             var revision: UInt64 = 0
             while !Task.isCancelled {
-                if let observed = active {
-                    let snapshot = await withTaskCancellationHandler {
-                        await observed.nextFriends(afterRevision: revision)
-                    } onCancel: {
-                        // This wakes a pending Rust watch even while content owns the CM mutex.
-                        observed.shutdown()
-                    }
-                    guard let self, current == self.generation,
-                          observation == self.friendsObservationGeneration, !Task.isCancelled else { return }
-                    revision = snapshot.revision
-                    guard snapshot.accountId == credentials.steamId else { continue }
-                    self.applyFriends(snapshot)
-                    switch snapshot.connection {
-                    case .loading, .ready, .error:
-                        continue
-                    case .authenticationRequired:
-                        self.dropSession(observed)
-                        return
-                    case .disconnected:
-                        self.dropSession(observed)
-                        active = nil
-                    }
+                let snapshot = await withTaskCancellationHandler {
+                    await session.nextFriends(afterRevision: revision)
+                } onCancel: {
+                    // Closes the account session, whose Closed state wakes the
+                    // pending Rust wait: only sign-out, a new sign-in or the
+                    // model's end cancel this task, and each ends the session.
+                    session.shutdown()
                 }
-
-                // One bounded cycle per interruption, with no status polling.
-                for attempt in 0..<3 {
-                    do {
-                        try await delay(attempt)
-                        try Task.checkCancellation()
-                        let replacement = try await connect(credentials)
-                        guard let self, current == self.generation,
-                              observation == self.friendsObservationGeneration, !Task.isCancelled else {
-                            replacement.shutdown()
-                            return
-                        }
-                        self.libraryPlatforms.cancel()
-                        self.session = replacement
-                        self.chat.connect(replacement, account: credentials.steamId)
-                        self.followGameSession(account: credentials.steamId)
-                        // The previous session is shut down: Transfers,
-                        // launches and Cloud maintenance go through this one.
-                        self.connectInstallations(replacement, credentials: credentials)
-                        active = replacement
-                        revision = 0
-                        Task { [weak self] in
-                            guard let self else { return }
-                            await self.reloadGames(replacement, generation: current)
-                            guard self.session === replacement else { return }
-                            if self.selectedGame != nil { self.reloadDetails() }
-                        }
-                        break
-                    } catch {
-                        guard let self, current == self.generation,
-                              observation == self.friendsObservationGeneration, !Task.isCancelled else { return }
-                        if case SteamError.AuthenticationRequired = error {
-                            self.friends?.connection = .authenticationRequired
-                            return
-                        }
-                        if attempt == 2 {
-                            self.friends?.connection = .failed(L10n.string("model.friends.reconnectFailed"))
-                            return
-                        }
-                    }
-                }
+                guard let self, current == self.generation, !Task.isCancelled else { return }
+                revision = snapshot.revision
+                guard snapshot.accountId == credentials.steamId else { continue }
+                self.applyFriends(snapshot)
+                self.follow(snapshot, of: session, account: credentials.steamId, generation: current)
+                if snapshot.connection == .stopped { return }
             }
+        }
+    }
+
+    /// What Swift loads through the session's CM connection follows it: a
+    /// new one reloads the library and the game on screen, and while there
+    /// is none, platform loads wait. Steam's chat and the account's own game
+    /// reach Swift as streams that end with their CM connection, so the chat
+    /// follows the connection here too: it waits while there is none, and a
+    /// new one reloads what it missed.
+    private func follow(_ snapshot: SteamFriendsSnapshot, of session: any SteamSessionProtocol, account: UInt64,
+                        generation current: Int) {
+        switch snapshot.connection {
+        case .loading, .ready, .error:
+            guard snapshot.transport != transport else { return }
+            let reconnected = snapshot.transport
+            transport = reconnected
+            libraryPlatforms.cancel()
+            chat.connect(session, account: account)
+            Task { [weak self] in
+                guard let self else { return }
+                await self.reloadGames(session, generation: current)
+                guard current == self.generation, self.transport == reconnected else { return }
+                if self.selectedGame != nil { self.reloadDetails() }
+            }
+        case .disconnected, .unreachable, .authenticationRequired, .stopped:
+            guard transport != nil else { return }
+            transport = nil
+            libraryPlatforms.cancel()
+            chat.suspend()
         }
     }
 
@@ -794,9 +761,10 @@ final class SteamModel {
         switch snapshot.connection {
         case .loading: presentation.connection = .loading
         case .ready: presentation.connection = .connected
-        case .disconnected: presentation.connection = .interrupted
+        case .disconnected, .stopped: presentation.connection = .interrupted
         case .authenticationRequired: presentation.connection = .authenticationRequired
         case .error: presentation.connection = .failed(L10n.string("model.friends.unavailable"))
+        case .unreachable: presentation.connection = .failed(L10n.string("model.friends.reconnectFailed"))
         }
         if snapshot.connection != .ready, snapshot.connection != .loading,
            let previous = friends, !previous.friends.isEmpty {
@@ -835,6 +803,7 @@ final class SteamModel {
         profileTask?.cancel()
         profileTask = nil
         session = nil
+        transport = nil
         login = nil
         displayName = nil
         avatarURL = nil
@@ -864,7 +833,7 @@ final class SteamModel {
     }
 
     func open(_ game: SteamGame) {
-        guard session != nil else { return }
+        guard transport != nil else { return }
         selectedGame = game
         details = nil
         news = []
@@ -899,7 +868,7 @@ final class SteamModel {
     /// Loads the achievements of `appId` into `model`, such as the overlay's
     /// for the running game.
     func loadAchievements(appId: UInt32, into model: GameAchievementsModel) {
-        guard let session else { return }
+        guard let session, transport != nil else { return }
         let language = language
         model.load { try await session.achievements(appId: appId, language: language).map(GameAchievement.init) }
     }
@@ -907,7 +876,8 @@ final class SteamModel {
     /// Remote details tell which builds the account can download, so an
     /// installed game never waits for them.
     func reloadDetails() {
-        guard let game = selectedGame, let session else { return }
+        let transport = self.transport
+        guard let game = selectedGame, let session, transport != nil else { return }
         detailsRequestGeneration += 1
         let detailsRequest = detailsRequestGeneration
         details = nil
@@ -921,11 +891,11 @@ final class SteamModel {
         Task {
             do {
                 let loaded = try await session.details(appId: game.appId, language: requestedLanguage)
-                guard current == generation && self.session === session && selection == detailGeneration && detailsRequest == detailsRequestGeneration else { return }
+                guard current == generation && self.transport == transport && selection == detailGeneration && detailsRequest == detailsRequestGeneration else { return }
                 details = loaded
                 isLoadingDetails = false
             } catch {
-                guard current == generation && self.session === session && selection == detailGeneration && detailsRequest == detailsRequestGeneration else { return }
+                guard current == generation && self.transport == transport && selection == detailGeneration && detailsRequest == detailsRequestGeneration else { return }
                 detailsError = Self.message(error)
                 isLoadingDetails = false
             }
@@ -934,9 +904,9 @@ final class SteamModel {
 
     /// The library downloads a game without opening its page: Steam picks the
     /// build the account can install, the native one first, as the Transfer
-    /// starts. It needs the account's session to.
+    /// starts. It needs the session's CM connection to.
     func libraryOffer(of game: SteamGame) -> GameOffer? {
-        guard session != nil else { return nil }
+        guard transport != nil else { return nil }
         return .steam(appId: game.appId, name: game.name, platform: nil, language: language)
     }
 
@@ -952,7 +922,7 @@ final class SteamModel {
     /// access token. None while signed out, or when Steam refuses them: the
     /// page then shows signed out.
     func webCookies() async -> [HTTPCookie] {
-        guard let credentials = sessionCredentials, let session else { return [] }
+        guard let credentials = sessionCredentials, let session, transport != nil else { return [] }
         if let webSignIn, webSignIn.steamId == credentials.steamId, webSignIn.date.timeIntervalSinceNow > -3_600 {
             return webSignIn.cookies
         }

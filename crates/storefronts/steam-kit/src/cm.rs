@@ -359,7 +359,7 @@ pub struct SteamConnection {
     session_id: i32,
     cell_id: u32,
     next_job: AtomicU64,
-    /// Cleared by the worker when Steam logs the session off.
+    /// Cleared by the worker when Steam logs the session off, and as it ends.
     logged_on: Arc<AtomicBool>,
 }
 
@@ -466,7 +466,8 @@ impl SteamConnection {
         let logged_on = Arc::new(AtomicBool::new(logged_on));
         let session = Arc::clone(&logged_on);
         let worker = tokio::spawn(async move {
-            // Ending drops every waiting request, which then reads a disconnection.
+            // Ending logs the connection off, then drops every waiting
+            // request, which then reads a disconnection.
             let _ = connection_worker(
                 socket,
                 commands,
@@ -476,7 +477,6 @@ impl SteamConnection {
                 &session,
             )
             .await;
-            session.store(false, Ordering::Release);
             profile_tx.send_replace(ProfileState::Disconnected);
             worker_friends.disconnect(false);
             worker_social.disconnect();
@@ -970,11 +970,17 @@ impl SteamConnection {
     }
 
     fn ensure_logged_on(&self) -> Result<(), CmError> {
-        if self.logged_on.load(Ordering::Acquire) {
+        if self.logged_on() {
             Ok(())
         } else {
             Err(CmError::Disconnected)
         }
+    }
+
+    /// False once the connection ended, before any request waiting on it
+    /// reads the end.
+    pub(crate) fn logged_on(&self) -> bool {
+        self.logged_on.load(Ordering::Acquire)
     }
 
     fn job(&self) -> Result<u64, CmError> {
@@ -1152,6 +1158,15 @@ async fn send_message(socket: &mut Socket, message: WsMessage) -> Result<(), CmE
         .map_err(|_| CmError::Disconnected)
 }
 
+/// Logs the connection off as the worker ends.
+struct LoggedOff<'a>(&'a AtomicBool);
+
+impl Drop for LoggedOff<'_> {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::Release);
+    }
+}
+
 async fn connection_worker(
     mut socket: Socket,
     mut commands: mpsc::Receiver<Command>,
@@ -1161,6 +1176,9 @@ async fn connection_worker(
     logged_on: &AtomicBool,
 ) -> Result<(), CmError> {
     let mut routes = Routes::default();
+    // Declared after the routes, so it drops first: a request that reads the
+    // disconnection, however the worker ends, finds the connection logged off.
+    let _ended = LoggedOff(logged_on);
     let mut heartbeat_header = None;
     let mut heartbeat = tokio::time::interval(Duration::from_secs(15));
     heartbeat.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -1604,6 +1622,27 @@ mod tests {
             connection.ensure_logged_on(),
             Err(CmError::Disconnected)
         ));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_request_that_reads_the_socket_closing_finds_the_connection_logged_off() {
+        let (connection, mut server) = test_server::connection(TEST_STEAM_ID, true).await;
+        let mut waiting = connection
+            .request(
+                DEPOT_KEY_REQUEST,
+                &proto::DepotKeyRequest {
+                    depot_id: 1,
+                    app_id: 620,
+                },
+                None,
+                DEPOT_KEY_RESPONSE,
+            )
+            .await
+            .unwrap();
+        server.request(DEPOT_KEY_REQUEST).await;
+        drop(server);
+        assert!(matches!(waiting.next().await, Err(CmError::Disconnected)));
+        assert!(!connection.logged_on());
     }
 
     #[tokio::test]

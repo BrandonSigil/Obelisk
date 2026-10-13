@@ -431,6 +431,12 @@ impl Client {
         self.downloads.cancel();
     }
 
+    /// Whether its CM connection ended. A request waiting on the connection
+    /// reads the end only once this is true.
+    pub fn ended(&self) -> bool {
+        !self.cm.logged_on()
+    }
+
     pub async fn profile(&self) -> Result<crate::cm::AccountProfile, ClientError> {
         // Include any wait for a content query in the optional profile's budget.
         let fresh = tokio::time::timeout(crate::cm::PROFILE_TIMEOUT, async {

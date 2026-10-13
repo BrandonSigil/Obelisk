@@ -797,7 +797,8 @@ public static func gog(session: GogSession, userId: String, language: String, se
     
     /**
      * The installations of the Steam account `session` signed in, whose
-     * receipts `receipts` keeps.
+     * receipts `receipts` keeps, for the whole sign-in: they reach Steam
+     * through the session's CM connection of the moment.
      */
 public static func steam(session: SteamSession, credentials: SteamCredentials, sessions: StorefrontSessions, receipts: String, locations: ObeliskLocations)throws  -> AccountInstallations  {
     return try  FfiConverterTypeAccountInstallations_lift(try rustCallWithError(FfiConverterTypeGameSessionError_lift) {
@@ -3018,21 +3019,52 @@ public func FfiConverterTypeSteamConnectionAttempt_lower(_ value: SteamConnectio
 
 
 /**
- * Debug-only controlled CM event source. It uses the production reducer and
- * watch subscription, letting macOS tests exercise raw packets across UniFFI.
+ * Debug-only controlled Account session. Its friends go through the
+ * production reducer and its states through the production conversion,
+ * letting macOS tests exercise raw packets and reconnections across UniFFI.
  */
 public protocol SteamFriendsFixtureProtocol: AnyObject, Sendable {
     
+    /**
+     * The session is shut down.
+     */
+    func close() 
+    
+    /**
+     * The CM connection drops and the session connects again, or Steam
+     * asks the account to sign in again.
+     */
     func disconnect(authenticationRequired: Bool) 
     
     func nextFriends(afterRevision: UInt64) async  -> SteamFriendsSnapshot
     
+    /**
+     * The CM connection of the moment receives a packet.
+     */
     func receive(kind: UInt32, body: Data) 
+    
+    /**
+     * A new CM connection replaces the one that dropped, its friends still
+     * loading.
+     */
+    func reconnect() 
+    
+    /**
+     * The player's retry, or the Mac's wake: the session connects again,
+     * unless its account must sign in again or it closed.
+     */
+    func retry() 
+    
+    /**
+     * Every attempt to connect again failed.
+     */
+    func unreachable() 
     
 }
 /**
- * Debug-only controlled CM event source. It uses the production reducer and
- * watch subscription, letting macOS tests exercise raw packets across UniFFI.
+ * Debug-only controlled Account session. Its friends go through the
+ * production reducer and its states through the production conversion,
+ * letting macOS tests exercise raw packets and reconnections across UniFFI.
  */
 open class SteamFriendsFixture: SteamFriendsFixtureProtocol, @unchecked Sendable {
     fileprivate let handle: UInt64
@@ -3096,6 +3128,21 @@ public convenience init(accountId: UInt64) {
     
 
     
+    /**
+     * The session is shut down.
+     */
+open func close()  {try! rustCall() {
+        uniffiCallStatus in
+    uniffi_obelisk_bridge_fn_method_steamfriendsfixture_close(
+            self.uniffiCloneHandle(),uniffiCallStatus
+    )
+}
+}
+    
+    /**
+     * The CM connection drops and the session connects again, or Steam
+     * asks the account to sign in again.
+     */
 open func disconnect(authenticationRequired: Bool)  {try! rustCall() {
         uniffiCallStatus in
     uniffi_obelisk_bridge_fn_method_steamfriendsfixture_disconnect(
@@ -3122,12 +3169,50 @@ open func nextFriends(afterRevision: UInt64)async  -> SteamFriendsSnapshot  {
         )
 }
     
+    /**
+     * The CM connection of the moment receives a packet.
+     */
 open func receive(kind: UInt32, body: Data)  {try! rustCall() {
         uniffiCallStatus in
     uniffi_obelisk_bridge_fn_method_steamfriendsfixture_receive(
             self.uniffiCloneHandle(),
         FfiConverterUInt32.lower(kind),
         FfiConverterData.lower(body),uniffiCallStatus
+    )
+}
+}
+    
+    /**
+     * A new CM connection replaces the one that dropped, its friends still
+     * loading.
+     */
+open func reconnect()  {try! rustCall() {
+        uniffiCallStatus in
+    uniffi_obelisk_bridge_fn_method_steamfriendsfixture_reconnect(
+            self.uniffiCloneHandle(),uniffiCallStatus
+    )
+}
+}
+    
+    /**
+     * The player's retry, or the Mac's wake: the session connects again,
+     * unless its account must sign in again or it closed.
+     */
+open func retry()  {try! rustCall() {
+        uniffiCallStatus in
+    uniffi_obelisk_bridge_fn_method_steamfriendsfixture_retry(
+            self.uniffiCloneHandle(),uniffiCallStatus
+    )
+}
+}
+    
+    /**
+     * Every attempt to connect again failed.
+     */
+open func unreachable()  {try! rustCall() {
+        uniffiCallStatus in
+    uniffi_obelisk_bridge_fn_method_steamfriendsfixture_unreachable(
+            self.uniffiCloneHandle(),uniffiCallStatus
     )
 }
 }
@@ -3401,7 +3486,9 @@ public protocol SteamSessionProtocol: AnyObject, Sendable {
     func games() async throws  -> [SteamGame]
     
     /**
-     * Suspends on the CM watch channel; no content-query mutex is held.
+     * The session's state after `after_revision`: its friends and how it
+     * stands with Steam, across its CM connections. No content-query mutex
+     * is held.
      */
     func nextFriends(afterRevision: UInt64) async  -> SteamFriendsSnapshot
     
@@ -3413,7 +3500,15 @@ public protocol SteamSessionProtocol: AnyObject, Sendable {
     func profile() async throws  -> SteamProfile
     
     /**
-     * Also wakes UniFFI futures, whose Swift wrappers do not cancel Rust awaits.
+     * Replaces the CM connection, live or not, and connects again, as on the
+     * player's retry or the Mac's wake. Nothing once Steam asked the account
+     * to sign in again.
+     */
+    func reconnect() 
+    
+    /**
+     * Stops reconnecting and ends the CM connection. Also wakes UniFFI
+     * futures, whose Swift wrappers do not cancel Rust awaits.
      */
     func shutdown() 
     
@@ -3695,7 +3790,9 @@ open func games()async throws  -> [SteamGame]  {
 }
     
     /**
-     * Suspends on the CM watch channel; no content-query mutex is held.
+     * The session's state after `after_revision`: its friends and how it
+     * stands with Steam, across its CM connections. No content-query mutex
+     * is held.
      */
 open func nextFriends(afterRevision: UInt64)async  -> SteamFriendsSnapshot  {
     return
@@ -3750,7 +3847,21 @@ open func profile()async throws  -> SteamProfile  {
 }
     
     /**
-     * Also wakes UniFFI futures, whose Swift wrappers do not cancel Rust awaits.
+     * Replaces the CM connection, live or not, and connects again, as on the
+     * player's retry or the Mac's wake. Nothing once Steam asked the account
+     * to sign in again.
+     */
+open func reconnect()  {try! rustCall() {
+        uniffiCallStatus in
+    uniffi_obelisk_bridge_fn_method_steamsession_reconnect(
+            self.uniffiCloneHandle(),uniffiCallStatus
+    )
+}
+}
+    
+    /**
+     * Stops reconnecting and ends the CM connection. Also wakes UniFFI
+     * futures, whose Swift wrappers do not cancel Rust awaits.
      */
 open func shutdown()  {try! rustCall() {
         uniffiCallStatus in
@@ -7993,17 +8104,33 @@ public func FfiConverterTypeSteamFriendGame_lower(_ value: SteamFriendGame) -> R
 
 
 public struct SteamFriendsSnapshot: Equatable, Hashable {
+    /**
+     * The session's revision, which grows across its CM connections.
+     */
     public var revision: UInt64
     public var accountId: UInt64
     public var connection: SteamFriendsConnection
+    /**
+     * The session's CM connection: 0 for the first, one more for each that
+     * replaced a dropped one.
+     */
+    public var transport: UInt64
     public var friends: [SteamFriend]
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(revision: UInt64, accountId: UInt64, connection: SteamFriendsConnection, friends: [SteamFriend]) {
+    public init(
+        /**
+         * The session's revision, which grows across its CM connections.
+         */revision: UInt64, accountId: UInt64, connection: SteamFriendsConnection, 
+        /**
+         * The session's CM connection: 0 for the first, one more for each that
+         * replaced a dropped one.
+         */transport: UInt64, friends: [SteamFriend]) {
         self.revision = revision
         self.accountId = accountId
         self.connection = connection
+        self.transport = transport
         self.friends = friends
     }
 
@@ -8026,6 +8153,7 @@ public struct FfiConverterTypeSteamFriendsSnapshot: FfiConverterRustBuffer {
                 revision: FfiConverterUInt64.read(from: &buf), 
                 accountId: FfiConverterUInt64.read(from: &buf), 
                 connection: FfiConverterTypeSteamFriendsConnection.read(from: &buf), 
+                transport: FfiConverterUInt64.read(from: &buf), 
                 friends: FfiConverterSequenceTypeSteamFriend.read(from: &buf)
         )
     }
@@ -8034,6 +8162,7 @@ public struct FfiConverterTypeSteamFriendsSnapshot: FfiConverterRustBuffer {
         FfiConverterUInt64.write(value.revision, into: &buf)
         FfiConverterUInt64.write(value.accountId, into: &buf)
         FfiConverterTypeSteamFriendsConnection.write(value.connection, into: &buf)
+        FfiConverterUInt64.write(value.transport, into: &buf)
         FfiConverterSequenceTypeSteamFriend.write(value.friends, into: &buf)
     }
 }
@@ -11126,9 +11255,21 @@ public enum SteamFriendsConnection: Equatable, Hashable {
     
     case loading
     case ready
+    /**
+     * The CM connection dropped, and the session connects again.
+     */
     case disconnected
     case authenticationRequired
     case error
+    /**
+     * Every attempt to connect again failed; a retry or the Mac's wake
+     * tries again.
+     */
+    case unreachable
+    /**
+     * The session was shut down.
+     */
+    case stopped
 
 
 
@@ -11160,6 +11301,10 @@ public struct FfiConverterTypeSteamFriendsConnection: FfiConverterRustBuffer {
         
         case 5: return .error
         
+        case 6: return .unreachable
+        
+        case 7: return .stopped
+        
         default: throw UniffiInternalError.unexpectedEnumCase
         }
     }
@@ -11186,6 +11331,14 @@ public struct FfiConverterTypeSteamFriendsConnection: FfiConverterRustBuffer {
         
         case .error:
             writeInt(&buf, Int32(5))
+        
+        
+        case .unreachable:
+            writeInt(&buf, Int32(6))
+        
+        
+        case .stopped:
+            writeInt(&buf, Int32(7))
         
         }
     }
@@ -13609,7 +13762,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_obelisk_bridge_checksum_method_steamsession_games() != 3409) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_obelisk_bridge_checksum_method_steamsession_next_friends() != 24746) {
+    if (uniffi_obelisk_bridge_checksum_method_steamsession_next_friends() != 45830) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_obelisk_bridge_checksum_method_steamsession_platforms() != 12501) {
@@ -13618,7 +13771,10 @@ private let initializationResult: InitializationResult = {
     if (uniffi_obelisk_bridge_checksum_method_steamsession_profile() != 34757) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_obelisk_bridge_checksum_method_steamsession_shutdown() != 361) {
+    if (uniffi_obelisk_bridge_checksum_method_steamsession_reconnect() != 54385) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_obelisk_bridge_checksum_method_steamsession_shutdown() != 30982) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_obelisk_bridge_checksum_method_steamsession_web_cookies() != 46146) {
@@ -13684,13 +13840,25 @@ private let initializationResult: InitializationResult = {
     if (uniffi_obelisk_bridge_checksum_method_steamconnectionattempt_connect() != 54392) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_obelisk_bridge_checksum_method_steamfriendsfixture_disconnect() != 38477) {
+    if (uniffi_obelisk_bridge_checksum_method_steamfriendsfixture_close() != 38754) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_obelisk_bridge_checksum_method_steamfriendsfixture_disconnect() != 58396) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_obelisk_bridge_checksum_method_steamfriendsfixture_next_friends() != 52490) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_obelisk_bridge_checksum_method_steamfriendsfixture_receive() != 60940) {
+    if (uniffi_obelisk_bridge_checksum_method_steamfriendsfixture_receive() != 17034) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_obelisk_bridge_checksum_method_steamfriendsfixture_reconnect() != 4608) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_obelisk_bridge_checksum_method_steamfriendsfixture_retry() != 11668) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_obelisk_bridge_checksum_method_steamfriendsfixture_unreachable() != 65007) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_obelisk_bridge_checksum_constructor_library_new() != 47156) {
@@ -13720,7 +13888,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_obelisk_bridge_checksum_constructor_accountinstallations_gog() != 4525) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_obelisk_bridge_checksum_constructor_accountinstallations_steam() != 8384) {
+    if (uniffi_obelisk_bridge_checksum_constructor_accountinstallations_steam() != 58838) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_obelisk_bridge_checksum_constructor_librarycache_new() != 37002) {
