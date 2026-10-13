@@ -306,44 +306,15 @@ impl ProfileSnapshot {
     }
 }
 
-pub(crate) struct ProfileRequest {
-    updates: watch::Receiver<ProfileState>,
-    name_revision: u64,
-    avatar_revision: u64,
-}
-
-impl ProfileRequest {
-    fn new(mut updates: watch::Receiver<ProfileState>) -> Result<Self, CmError> {
-        let state = updates.borrow_and_update().clone();
-        let ProfileState::Ready(snapshot) = state else {
-            return Err(CmError::Disconnected);
-        };
-        Ok(Self {
-            updates,
-            name_revision: snapshot.name_revision,
-            avatar_revision: snapshot.avatar_revision,
-        })
-    }
-
-    /// Waits without a deadline: `Client::profile` applies `PROFILE_TIMEOUT` to
-    /// the whole request.
-    pub(crate) async fn receive(mut self) -> Result<AccountProfile, CmError> {
-        loop {
-            self.updates
-                .changed()
-                .await
-                .map_err(|_| CmError::Disconnected)?;
-            match self.updates.borrow_and_update().clone() {
-                ProfileState::Ready(snapshot)
-                    if snapshot.name_revision != self.name_revision
-                        && snapshot.avatar_revision != self.avatar_revision =>
-                {
-                    return Ok(snapshot.value);
-                }
-                ProfileState::Disconnected => return Err(CmError::Disconnected),
-                _ => {}
-            }
-        }
+/// The account's profile once Steam pushed both its name and its avatar,
+/// which it does unasked as the account goes online.
+async fn pushed_profile(updates: watch::Receiver<ProfileState>) -> Result<AccountProfile, CmError> {
+    match obelisk_core::watch::next_matching(updates, |state| {
+        matches!(state, ProfileState::Disconnected) || state.received().is_some()
+    })
+    .await
+    {
+        Ok(state) | Err(state) => state.received().ok_or(CmError::Disconnected),
     }
 }
 
@@ -595,11 +566,13 @@ impl SteamConnection {
         self.worker.abort_handle()
     }
 
-    /// The profile Steam last told this connection, when it told both its
-    /// name and its avatar. Steam tells them unasked as the account goes
-    /// online, and may then leave a request for them unanswered.
-    pub(crate) fn received_profile(&self) -> Option<AccountProfile> {
-        self.profile.borrow().received()
+    /// The connected account's profile, once Steam pushed it. Nothing is
+    /// asked: asking for the account's own persona makes its running game
+    /// drop out and come back, so every friend hears again that it started
+    /// playing (see `own_game`). Waits without a deadline: `Client::profile`
+    /// applies `PROFILE_TIMEOUT`.
+    pub(crate) async fn profile(&self) -> Result<AccountProfile, CmError> {
+        pushed_profile(self.profile.clone()).await
     }
 
     /// A web access token for the logged-on account, asked over this
@@ -619,22 +592,6 @@ impl SteamConnection {
             )
             .await?;
         Ok((self.steam_id, response.access_token))
-    }
-
-    /// Requests only the connected account's profile. Persona updates have their
-    /// own channel so this optional query never drains content or license replies.
-    pub(crate) async fn request_profile(&self) -> Result<ProfileRequest, CmError> {
-        self.ensure_logged_on()?;
-        let request = ProfileRequest::new(self.profile.clone())?;
-        self.send(
-            FRIEND_DATA_REQUEST,
-            &proto::FriendDataRequest {
-                persona_state_requested: PERSONA_PROFILE,
-                friends: vec![self.steam_id],
-            },
-        )
-        .await?;
-        Ok(request)
     }
 
     /// Returns the user's own visible game library, including played free games.
@@ -1678,7 +1635,8 @@ mod tests {
             })
             .await
             .unwrap();
-        let request = connection.request_profile().await.unwrap();
+        // The profile waits for what Steam pushes; nothing asks for it.
+        let request = tokio::spawn(pushed_profile(connection.profile.clone()));
         // Waiting requests run concurrently; each reads only its own responses.
         let content_job = connection.next_job.load(Ordering::Relaxed);
         let mut content = connection
@@ -1704,9 +1662,8 @@ mod tests {
             .unwrap();
         let server_task = tokio::spawn(async move {
             let mut server = server;
-            let mut saw_avatar = false;
             let mut saw_content = false;
-            while !saw_avatar || !saw_content {
+            while !saw_content {
                 let frame = server.next().await.unwrap().unwrap();
                 let WsMessage::Binary(bytes) = frame else {
                     continue;
@@ -1716,10 +1673,10 @@ mod tests {
                 for packet in packets {
                     if packet.kind == FRIEND_DATA_REQUEST {
                         let body = proto::FriendDataRequest::decode(&packet.body[..]).unwrap();
-                        assert_eq!(body.friends, vec![TEST_STEAM_ID]);
-                        assert_eq!(body.persona_state_requested, PERSONA_PROFILE);
-                        assert_eq!(packet.header.steam_id, Some(TEST_STEAM_ID));
-                        saw_avatar = true;
+                        assert!(
+                            !body.friends.contains(&TEST_STEAM_ID),
+                            "never the account itself"
+                        );
                     }
                     if packet.kind == SERVICE_REQUEST
                         && packet.header.job_source != Some(FRIENDS_HYDRATION_JOB)
@@ -1844,7 +1801,7 @@ mod tests {
                 .unwrap();
             server
         });
-        let profile = request.receive().await.unwrap();
+        let profile = request.await.unwrap().unwrap();
         assert_eq!(profile.display_name.as_deref(), Some("Zagrios"));
         assert_eq!(
             profile.avatar_url,
@@ -2076,18 +2033,16 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn avatar_request_observes_disconnection() {
+    async fn the_profile_wait_observes_disconnection() {
         let (sender, receiver) = watch::channel(ProfileState::default());
-        let request = ProfileRequest::new(receiver).unwrap();
+        let waiting = tokio::spawn(pushed_profile(receiver));
+        tokio::task::yield_now().await;
         sender.send_replace(ProfileState::Disconnected);
-        assert!(matches!(
-            request.receive().await,
-            Err(CmError::Disconnected)
-        ));
+        assert!(matches!(waiting.await.unwrap(), Err(CmError::Disconnected)));
         let (sender, receiver) = watch::channel(ProfileState::default());
         drop(sender);
         assert!(matches!(
-            ProfileRequest::new(receiver).unwrap().receive().await,
+            pushed_profile(receiver).await,
             Err(CmError::Disconnected)
         ));
     }
@@ -2114,18 +2069,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn profile_request_waits_for_fresh_name_and_avatar_in_either_order() {
+    async fn the_profile_waits_for_a_pushed_name_and_avatar_in_either_order() {
         for name_first in [true, false] {
-            let (sender, receiver) = watch::channel(ProfileState::Ready(ProfileSnapshot {
-                value: AccountProfile {
-                    display_name: Some("Old public name".into()),
-                    avatar_url: Some("old-avatar".into()),
-                },
-                name_revision: 1,
-                avatar_revision: 1,
-            }));
-            let request = ProfileRequest::new(receiver).unwrap();
-            let mut result = Box::pin(request.receive());
+            let (sender, receiver) = watch::channel(ProfileState::default());
+            let mut result = Box::pin(pushed_profile(receiver));
             let flags = if name_first {
                 [PERSONA_PLAYER_NAME, PERSONA_PRESENCE]
             } else {
@@ -2159,6 +2106,13 @@ mod tests {
                     "ab".repeat(20)
                 ))
             );
+            // Already pushed, it answers at once; a disconnection ends the wait.
+            assert!(pushed_profile(sender.subscribe()).await.is_ok());
+            sender.send_replace(ProfileState::Disconnected);
+            assert!(matches!(
+                pushed_profile(sender.subscribe()).await,
+                Err(CmError::Disconnected)
+            ));
         }
     }
 

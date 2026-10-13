@@ -456,20 +456,11 @@ impl Client {
         !self.cm.logged_on()
     }
 
+    /// The account's name and avatar, as Steam pushes them once it is online.
     pub async fn profile(&self) -> Result<crate::cm::AccountProfile, ClientError> {
-        // Include any wait for a content query in the optional profile's budget.
-        let fresh = tokio::time::timeout(crate::cm::PROFILE_TIMEOUT, async {
-            let request = self.cm.request_profile().await?;
-            request.receive().await.map_err(Into::into)
-        })
-        .await;
-        match fresh {
-            Ok(profile) => profile,
-            // Steam may not answer for what it already told.
-            Err(_) => self
-                .cm
-                .received_profile()
-                .ok_or_else(|| crate::cm::CmError::Timeout.into()),
+        match tokio::time::timeout(crate::cm::PROFILE_TIMEOUT, self.cm.profile()).await {
+            Ok(profile) => profile.map_err(Into::into),
+            Err(_) => Err(crate::cm::CmError::Timeout.into()),
         }
     }
 
