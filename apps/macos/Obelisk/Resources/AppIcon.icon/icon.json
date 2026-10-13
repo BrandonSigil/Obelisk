@@ -4,9 +4,26 @@
     {
       "layers": [
         {
+          "glass": true,
+          "image-name": "prisme.svg",
+          "name": "prisme"
+        }
+      ],
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0
+      },
+      "translucency": {
+        "enabled": false,
+        "value": 0.5
+      }
+    },
+    {
+      "layers": [
+        {
           "glass": false,
-          "image-name": "porte.svg",
-          "name": "porte"
+          "image-name": "lumiere.png",
+          "name": "lumiere"
         }
       ],
       "shadow": {

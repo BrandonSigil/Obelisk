@@ -1,8 +1,8 @@
 import AppKit
 import SwiftUI
 
-/// Obelisk's settings: a hero in the violet of Obelisk's icon, its obelisk
-/// glowing, reaching under the title bar band; then the appearance, the
+/// Obelisk's settings: a hero drawn from Obelisk's icon, its prism and the
+/// stores' beams, reaching under the title bar band; then the appearance, the
 /// language, the games, the storage and the storefronts, each a card of rows
 /// as a game page's. The
 /// bar's backdrop and the page's title show once the hero scrolled under it.
@@ -262,49 +262,135 @@ private struct SettingsHero: View {
     }
 }
 
-/// Obelisk's icon, wide: its obelisk glowing toward the trailing edge, on a
-/// violet that darkens toward the leading edge and the title.
+/// Obelisk's icon, wide: the stores' colored beams meet in a glass prism on
+/// the trailing side and leave it as one white beam, on the icon's night sky.
 private struct SettingsHeroArtwork: View {
     var body: some View {
-        MeshGradient(
-            width: 3,
-            height: 3,
-            points: [
-                [0, 0], [0.55, 0], [1, 0],
-                [0, 0.5], [0.62, 0.42], [1, 0.5],
-                [0, 1], [0.5, 1], [1, 1],
-            ],
-            colors: [
-                Color(red: 0.22, green: 0.06, blue: 0.38), Color(red: 0.52, green: 0.16, blue: 0.84),
-                Color(red: 0.76, green: 0.25, blue: 0.98),
-                Color(red: 0.12, green: 0.05, blue: 0.26), Color(red: 0.34, green: 0.13, blue: 0.68),
-                Color(red: 0.5, green: 0.22, blue: 0.9),
-                Color(red: 0.07, green: 0.03, blue: 0.16), Color(red: 0.16, green: 0.08, blue: 0.4),
-                Color(red: 0.29, green: 0.16, blue: 0.72),
-            ]
-        )
-        .overlay(alignment: .bottomTrailing) {
-            GeometryReader { geometry in
-                let height = geometry.size.height * 0.84
-                let center = CGPoint(x: geometry.size.width - 190, y: geometry.size.height - height / 2)
-                ZStack {
-                    // The light the obelisk sheds on the violet around it.
-                    RadialGradient(colors: [.white.opacity(0.32), ObeliskStyle.accent.opacity(0.28), .clear],
-                                   center: .center, startRadius: 0, endRadius: height * 1.1)
-                        .frame(width: height * 2.4, height: height * 2.4)
-                    Image("MenuBarIcon")
-                        .renderingMode(.template)
-                        .resizable()
-                        .scaledToFit()
-                        .foregroundStyle(.white)
-                        .frame(height: height)
-                        .shadow(color: Color(red: 0.95, green: 0.82, blue: 1).opacity(0.9), radius: 14)
-                        .shadow(color: ObeliskStyle.accent, radius: 46)
-                }
-                .position(center)
-            }
-            .accessibilityHidden(true)
+        Canvas { context, size in
+            SettingsHeroPrism(size: size).draw(in: &context)
         }
+        .accessibilityHidden(true)
+    }
+}
+
+/// The icon's prism scene, in the icon's 1024-point units, placed on the
+/// hero: the prism on the trailing side, its beams reaching toward the leading
+/// side but fading out before the title.
+private struct SettingsHeroPrism {
+    let size: CGSize
+
+    private static let apex = CGPoint(x: 512, y: 300)
+    private static let baseLeading = CGPoint(x: 292, y: 681)
+    private static let baseTrailing = CGPoint(x: 732, y: 681)
+    private static let center = CGPoint(x: 512, y: 490)
+    /// The stores' beams, magenta to cyan: where the icon starts each one and
+    /// how far down the prism's leading side it enters.
+    private static let beams: [(color: Color, start: CGPoint, entry: CGFloat)] = [
+        (Color(red: 1, green: 0.31, blue: 0.847), CGPoint(x: 20, y: 600), 0.46),
+        (Color(red: 0.753, green: 0.294, blue: 1), CGPoint(x: 20, y: 750), 0.505),
+        (Color(red: 0.482, green: 0.361, blue: 1), CGPoint(x: 70, y: 890), 0.55),
+        (Color(red: 0.298, green: 0.553, blue: 1), CGPoint(x: 170, y: 1000), 0.595),
+        (Color(red: 0.247, green: 0.878, blue: 1), CGPoint(x: 310, y: 1080), 0.64),
+    ]
+    /// Where the white beam leaves the prism's trailing side.
+    private static let exit = (on(apex, baseTrailing, 0.40), on(apex, baseTrailing, 0.47))
+
+    /// Points per icon unit: the prism stands 58% of the hero's height.
+    private var scale: CGFloat { size.height * 0.58 / 381 }
+
+    /// How far the beams run past where the icon starts them: further on a wide
+    /// hero, their faded start kept clear of the title on a narrow one.
+    private var reach: CGFloat {
+        let first = Self.beams[0]
+        let entry = place(Self.on(Self.apex, Self.baseLeading, first.entry))
+        let run = (Self.on(Self.apex, Self.baseLeading, first.entry).x - first.start.x) * scale
+        return min(max((entry.x - 300) / run, 0.7), 1.8)
+    }
+
+    func draw(in context: inout GraphicsContext) {
+        context.fill(Path(CGRect(origin: .zero, size: size)), with: .radialGradient(
+            Gradient(stops: [
+                .init(color: Color(red: 0.165, green: 0.102, blue: 0.416), location: 0),
+                .init(color: Color(red: 0.067, green: 0.043, blue: 0.2), location: 0.55),
+                .init(color: Color(red: 0.02, green: 0.012, blue: 0.071), location: 1),
+            ]),
+            center: place(CGPoint(x: 560, y: 420)), startRadius: 0, endRadius: max(size.width * 0.8, 680 * scale)))
+
+        let beams = Self.beams.map { beam in
+            let entry = Self.on(Self.apex, Self.baseLeading, beam.entry)
+            let start = Self.on(entry, beam.start, reach)
+            let length = hypot(start.x - entry.x, start.y - entry.y)
+            let normal = CGPoint(x: -(entry.y - start.y) / length, y: (entry.x - start.x) / length)
+            let startWidth = 6 + 20 * reach
+            let path = polygon([
+                CGPoint(x: start.x + normal.x * startWidth, y: start.y + normal.y * startWidth),
+                CGPoint(x: entry.x + normal.x * 6, y: entry.y + normal.y * 6),
+                CGPoint(x: entry.x - normal.x * 6, y: entry.y - normal.y * 6),
+                CGPoint(x: start.x - normal.x * startWidth, y: start.y - normal.y * startWidth),
+            ])
+            let shading = GraphicsContext.Shading.linearGradient(
+                Gradient(stops: [
+                    .init(color: beam.color.opacity(0), location: 0),
+                    .init(color: beam.color.opacity(0.85), location: 0.5),
+                    .init(color: beam.color, location: 1),
+                ]),
+                startPoint: place(start), endPoint: place(entry))
+            return (path, shading)
+        }
+        context.drawLayer { glow in
+            glow.addFilter(.blur(radius: 24 * scale))
+            for (path, shading) in beams { glow.fill(path, with: shading) }
+        }
+        for (path, shading) in beams { context.fill(path, with: shading) }
+
+        // The light crossing the prism, from the beams to the white beam.
+        let (exitTop, exitBottom) = Self.exit
+        let entries = Self.beams.map { Self.on(Self.apex, Self.baseLeading, $0.entry) }
+        context.drawLayer { inner in
+            inner.addFilter(.blur(radius: 8 * scale))
+            inner.fill(polygon([entries[0], entries[4], exitBottom, exitTop]), with: .linearGradient(
+                Gradient(colors: [.white.opacity(0.45), .white.opacity(0.95)]),
+                startPoint: place(entries[2]), endPoint: place(exitTop)))
+        }
+
+        let beamOut = polygon([
+            exitTop, Self.on(exitTop, CGPoint(x: 1060, y: 170), 3),
+            Self.on(exitBottom, CGPoint(x: 1060, y: 250), 3), exitBottom,
+        ])
+        context.drawLayer { glow in
+            glow.addFilter(.blur(radius: 24 * scale))
+            glow.fill(beamOut, with: .color(Color(red: 1, green: 0.839, blue: 0.965).opacity(0.9)))
+        }
+        context.fill(beamOut, with: .linearGradient(
+            Gradient(colors: [.white, .white.opacity(0.75)]),
+            startPoint: place(exitTop), endPoint: place(CGPoint(x: 1024, y: 200))))
+
+        let prism = polygon([Self.apex, Self.baseTrailing, Self.baseLeading])
+        let top = place(Self.apex)
+        let bottom = CGPoint(x: top.x, y: place(Self.baseLeading).y)
+        context.fill(prism, with: .linearGradient(
+            Gradient(colors: [.white.opacity(0.3), .white.opacity(0.06)]), startPoint: top, endPoint: bottom))
+        context.stroke(prism, with: .linearGradient(
+            Gradient(colors: [.white.opacity(0.95), .white.opacity(0.35)]), startPoint: top, endPoint: bottom),
+            style: StrokeStyle(lineWidth: 10 * scale, lineJoin: .round))
+    }
+
+    /// An icon point on the hero: the prism's center 240 points from the
+    /// trailing edge, a little below the middle.
+    private func place(_ point: CGPoint) -> CGPoint {
+        CGPoint(x: size.width - 240 + (point.x - Self.center.x) * scale,
+                y: size.height * 0.56 + (point.y - Self.center.y) * scale)
+    }
+
+    private func polygon(_ points: [CGPoint]) -> Path {
+        Path { path in
+            path.addLines(points.map(place))
+            path.closeSubpath()
+        }
+    }
+
+    private static func on(_ from: CGPoint, _ to: CGPoint, _ fraction: CGFloat) -> CGPoint {
+        CGPoint(x: from.x + (to.x - from.x) * fraction, y: from.y + (to.y - from.y) * fraction)
     }
 }
 

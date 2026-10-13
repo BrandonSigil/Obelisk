@@ -95,7 +95,7 @@ struct SignInPage<Content: View>: View {
     }
 }
 
-/// The store's logo on glass, or Home's obelisk.
+/// The store's logo on glass, or Home's prism.
 struct SignInEmblem: View {
     let section: LibrarySection
     var size: CGFloat = 76
