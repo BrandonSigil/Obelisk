@@ -11,10 +11,7 @@ use crate::{
     sessions::{self, Admission, Failure, Storefront as _, Supervised, failed},
 };
 use obelisk_core::{installation::TransferProgress, launch::LaunchTarget, transfer::CancelToken};
-use std::{
-    path::{Path, PathBuf},
-    sync::Arc,
-};
+use std::{path::Path, sync::Arc};
 use steam_kit::cloud::{CloudListing, CloudMetadata};
 
 /// What an account's installations ask of Steam's network. Every call may
@@ -175,21 +172,12 @@ impl<N: Network> Content<N> {
             home: self.locations.home.clone(),
             install: receipt.directory.clone().into(),
             app_id: receipt.product.app_id,
-            prefix: self
-                .windows(receipt)
+            prefix: receipt
+                .windows(&self.locations)
+                .ok()
+                .flatten()
                 .map(|windows| windows.prefix().to_owned()),
         }
-    }
-
-    /// The installation's Wine prefix, when it is a Windows one.
-    fn windows(&self, receipt: &Receipt<Steam>) -> Option<crate::wine::Installation> {
-        let install = Path::new(&receipt.directory);
-        let game = crate::profile::Game::Steam {
-            app_id: receipt.product.app_id,
-        };
-        crate::wine::Installation::of(&self.locations, game, &receipt.platform, install)
-            .ok()
-            .flatten()
     }
 }
 
@@ -260,19 +248,19 @@ impl<N: Network> installations::Content<Steam> for Content<N> {
         admission: Admission<Steam>,
     ) -> BoxFuture<'a, Result<(), Failure>> {
         Box::pin(async move {
-            let install = PathBuf::from(&receipt.directory);
-            let app_id = receipt.product.app_id;
             let target = self
                 .network
-                .launch_target(app_id, &receipt.platform, &install)
+                .launch_target(
+                    receipt.product.app_id,
+                    &receipt.platform,
+                    Path::new(&receipt.directory),
+                )
                 .await?;
             admission
                 .hand_off(Handover {
                     locations: self.locations.clone(),
                     credentials: self.credentials.clone(),
-                    app_id,
-                    platform: receipt.platform.clone(),
-                    install,
+                    receipt: receipt.clone(),
                     target,
                 })
                 .await
@@ -310,12 +298,7 @@ impl<N: Network> installations::Content<Steam> for Content<N> {
         format!("steam-{}-{}", receipt.product.app_id, receipt.platform)
     }
     fn remove_prefix(&self, receipt: &Receipt<Steam>) -> Option<Result<(), String>> {
-        let windows = self.windows(receipt)?;
-        Some(
-            windows
-                .remove(&self.locations)
-                .map_err(|error| error.to_string()),
-        )
+        receipt.remove_prefix(&self.locations)
     }
     fn maintain<'a>(
         &'a self,
@@ -355,27 +338,24 @@ impl<N: Network> installations::Content<Steam> for Content<N> {
 struct Handover {
     locations: Locations,
     credentials: Credentials,
-    app_id: u32,
-    platform: String,
-    install: PathBuf,
+    receipt: Receipt<Steam>,
     target: LaunchTarget,
 }
 
 impl sessions::Handover<Steam> for Handover {
     type Prepared = super::Request;
     fn platform(&self) -> &str {
-        &self.platform
+        &self.receipt.platform
     }
     fn prepare(&self) -> BoxFuture<'_, Result<super::Request, Failure>> {
-        let (locations, app_id) = (self.locations.clone(), self.app_id);
-        let (platform, install, target) = (
-            self.platform.clone(),
-            self.install.clone(),
+        let (locations, receipt, target) = (
+            self.locations.clone(),
+            self.receipt.clone(),
             self.target.clone(),
         );
         Box::pin(async move {
             blocking(crate::Error::StartFailed.to_string(), move || {
-                super::prepare(&locations, app_id, &platform, &install, &target)
+                super::prepare(&locations, &receipt, &target)
             })
             .await?
             .map_err(|error| match error {

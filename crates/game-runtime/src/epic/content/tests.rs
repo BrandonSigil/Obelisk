@@ -388,15 +388,10 @@ async fn a_windows_launch_gets_voile_before_it_is_prepared_and_a_mac_launch_gets
 }
 
 #[test]
-fn an_uninstalled_windows_build_loses_its_prefix_and_a_mac_build_has_none() {
+fn a_build_installs_into_the_folder_epic_names_for_it() {
     let fixture = Fixture::new();
-    let (windows, mac) = (fixture.installed("Windows"), fixture.installed("Mac"));
-    let prefix = fixture.locations.wine_prefixes.join("epic-hash-Windows");
-    std::fs::create_dir_all(prefix.join("drive_c")).unwrap();
+    let windows = fixture.installed("Windows");
 
-    assert_eq!(fixture.content.remove_prefix(&windows), Some(Ok(())));
-    assert!(!prefix.exists());
-    assert_eq!(fixture.content.remove_prefix(&mac), None);
     assert_eq!(
         fixture.content.directory_name(&windows),
         epic_kit::client::installation_directory_name("sandbox", "catalog", "game", "Windows")

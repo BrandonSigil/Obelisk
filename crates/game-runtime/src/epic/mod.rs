@@ -17,7 +17,6 @@ use obelisk_core::transfer::CancelToken;
 use serde::{Deserialize, Serialize};
 pub use session::{EpicIndicator, archive, indicators, maintain, removed};
 use std::{path::PathBuf, sync::Arc};
-pub use windows::prepare_windows;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -90,12 +89,16 @@ pub struct Configuration {
     pub prefix: Option<PathBuf>,
 }
 impl Configuration {
-    /// How Obelisk runs the game.
-    pub(crate) fn profile(&self) -> crate::profile::Profile {
-        crate::profile::of(crate::profile::Game::Epic {
-            namespace: &self.namespace,
-            app_name: &self.app_name,
-        })
+    /// The game as Wine starts a Windows build.
+    pub(crate) fn game(&self) -> crate::wine::Game<'_> {
+        crate::wine::Game {
+            id: crate::profile::Game::Epic {
+                namespace: &self.namespace,
+                app_name: &self.app_name,
+            },
+            install: &self.install,
+            title: &self.title,
+        }
     }
     fn scope(&self, account: &str) -> cloud_vault::EpicScope {
         cloud_vault::EpicScope {
@@ -255,6 +258,12 @@ impl crate::installations::Storefront for Epic {
         Store {
             namespace: product.namespace.clone(),
             app_name: product.app_name.clone(),
+        }
+    }
+    fn profile_game(product: &Product) -> crate::profile::Game<'_> {
+        crate::profile::Game::Epic {
+            namespace: &product.namespace,
+            app_name: &product.app_name,
         }
     }
     fn receipt_id(game: &Store, platform: &str) -> String {

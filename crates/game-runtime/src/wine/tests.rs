@@ -30,6 +30,32 @@ pub(crate) fn target(executable: &Path, arguments: &[&str]) -> LaunchTarget {
 
 /// A game no profile names.
 const OTHER: crate::profile::Game<'static> = crate::profile::Game::Steam { app_id: 42 };
+/// A game whose profile names the Linux engine and D3DMetal.
+const ELDEN_RING: crate::profile::Game<'static> = crate::profile::Game::Steam { app_id: 1245620 };
+
+/// Obelisk's folders under `root`: its library, its bundle and its home.
+pub(crate) fn locations(root: &Path) -> crate::Locations {
+    crate::Locations::new(
+        &root.join("library"),
+        &root.join("Obelisk.app"),
+        &root.join("home"),
+    )
+}
+
+/// Installs the Linux engine's runtime as Voile's development runtime: its
+/// engine, its Wine and Neptune's Direct3D, each a placeholder.
+pub(crate) fn engine_runtime(locations: &crate::Locations) -> PathBuf {
+    let runtime = locations.voile.join("current/linux");
+    for file in ["engine/fexdarwin-run", "wine/bin/wine"] {
+        fs::create_dir_all(runtime.join(file).parent().unwrap()).unwrap();
+        fs::write(runtime.join(file), "").unwrap();
+    }
+    fs::create_dir_all(runtime.join("windows")).unwrap();
+    for library in ["d3d11.dll", "dxgi.dll", "d3d12.dll"] {
+        fs::write(runtime.join("windows").join(library), library).unwrap();
+    }
+    runtime
+}
 
 pub(crate) fn config(root: &Path) -> Config {
     Config {
@@ -56,6 +82,35 @@ impl Storefront for Plain {
     }
 }
 
+/// A storefront whose games start behind its helper and read a variable
+/// their session sets.
+struct Behind;
+impl Storefront for Behind {
+    const HELPER: Option<&'static str> = Some(r"C:\helper.exe");
+    const PASSED: &'static [&'static str] = &["SESSION_PORT"];
+    fn prerequisites(&self) -> Result<Vec<Prerequisite>, Error> {
+        Ok(Vec::new())
+    }
+}
+
+/// The game no profile names, installed in `install`, without a store title.
+fn plain(install: &Path) -> Game<'_> {
+    Game {
+        id: OTHER,
+        install,
+        title: "",
+    }
+}
+
+/// The engine's configuration of a prefix beside `root`.
+fn linux_config(root: &Path) -> Config {
+    Config {
+        prefix: root.join("Prefixes/game-linux/prefix"),
+        engine: Engine::Linux,
+        ..config(root)
+    }
+}
+
 /// A Windows game inside `root/game`, and its target.
 fn game(root: &Path) -> (PathBuf, LaunchTarget) {
     let install = root.join("game");
@@ -68,7 +123,7 @@ fn game(root: &Path) -> (PathBuf, LaunchTarget) {
 /// The environment Wine commands of `config` run with.
 fn environment(config: &Config) -> HashMap<String, String> {
     let (install, target) = game(config.prefix.parent().unwrap());
-    super::target(&install, &target, HashMap::new(), config)
+    super::target::<Plain>(config, &plain(&install), &target, HashMap::new())
         .unwrap()
         .environment
 }
@@ -81,11 +136,11 @@ fn a_windows_game_starts_in_wine_itself_when_no_storefront_helper_stands_in() {
     fs::write(install.join("Binaries/Game.exe"), pe()).unwrap();
     let config = config(&root);
 
-    let target = super::target(
-        &install,
+    let target = super::target::<Plain>(
+        &config,
+        &plain(&install),
         &target(&install.join("Binaries/Game.exe"), &["-EpicPortal"]),
         HashMap::from([("HOME".to_owned(), "/home".to_owned())]),
-        &config,
     )
     .unwrap();
 
@@ -119,7 +174,7 @@ fn only_a_windows_program_inside_the_installation_starts_and_readies_a_prefix() 
     for executable in [install.join("script.exe"), root.join("outside.exe")] {
         let target = target(&executable, &[]);
         assert!(matches!(
-            super::target(&install, &target, HashMap::new(), &config),
+            super::target::<Plain>(&config, &plain(&install), &target, HashMap::new()),
             Err(Error::NotExecutable)
         ));
         assert!(matches!(
@@ -132,29 +187,242 @@ fn only_a_windows_program_inside_the_installation_starts_and_readies_a_prefix() 
 }
 
 #[test]
-fn a_prefix_is_booted_then_furnished_before_its_prerequisites_run_and_its_log_folder_exists() {
+fn an_engine_game_takes_its_store_title_in_the_dock_without_trademark_signs_or_else_its_program_s_name()
+ {
     let (_directory, root) = installation();
-    let config = recording_runtime(&root);
-    let (install, target) = game(&root);
-    fs::write(install.join("setup.exe"), "").unwrap();
-    let storefront = Plain {
-        prerequisites: vec![Prerequisite {
-            id: "setup".into(),
-            programs: vec![(install.join("setup.exe"), "/quiet".into())],
-        }],
+    let install = root.join("install");
+    fs::create_dir_all(&install).unwrap();
+    let executable = install.join("RocketLeague_EAC.exe");
+    fs::write(&executable, pe()).unwrap();
+    let config = linux_config(&root);
+    let named = |title: &str| {
+        let game = Game {
+            title,
+            ..plain(&install)
+        };
+        super::target::<Plain>(&config, &game, &target(&executable, &[]), HashMap::new())
+            .unwrap()
+            .environment[crate::linux_engine::APP_NAME]
+            .clone()
     };
 
-    prepare(&config, &root, &install, &target, &storefront).unwrap();
+    assert_eq!(named("Rocket League® "), "Rocket League");
+    assert_eq!(named(""), "RocketLeague_EAC");
+}
+
+#[test]
+fn a_storefront_s_helper_and_session_variables_reach_its_game_on_either_engine() {
+    use crate::linux_engine::tests::{guest_command, options};
+    let (_directory, root) = installation();
+    let (install, launched) = game(&root);
+    let program = install.join("Game.exe").to_string_lossy().into_owned();
+    let (rosetta, linux) = (config(&root), linux_config(&root));
+
+    let behind =
+        super::target::<Behind>(&rosetta, &plain(&install), &launched, HashMap::new()).unwrap();
+    assert_eq!(behind.arguments, [r"C:\helper.exe", program.as_str()]);
+    let behind =
+        super::target::<Behind>(&linux, &plain(&install), &launched, HashMap::new()).unwrap();
+    assert_eq!(
+        guest_command(&behind),
+        [r"C:\helper.exe", "/opt/game/Game.exe"]
+    );
+    assert_eq!(options(&behind, "--pass"), ["SESSION_PORT"]);
+
+    let alone =
+        super::target::<Plain>(&rosetta, &plain(&install), &launched, HashMap::new()).unwrap();
+    assert_eq!(alone.arguments, [program.as_str()]);
+    let alone =
+        super::target::<Plain>(&linux, &plain(&install), &launched, HashMap::new()).unwrap();
+    assert_eq!(guest_command(&alone), ["/opt/game/Game.exe"]);
+    assert!(options(&alone, "--pass").is_empty());
+}
+
+#[test]
+fn a_private_file_is_read_through_the_z_drive_on_rosetta_and_from_the_c_drive_on_the_engine() {
+    let (_directory, root) = installation();
+    for config in [config(&root), linux_config(&root)] {
+        fs::create_dir_all(config.prefix.join("drive_c")).unwrap();
+
+        let (folder, path) = private_file(&config, "ownership.bin", b"token").unwrap();
+
+        let file = match config.engine {
+            Engine::Rosetta => PathBuf::from(path.strip_prefix("Z:").unwrap().replace('\\', "/")),
+            Engine::Linux => config
+                .prefix
+                .join("drive_c")
+                .join(path.strip_prefix("C:\\").unwrap().replace('\\', "/")),
+        };
+        assert!(path.ends_with("\\ownership.bin"), "{path}");
+        assert_eq!(fs::read(&file).unwrap(), b"token");
+        drop(folder);
+        assert!(!file.exists());
+    }
+}
+
+/// Where Wine logs a storefront's games.
+type Diagnostics = fn(&crate::Locations) -> &PathBuf;
+
+#[test]
+fn each_storefront_s_game_is_readied_in_its_prefix_and_logs_into_its_store_s_diagnostics_folder() {
+    use crate::profile::Game::{Epic, Gog, Steam};
+    let rows: [(crate::profile::Game, &str, Diagnostics, &str); 3] = [
+        (
+            Steam { app_id: 42 },
+            "Steam/steam-42-windows",
+            |locations| &locations.steam_diagnostics,
+            "wine-42.log",
+        ),
+        (
+            Epic {
+                namespace: "space",
+                app_name: "game",
+            },
+            "Epic/epic-hash-Windows",
+            |locations| &locations.epic_diagnostics,
+            "wine-game.log",
+        ),
+        (
+            Gog {
+                product_id: "1207658924",
+            },
+            "GOG/gog-1207658924-windows",
+            |locations| &locations.gog_diagnostics,
+            "wine-1207658924.log",
+        ),
+    ];
+    for (game, folder, diagnostics, log) in rows {
+        let (_directory, root) = installation();
+        let locations = locations(&root);
+        record_calls(&locations.voile.join("current"));
+        let install = locations.library.join("Games").join(folder);
+        fs::create_dir_all(&install).unwrap();
+        fs::write(install.join("Game.exe"), pe()).unwrap();
+        fs::write(install.join("setup.exe"), "").unwrap();
+        let storefront = Plain {
+            prerequisites: vec![Prerequisite {
+                id: "setup".into(),
+                programs: vec![(install.join("setup.exe"), "/quiet".into())],
+            }],
+        };
+        let windows = Installation::of(&locations, game, "windows", &install)
+            .unwrap()
+            .unwrap();
+
+        let config = windows
+            .ready(
+                &locations,
+                &target(&install.join("Game.exe"), &[]),
+                &storefront,
+            )
+            .unwrap();
+
+        let prefix = locations.wine_prefixes.join(install.file_name().unwrap());
+        assert_eq!(windows.prefix(), prefix);
+        assert_eq!(config.prefix, prefix);
+        assert_eq!(config.log, diagnostics(&locations).join(log));
+        assert!(diagnostics(&locations).is_dir(), "{game:?}");
+        assert_eq!(
+            calls(&locations.wine_prefixes),
+            [
+                "wineboot --init".to_owned(),
+                format!("{} /quiet", install.join("setup.exe").display()),
+            ]
+        );
+        assert!(prefix.join("furnished").is_file());
+    }
+}
+
+#[test]
+fn the_program_a_profile_names_instead_is_the_one_readied_and_the_one_started() {
+    use crate::linux_engine::tests::guest_command;
+    let rocket_league = crate::profile::Game::Epic {
+        namespace: "9773aa1aa54f4f7b80e44bef04986cea",
+        app_name: "Sugar",
+    };
+    let (_directory, root) = installation();
+    let locations = locations(&root);
+    engine_runtime(&locations);
+    record_calls(&locations.voile.join("current"));
+    let install = locations.library.join("Games/Epic/epic-rl-Windows");
+    fs::create_dir_all(install.join("Binaries/Win64")).unwrap();
+    // The publisher's program is no Windows program Wine could start.
+    fs::write(install.join("Launcher.exe"), b"#!/bin/sh\n").unwrap();
+    fs::write(install.join("Binaries/Win64/RocketLeague_EAC.exe"), pe()).unwrap();
+    let launcher = target(&install.join("Launcher.exe"), &["-AUTH_TYPE=exchangecode"]);
+    let windows = Installation::of(&locations, rocket_league, "Windows", &install)
+        .unwrap()
+        .unwrap();
+    // A prefix the engine already created.
+    fs::create_dir_all(windows.prefix().join("drive_c/windows/system32")).unwrap();
+    fs::write(windows.prefix().join("system.reg"), "registry").unwrap();
+
+    let config = windows
+        .ready(&locations, &launcher, &Plain::default())
+        .unwrap();
+    let game = Game {
+        id: rocket_league,
+        ..plain(&install)
+    };
+    let started = super::target::<Plain>(&config, &game, &launcher, HashMap::new()).unwrap();
 
     assert_eq!(
-        calls(&root),
+        guest_command(&started),
         [
-            "wineboot --init".to_owned(),
-            format!("{} /quiet", install.join("setup.exe").display()),
+            "/opt/game/Binaries/Win64/RocketLeague_EAC.exe",
+            "-AUTH_TYPE=exchangecode"
         ]
     );
-    assert!(config.prefix.join("furnished").is_file());
-    assert!(root.join("logs").is_dir());
+    // The engine's prefix renders through Neptune's Direct3D.
+    assert_eq!(
+        fs::read(windows.prefix().join("drive_c/windows/system32/d3d11.dll")).unwrap(),
+        b"d3d11.dll"
+    );
+    // Without the profile, the publisher's program is neither readied nor
+    // started.
+    let other = Installation::of(&locations, OTHER, "Windows", &install)
+        .unwrap()
+        .unwrap();
+    assert!(matches!(
+        other.ready(&locations, &launcher, &Plain::default()),
+        Err(Error::NotExecutable)
+    ));
+    assert!(matches!(
+        super::target::<Plain>(&config, &plain(&install), &launcher, HashMap::new()),
+        Err(Error::NotExecutable)
+    ));
+    assert!(calls(&locations.wine_prefixes).is_empty());
+    assert!(!other.prefix().exists());
+}
+
+#[test]
+fn a_d3dmetal_game_is_translated_once_it_is_readied() {
+    use std::os::unix::fs::PermissionsExt;
+    let (_directory, root) = installation();
+    let locations = locations(&root);
+    engine_runtime(&locations);
+    // Obelisk's Intel helper only records what it was asked.
+    let helper = locations.helpers.join(crate::package::SDK_INTEL);
+    fs::create_dir_all(&locations.helpers).unwrap();
+    let record = root.join("translated");
+    fs::write(
+        &helper,
+        format!("#!/bin/sh\necho \"$1\" >> \"{}\"\n", record.display()),
+    )
+    .unwrap();
+    fs::set_permissions(&helper, fs::Permissions::from_mode(0o755)).unwrap();
+    let (install, target) = game(&root);
+    let windows = Installation::of(&locations, ELDEN_RING, "windows", &install)
+        .unwrap()
+        .unwrap();
+    fs::create_dir_all(windows.prefix().join("drive_c/windows/system32")).unwrap();
+    fs::write(windows.prefix().join("system.reg"), "registry").unwrap();
+
+    windows
+        .ready(&locations, &target, &Plain::default())
+        .unwrap();
+
+    assert_eq!(fs::read_to_string(&record).unwrap(), "warm-d3dmetal\n");
 }
 
 #[test]
@@ -178,14 +446,17 @@ fn d3dmetal_is_selected_only_when_the_runtime_carries_it() {
 #[test]
 fn a_missing_runtime_is_reported_before_any_prefix_is_created() {
     let (_directory, root) = installation();
-    let config = config(&root);
-
+    let locations = locations(&root);
     let (install, target) = game(&root);
+    let windows = Installation::of(&locations, OTHER, "windows", &install)
+        .unwrap()
+        .unwrap();
+
     assert!(matches!(
-        prepare(&config, &root, &install, &target, &Plain::default()),
+        windows.ready(&locations, &target, &Plain::default()),
         Err(Error::WineUnavailable)
     ));
-    assert!(!config.prefix.exists());
+    assert!(!windows.prefix().exists());
 }
 
 #[test]
@@ -456,16 +727,11 @@ fn a_saved_configuration_from_before_engines_and_graphics_runs_rosetta_s_wine() 
 fn a_game_whose_profile_names_the_linux_engine_runs_there_in_its_own_prefix_with_its_graphics() {
     let (_directory, root) = installation();
     let library = root.join("library");
-    let locations = crate::Locations::new(&library, Path::new("/Obelisk.app"), Path::new("/home"));
-    let runtime = locations.voile.join("current/linux");
-    for file in ["engine/fexdarwin-run", "wine/bin/wine"] {
-        fs::create_dir_all(runtime.join(file).parent().unwrap()).unwrap();
-        fs::write(runtime.join(file), "").unwrap();
-    }
+    let locations = locations(&root);
+    let runtime = engine_runtime(&locations);
     let install = library.join("Games/Steam/steam-1245620-windows");
-    let elden_ring = crate::profile::Game::Steam { app_id: 1245620 };
 
-    let windows = Installation::of(&locations, elden_ring, "windows", &install)
+    let windows = Installation::of(&locations, ELDEN_RING, "windows", &install)
         .unwrap()
         .unwrap();
 
@@ -473,7 +739,7 @@ fn a_game_whose_profile_names_the_linux_engine_runs_there_in_its_own_prefix_with
         windows.prefix(),
         library.join("Prefixes/steam-1245620-windows-linux/prefix")
     );
-    let config = windows.runtime(&locations, root.join("game.log")).unwrap();
+    let config = windows.runtime(&locations).unwrap();
     assert_eq!(config.engine, Engine::Linux);
     assert_eq!(config.graphics, Graphics::D3DMetal);
     assert_eq!(config.runtime, runtime);
@@ -517,6 +783,26 @@ fn an_uninstalled_windows_game_loses_its_prefix_but_never_what_a_link_points_to(
         Err(RemovalFailure::Unsafe(_))
     ));
     assert!(elsewhere.is_dir());
+}
+
+#[test]
+fn uninstalling_removes_the_engine_s_folder_and_any_rosetta_prefix() {
+    let (_directory, root) = installation();
+    let locations = locations(&root);
+    let install = root.join("library/Games/Steam/steam-1245620-windows");
+    let rosetta = Installation::of(&locations, OTHER, "windows", &install)
+        .unwrap()
+        .unwrap();
+    fs::create_dir_all(rosetta.prefix().join("drive_c")).unwrap();
+    let linux = Installation::of(&locations, ELDEN_RING, "windows", &install)
+        .unwrap()
+        .unwrap();
+    fs::create_dir_all(linux.prefix().join("drive_c")).unwrap();
+
+    linux.remove(&locations).unwrap();
+
+    assert!(!rosetta.prefix().exists());
+    assert!(!linux.prefix().parent().unwrap().exists());
 }
 
 #[test]

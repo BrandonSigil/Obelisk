@@ -286,14 +286,13 @@ fn only_a_windows_build_runs_in_its_own_prefix() {
         configuration.session_directory,
         fixture.locations.gog_sessions
     );
+    assert_eq!(configuration.title, "The Witcher");
     configuration.validate(ACCOUNT).unwrap();
-    assert!(fixture.content.remove_prefix(&windows).is_some());
 
     let mac = fixture.receipt("macos");
     let configuration = fixture.content.configuration(&mac);
     assert_eq!(configuration.prefix, None);
     configuration.validate(ACCOUNT).unwrap();
-    assert!(fixture.content.remove_prefix(&mac).is_none());
     assert_eq!(fixture.content.directory_name(&mac), "gog-1207658924-macos");
 }
 

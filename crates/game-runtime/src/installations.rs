@@ -63,6 +63,8 @@ pub trait Storefront: sessions::Storefront {
 
     /// The game `product` names.
     fn product_game(product: &Self::Product) -> Self::Game;
+    /// The game `product` names, as Obelisk's profiles look it up.
+    fn profile_game(product: &Self::Product) -> crate::profile::Game<'_>;
     /// An installation's id, one per game and platform, as Swift names it.
     fn receipt_id(game: &Self::Game, platform: &str) -> String;
     /// The name a Transfer's progress gives the game.

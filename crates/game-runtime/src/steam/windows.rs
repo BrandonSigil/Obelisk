@@ -35,6 +35,10 @@ pub(super) struct Prefix<'a> {
 }
 
 impl wine::Storefront for Prefix<'_> {
+    const HELPER: Option<&'static str> = Some(HELPER);
+    const PASSED: &'static [&'static str] = GAME_ENVIRONMENT;
+    const STEAM_CLIENT: bool = true;
+
     /// The steps of the install scripts the installation lists, which Steam
     /// runs before a game first starts. A script that cannot be read is left
     /// out.
@@ -72,12 +76,8 @@ impl wine::Storefront for Prefix<'_> {
     }
 
     /// Places Valve's steamclient libraries where the prefix's registry
-    /// points steam_api, and on the Linux engine leads lsteamclient to
-    /// Valve's Linux steamclient.
+    /// points steam_api.
     fn furnish(&self, config: &wine::Config) -> Result<(), Error> {
-        if config.engine == wine::Engine::Linux {
-            crate::linux_engine::link_steam_client(config)?;
-        }
         let steam = config.prefix.join("drive_c/Program Files (x86)/Steam");
         fs::create_dir_all(&steam)?;
         for name in CLIENTS {
@@ -113,28 +113,24 @@ fn same_contents(a: &Path, b: &Path) -> std::io::Result<bool> {
     }
 }
 
-/// The Windows game `target` names inside `install`, started by steam.exe,
-/// and the Steam API library that shows the game uses Steamworks.
+/// The Windows game `target` names, started by steam.exe, and the Steam API
+/// library beside the program that starts, which shows the game uses
+/// Steamworks.
 pub(super) fn target(
-    install: &Path,
+    config: &wine::Config,
+    game: &wine::Game<'_>,
     target: &LaunchTarget,
     home: &Path,
-    config: &wine::Config,
 ) -> Result<(Target, PathBuf), Error> {
-    let environment = crate::native::environment(home);
-    let game = match config.engine {
-        wine::Engine::Rosetta => {
-            let mut game = wine::target(install, target, environment, config)?;
-            game.arguments.insert(0, HELPER.to_owned());
-            game
-        }
-        wine::Engine::Linux => {
-            let guest = crate::linux_engine::Guest::steam(config, HELPER, GAME_ENVIRONMENT);
-            crate::linux_engine::target_in(install, target, environment, config, &guest)?
-        }
-    };
-    let steam_api = super::launch::library(target, &["steam_api64.dll", "steam_api.dll"])?;
-    Ok((game, steam_api))
+    let launched =
+        wine::target::<Prefix<'_>>(config, game, target, crate::native::environment(home))?;
+    let folder = launched
+        .program
+        .as_deref()
+        .and_then(Path::parent)
+        .ok_or(Error::ApiMissing)?;
+    let steam_api = super::launch::library_in(folder, &["steam_api64.dll", "steam_api.dll"])?;
+    Ok((launched, steam_api))
 }
 
 #[cfg(test)]

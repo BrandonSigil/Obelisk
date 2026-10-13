@@ -13,7 +13,6 @@ pub use client::start;
 pub use launch::serve;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-pub use windows::prepare_windows;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -49,11 +48,25 @@ pub struct Configuration {
     pub helper: PathBuf,
     pub product_id: String,
     pub platform: String,
+    /// The game's name in the store, which the Linux engine shows in the
+    /// menu bar, the Dock and Cmd-Tab.
+    #[serde(default)]
+    pub title: String,
     /// Set for a Windows build, which runs in Wine.
     #[serde(default)]
     pub prefix: Option<PathBuf>,
 }
 impl Configuration {
+    /// The game as Wine starts a Windows build.
+    pub(crate) fn game(&self) -> crate::wine::Game<'_> {
+        crate::wine::Game {
+            id: crate::profile::Game::Gog {
+                product_id: &self.product_id,
+            },
+            install: &self.install,
+            title: &self.title,
+        }
+    }
     /// Whether `wine` runs this build in its own prefix, and only a Windows
     /// build.
     fn runs_in(&self, wine: Option<&crate::wine::Config>) -> bool {
@@ -171,6 +184,11 @@ impl crate::installations::Storefront for Gog {
     const QUEUE: crate::queue::Storefront = crate::queue::Storefront::Gog;
     fn product_game(product: &Product) -> String {
         product.product_id.clone()
+    }
+    fn profile_game(product: &Product) -> crate::profile::Game<'_> {
+        crate::profile::Game::Gog {
+            product_id: &product.product_id,
+        }
     }
     fn receipt_id(product_id: &String, platform: &str) -> String {
         format!("{product_id}:{platform}")

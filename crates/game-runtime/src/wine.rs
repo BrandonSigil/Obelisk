@@ -1,6 +1,7 @@
 //! A Windows game runs in Obelisk's Wine runtime, inside the prefix of its
 //! installation. What a storefront adds, such as Steam's steam.exe helper or
-//! the prerequisites it names, comes from that storefront's side.
+//! the prerequisites it names, comes from that storefront's side, and is
+//! translated here for the engine the game's profile names.
 use crate::{
     Error,
     supervisor::{Target, architecture::Architecture},
@@ -208,8 +209,17 @@ impl Config {
     }
 }
 
-/// What one storefront adds to the prefix of its Windows installations.
+/// What one storefront adds to the prefix of its Windows installations, and
+/// to the games that start there.
 pub trait Storefront {
+    /// The Windows program its games start behind, given the game's program
+    /// and arguments, such as Steam's steam.exe.
+    const HELPER: Option<&'static str> = None;
+    /// Variables its games read that exist only once their Game session
+    /// starts them, such as the Steam host's ports.
+    const PASSED: &'static [&'static str] = &[];
+    /// Whether its games reach Valve's steamclient through lsteamclient.
+    const STEAM_CLIENT: bool = false;
     /// The programs it names to run once in a prefix before a game first
     /// starts, in order.
     fn prerequisites(&self) -> Result<Vec<Prerequisite>, Error>;
@@ -219,17 +229,25 @@ pub trait Storefront {
     }
 }
 
+/// A storefront's Windows game as Wine starts it: the game its profile is
+/// looked up by, its installation's folder, and its name in the store.
+pub(crate) struct Game<'a> {
+    pub id: crate::profile::Game<'a>,
+    pub install: &'a Path,
+    pub title: &'a str,
+}
+
 /// Readies the prefix of the Windows installation in `install` to start
 /// `target`: the game must be a Windows program inside the installation, then
 /// the prefix is created or updated for the runtime, the storefront furnishes
 /// it and its prerequisites run. Nothing touches the prefix for a game that
 /// cannot start.
-pub fn prepare(
+fn prepare<S: Storefront>(
     config: &Config,
     home: &Path,
     install: &Path,
     target: &LaunchTarget,
-    storefront: &impl Storefront,
+    storefront: &S,
 ) -> Result<(), Error> {
     if config.engine == Engine::Linux {
         return crate::linux_engine::prepare(config, install, target, storefront);
@@ -244,32 +262,57 @@ pub fn prepare(
     }
 }
 
-/// The Windows game `target` names inside `install`, which Wine starts in the
-/// prefix with `environment` and Wine's own settings, logging to the
-/// installation's log.
-pub(crate) fn target(
-    install: &Path,
+/// The game `target` names, or the program its profile names instead, that
+/// Wine starts in the prefix with `environment` and Wine's own settings, as S
+/// completes it, logging to the installation's log.
+pub(crate) fn target<S: Storefront>(
+    config: &Config,
+    game: &Game<'_>,
     target: &LaunchTarget,
     environment: HashMap<String, String>,
-    config: &Config,
 ) -> Result<Target, Error> {
+    let launched = crate::profile::of(game.id).target(game.install, target);
     if config.engine == Engine::Linux {
-        return crate::linux_engine::target(install, target, environment, config);
+        return crate::linux_engine::target::<S>(
+            game.install,
+            &launched,
+            game.title,
+            environment,
+            config,
+        );
     }
-    let executable = program(install, target)?;
-    let mut arguments = vec![executable.to_string_lossy().into_owned()];
-    arguments.extend(target.arguments.iter().cloned());
+    let executable = program(game.install, &launched)?;
+    let mut arguments: Vec<String> = S::HELPER.map(str::to_owned).into_iter().collect();
+    arguments.push(executable.to_string_lossy().into_owned());
+    arguments.extend(launched.arguments.iter().cloned());
     let mut environment = environment;
     environment.extend(config.environment());
     Ok(Target {
         executable: config.wine(),
         arguments,
-        working_directory: target.working_directory.clone().into(),
+        working_directory: launched.working_directory.into(),
         environment,
         log: Some(config.log.clone()),
-        installation: Some(install.to_owned()),
+        installation: Some(game.install.to_owned()),
         program: Some(executable),
     })
+}
+
+/// A file the game reads, in a private folder that lives as long as the
+/// returned TempDir, and its Windows path. Rosetta's Wine reads it on the
+/// Mac's disk, through its Z: drive; the engine's guest, which cannot see
+/// that disk, in the prefix's C: drive.
+pub(crate) fn private_file(
+    config: &Config,
+    name: &str,
+    bytes: &[u8],
+) -> Result<(tempfile::TempDir, String), Error> {
+    if config.engine == Engine::Linux {
+        return crate::linux_engine::private_file(config, name, bytes);
+    }
+    let (directory, path) =
+        crate::files::private_temp_file(&std::env::temp_dir(), "obelisk-", name, bytes)?;
+    Ok((directory, windows_path(&path)))
 }
 
 /// The Windows program `target` names, when it is one inside `install`.
@@ -376,44 +419,37 @@ pub(crate) fn windows_path(path: &Path) -> String {
 /// and goes when the installation is uninstalled.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Installation {
+    install: PathBuf,
     prefix: PathBuf,
-    engine: Engine,
-    graphics: Graphics,
+    /// Where Wine logs while its game runs.
+    log: PathBuf,
+    profile: crate::profile::Profile,
 }
 
 impl Installation {
     /// The installation of `game` in `install`, when `platform` names a
-    /// Windows build as a storefront spells it, run as the game's profile
-    /// says.
+    /// Windows build, run as the game's profile says.
     pub fn of(
         locations: &crate::Locations,
         game: crate::profile::Game<'_>,
         platform: &str,
         install: &Path,
     ) -> Result<Option<Self>, Error> {
-        if !platform.eq_ignore_ascii_case("windows") {
+        if !windows_build(platform) {
             return Ok(None);
         }
-        let windows = Self {
-            prefix: prefix(&locations.wine_prefixes, install)?,
-            engine: Engine::Rosetta,
-            graphics: Graphics::default(),
-        };
         let profile = crate::profile::of(game);
-        Ok(Some(match profile.engine {
-            Engine::Rosetta => windows,
-            Engine::Linux => windows.on_linux_engine(profile.graphics)?,
+        let prefix = prefix(&locations.wine_prefixes, install)?;
+        let prefix = match profile.engine {
+            Engine::Rosetta => prefix,
+            Engine::Linux => crate::linux_engine::prefix(&prefix)?,
+        };
+        Ok(Some(Self {
+            install: install.to_owned(),
+            prefix,
+            log: log(locations, game),
+            profile,
         }))
-    }
-
-    /// The same installation run by the Linux engine with `graphics`, in its
-    /// own prefix.
-    pub fn on_linux_engine(self, graphics: Graphics) -> Result<Self, Error> {
-        Ok(Self {
-            prefix: crate::linux_engine::prefix(&self.prefix)?,
-            engine: Engine::Linux,
-            graphics,
-        })
     }
 
     /// The Windows machine the installation runs in.
@@ -421,12 +457,30 @@ impl Installation {
         &self.prefix
     }
 
-    /// How its game runs, once Voile is installed. Wine logs into `log`.
-    pub fn runtime(&self, locations: &crate::Locations, log: PathBuf) -> Result<Config, Error> {
-        match self.engine {
-            Engine::Rosetta => Config::locate(&locations.voile, self.prefix.clone(), log),
+    /// Readies the prefix, with `storefront`'s additions, to start `target`
+    /// or the program the game's profile names instead, and returns how its
+    /// game runs. D3DMetal is translated before a game that renders with it
+    /// starts.
+    pub fn ready<S: Storefront>(
+        &self,
+        locations: &crate::Locations,
+        target: &LaunchTarget,
+        storefront: &S,
+    ) -> Result<Config, Error> {
+        let config = self.runtime(locations)?;
+        let target = self.profile.target(&self.install, target);
+        prepare(&config, &locations.home, &self.install, &target, storefront)?;
+        crate::linux_engine::translate_d3dmetal(&config, &locations.helpers);
+        Ok(config)
+    }
+
+    /// How its game runs, once Voile is installed.
+    fn runtime(&self, locations: &crate::Locations) -> Result<Config, Error> {
+        let (prefix, log) = (self.prefix.clone(), self.log.clone());
+        match self.profile.engine {
+            Engine::Rosetta => Config::locate(&locations.voile, prefix, log),
             Engine::Linux => {
-                Config::locate_linux(&locations.voile, self.prefix.clone(), log, self.graphics)
+                Config::locate_linux(&locations.voile, prefix, log, self.profile.graphics)
             }
         }
     }
@@ -438,7 +492,7 @@ impl Installation {
         &self,
         locations: &crate::Locations,
     ) -> Result<(), obelisk_core::installation::RemovalFailure> {
-        match self.engine {
+        match self.profile.engine {
             Engine::Rosetta => remove_prefix(locations, &self.prefix),
             // The engine's folder, and the Rosetta prefix an earlier launch
             // may have made before the game moved to the engine.
@@ -456,6 +510,28 @@ impl Installation {
                 }
             }
         }
+    }
+}
+
+/// Whether `platform` names a Windows build, as a storefront spells it:
+/// Steam's and GOG's `windows`, Epic's `Windows`.
+pub(crate) fn windows_build(platform: &str) -> bool {
+    platform.eq_ignore_ascii_case("windows")
+}
+
+/// Where Wine logs `game`: in its storefront's diagnostics folder.
+fn log(locations: &crate::Locations, game: crate::profile::Game<'_>) -> PathBuf {
+    use crate::profile::Game::{Epic, Gog, Steam};
+    match game {
+        Steam { app_id } => locations
+            .steam_diagnostics
+            .join(format!("wine-{app_id}.log")),
+        Epic { app_name, .. } => locations
+            .epic_diagnostics
+            .join(format!("wine-{app_name}.log")),
+        Gog { product_id } => locations
+            .gog_diagnostics
+            .join(format!("wine-{product_id}.log")),
     }
 }
 

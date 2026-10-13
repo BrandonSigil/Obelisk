@@ -19,8 +19,20 @@ impl wine::Storefront for Plain {
     }
 }
 
+/// A storefront whose games start behind steam.exe and reach Valve's
+/// steamclient, as Steam's do.
+struct SteamClient;
+impl wine::Storefront for SteamClient {
+    const HELPER: Option<&'static str> = Some(r"C:\windows\system32\steam.exe");
+    const PASSED: &'static [&'static str] = &["SteamAppId", "Steam3Master"];
+    const STEAM_CLIENT: bool = true;
+    fn prerequisites(&self) -> Result<Vec<wine::Prerequisite>, Error> {
+        Ok(Vec::new())
+    }
+}
+
 /// The values of every `option` pair in the launcher's arguments.
-fn options<'a>(target: &'a Target, option: &str) -> Vec<&'a str> {
+pub(crate) fn options<'a>(target: &'a Target, option: &str) -> Vec<&'a str> {
     let separator = target
         .arguments
         .iter()
@@ -34,7 +46,7 @@ fn options<'a>(target: &'a Target, option: &str) -> Vec<&'a str> {
 }
 
 /// What the launcher starts in the guest: the program and its arguments.
-fn guest_command(target: &Target) -> &[String] {
+pub(crate) fn guest_command(target: &Target) -> &[String] {
     let separator = target
         .arguments
         .iter()
@@ -68,9 +80,10 @@ fn a_game_starts_through_the_native_launcher_with_guest_paths() {
     let mut environment = HashMap::new();
     environment.insert("HOME".to_owned(), "/Users/player".to_owned());
 
-    let target = target(
+    let target = target::<Plain>(
         &install,
         &launch_target(&executable, &["-AUTH_TYPE=exchangecode"]),
+        "",
         environment,
         &config,
     )
@@ -109,83 +122,20 @@ fn a_game_starts_through_the_native_launcher_with_guest_paths() {
 }
 
 #[test]
-fn a_game_takes_its_store_name_in_the_dock_without_trademark_signs() {
-    let (_directory, root) = installation();
-    let install = root.join("install");
-    fs::create_dir_all(&install).unwrap();
-    let executable = install.join("RocketLeague_EAC.exe");
-    fs::write(&executable, pe()).unwrap();
-    let environment = HashMap::from([(APP_NAME.to_owned(), "Rocket League® ".to_owned())]);
-
-    let target = target(
-        &install,
-        &launch_target(&executable, &[]),
-        environment,
-        &linux_config(&root),
-    )
-    .unwrap();
-
-    assert_eq!(target.environment[APP_NAME], "Rocket League");
-}
-
-#[test]
 fn a_program_outside_the_installation_never_starts() {
     let (_directory, root) = installation();
     let install = root.join("install");
     fs::create_dir_all(&install).unwrap();
     let outside = root.join("Other.exe");
     fs::write(&outside, pe()).unwrap();
-    let failure = target(
+    let failure = target::<Plain>(
         &install,
         &launch_target(&outside, &[]),
+        "",
         HashMap::new(),
         &linux_config(&root),
     );
     assert!(matches!(failure, Err(Error::NotExecutable)));
-}
-
-#[test]
-fn a_private_file_lives_in_the_prefix_s_c_drive_as_long_as_its_folder() {
-    let (_directory, root) = installation();
-    let config = linux_config(&root);
-    fs::create_dir_all(config.prefix.join("drive_c")).unwrap();
-
-    let (folder, path) = private_file(&config, "ownership.bin", b"token").unwrap();
-
-    let name = path
-        .strip_prefix("C:\\")
-        .and_then(|rest| rest.strip_suffix("\\ownership.bin"))
-        .unwrap();
-    let file = config
-        .prefix
-        .join("drive_c")
-        .join(name)
-        .join("ownership.bin");
-    assert_eq!(fs::read(&file).unwrap(), b"token");
-    drop(folder);
-    assert!(!file.exists());
-}
-
-#[test]
-fn uninstalling_removes_the_engine_s_folder_and_any_rosetta_prefix() {
-    let (_directory, root) = installation();
-    let locations = crate::Locations::new(&root.join("library"), Path::new("/Obelisk.app"), &root);
-    let install = root.join("library/Games/Epic/epic-game-Windows");
-    let game = crate::profile::Game::Steam { app_id: 42 };
-    let rosetta = crate::wine::Installation::of(&locations, game, "Windows", &install)
-        .unwrap()
-        .unwrap();
-    fs::create_dir_all(rosetta.prefix().join("drive_c")).unwrap();
-    let linux = rosetta
-        .clone()
-        .on_linux_engine(wine::Graphics::Dxmt)
-        .unwrap();
-    fs::create_dir_all(linux.prefix().join("drive_c")).unwrap();
-
-    linux.remove(&locations).unwrap();
-
-    assert!(!rosetta.prefix().exists());
-    assert!(!home(linux.prefix()).unwrap().exists());
 }
 
 #[test]
@@ -199,9 +149,10 @@ fn a_d3dmetal_game_asks_the_launcher_for_the_d3dmetal_render_server() {
         ..linux_config(&root)
     };
 
-    let target = target(
+    let target = target::<Plain>(
         &install,
         &launch_target(&install.join("Game.exe"), &[]),
+        "",
         HashMap::new(),
         &config,
     )
@@ -222,17 +173,12 @@ fn steam_target(root: &Path, host_pid: bool) -> (wine::Config, Target) {
         fs::create_dir_all(config.runtime.join("guest")).unwrap();
         fs::write(config.runtime.join("guest").join(HOST_PID), b"elf").unwrap();
     }
-    let guest = Guest::steam(
-        &config,
-        r"C:\windows\system32\steam.exe",
-        &["SteamAppId", "Steam3Master"],
-    );
-    let target = target_in(
+    let target = target::<SteamClient>(
         &install,
         &launch_target(&program, &["-eac"]),
+        "",
         HashMap::new(),
         &config,
-        &guest,
     )
     .unwrap();
     (config, target)
@@ -675,7 +621,7 @@ fn smoke() {
     let launch = launch_target(&executable, &arguments);
 
     prepare(&config, &install, &launch, &Plain).unwrap();
-    let target = target(&install, &launch, HashMap::new(), &config).unwrap();
+    let target = target::<Plain>(&install, &launch, "", HashMap::new(), &config).unwrap();
     let output = Command::new(&target.executable)
         .args(&target.arguments)
         .current_dir(&target.working_directory)

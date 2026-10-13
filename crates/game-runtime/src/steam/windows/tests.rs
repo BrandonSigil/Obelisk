@@ -1,12 +1,32 @@
 use super::*;
-use crate::wine::tests::{calls, config, installation, pe, record_calls, target};
+use crate::installations::Receipt;
+use crate::wine::tests::{
+    config, engine_runtime, installation, locations, pe, record_calls, target,
+};
 
-fn locations(root: &Path) -> crate::Locations {
-    crate::Locations::new(
-        &root.join("library"),
-        &root.join("Obelisk.app"),
-        &root.join("home"),
-    )
+/// The receipt of Steam's `app_id`, named `name`, as a Windows build in
+/// `install`.
+fn receipt(install: &Path, app_id: u32, name: &str) -> Receipt<crate::steam::Steam> {
+    Receipt {
+        product: crate::steam::Product {
+            app_id,
+            language: "english".into(),
+        },
+        name: name.into(),
+        directory: install.to_string_lossy().into_owned(),
+        platform: "windows".into(),
+        total_bytes: 1,
+        needs_verification: false,
+    }
+}
+
+/// A game no profile names, in `install`.
+fn game(install: &Path) -> wine::Game<'_> {
+    wine::Game {
+        id: crate::profile::Game::Steam { app_id: 42 },
+        install,
+        title: "",
+    }
 }
 
 /// A Windows game in `root/game` whose Steam API sits beside Unity's plugins.
@@ -23,20 +43,18 @@ fn steam_game(root: &Path) -> PathBuf {
 }
 
 #[test]
-fn a_windows_game_starts_behind_steam_exe_in_its_prefix() {
+fn a_windows_game_starts_behind_steam_exe_with_the_steam_api_beside_its_program() {
     let (_directory, root) = installation();
     let install = steam_game(&root);
-    let config = config(&root);
 
     let (target, steam_api) = super::target(
-        &install,
+        &config(&root),
+        &game(&install),
         &target(&install.join("Game.exe"), &["-screen-fullscreen", "0"]),
         &root,
-        &config,
     )
     .unwrap();
 
-    assert_eq!(target.executable, root.join("runtime/bin/wine"));
     assert_eq!(
         target.arguments,
         [
@@ -45,11 +63,6 @@ fn a_windows_game_starts_behind_steam_exe_in_its_prefix() {
             "-screen-fullscreen",
             "0",
         ]
-    );
-    assert_eq!(target.working_directory, install);
-    assert_eq!(
-        target.environment["WINEPREFIX"],
-        root.join("prefix").to_string_lossy()
     );
     assert_eq!(
         steam_api,
@@ -66,10 +79,10 @@ fn a_game_without_the_steam_api_is_refused() {
 
     assert!(matches!(
         super::target(
-            &install,
+            &config(&root),
+            &game(&install),
             &target(&install.join("Game.exe"), &[]),
             &root,
-            &config(&root)
         ),
         Err(Error::ApiMissing)
     ));
@@ -126,9 +139,7 @@ fn a_windows_launch_readies_the_installation_prefix_and_names_it_once() {
 
     let request = crate::steam::prepare(
         &locations,
-        42,
-        "windows",
-        &install,
+        &receipt(&install, 42, "Game"),
         &target(&install.join("Game.exe"), &[]),
     )
     .unwrap();
@@ -143,29 +154,17 @@ fn a_windows_launch_readies_the_installation_prefix_and_names_it_once() {
     );
     assert_eq!(request.target.arguments[0], HELPER);
     assert_eq!(
-        request.target.log,
-        Some(root.join("home/Library/Logs/Obelisk/Steam/wine-42.log"))
-    );
-    assert_eq!(calls(&root.join("library/Prefixes")), ["wineboot --init"]);
-    assert_eq!(
         fs::read(prefix.join("drive_c/Program Files (x86)/Steam/steamclient64.dll")).unwrap(),
         b"steamclient64.dll"
     );
 }
 
 #[test]
-fn a_game_whose_profile_names_the_linux_engine_readies_the_engine_s_prefix_with_valve_s_clients() {
+fn a_game_whose_profile_names_the_linux_engine_readies_the_engine_s_prefix_and_takes_its_store_title_in_the_dock()
+ {
     let (_directory, root) = installation();
     let locations = locations(&root);
-    let runtime = locations.voile.join("current/linux");
-    for file in ["engine/fexdarwin-run", "wine/bin/wine"] {
-        fs::create_dir_all(runtime.join(file).parent().unwrap()).unwrap();
-        fs::write(runtime.join(file), "").unwrap();
-    }
-    fs::create_dir_all(runtime.join("windows")).unwrap();
-    for library in ["d3d11.dll", "dxgi.dll", "d3d12.dll"] {
-        fs::write(runtime.join("windows").join(library), library).unwrap();
-    }
+    let runtime = engine_runtime(&locations);
     fs::create_dir_all(runtime.join("steam")).unwrap();
     for name in CLIENTS {
         fs::write(runtime.join("steam").join(name), name).unwrap();
@@ -184,9 +183,7 @@ fn a_game_whose_profile_names_the_linux_engine_readies_the_engine_s_prefix_with_
 
     let request = crate::steam::prepare(
         &locations,
-        1245620,
-        "windows",
-        &install,
+        &receipt(&install, 1245620, "ELDEN RING"),
         &target(&install.join("Game.exe"), &[]),
     )
     .unwrap();
@@ -212,16 +209,16 @@ fn a_game_whose_profile_names_the_linux_engine_readies_the_engine_s_prefix_with_
         [HELPER, "/opt/game/Game.exe"]
     );
     assert_eq!(
+        request.target.environment[crate::linux_engine::APP_NAME],
+        "ELDEN RING"
+    );
+    assert_eq!(
         fs::read(prefix.join("drive_c/Program Files (x86)/Steam/steamclient64.dll")).unwrap(),
         b"steamclient64.dll"
     );
     assert_eq!(
         fs::read_link(prefix.with_file_name(".steam").join("sdk64")).unwrap(),
         Path::new("/opt/steam/linux64")
-    );
-    assert_eq!(
-        fs::read(prefix.join("drive_c/windows/system32/d3d12.dll")).unwrap(),
-        b"d3d12.dll"
     );
     // The Rosetta prefix is never made, and no prerequisite runs.
     assert!(!root.join("library/Prefixes/steam-1245620-windows").exists());
@@ -236,9 +233,7 @@ fn a_windows_launch_waits_for_voile_and_a_mac_one_never_does() {
     assert!(matches!(
         crate::steam::prepare(
             &locations,
-            42,
-            "windows",
-            &install,
+            &receipt(&install, 42, "Game"),
             &target(&install.join("Game.exe"), &[])
         ),
         Err(Error::WineUnavailable)

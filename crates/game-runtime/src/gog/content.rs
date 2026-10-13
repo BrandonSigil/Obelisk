@@ -117,25 +117,13 @@ impl<N: Network> Content<N> {
             helper: self.locations.helper.clone(),
             product_id: receipt.product.product_id.clone(),
             platform: receipt.platform.clone(),
-            prefix: self
-                .windows(receipt)
+            title: receipt.name.clone(),
+            prefix: receipt
+                .windows(&self.locations)
+                .ok()
+                .flatten()
                 .map(|windows| windows.prefix().to_owned()),
         }
-    }
-
-    /// The build's Wine prefix, when it is a Windows one.
-    fn windows(&self, receipt: &Receipt<Gog>) -> Option<crate::wine::Installation> {
-        let game = crate::profile::Game::Gog {
-            product_id: &receipt.product.product_id,
-        };
-        crate::wine::Installation::of(
-            &self.locations,
-            game,
-            &receipt.platform,
-            Path::new(&receipt.directory),
-        )
-        .ok()
-        .flatten()
     }
 }
 
@@ -190,6 +178,7 @@ impl<N: Network> installations::Content<Gog> for Content<N> {
                 .hand_off(Handover {
                     network: self.network.clone(),
                     configuration: self.configuration(receipt),
+                    windows: receipt.windows(&self.locations).ok().flatten(),
                     locations: self.locations.clone(),
                 })
                 .await
@@ -206,12 +195,7 @@ impl<N: Network> installations::Content<Gog> for Content<N> {
         gog_kit::client::installation_directory_name(&receipt.product.product_id, &receipt.platform)
     }
     fn remove_prefix(&self, receipt: &Receipt<Gog>) -> Option<Result<(), String>> {
-        let windows = self.windows(receipt)?;
-        Some(
-            windows
-                .remove(&self.locations)
-                .map_err(|error| error.to_string()),
-        )
+        receipt.remove_prefix(&self.locations)
     }
     fn maintain<'a>(
         &'a self,
@@ -231,6 +215,8 @@ impl<N: Network> installations::Content<Gog> for Content<N> {
 struct Handover<N: Network> {
     network: Arc<N>,
     configuration: Configuration,
+    /// Set for a Windows build, whose prefix it readies.
+    windows: Option<crate::wine::Installation>,
     locations: Locations,
 }
 
@@ -242,14 +228,17 @@ impl<N: Network> sessions::Handover<Gog> for Handover<N> {
     }
     fn prepare(&self) -> BoxFuture<'_, Result<Self::Prepared, Failure>> {
         Box::pin(async move {
-            let wine = match self.configuration.prefix.is_some() {
-                false => None,
-                true => {
-                    let (configuration, locations) =
-                        (self.configuration.clone(), self.locations.clone());
+            let wine = match &self.windows {
+                None => None,
+                Some(windows) => {
+                    let (windows, configuration, locations) = (
+                        windows.clone(),
+                        self.configuration.clone(),
+                        self.locations.clone(),
+                    );
                     Some(
                         blocking(Error::Session.to_string(), move || {
-                            super::prepare_windows(&configuration, &locations)
+                            super::windows::ready(&windows, &configuration, &locations)
                         })
                         .await?
                         .map_err(failed)?,

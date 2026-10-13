@@ -74,6 +74,33 @@ impl<S: Storefront> Receipt<S> {
         S::receipt_id(&self.game(), &self.platform)
     }
 
+    /// Its game as Wine starts a Windows build: the game its profile is
+    /// looked up by, in its folder, with its name in the store.
+    pub(crate) fn wine_game(&self) -> crate::wine::Game<'_> {
+        crate::wine::Game {
+            id: S::profile_game(&self.product),
+            install: Path::new(&self.directory),
+            title: &self.name,
+        }
+    }
+
+    /// Its Wine prefix and how its game runs there, when it is a Windows
+    /// build.
+    pub fn windows(
+        &self,
+        locations: &crate::Locations,
+    ) -> Result<Option<crate::wine::Installation>, crate::Error> {
+        let game = self.wine_game();
+        crate::wine::Installation::of(locations, game.id, &self.platform, game.install)
+    }
+
+    /// Deletes its Wine prefix once its folder is gone. `None` when it has
+    /// none.
+    pub(crate) fn remove_prefix(&self, locations: &crate::Locations) -> Option<Result<(), String>> {
+        let windows = self.windows(locations).ok().flatten()?;
+        Some(windows.remove(locations).map_err(|error| error.to_string()))
+    }
+
     /// The Transfer that verifies its installation, or updates it in place,
     /// with the build it records.
     pub(super) fn transfer(&self) -> Transfer<S> {

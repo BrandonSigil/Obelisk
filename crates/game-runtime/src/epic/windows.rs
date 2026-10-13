@@ -1,48 +1,18 @@
 //! A Windows Epic build: Wine starts it in its installation's prefix, once the
 //! prefix ran the prerequisite the installation's manifest names.
-use super::{Configuration, Error, Result};
+use super::{Configuration, Result};
 use crate::wine;
 use std::path::Path;
 
-/// The Wine installation of an Epic build, when it is a Windows one.
-pub(crate) fn installation(
-    locations: &crate::Locations,
-    namespace: &str,
-    app_name: &str,
-    platform: &str,
-    install: &Path,
-) -> std::result::Result<Option<wine::Installation>, crate::Error> {
-    let game = crate::profile::Game::Epic {
-        namespace,
-        app_name,
-    };
-    wine::Installation::of(locations, game, platform, install)
-}
-
-/// Readies a Windows build for its Game session: its prefix, the prerequisite
-/// its installation names, and the folder of Wine's log. This runs before any
-/// short-lived game credential exists, since a prerequisite may take minutes.
-pub fn prepare_windows(
+/// Readies a Windows build for its Game session in `windows`, its
+/// installation's prefix, with the prerequisite the build names. This runs
+/// before any short-lived game credential exists, since a prerequisite may
+/// take minutes.
+pub(super) fn ready(
+    windows: &wine::Installation,
     config: &Configuration,
     locations: &crate::Locations,
 ) -> Result<wine::Config> {
-    // The configuration may come from a saved journal: its prefix must be the
-    // one of the installation it names.
-    let windows = installation(
-        locations,
-        &config.namespace,
-        &config.app_name,
-        &config.platform,
-        &config.install,
-    )?
-    .filter(|windows| config.prefix.as_deref() == Some(windows.prefix()))
-    .ok_or(Error::Unsupported)?;
-    let wine = windows.runtime(
-        locations,
-        locations
-            .epic_diagnostics
-            .join(format!("wine-{}.log", config.app_name)),
-    )?;
     let installed = epic_kit::client::installed_launch(
         &config.namespace,
         &config.catalog_item_id,
@@ -54,16 +24,11 @@ pub fn prepare_windows(
         install: &config.install,
         prerequisite: installed.prerequisite.as_ref(),
     };
-    // The game's profile may start another program than the publisher's:
-    // that program must be the one readied.
-    let target = config.profile().target(&config.install, &installed.target);
-    wine::prepare(&wine, &config.home, &config.install, &target, &prefix)?;
-    crate::linux_engine::translate_d3dmetal(&wine, &locations.helpers);
-    Ok(wine)
+    Ok(windows.ready(locations, &installed.target, &prefix)?)
 }
 
 /// What Epic adds to the prefix of the installation in `install`.
-struct Prefix<'a> {
+pub(super) struct Prefix<'a> {
     install: &'a Path,
     prerequisite: Option<&'a epic_kit::client::Prerequisite>,
 }

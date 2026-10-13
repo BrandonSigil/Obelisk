@@ -288,21 +288,23 @@ pub(crate) fn steam_api(target: &obelisk_core::launch::LaunchTarget) -> Result<P
     library(target, &["libsteam_api.dylib"])
 }
 
-/// The first file under the game's directory named like one of `names`,
-/// ignoring case as Windows file names do.
-pub(crate) fn library(
-    target: &obelisk_core::launch::LaunchTarget,
-    names: &[&str],
-) -> Result<PathBuf, Error> {
-    const MAX_ENTRIES: usize = 20_000;
+/// The first file under the game's directory, its bundle or its executable's
+/// folder, named like one of `names`.
+fn library(target: &obelisk_core::launch::LaunchTarget, names: &[&str]) -> Result<PathBuf, Error> {
     let executable = Path::new(&target.executable)
         .canonicalize()
         .map_err(|_| Error::ApiMissing)?;
-    let directory = if target.is_application_bundle {
-        executable
-    } else {
-        executable.parent().ok_or(Error::ApiMissing)?.to_owned()
-    };
+    if target.is_application_bundle {
+        return library_in(&executable, names);
+    }
+    library_in(executable.parent().ok_or(Error::ApiMissing)?, names)
+}
+
+/// The first file under `directory` named like one of `names`, ignoring case
+/// as Windows file names do.
+pub(crate) fn library_in(directory: &Path, names: &[&str]) -> Result<PathBuf, Error> {
+    const MAX_ENTRIES: usize = 20_000;
+    let directory = directory.canonicalize().map_err(|_| Error::ApiMissing)?;
     let mut pending = vec![directory.clone()];
     let mut inspected = 0;
     while let Some(folder) = pending.pop() {

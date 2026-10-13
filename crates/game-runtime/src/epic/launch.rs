@@ -11,7 +11,6 @@ use crate::supervisor::{
 use epic_kit::{client::LaunchPlan, friends::Activity};
 use std::{
     io::{Read, Write},
-    os::unix::fs::PermissionsExt,
     path::Path,
 };
 
@@ -228,67 +227,52 @@ impl<S: Services> lifecycle::Launch for Launch<S> {
     }
 }
 
-/// The plan's ownership token in a private folder that lives as long as the
-/// game, and the file that holds it.
-fn ownership_token(plan: &LaunchPlan) -> Result<Option<(tempfile::TempDir, PathBuf)>> {
-    let Some(bytes) = &plan.ownership_token else {
-        return Ok(None);
-    };
-    let directory = tempfile::Builder::new()
-        .prefix("obelisk-epic-ownership-")
-        .permissions(std::fs::Permissions::from_mode(0o700))
-        .tempdir()?;
-    let path = directory.path().join("ownership.bin");
-    obelisk_core::write_atomic(&path, bytes)?;
-    Ok(Some((directory, path)))
-}
-
-/// A Windows build, which Wine starts in its prefix.
+/// A Windows build, which Wine starts in its prefix, with the plan's
+/// ownership token where that Wine reads it.
 pub(super) fn windows_target(
     plan: &LaunchPlan,
     config: &Configuration,
     wine: &crate::wine::Config,
     environment: &std::collections::HashMap<String, String>,
 ) -> Result<(Target, Architecture, Option<tempfile::TempDir>)> {
-    let launched = config.profile().target(&config.install, &plan.target);
-    let mut environment = environment.clone();
-    if wine.engine == crate::wine::Engine::Linux && !config.title.is_empty() {
-        environment.insert(
-            crate::linux_engine::APP_NAME.to_owned(),
-            config.title.clone(),
-        );
-    }
-    let mut target = crate::wine::target(&config.install, &launched, environment, wine)?;
-    let ownership = match (&plan.ownership_token, wine.engine) {
-        // The engine's guest cannot see the Mac's disk: the token goes into the
-        // prefix's C: drive.
-        (Some(bytes), crate::wine::Engine::Linux) => {
-            let (directory, path) =
-                crate::linux_engine::private_file(wine, "ownership.bin", bytes)?;
+    let mut target = crate::wine::target::<super::windows::Prefix<'_>>(
+        wine,
+        &config.game(),
+        &plan.target,
+        environment.clone(),
+    )?;
+    let ownership = match &plan.ownership_token {
+        Some(bytes) => {
+            let (directory, path) = crate::wine::private_file(wine, "ownership.bin", bytes)?;
             target.arguments.push(format!("-epicovt={path}"));
             Some(directory)
         }
-        // The game reads the token through Wine's view of the Mac's disk.
-        _ => ownership_token(plan)?.map(|(directory, path)| {
-            target
-                .arguments
-                .push(format!("-epicovt={}", crate::wine::windows_path(&path)));
-            directory
-        }),
+        None => None,
     };
     Ok((target, wine.architecture(), ownership))
 }
 
+/// A Mac build, with the plan's ownership token in a private folder that
+/// lives as long as the game.
 pub(super) fn native_target(
     plan: &LaunchPlan,
     config: &Configuration,
     environment: &std::collections::HashMap<String, String>,
 ) -> Result<(Target, Architecture, Option<tempfile::TempDir>)> {
     let mut arguments = plan.target.arguments.clone();
-    let ownership = ownership_token(plan)?.map(|(directory, path)| {
-        arguments.push(format!("-epicovt={}", path.display()));
-        directory
-    });
+    let ownership = match &plan.ownership_token {
+        Some(bytes) => {
+            let (directory, path) = crate::files::private_temp_file(
+                &std::env::temp_dir(),
+                "obelisk-epic-ownership-",
+                "ownership.bin",
+                bytes,
+            )?;
+            arguments.push(format!("-epicovt={}", path.display()));
+            Some(directory)
+        }
+        None => None,
+    };
     let (target, architecture) = crate::native::target(
         &config.install,
         &plan.target,

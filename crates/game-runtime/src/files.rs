@@ -75,6 +75,24 @@ pub(crate) fn private_directory(path: &Path) -> Result<(), Error> {
     }
     Ok(())
 }
+/// Writes `bytes` to a file named `name` in a new folder inside `parent`
+/// that only this user opens, whose name starts with `prefix`. The folder
+/// lives as long as the returned TempDir.
+pub(crate) fn private_temp_file(
+    parent: &Path,
+    prefix: &str,
+    name: &str,
+    bytes: &[u8],
+) -> std::io::Result<(tempfile::TempDir, PathBuf)> {
+    use std::os::unix::fs::PermissionsExt;
+    let directory = tempfile::Builder::new()
+        .prefix(prefix)
+        .permissions(fs::Permissions::from_mode(0o700))
+        .tempdir_in(parent)?;
+    let path = directory.path().join(name);
+    obelisk_core::write_atomic(&path, bytes)?;
+    Ok((directory, path))
+}
 pub(crate) fn prepare(
     config: &Config,
     cancelled: &std::sync::atomic::AtomicBool,

@@ -162,24 +162,12 @@ impl<N: Network> Content<N> {
             platform: receipt.platform.clone(),
             language: self.language.clone(),
             title: receipt.name.clone(),
-            prefix: self
-                .windows(receipt)
+            prefix: receipt
+                .windows(&self.locations)
+                .ok()
+                .flatten()
                 .map(|windows| windows.prefix().to_owned()),
         }
-    }
-
-    /// The build's Wine prefix, when it is a Windows one.
-    fn windows(&self, receipt: &Receipt<Epic>) -> Option<crate::wine::Installation> {
-        let install = Path::new(&receipt.directory);
-        super::windows::installation(
-            &self.locations,
-            &receipt.product.namespace,
-            &receipt.product.app_name,
-            &receipt.platform,
-            install,
-        )
-        .ok()
-        .flatten()
     }
 
     /// What maintenance of `game` syncs: its installation, or, uninstalled,
@@ -270,6 +258,7 @@ impl<N: Network> installations::Content<Epic> for Content<N> {
                 .hand_off(Handover {
                     network: self.network.clone(),
                     configuration: self.configuration(receipt),
+                    windows: receipt.windows(&self.locations).ok().flatten(),
                     locations: self.locations.clone(),
                     saved: self.credentials.saved.clone(),
                 })
@@ -305,12 +294,7 @@ impl<N: Network> installations::Content<Epic> for Content<N> {
         )
     }
     fn remove_prefix(&self, receipt: &Receipt<Epic>) -> Option<Result<(), String>> {
-        let windows = self.windows(receipt)?;
-        Some(
-            windows
-                .remove(&self.locations)
-                .map_err(|error| error.to_string()),
-        )
+        receipt.remove_prefix(&self.locations)
     }
     fn maintain<'a>(
         &'a self,
@@ -362,6 +346,8 @@ impl<N: Network> installations::Content<Epic> for Content<N> {
 struct Handover<N: Network> {
     network: Arc<N>,
     configuration: Configuration,
+    /// Set for a Windows build, whose prefix it readies.
+    windows: Option<crate::wine::Installation>,
     locations: Locations,
     saved: Arc<dyn Fn() + Send + Sync>,
 }
@@ -376,14 +362,17 @@ impl<N: Network> sessions::Handover<Epic> for Handover<N> {
         Box::pin(async move {
             // A Windows build runs in Wine, readied before any exchange code
             // exists: a prerequisite may take minutes.
-            let wine = match self.configuration.prefix.is_some() {
-                false => None,
-                true => {
-                    let (configuration, locations) =
-                        (self.configuration.clone(), self.locations.clone());
+            let wine = match &self.windows {
+                None => None,
+                Some(windows) => {
+                    let (windows, configuration, locations) = (
+                        windows.clone(),
+                        self.configuration.clone(),
+                        self.locations.clone(),
+                    );
                     Some(
                         blocking(Error::Session.to_string(), move || {
-                            super::prepare_windows(&configuration, &locations)
+                            super::windows::ready(&windows, &configuration, &locations)
                         })
                         .await?
                         .map_err(failed)?,

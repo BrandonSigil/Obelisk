@@ -215,3 +215,24 @@ fn a_transfer_lands_on_its_games_installation_of_its_platform_or_any_while_the_s
     .transfer("/library/Games/Steam".into());
     assert!(picked.lands_on(&portal("macos")) && picked.lands_on(&portal("windows")));
 }
+
+/// Uninstalls `windows` and `mac`, two builds of one game, whose folders are
+/// gone: the Windows build's prefix goes with it.
+fn removes_its_prefix<S: Storefront>(windows: Receipt<S>, mac: Receipt<S>) {
+    let (_directory, root) = crate::wine::tests::installation();
+    let locations = crate::wine::tests::locations(&root);
+    let folder = Path::new(&windows.directory).file_name().unwrap();
+    let prefix = locations.wine_prefixes.join(folder);
+    std::fs::create_dir_all(prefix.join("drive_c")).unwrap();
+
+    assert_eq!(windows.remove_prefix(&locations), Some(Ok(())));
+    assert!(!prefix.exists());
+    assert_eq!(mac.remove_prefix(&locations), None);
+}
+
+#[test]
+fn an_uninstalled_windows_build_loses_its_prefix_and_a_mac_build_has_none() {
+    removes_its_prefix(portal("windows"), portal("macos"));
+    removes_its_prefix(sandbox_game("Windows"), sandbox_game("Mac"));
+    removes_its_prefix(witcher("windows"), witcher("macos"));
+}

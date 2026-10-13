@@ -165,7 +165,7 @@ impl Runtimes {
 /// got: the storefront's own, then Voile for a build that runs in Wine.
 fn needed<P: sessions::Storefront>(platform: &str) -> Vec<Runtime> {
     let mut needed = P::RUNTIMES.to_vec();
-    if platform.eq_ignore_ascii_case("windows") {
+    if crate::wine::windows_build(platform) {
         needed.push(Runtime::Voile);
     }
     needed

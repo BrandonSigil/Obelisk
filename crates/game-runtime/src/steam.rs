@@ -1,6 +1,7 @@
 //! The Steam adapter of the Game session supervisor.
 use crate::{
     Config, Error, HostState,
+    installations::Receipt,
     protocol::Credentials,
     runtimes::Runtime,
     supervisor::{self, Record, Target},
@@ -99,34 +100,24 @@ impl supervisor::Provider for Steam {
     }
 }
 
-/// The launch of the Steam game `target` names inside `install`, with its
-/// Cloud, ready for its supervisor. A Windows game runs in Wine, in the
-/// installation's own prefix, which is readied first.
+/// The launch of the Steam game `receipt` installed, started as `target`
+/// says, with its Cloud, ready for its supervisor. A Windows game runs in
+/// Wine, in the installation's own prefix, which is readied first.
 pub fn prepare(
     locations: &crate::Locations,
-    app_id: u32,
-    platform: &str,
-    install: &Path,
+    receipt: &Receipt<Steam>,
     target: &obelisk_core::launch::LaunchTarget,
 ) -> Result<Request, Error> {
     let home = &locations.home;
-    let log = locations
-        .steam_diagnostics
-        .join(format!("wine-{app_id}.log"));
-    let game = crate::profile::Game::Steam { app_id };
-    // The game's profile may start another program than Steam's launch.
-    let target = &crate::profile::of(game).target(install, target);
-    let wine = match crate::wine::Installation::of(locations, game, platform, install)? {
-        Some(windows) => Some(windows.runtime(locations, log)?),
-        None => None,
-    };
-    let (target, steam_api) = match &wine {
-        Some(wine) => {
-            crate::wine::prepare(wine, home, install, target, &windows::Prefix { install })?;
-            crate::linux_engine::translate_d3dmetal(wine, &locations.helpers);
-            windows::target(install, target, home, wine)?
+    let install = Path::new(&receipt.directory);
+    let app_id = receipt.product.app_id;
+    let (wine, (target, steam_api)) = match receipt.windows(locations)? {
+        Some(windows) => {
+            let wine = windows.ready(locations, target, &windows::Prefix { install })?;
+            let launched = windows::target(&wine, &receipt.wine_game(), target, home)?;
+            (Some(wine), launched)
         }
-        None => native_target(install, target, home)?,
+        None => (None, native_target(install, target, home)?),
     };
     let cloud = cloud::Config {
         root: locations.cloud_archive.clone(),
@@ -238,6 +229,11 @@ impl crate::installations::Storefront for Steam {
     const QUEUE: crate::queue::Storefront = crate::queue::Storefront::Steam;
     fn product_game(product: &Product) -> u32 {
         product.app_id
+    }
+    fn profile_game(product: &Product) -> crate::profile::Game<'_> {
+        crate::profile::Game::Steam {
+            app_id: product.app_id,
+        }
     }
     fn receipt_id(app_id: &u32, platform: &str) -> String {
         format!("{app_id}-{platform}")

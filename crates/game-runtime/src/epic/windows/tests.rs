@@ -1,6 +1,6 @@
 use super::*;
-use crate::wine::tests::{calls, installation, pe, record_calls};
-use std::{fs, path::PathBuf};
+use crate::wine::tests::{calls, installation, locations, pe, record_calls};
+use std::fs;
 
 fn configuration(root: &Path) -> Configuration {
     let install = root.join("library/Games/Epic/epic-hash-Windows");
@@ -113,11 +113,7 @@ fn an_epic_prerequisite_runs_unless_it_leaves_the_installation() {
 #[test]
 fn a_windows_build_readies_its_prefix_with_its_prerequisite_before_any_credential() {
     let (_directory, root) = installation();
-    let locations = crate::Locations::new(
-        &root.join("library"),
-        &root.join("Obelisk.app"),
-        &root.join("home"),
-    );
+    let locations = locations(&root);
     record_calls(&locations.voile.join("current"));
     let config = configuration(&root);
     install(
@@ -127,14 +123,18 @@ fn a_windows_build_readies_its_prefix_with_its_prerequisite_before_any_credentia
     );
     fs::create_dir_all(config.install.join("Redist")).unwrap();
     fs::write(config.install.join("Redist/setup.exe"), "").unwrap();
+    let windows = wine::Installation::of(
+        &locations,
+        config.game().id,
+        &config.platform,
+        &config.install,
+    )
+    .unwrap()
+    .unwrap();
 
-    let wine = prepare_windows(&config, &locations).unwrap();
+    let wine = ready(&windows, &config, &locations).unwrap();
 
     assert_eq!(wine.prefix, root.join("library/Prefixes/epic-hash-Windows"));
-    assert_eq!(
-        wine.log,
-        root.join("home/Library/Logs/Obelisk/Epic/wine-game.log")
-    );
     assert!(config.runs_in(Some(&wine)));
     assert_eq!(
         calls(&root.join("library/Prefixes")),
@@ -146,52 +146,4 @@ fn a_windows_build_readies_its_prefix_with_its_prerequisite_before_any_credentia
             ),
         ]
     );
-    assert!(root.join("home/Library/Logs/Obelisk/Epic").is_dir());
-}
-
-#[test]
-fn a_build_that_is_no_windows_program_never_boots_a_prefix() {
-    let (_directory, root) = installation();
-    let locations = crate::Locations::new(
-        &root.join("library"),
-        &root.join("Obelisk.app"),
-        &root.join("home"),
-    );
-    record_calls(&locations.voile.join("current"));
-    let config = configuration(&root);
-    install(&config, b"#!/bin/sh\n", None);
-
-    assert!(matches!(
-        prepare_windows(&config, &locations),
-        Err(Error::Unsupported)
-    ));
-    assert!(calls(&root.join("library/Prefixes")).is_empty());
-    assert!(!config.prefix.as_ref().unwrap().exists());
-}
-
-#[test]
-fn a_mac_build_or_a_missing_runtime_is_no_windows_launch() {
-    let (_directory, root) = installation();
-    let locations = crate::Locations::new(
-        &root.join("library"),
-        &root.join("Obelisk.app"),
-        &root.join("home"),
-    );
-    let mut config = configuration(&root);
-    install(&config, &pe(), None);
-    assert!(matches!(
-        prepare_windows(&config, &locations),
-        Err(Error::WineUnavailable)
-    ));
-    config.platform = "Mac".into();
-    assert!(matches!(
-        prepare_windows(&config, &locations),
-        Err(Error::Unsupported)
-    ));
-    config.platform = "Windows".into();
-    config.prefix = None::<PathBuf>;
-    assert!(matches!(
-        prepare_windows(&config, &locations),
-        Err(Error::Unsupported)
-    ));
 }

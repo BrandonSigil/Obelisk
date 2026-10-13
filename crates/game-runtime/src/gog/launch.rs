@@ -105,7 +105,12 @@ fn windows_target(
     wine: &crate::wine::Config,
     environment: &std::collections::HashMap<String, String>,
 ) -> Result<(Target, Architecture)> {
-    let target = crate::wine::target(&config.install, launched, environment.clone(), wine)?;
+    let target = crate::wine::target::<super::windows::Prefix>(
+        wine,
+        &config.game(),
+        launched,
+        environment.clone(),
+    )?;
     Ok((target, wine.architecture()))
 }
 
@@ -126,3 +131,6 @@ fn native_target(
 pub fn serve(input: impl Read, output: impl Write, inspect: lifecycle::Inspect) -> Result<()> {
     lifecycle::serve::<Launch>(input, output, inspect)
 }
+
+#[cfg(test)]
+mod tests;

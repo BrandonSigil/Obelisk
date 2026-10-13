@@ -305,19 +305,14 @@ async fn a_game_without_steam_cloud_archives_nothing_and_a_failure_is_its_cloud_
 }
 
 #[tokio::test]
-async fn an_uninstalled_windows_game_loses_its_prefix_and_a_mac_game_has_none() {
+async fn each_build_of_a_game_installs_into_a_folder_named_after_its_app_and_platform() {
     let fixture = Fixture::new();
     let (windows, mac) = (fixture.installed("windows"), fixture.installed("macos"));
-    let prefix = fixture.locations.wine_prefixes.join("steam-620-windows");
-    std::fs::create_dir_all(prefix.join("drive_c")).unwrap();
 
     assert_eq!(
         fixture.content.directory_name(&windows),
         "steam-620-windows"
     );
-    assert_eq!(fixture.content.remove_prefix(&windows), Some(Ok(())));
-    assert!(!prefix.exists());
-    assert_eq!(fixture.content.remove_prefix(&mac), None);
     assert_eq!(fixture.content.directory_name(&mac), "steam-620-macos");
 }
 

@@ -3,7 +3,7 @@
 use super::*;
 use crate::supervisor::storage;
 
-/// `wine` is how a Windows build runs, from `prepare_windows`, and must be
+/// `wine` is how a Windows build runs, from `windows::ready`, and must be
 /// absent for a Mac build.
 pub fn start(
     config: Configuration,
