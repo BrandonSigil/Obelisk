@@ -96,7 +96,7 @@ fn config(directory: &Path) -> Config {
         package: directory.join("unused.zip"),
         cache: directory.join("runtime"),
         diagnostics: directory.join("diagnostics"),
-        steam_api: directory.join("libsteam_api.dylib"),
+        steam_api: Some(directory.join("libsteam_api.dylib")),
         wine: None,
         home: directory.into(),
         app_id: 42,

@@ -146,7 +146,10 @@ pub struct Config {
     pub package: PathBuf,
     pub cache: PathBuf,
     pub diagnostics: PathBuf,
-    pub steam_api: PathBuf,
+    /// A Mac game's Steam API library, whose slices choose the game's. A
+    /// Windows game names none: Wine loads whatever Steam API the game
+    /// ships, if any.
+    pub steam_api: Option<PathBuf>,
     pub home: PathBuf,
     pub app_id: u32,
     #[serde(default)]

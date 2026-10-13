@@ -16,13 +16,13 @@ impl Fixture {
             cache: root.path().join("cache"),
             diagnostics: root.path().join("logs"),
             home: root.path().join("home"),
-            steam_api: root.path().join("libsteam_api.dylib"),
+            steam_api: Some(root.path().join("libsteam_api.dylib")),
             wine: None,
             app_id: 42,
         };
         fs::create_dir_all(&config.helpers).unwrap();
         fs::create_dir(&config.home).unwrap();
-        fs::write(&config.steam_api, b"fixture SDK").unwrap();
+        fs::write(config.steam_api.as_ref().unwrap(), b"fixture SDK").unwrap();
         for name in HELPERS {
             fs::write(config.helpers.join(name), name).unwrap();
             if executable_helper(name) {
@@ -318,7 +318,7 @@ fn downloaded_runtime_loads_without_steam_installation_access() {
         cache: root.path().join("cache"),
         diagnostics: root.path().join("logs"),
         home: root.path().join("home"),
-        steam_api: root.path().join("unused"),
+        steam_api: None,
         wine: None,
         app_id: 0,
     };

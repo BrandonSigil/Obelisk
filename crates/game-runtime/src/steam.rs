@@ -112,13 +112,16 @@ pub fn prepare(
     let home = &locations.home;
     let install = Path::new(&receipt.directory);
     let app_id = receipt.product.app_id;
-    let (wine, (target, steam_api)) = match receipt.windows(locations)? {
+    let (wine, target, steam_api) = match receipt.windows(locations)? {
         Some(windows) => {
             let wine = windows.ready(locations, target, &windows::Prefix { install })?;
             let launched = windows::target(&wine, &receipt.wine_game(), target, home)?;
-            (Some(wine), launched)
+            (Some(wine), launched, None)
         }
-        None => (None, native_target(install, target, home)?),
+        None => {
+            let (launched, steam_api) = native_target(install, target, home)?;
+            (None, launched, Some(steam_api))
+        }
     };
     let cloud = cloud::Config {
         root: locations.cloud_archive.clone(),

@@ -89,7 +89,7 @@ struct LibraryCoverCard<Artwork: View>: View {
         .scaleEffect(hovered && !reduceMotion ? 1.03 : 1)
         .animation(reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 0.72), value: hovered)
         .onHover { hovered = $0 }
-        .forceQuitConfirmation(title, asking: $asking)
+        .forceQuitConfirmation(title, for: action, asking: $asking)
     }
 }
 

@@ -70,7 +70,7 @@ fn native_supervisor_acknowledges_and_reports_preparation_failure_without_valve(
                 package: root.0.join("missing.zip"),
                 cache: root.0.join("cache"),
                 diagnostics: root.0.join("logs"),
-                steam_api: root.0.join("missing-api.dylib"),
+                steam_api: Some(root.0.join("missing-api.dylib")),
                 wine: None,
                 home: root.0.clone(),
             },

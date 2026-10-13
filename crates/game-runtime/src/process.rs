@@ -189,7 +189,7 @@ mod tests {
             package: temporary.path().join("runtime.zip"),
             cache: temporary.path().into(),
             diagnostics: temporary.path().into(),
-            steam_api: temporary.path().join("libsteam_api.dylib"),
+            steam_api: Some(temporary.path().join("libsteam_api.dylib")),
             wine: None,
             home: temporary.path().into(),
             app_id: 1030300,

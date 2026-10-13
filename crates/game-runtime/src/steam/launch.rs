@@ -49,7 +49,8 @@ impl Machine for Mac {
         if let Some(wine) = &config.wine {
             return Ok(Some(wine.architecture()));
         }
-        Architecture::select(&target.executable, &config.steam_api).map(Some)
+        let library = config.steam_api.as_deref().ok_or(Error::ApiMissing)?;
+        Architecture::select(&target.executable, library).map(Some)
     }
     fn prepare(
         launch: &crate::Launch,
@@ -300,9 +301,8 @@ fn library(target: &obelisk_core::launch::LaunchTarget, names: &[&str]) -> Resul
     library_in(executable.parent().ok_or(Error::ApiMissing)?, names)
 }
 
-/// The first file under `directory` named like one of `names`, ignoring case
-/// as Windows file names do.
-pub(crate) fn library_in(directory: &Path, names: &[&str]) -> Result<PathBuf, Error> {
+/// The first file under `directory` named like one of `names`, ignoring case.
+fn library_in(directory: &Path, names: &[&str]) -> Result<PathBuf, Error> {
     const MAX_ENTRIES: usize = 20_000;
     let directory = directory.canonicalize().map_err(|_| Error::ApiMissing)?;
     let mut pending = vec![directory.clone()];

@@ -108,7 +108,7 @@ struct GameActionButton: View {
             }
         }
         .fixedSize()
-        .forceQuitConfirmation(gameName, asking: $asking)
+        .forceQuitConfirmation(gameName, for: action, asking: $asking)
     }
 }
 
@@ -199,11 +199,16 @@ extension GameAction {
 extension View {
     /// Asks before forcing `gameName` to quit, as macOS's own Force Quit does:
     /// what the game did not save is lost. The confirmation runs the action
-    /// `asking` holds.
-    func forceQuitConfirmation(_ gameName: String, asking: Binding<GameAction?>) -> some View {
+    /// `asking` holds. The question goes away once `action` no longer needs
+    /// it, as when the game exits by itself first.
+    func forceQuitConfirmation(_ gameName: String, for action: GameAction,
+                               asking: Binding<GameAction?>) -> some View {
         // Read now: the alert may clear `asking` before its button runs.
         let asked = asking.wrappedValue
-        return alert(L10n.string("ui.game.force_quit_title", gameName), isPresented: Binding(
+        return onChange(of: action.needsConfirmation) { _, needs in
+            if !needs { asking.wrappedValue = nil }
+        }
+        .alert(L10n.string("ui.game.force_quit_title", gameName), isPresented: Binding(
             get: { asking.wrappedValue != nil },
             set: { if !$0 { asking.wrappedValue = nil } }
         )) {

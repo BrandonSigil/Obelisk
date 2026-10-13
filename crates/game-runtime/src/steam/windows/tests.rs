@@ -3,6 +3,7 @@ use crate::installations::Receipt;
 use crate::wine::tests::{
     config, engine_runtime, installation, locations, pe, record_calls, target,
 };
+use std::path::PathBuf;
 
 /// The receipt of Steam's `app_id`, named `name`, as a Windows build in
 /// `install`.
@@ -43,11 +44,13 @@ fn steam_game(root: &Path) -> PathBuf {
 }
 
 #[test]
-fn a_windows_game_starts_behind_steam_exe_with_the_steam_api_beside_its_program() {
+fn a_windows_game_starts_behind_steam_exe_even_without_the_steam_api() {
     let (_directory, root) = installation();
-    let install = steam_game(&root);
+    let install = root.join("game");
+    fs::create_dir_all(&install).unwrap();
+    fs::write(install.join("Game.exe"), pe()).unwrap();
 
-    let (target, steam_api) = super::target(
+    let target = super::target(
         &config(&root),
         &game(&install),
         &target(&install.join("Game.exe"), &["-screen-fullscreen", "0"]),
@@ -64,28 +67,6 @@ fn a_windows_game_starts_behind_steam_exe_with_the_steam_api_beside_its_program(
             "0",
         ]
     );
-    assert_eq!(
-        steam_api,
-        install.join("Game_Data/Plugins/x86_64/steam_api64.dll")
-    );
-}
-
-#[test]
-fn a_game_without_the_steam_api_is_refused() {
-    let (_directory, root) = installation();
-    let install = root.join("game");
-    fs::create_dir_all(&install).unwrap();
-    fs::write(install.join("Game.exe"), pe()).unwrap();
-
-    assert!(matches!(
-        super::target(
-            &config(&root),
-            &game(&install),
-            &target(&install.join("Game.exe"), &[]),
-            &root,
-        ),
-        Err(Error::ApiMissing)
-    ));
 }
 
 #[test]
@@ -153,6 +134,7 @@ fn a_windows_launch_readies_the_installation_prefix_and_names_it_once() {
         Some(&prefix)
     );
     assert_eq!(request.target.arguments[0], HELPER);
+    assert_eq!(request.config.steam_api, None);
     assert_eq!(
         fs::read(prefix.join("drive_c/Program Files (x86)/Steam/steamclient64.dll")).unwrap(),
         b"steamclient64.dll"

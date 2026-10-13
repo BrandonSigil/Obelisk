@@ -3,11 +3,7 @@
 //! scripts the installation lists.
 use crate::{Error, supervisor::Target, wine};
 use obelisk_core::launch::LaunchTarget;
-use std::{
-    fs,
-    io::Read,
-    path::{Path, PathBuf},
-};
+use std::{fs, io::Read, path::Path};
 
 /// The helper every Windows game starts behind. Wine installs it in each prefix.
 const HELPER: &str = r"C:\windows\system32\steam.exe";
@@ -113,24 +109,16 @@ fn same_contents(a: &Path, b: &Path) -> std::io::Result<bool> {
     }
 }
 
-/// The Windows game `target` names, started by steam.exe, and the Steam API
-/// library beside the program that starts, which shows the game uses
-/// Steamworks.
+/// The Windows game `target` names, started by steam.exe. A game that ships
+/// no Steam API starts all the same, and its Game session keeps the host,
+/// Cloud and quitting.
 pub(super) fn target(
     config: &wine::Config,
     game: &wine::Game<'_>,
     target: &LaunchTarget,
     home: &Path,
-) -> Result<(Target, PathBuf), Error> {
-    let launched =
-        wine::target::<Prefix<'_>>(config, game, target, crate::native::environment(home))?;
-    let folder = launched
-        .program
-        .as_deref()
-        .and_then(Path::parent)
-        .ok_or(Error::ApiMissing)?;
-    let steam_api = super::launch::library_in(folder, &["steam_api64.dll", "steam_api.dll"])?;
-    Ok((launched, steam_api))
+) -> Result<Target, Error> {
+    wine::target::<Prefix<'_>>(config, game, target, crate::native::environment(home))
 }
 
 #[cfg(test)]

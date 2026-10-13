@@ -122,7 +122,7 @@ pub(crate) fn prepare(
     config: &Config,
     cancelled: &std::sync::atomic::AtomicBool,
 ) -> Result<Prepared, Error> {
-    if !config.steam_api.is_file() {
+    if config.wine.is_none() && !config.steam_api.as_deref().is_some_and(Path::is_file) {
         return Err(Error::Unavailable);
     }
     let directory = crate::package::prepare(config, cancelled)?;
@@ -135,9 +135,8 @@ pub(crate) fn prepare(
     ];
     // Refuse an unsupported or malformed SDK library before anything is written.
     // The selected slice itself is owned by Launch, which the supervisor reads.
-    // A Windows game's library is a PE file that only Wine loads.
-    if config.wine.is_none() {
-        crate::supervisor::architecture::Architecture::preferred(&config.steam_api)?;
+    if let Some(library) = &config.steam_api {
+        crate::supervisor::architecture::Architecture::preferred(library)?;
     }
     let prepared = Prepared {
         storage: None,
@@ -283,7 +282,7 @@ mod atomic_tests {
             package: root.join("unused"),
             cache: home.join("cache"),
             diagnostics: root.join("logs"),
-            steam_api: root.join("unused"),
+            steam_api: None,
             wine: None,
             home,
             app_id: 42,
@@ -347,6 +346,34 @@ mod atomic_tests {
             "{}",
             String::from_utf8_lossy(&result.stdout)
         );
+    }
+
+    #[test]
+    fn only_a_mac_game_needs_its_steam_api_library_to_start_the_host() {
+        let root = tempfile::tempdir().unwrap();
+        let mut config = Config {
+            helpers: root.path().join("helpers"),
+            package: root.path().join("unused"),
+            cache: root.path().join("cache"),
+            diagnostics: root.path().join("logs"),
+            steam_api: None,
+            wine: None,
+            home: root.path().join("home"),
+            app_id: 42,
+            cloud_save_roots: vec![],
+        };
+        // A cancelled launch stops at the runtime package, after the library.
+        let cancelled = std::sync::atomic::AtomicBool::new(true);
+
+        assert!(matches!(
+            prepare(&config, &cancelled),
+            Err(Error::Unavailable)
+        ));
+        config.wine = Some(crate::wine::tests::config(root.path()));
+        assert!(matches!(
+            prepare(&config, &cancelled),
+            Err(Error::Cancelled)
+        ));
     }
 
     #[test]

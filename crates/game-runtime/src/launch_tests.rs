@@ -15,7 +15,7 @@ fn fixture(root: &std::path::Path) -> (Config, files::Prepared) {
         package: root.join("unused.zip"),
         cache: root.into(),
         diagnostics: root.into(),
-        steam_api: root.join("libsteam_api.dylib"),
+        steam_api: Some(root.join("libsteam_api.dylib")),
         wine: None,
         home: root.into(),
         app_id: 42,
