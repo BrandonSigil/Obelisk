@@ -2,12 +2,12 @@
 //! saves live, the credentials every account call renews and saves first, and
 //! what Epic's network does for them. Only the network is a seam; tests stand
 //! in for it.
-use super::{Configuration, Download, Epic, Error, IdleGuard, Receipt, Store};
+use super::{Configuration, Epic, Error, IdleGuard, Product, Store};
 use crate::{
     Locations,
     cloud::Control,
     cloud_status,
-    installations::{self, BoxFuture, Credentials, Runtime, Runtimes, blocking},
+    installations::{self, BoxFuture, Credentials, Receipt, Runtime, Runtimes, Transfer, blocking},
     sessions::{self, Admission, BeforeBegin, Failure, Storefront as _, Supervised, failed},
 };
 use epic_kit::client::Client as EpicClient;
@@ -26,16 +26,18 @@ pub trait Network: Send + Sync + 'static {
     fn account_id(&self) -> BoxFuture<'_, Result<String, Failure>>;
     /// A short-lived code the game signs in with.
     fn exchange_code(&self) -> BoxFuture<'_, Result<String, Failure>>;
-    /// Runs one Transfer into the folder `request` names.
+    /// Runs `transfer` into the folder it names.
     fn download<'a>(
         &'a self,
-        request: &'a Download,
+        transfer: &'a Transfer<Epic>,
     ) -> BoxFuture<'a, Result<epic_kit::client::Installation, Failure>>;
     fn progress(&self) -> Option<TransferProgress>;
     fn cancel(&self);
     /// Whether Epic's live build differs from the one `receipt` installed.
-    fn update_available<'a>(&'a self, receipt: &'a Receipt)
-    -> BoxFuture<'a, Result<bool, Failure>>;
+    fn update_available<'a>(
+        &'a self,
+        receipt: &'a Receipt<Epic>,
+    ) -> BoxFuture<'a, Result<bool, Failure>>;
     /// Saves the build's Cloud archive before its files go.
     fn archive(&self, config: Configuration) -> BoxFuture<'_, Result<(), Error>>;
     /// Syncs Cloud saves on the player's request, while `idle` keeps every
@@ -65,16 +67,16 @@ impl Network for EpicClient {
     }
     fn download<'a>(
         &'a self,
-        request: &'a Download,
+        transfer: &'a Transfer<Epic>,
     ) -> BoxFuture<'a, Result<epic_kit::client::Installation, Failure>> {
         Box::pin(async move {
             EpicClient::download(
                 self,
-                &request.namespace,
-                &request.catalog_item_id,
-                &request.app_name,
-                &request.platform,
-                &request.directory,
+                &transfer.product.namespace,
+                &transfer.product.catalog_item_id,
+                &transfer.product.app_name,
+                &transfer.platform,
+                &transfer.directory,
             )
             .await
             .map_err(failed)
@@ -88,14 +90,14 @@ impl Network for EpicClient {
     }
     fn update_available<'a>(
         &'a self,
-        receipt: &'a Receipt,
+        receipt: &'a Receipt<Epic>,
     ) -> BoxFuture<'a, Result<bool, Failure>> {
         Box::pin(async move {
             EpicClient::update_available(
                 self,
-                &receipt.namespace,
-                &receipt.catalog_item_id,
-                &receipt.app_name,
+                &receipt.product.namespace,
+                &receipt.product.catalog_item_id,
+                &receipt.product.app_name,
                 &receipt.platform,
                 Path::new(&receipt.directory),
             )
@@ -152,16 +154,16 @@ impl<N: Network> Content<N> {
 
     /// The build's Cloud configuration: a Windows build keeps its saves in
     /// its Wine prefix.
-    fn configuration(&self, receipt: &Receipt, request: &Download) -> Configuration {
+    fn configuration(&self, receipt: &Receipt<Epic>) -> Configuration {
         Configuration {
             root: self.locations.cloud_archive.clone(),
             home: self.locations.home.clone(),
             install: receipt.directory.clone().into(),
             session_directory: self.locations.epic_sessions.clone(),
             helper: self.locations.helper.clone(),
-            namespace: receipt.namespace.clone(),
-            catalog_item_id: request.catalog_item_id.clone(),
-            app_name: receipt.app_name.clone(),
+            namespace: receipt.product.namespace.clone(),
+            catalog_item_id: receipt.product.catalog_item_id.clone(),
+            app_name: receipt.product.app_name.clone(),
             platform: receipt.platform.clone(),
             language: self.language.clone(),
             title: receipt.name.clone(),
@@ -172,12 +174,12 @@ impl<N: Network> Content<N> {
     }
 
     /// The build's Wine prefix, when it is a Windows one.
-    fn windows(&self, receipt: &Receipt) -> Option<crate::wine::Installation> {
+    fn windows(&self, receipt: &Receipt<Epic>) -> Option<crate::wine::Installation> {
         let install = Path::new(&receipt.directory);
         super::windows::installation(
             &self.locations,
-            &receipt.namespace,
-            &receipt.app_name,
+            &receipt.product.namespace,
+            &receipt.product.app_name,
             &receipt.platform,
             install,
         )
@@ -190,10 +192,10 @@ impl<N: Network> Content<N> {
     async fn maintenance(
         &self,
         game: &Store,
-        installed: Option<(&Receipt, &Download)>,
+        installed: Option<&Receipt<Epic>>,
     ) -> Result<Configuration, Failure> {
-        if let Some((receipt, request)) = installed {
-            return Ok(self.configuration(receipt, request));
+        if let Some(receipt) = installed {
+            return Ok(self.configuration(receipt));
         }
         let (root, account, wanted) = (
             self.locations.cloud_archive.clone(),
@@ -219,21 +221,26 @@ impl<N: Network> Content<N> {
 impl<N: Network> installations::Content<Epic> for Content<N> {
     /// Gets Voile for a Windows build unless it is in place, then the
     /// game's files.
-    fn download<'a>(&'a self, request: &'a Download) -> BoxFuture<'a, Result<Receipt, Failure>> {
+    fn download<'a>(
+        &'a self,
+        transfer: &'a Transfer<Epic>,
+    ) -> BoxFuture<'a, Result<Receipt<Epic>, Failure>> {
         Box::pin(async move {
             self.runtimes.begin();
             self.prepare().await?;
-            let needed = installations::needs_voile(&request.platform).then_some(Runtime::Voile);
-            let game = <Epic as installations::Storefront>::transfer_name(request);
+            let needed = installations::needs_voile(&transfer.platform).then_some(Runtime::Voile);
+            let game = transfer.progress_name();
             self.runtimes.get(&game, needed.as_slice()).await?;
-            let installed = self.network.download(request).await;
+            let installed = self.network.download(transfer).await;
             self.credentials.save_later();
             let installed = installed?;
             Ok(Receipt {
-                namespace: request.namespace.clone(),
-                catalog_item_id: request.catalog_item_id.clone(),
-                app_name: installed.app_name,
-                name: request.title.clone(),
+                product: Product {
+                    namespace: transfer.product.namespace.clone(),
+                    catalog_item_id: transfer.product.catalog_item_id.clone(),
+                    app_name: installed.app_name,
+                },
+                name: transfer.name.clone(),
                 directory: installed.directory,
                 platform: installed.platform,
                 total_bytes: installed.total_bytes,
@@ -251,7 +258,7 @@ impl<N: Network> installations::Content<Epic> for Content<N> {
     }
     fn update_available<'a>(
         &'a self,
-        receipt: &'a Receipt,
+        receipt: &'a Receipt<Epic>,
     ) -> BoxFuture<'a, Result<bool, Failure>> {
         Box::pin(async move {
             let available = self.network.update_available(receipt).await;
@@ -262,15 +269,14 @@ impl<N: Network> installations::Content<Epic> for Content<N> {
     }
     fn launch<'a>(
         &'a self,
-        receipt: &'a Receipt,
-        request: &'a Download,
+        receipt: &'a Receipt<Epic>,
         admission: Admission<Epic>,
     ) -> BoxFuture<'a, Result<(), Failure>> {
         Box::pin(async move {
             let outcome = admission
                 .hand_off(Handover {
                     network: self.network.clone(),
-                    configuration: self.configuration(receipt, request),
+                    configuration: self.configuration(receipt),
                     locations: self.locations.clone(),
                     saved: self.credentials.saved.clone(),
                 })
@@ -279,28 +285,17 @@ impl<N: Network> installations::Content<Epic> for Content<N> {
             outcome
         })
     }
-    fn archive<'a>(
-        &'a self,
-        receipt: &'a Receipt,
-        request: &'a Download,
-    ) -> BoxFuture<'a, Result<(), Failure>> {
+    fn archive<'a>(&'a self, receipt: &'a Receipt<Epic>) -> BoxFuture<'a, Result<(), Failure>> {
         Box::pin(async move {
             self.prepare().await?;
-            let archived = self
-                .network
-                .archive(self.configuration(receipt, request))
-                .await;
+            let archived = self.network.archive(self.configuration(receipt)).await;
             self.credentials.save_later();
             archived.map_err(failed)
         })
     }
-    fn removed<'a>(
-        &'a self,
-        receipt: &'a Receipt,
-        request: &'a Download,
-    ) -> BoxFuture<'a, Result<(), Failure>> {
+    fn removed<'a>(&'a self, receipt: &'a Receipt<Epic>) -> BoxFuture<'a, Result<(), Failure>> {
         Box::pin(async move {
-            let (config, account) = (self.configuration(receipt, request), self.account.clone());
+            let (config, account) = (self.configuration(receipt), self.account.clone());
             blocking(Epic::SESSION_FAILED, move || {
                 super::removed(&config, &account)
             })
@@ -308,15 +303,15 @@ impl<N: Network> installations::Content<Epic> for Content<N> {
             .map_err(failed)
         })
     }
-    fn directory_name(&self, receipt: &Receipt, request: &Download) -> String {
+    fn directory_name(&self, receipt: &Receipt<Epic>) -> String {
         epic_kit::client::installation_directory_name(
-            &receipt.namespace,
-            &request.catalog_item_id,
-            &receipt.app_name,
+            &receipt.product.namespace,
+            &receipt.product.catalog_item_id,
+            &receipt.product.app_name,
             &receipt.platform,
         )
     }
-    fn remove_prefix(&self, receipt: &Receipt) -> Option<Result<(), String>> {
+    fn remove_prefix(&self, receipt: &Receipt<Epic>) -> Option<Result<(), String>> {
         let windows = self.windows(receipt)?;
         Some(
             windows
@@ -327,7 +322,7 @@ impl<N: Network> installations::Content<Epic> for Content<N> {
     fn maintain<'a>(
         &'a self,
         game: &'a Store,
-        installed: Option<(&'a Receipt, &'a Download)>,
+        installed: Option<&'a Receipt<Epic>>,
         control: Arc<Control>,
     ) -> BoxFuture<'a, Result<(), Failure>> {
         Box::pin(async move {

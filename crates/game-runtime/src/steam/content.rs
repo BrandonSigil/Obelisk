@@ -1,12 +1,12 @@
 //! Steam's part of an account's installations: where each installation and
 //! its Cloud saves live, and what Steam's network does for them. Only the
 //! network is a seam; tests stand in for it.
-use super::{Download, Receipt, Steam, cloud as steam_cloud};
+use super::{Product, Steam, cloud as steam_cloud};
 use crate::{
     Locations,
     cloud::Control,
     cloud_status,
-    installations::{self, BoxFuture, Runtime, Runtimes, blocking},
+    installations::{self, BoxFuture, Receipt, Runtime, Runtimes, Transfer, blocking},
     protocol::Credentials,
     sessions::{self, Admission, Failure, Storefront as _, Supervised, failed},
 };
@@ -27,16 +27,18 @@ pub trait Network: Send + Sync + 'static {
         app_id: u32,
         language: &'a str,
     ) -> BoxFuture<'a, Result<String, Failure>>;
-    /// Runs one Transfer into the folder `request` names.
+    /// Runs `transfer` into the folder it names.
     fn download<'a>(
         &'a self,
-        request: &'a Download,
+        transfer: &'a Transfer<Steam>,
     ) -> BoxFuture<'a, Result<steam_kit::client::Installation, Failure>>;
     fn progress(&self) -> Option<TransferProgress>;
     fn cancel(&self);
     /// Whether Steam offers a newer build than the one `receipt` installed.
-    fn update_available<'a>(&'a self, receipt: &'a Receipt)
-    -> BoxFuture<'a, Result<bool, Failure>>;
+    fn update_available<'a>(
+        &'a self,
+        receipt: &'a Receipt<Steam>,
+    ) -> BoxFuture<'a, Result<bool, Failure>>;
     /// What starts the game installed in `install`.
     fn launch_target<'a>(
         &'a self,
@@ -75,15 +77,15 @@ impl Network for steam_kit::client::Client {
     }
     fn download<'a>(
         &'a self,
-        request: &'a Download,
+        transfer: &'a Transfer<Steam>,
     ) -> BoxFuture<'a, Result<steam_kit::client::Installation, Failure>> {
         Box::pin(async move {
             steam_kit::client::Client::download(
                 self,
-                request.app_id,
-                request.platform.as_deref(),
-                &request.language,
-                &request.directory,
+                transfer.product.app_id,
+                transfer.platform.as_deref(),
+                &transfer.product.language,
+                &transfer.directory,
             )
             .await
             .map_err(failed)
@@ -97,14 +99,14 @@ impl Network for steam_kit::client::Client {
     }
     fn update_available<'a>(
         &'a self,
-        receipt: &'a Receipt,
+        receipt: &'a Receipt<Steam>,
     ) -> BoxFuture<'a, Result<bool, Failure>> {
         Box::pin(async move {
             steam_kit::client::Client::update_available(
                 self,
-                receipt.app_id,
+                receipt.product.app_id,
                 &receipt.platform,
-                &receipt.language,
+                &receipt.product.language,
                 Path::new(&receipt.directory),
             )
             .await
@@ -169,12 +171,12 @@ impl<N: Network> Content<N> {
 
     /// Where the installation's Cloud saves live: a Windows game's in its
     /// Wine prefix.
-    fn cloud(&self, receipt: &Receipt) -> steam_cloud::Config {
+    fn cloud(&self, receipt: &Receipt<Steam>) -> steam_cloud::Config {
         steam_cloud::Config {
             root: self.locations.cloud_archive.clone(),
             home: self.locations.home.clone(),
             install: receipt.directory.clone().into(),
-            app_id: receipt.app_id,
+            app_id: receipt.product.app_id,
             prefix: self
                 .windows(receipt)
                 .map(|windows| windows.prefix().to_owned()),
@@ -182,10 +184,10 @@ impl<N: Network> Content<N> {
     }
 
     /// The installation's Wine prefix, when it is a Windows one.
-    fn windows(&self, receipt: &Receipt) -> Option<crate::wine::Installation> {
+    fn windows(&self, receipt: &Receipt<Steam>) -> Option<crate::wine::Installation> {
         let install = Path::new(&receipt.directory);
         let game = crate::profile::Game::Steam {
-            app_id: receipt.app_id,
+            app_id: receipt.product.app_id,
         };
         crate::wine::Installation::of(&self.locations, game, &receipt.platform, install)
             .ok()
@@ -209,14 +211,17 @@ fn cloud_failure(failure: steam_cloud::Failure) -> Failure {
 impl<N: Network> installations::Content<Steam> for Content<N> {
     /// Picks the build first, then gets Valve's Steam components, and Voile
     /// for a Windows build, unless they are in place, then the game's files.
-    fn download<'a>(&'a self, request: &'a Download) -> BoxFuture<'a, Result<Receipt, Failure>> {
+    fn download<'a>(
+        &'a self,
+        transfer: &'a Transfer<Steam>,
+    ) -> BoxFuture<'a, Result<Receipt<Steam>, Failure>> {
         Box::pin(async move {
             self.runtimes.begin();
-            let platform = match &request.platform {
+            let platform = match &transfer.platform {
                 Some(platform) => platform.clone(),
                 None => {
                     self.network
-                        .platform(request.app_id, &request.language)
+                        .platform(transfer.product.app_id, &transfer.product.language)
                         .await?
                 }
             };
@@ -224,19 +229,21 @@ impl<N: Network> installations::Content<Steam> for Content<N> {
             if installations::needs_voile(&platform) {
                 needed.push(Runtime::Voile);
             }
-            let game = <Steam as installations::Storefront>::transfer_name(request);
+            let game = transfer.progress_name();
             self.runtimes.get(&game, &needed).await?;
-            let request = Download {
+            let transfer = Transfer {
                 platform: Some(platform),
-                ..request.clone()
+                ..transfer.clone()
             };
-            let installed = self.network.download(&request).await?;
+            let installed = self.network.download(&transfer).await?;
             Ok(Receipt {
-                app_id: installed.app_id,
+                product: Product {
+                    app_id: installed.app_id,
+                    language: installed.language,
+                },
                 name: installed.name,
                 directory: installed.directory,
                 platform: installed.platform,
-                language: installed.language,
                 total_bytes: installed.total_bytes,
                 needs_verification: false,
             })
@@ -251,27 +258,27 @@ impl<N: Network> installations::Content<Steam> for Content<N> {
     }
     fn update_available<'a>(
         &'a self,
-        receipt: &'a Receipt,
+        receipt: &'a Receipt<Steam>,
     ) -> BoxFuture<'a, Result<bool, Failure>> {
         self.network.update_available(receipt)
     }
     fn launch<'a>(
         &'a self,
-        receipt: &'a Receipt,
-        _: &'a Download,
+        receipt: &'a Receipt<Steam>,
         admission: Admission<Steam>,
     ) -> BoxFuture<'a, Result<(), Failure>> {
         Box::pin(async move {
             let install = PathBuf::from(&receipt.directory);
+            let app_id = receipt.product.app_id;
             let target = self
                 .network
-                .launch_target(receipt.app_id, &receipt.platform, &install)
+                .launch_target(app_id, &receipt.platform, &install)
                 .await?;
             admission
                 .hand_off(Handover {
                     locations: self.locations.clone(),
                     credentials: self.credentials.clone(),
-                    app_id: receipt.app_id,
+                    app_id,
                     platform: receipt.platform.clone(),
                     install,
                     target,
@@ -279,15 +286,11 @@ impl<N: Network> installations::Content<Steam> for Content<N> {
                 .await
         })
     }
-    fn archive<'a>(
-        &'a self,
-        receipt: &'a Receipt,
-        _: &'a Download,
-    ) -> BoxFuture<'a, Result<(), Failure>> {
+    fn archive<'a>(&'a self, receipt: &'a Receipt<Steam>) -> BoxFuture<'a, Result<(), Failure>> {
         Box::pin(async move {
             let rules = self
                 .network
-                .archive_rules(receipt.app_id)
+                .archive_rules(receipt.product.app_id)
                 .await
                 .map_err(key)?;
             let Some((metadata, listing)) = rules else {
@@ -301,11 +304,7 @@ impl<N: Network> installations::Content<Steam> for Content<N> {
             .map_err(key)
         })
     }
-    fn removed<'a>(
-        &'a self,
-        receipt: &'a Receipt,
-        _: &'a Download,
-    ) -> BoxFuture<'a, Result<(), Failure>> {
+    fn removed<'a>(&'a self, receipt: &'a Receipt<Steam>) -> BoxFuture<'a, Result<(), Failure>> {
         Box::pin(async move {
             let (config, account) = (self.cloud(receipt), self.account());
             blocking(Steam::SESSION_FAILED, move || {
@@ -315,10 +314,10 @@ impl<N: Network> installations::Content<Steam> for Content<N> {
             .map_err(key)
         })
     }
-    fn directory_name(&self, receipt: &Receipt, _: &Download) -> String {
-        format!("steam-{}-{}", receipt.app_id, receipt.platform)
+    fn directory_name(&self, receipt: &Receipt<Steam>) -> String {
+        format!("steam-{}-{}", receipt.product.app_id, receipt.platform)
     }
-    fn remove_prefix(&self, receipt: &Receipt) -> Option<Result<(), String>> {
+    fn remove_prefix(&self, receipt: &Receipt<Steam>) -> Option<Result<(), String>> {
         let windows = self.windows(receipt)?;
         Some(
             windows
@@ -329,15 +328,13 @@ impl<N: Network> installations::Content<Steam> for Content<N> {
     fn maintain<'a>(
         &'a self,
         game: &'a u32,
-        installed: Option<(&'a Receipt, &'a Download)>,
+        installed: Option<&'a Receipt<Steam>>,
         control: Arc<Control>,
     ) -> BoxFuture<'a, Result<(), Failure>> {
         Box::pin(async move {
             // An uninstalled game syncs what its saved context names.
             let target = match installed {
-                Some((receipt, _)) => {
-                    steam_cloud::MaintenanceTarget::Installed(self.cloud(receipt))
-                }
+                Some(receipt) => steam_cloud::MaintenanceTarget::Installed(self.cloud(receipt)),
                 None => steam_cloud::MaintenanceTarget::Uninstalled {
                     root: self.locations.cloud_archive.clone(),
                     app_id: *game,

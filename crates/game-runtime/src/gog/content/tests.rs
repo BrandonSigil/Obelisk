@@ -1,7 +1,14 @@
 //! GOG's part of the installations through their Content interface, with a
 //! network the test stands in for and real folders in a temporary library.
 use super::*;
-use crate::installations::{Content as _, tests::FakeRuntimes};
+use crate::{
+    installations::{
+        Content as _, Installations, Offer, Queueing,
+        tests::{FakeRuntimes, eventually},
+    },
+    queue::DownloadQueue,
+    sessions::Sessions,
+};
 use std::sync::Mutex;
 use tokio::sync::Notify;
 
@@ -43,20 +50,21 @@ impl Network for Fake {
     }
     fn download<'a>(
         &'a self,
-        request: &'a Download,
+        transfer: &'a Transfer<Gog>,
         language: &'a str,
     ) -> BoxFuture<'a, Result<gog_kit::client::Installation, Failure>> {
         Box::pin(async move {
             self.call(&format!("download {language}"));
+            let product_id = &transfer.product.product_id;
             Ok(gog_kit::client::Installation {
-                product_id: request.product_id.clone(),
+                product_id: product_id.clone(),
                 user_id: ACCOUNT.into(),
-                directory: request
+                directory: transfer
                     .directory
-                    .join(format!("gog-{}-{}", request.product_id, request.platform))
+                    .join(format!("gog-{product_id}-{}", transfer.platform))
                     .to_string_lossy()
                     .into_owned(),
-                platform: request.platform.clone(),
+                platform: transfer.platform.clone(),
                 total_bytes: 100,
                 build_id: "1".into(),
                 version_name: "1.0".into(),
@@ -74,7 +82,7 @@ impl Network for Fake {
     fn cancel(&self) {
         self.call("cancel");
     }
-    fn update_available<'a>(&'a self, _: &'a Receipt) -> BoxFuture<'a, Result<bool, Failure>> {
+    fn update_available<'a>(&'a self, _: &'a Receipt<Gog>) -> BoxFuture<'a, Result<bool, Failure>> {
         Box::pin(async move {
             self.call("update");
             Ok(false)
@@ -124,23 +132,23 @@ impl Fixture {
         }
     }
 
-    fn request(&self, platform: &str) -> Download {
-        Download {
-            product_id: "1207658924".into(),
-            title: "The Witcher".into(),
+    fn transfer(&self, platform: &str) -> Transfer<Gog> {
+        Transfer {
+            product: witcher(),
+            name: "The Witcher".into(),
             platform: platform.into(),
             directory: self.locations.library.join("Games/GOG"),
         }
     }
 
-    fn receipt(&self, platform: &str) -> Receipt {
+    fn receipt(&self, platform: &str) -> Receipt<Gog> {
         let directory = self
             .locations
             .library
             .join(format!("Games/GOG/gog-1207658924-{platform}"));
         std::fs::create_dir_all(&directory).unwrap();
         Receipt {
-            product_id: "1207658924".into(),
+            product: witcher(),
             name: "The Witcher".into(),
             directory: directory.to_string_lossy().into_owned(),
             platform: platform.into(),
@@ -150,12 +158,19 @@ impl Fixture {
     }
 }
 
+/// The Witcher, as GOG names it.
+fn witcher() -> Product {
+    Product {
+        product_id: "1207658924".into(),
+    }
+}
+
 #[tokio::test]
 async fn a_transfer_saves_renewed_credentials_first_and_installs_the_language() {
     let fixture = Fixture::new();
-    let request = fixture.request("windows");
-    let receipt = fixture.content.download(&request).await.unwrap();
-    assert_eq!(receipt.product_id, "1207658924");
+    let transfer = fixture.transfer("windows");
+    let receipt = fixture.content.download(&transfer).await.unwrap();
+    assert_eq!(receipt.product, witcher());
     assert_eq!(receipt.name, "The Witcher");
     assert_eq!(receipt.platform, "windows");
     assert!(!receipt.needs_verification);
@@ -177,8 +192,8 @@ async fn a_transfer_cancelled_while_credentials_renew_never_starts() {
     let running = {
         let fixture = fixture.clone();
         tokio::spawn(async move {
-            let request = fixture.request("macos");
-            fixture.content.download(&request).await
+            let transfer = fixture.transfer("macos");
+            fixture.content.download(&transfer).await
         })
     };
     while fixture.fake.calls().is_empty() {
@@ -199,9 +214,9 @@ async fn a_transfer_cancelled_while_credentials_renew_never_starts() {
 #[tokio::test]
 async fn gog_keeps_no_cloud_saves() {
     let fixture = Fixture::new();
-    let (receipt, request) = (fixture.receipt("macos"), fixture.request("macos"));
-    assert_eq!(fixture.content.archive(&receipt, &request).await, Ok(()));
-    assert_eq!(fixture.content.removed(&receipt, &request).await, Ok(()));
+    let receipt = fixture.receipt("macos");
+    assert_eq!(fixture.content.archive(&receipt).await, Ok(()));
+    assert_eq!(fixture.content.removed(&receipt).await, Ok(()));
     assert!(
         fixture
             .content
@@ -213,7 +228,7 @@ async fn gog_keeps_no_cloud_saves() {
     assert_eq!(
         fixture
             .content
-            .maintain(&"1207658924".into(), Some((&receipt, &request)), control)
+            .maintain(&"1207658924".into(), Some(&receipt), control)
             .await,
         Err(Failure::Failed("backend.gog.unsupported".into()))
     );
@@ -246,12 +261,7 @@ fn only_a_windows_build_runs_in_its_own_prefix() {
     assert_eq!(configuration.prefix, None);
     configuration.validate(ACCOUNT).unwrap();
     assert!(fixture.content.remove_prefix(&mac).is_none());
-    assert_eq!(
-        fixture
-            .content
-            .directory_name(&mac, &fixture.request("macos")),
-        "gog-1207658924-macos"
-    );
+    assert_eq!(fixture.content.directory_name(&mac), "gog-1207658924-macos");
 }
 
 #[tokio::test]
@@ -264,7 +274,7 @@ async fn a_windows_transfer_gets_voile_before_the_game_and_a_mac_one_does_not() 
 
         fixture
             .content
-            .download(&fixture.request(platform))
+            .download(&fixture.transfer(platform))
             .await
             .unwrap();
 
@@ -284,7 +294,7 @@ async fn voile_that_fails_to_download_fails_the_transfer_before_the_game() {
     let failure = Failure::Failed("backend.voile.downloadFailed".into());
     fixture.runtimes.fail(failure.clone());
 
-    let downloaded = fixture.content.download(&fixture.request("windows")).await;
+    let downloaded = fixture.content.download(&fixture.transfer("windows")).await;
 
     assert_eq!(downloaded, Err(failure));
     assert!(
@@ -293,5 +303,76 @@ async fn voile_that_fails_to_download_fails_the_transfer_before_the_game() {
             .calls()
             .iter()
             .any(|call| call.starts_with("download"))
+    );
+}
+
+#[tokio::test]
+async fn an_installed_build_updates_in_place_and_another_platform_installs_beside_it() {
+    let fixture = Fixture::new();
+    let library = fixture.locations.library.clone();
+    let previous = library.join("Previous location/gog-1207658924-windows");
+    std::fs::create_dir_all(&previous).unwrap();
+    let file = library.join("gog-installations.json");
+    let written = serde_json::json!([{
+        "productId": "1207658924",
+        "name": "The Witcher",
+        "directory": previous,
+        "platform": "windows",
+        "totalBytes": 100
+    }]);
+    std::fs::write(&file, serde_json::to_vec(&written).unwrap()).unwrap();
+    let sessions = Arc::new(Sessions::<Gog>::new(Box::new(|| Ok(None))));
+    eventually(|| !sessions.state().recovering).await;
+    let installations = Installations::new(
+        Arc::new(fixture.content),
+        sessions,
+        ACCOUNT.to_string(),
+        file,
+        library.clone(),
+        fixture.locations.home.clone(),
+        Queueing {
+            queue: DownloadQueue::new(),
+            account: ACCOUNT.into(),
+            name: |game: &String| game.clone(),
+        },
+    );
+    let idle = || {
+        let state = installations.state();
+        !state.downloading && state.queued.is_empty()
+    };
+
+    installations.update("1207658924:windows");
+    eventually(idle).await;
+    let receipts = installations.state().receipts;
+    assert_eq!(receipts.len(), 1);
+    let windows = receipts[0].clone();
+    assert_eq!(Path::new(&windows.directory), previous);
+
+    installations.install(Offer {
+        product: witcher(),
+        name: "The Witcher".into(),
+        platform: "macos".into(),
+    });
+    eventually(idle).await;
+    let state = installations.state();
+    assert_eq!(state.report, None);
+    let mac = state
+        .receipts
+        .iter()
+        .find(|receipt| receipt.id() == "1207658924:macos")
+        .unwrap();
+    assert_eq!(
+        Path::new(&mac.directory),
+        library.join("Games/GOG/gog-1207658924-macos")
+    );
+    assert!(state.receipts.contains(&windows));
+    assert_eq!(
+        fixture
+            .fake
+            .calls()
+            .iter()
+            .filter(|call| call.starts_with("download"))
+            .count(),
+        2
     );
 }

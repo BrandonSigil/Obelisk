@@ -2,10 +2,13 @@
 //! network the test stands in for and real files in a temporary library.
 use super::*;
 use crate::{
-    installations::{Content as _, tests::FakeRuntimes},
+    installations::{
+        Content as _,
+        tests::{FakeRuntimes, eventually},
+    },
     sessions::Sessions,
 };
-use std::{collections::VecDeque, sync::Mutex, time::Duration};
+use std::{collections::VecDeque, sync::Mutex};
 use tokio::sync::Notify;
 
 const ACCOUNT: &str = "0123456789abcdef0123456789abcdef";
@@ -64,21 +67,21 @@ impl Network for Fake {
     }
     fn download<'a>(
         &'a self,
-        request: &'a Download,
+        transfer: &'a Transfer<Epic>,
     ) -> BoxFuture<'a, Result<epic_kit::client::Installation, Failure>> {
         Box::pin(async move {
             self.call("download");
             Ok(epic_kit::client::Installation {
-                app_name: request.app_name.clone(),
-                namespace: request.namespace.clone(),
-                catalog_item_id: request.catalog_item_id.clone(),
+                app_name: transfer.product.app_name.clone(),
+                namespace: transfer.product.namespace.clone(),
+                catalog_item_id: transfer.product.catalog_item_id.clone(),
                 account_id: ACCOUNT.into(),
-                directory: request
+                directory: transfer
                     .directory
                     .join("epic-hash-Mac")
                     .to_string_lossy()
                     .into_owned(),
-                platform: request.platform.clone(),
+                platform: transfer.platform.clone(),
                 total_bytes: 100,
                 build_version: "1".into(),
                 launch_executable: "Game.app".into(),
@@ -94,7 +97,10 @@ impl Network for Fake {
     fn cancel(&self) {
         self.call("cancel");
     }
-    fn update_available<'a>(&'a self, _: &'a Receipt) -> BoxFuture<'a, Result<bool, Failure>> {
+    fn update_available<'a>(
+        &'a self,
+        _: &'a Receipt<Epic>,
+    ) -> BoxFuture<'a, Result<bool, Failure>> {
         Box::pin(async move {
             self.call("update");
             Ok(true)
@@ -171,31 +177,37 @@ impl Fixture {
         }
     }
     /// The build of `platform`, installed.
-    fn installed(&self, platform: &str) -> (Receipt, Download) {
-        let games = self.locations.library.join("Games/Epic");
-        let directory = games.join(format!("epic-hash-{platform}"));
+    fn installed(&self, platform: &str) -> Receipt<Epic> {
+        let directory = self
+            .locations
+            .library
+            .join(format!("Games/Epic/epic-hash-{platform}"));
         std::fs::create_dir_all(&directory).unwrap();
-        let receipt = Receipt {
-            namespace: "sandbox".into(),
-            catalog_item_id: "catalog".into(),
-            app_name: "game".into(),
+        Receipt {
+            product: product(),
             name: "Fixture".into(),
             directory: directory.to_string_lossy().into_owned(),
             platform: platform.into(),
             total_bytes: 100,
             needs_verification: false,
-        };
-        (receipt, self.request(platform))
+        }
     }
-    fn request(&self, platform: &str) -> Download {
-        Download {
-            namespace: "sandbox".into(),
-            catalog_item_id: "catalog".into(),
-            app_name: "game".into(),
-            title: "Fixture".into(),
+    fn transfer(&self, platform: &str) -> Transfer<Epic> {
+        Transfer {
+            product: product(),
+            name: "Fixture".into(),
             platform: platform.into(),
             directory: self.locations.library.join("Games/Epic"),
         }
+    }
+}
+
+/// The game's catalog item.
+fn product() -> Product {
+    Product {
+        namespace: "sandbox".into(),
+        catalog_item_id: "catalog".into(),
+        app_name: "game".into(),
     }
 }
 
@@ -210,22 +222,14 @@ fn control() -> Arc<Control> {
     Arc::new(Control::new(|_| {}))
 }
 
-async fn eventually(predicate: impl Fn() -> bool) {
-    let deadline = std::time::Instant::now() + Duration::from_secs(3);
-    while !predicate() {
-        assert!(std::time::Instant::now() < deadline, "timed out");
-        tokio::time::sleep(Duration::from_millis(5)).await;
-    }
-}
-
 #[tokio::test]
 async fn every_account_call_renews_and_saves_the_credentials_first() {
     let fixture = Fixture::new();
-    let request = fixture.request("Mac");
+    let transfer = fixture.transfer("Mac");
 
-    let receipt = fixture.content.download(&request).await.unwrap();
+    let receipt = fixture.content.download(&transfer).await.unwrap();
 
-    assert_eq!(receipt.namespace, "sandbox");
+    assert_eq!(receipt.product, product());
     assert_eq!(receipt.name, "Fixture");
     assert!(!receipt.needs_verification);
     // The Transfer's own rotation is saved after it, without holding it.
@@ -235,8 +239,8 @@ async fn every_account_call_renews_and_saves_the_credentials_first() {
         ["prepare", "saved", "download", "saved"]
     );
 
-    let (receipt, request) = fixture.installed("Mac");
-    fixture.content.archive(&receipt, &request).await.unwrap();
+    let receipt = fixture.installed("Mac");
+    fixture.content.archive(&receipt).await.unwrap();
     eventually(|| fixture.fake.calls().len() == 8).await;
     assert_eq!(
         fixture.fake.calls()[4..],
@@ -252,10 +256,10 @@ async fn every_account_call_renews_and_saves_the_credentials_first() {
 #[tokio::test]
 async fn a_transfer_cancelled_while_its_credentials_renew_never_starts() {
     let fixture = Fixture::new();
-    let request = fixture.request("Mac");
+    let transfer = fixture.transfer("Mac");
     *fixture.fake.held.lock().unwrap() = true;
 
-    let (downloaded, ()) = tokio::join!(fixture.content.download(&request), async {
+    let (downloaded, ()) = tokio::join!(fixture.content.download(&transfer), async {
         eventually(|| fixture.fake.calls().contains(&"prepare".to_string())).await;
         fixture.content.cancel();
         fixture.fake.released.notify_one();
@@ -269,10 +273,10 @@ async fn a_transfer_cancelled_while_its_credentials_renew_never_starts() {
 async fn a_windows_build_keeps_its_saves_in_its_wine_prefix_and_a_mac_build_has_none() {
     let fixture = Fixture::new();
     for platform in ["Windows", "Mac"] {
-        let (receipt, request) = fixture.installed(platform);
+        let receipt = fixture.installed(platform);
         fixture
             .content
-            .maintain(&game(), Some((&receipt, &request)), control())
+            .maintain(&game(), Some(&receipt), control())
             .await
             .unwrap();
     }
@@ -307,12 +311,12 @@ async fn an_uninstalled_game_without_a_saved_context_cannot_sync_and_a_cancelled
     );
     assert!(fixture.fake.maintained.lock().unwrap().is_empty());
 
-    let (receipt, request) = fixture.installed("Mac");
+    let receipt = fixture.installed("Mac");
     *fixture.fake.maintenance.lock().unwrap() = Some(Error::Cancelled);
     assert_eq!(
         fixture
             .content
-            .maintain(&game(), Some((&receipt, &request)), control())
+            .maintain(&game(), Some(&receipt), control())
             .await,
         Err(Failure::Cancelled)
     );
@@ -321,7 +325,7 @@ async fn an_uninstalled_game_without_a_saved_context_cannot_sync_and_a_cancelled
 #[tokio::test]
 async fn a_launch_code_that_another_account_signed_is_refused_before_the_game_starts() {
     let fixture = Fixture::new();
-    let (receipt, request) = fixture.installed("Mac");
+    let receipt = fixture.installed("Mac");
     fixture
         .fake
         .accounts
@@ -332,7 +336,7 @@ async fn a_launch_code_that_another_account_signed_is_refused_before_the_game_st
     eventually(|| !sessions.state().recovering).await;
     let admission = sessions.admit(game(), ACCOUNT.into()).unwrap();
 
-    let launched = fixture.content.launch(&receipt, &request, admission).await;
+    let launched = fixture.content.launch(&receipt, admission).await;
 
     assert_eq!(
         launched,
@@ -351,8 +355,7 @@ async fn a_launch_code_that_another_account_signed_is_refused_before_the_game_st
 #[test]
 fn an_uninstalled_windows_build_loses_its_prefix_and_a_mac_build_has_none() {
     let fixture = Fixture::new();
-    let (windows, request) = fixture.installed("Windows");
-    let (mac, _) = fixture.installed("Mac");
+    let (windows, mac) = (fixture.installed("Windows"), fixture.installed("Mac"));
     let prefix = fixture.locations.wine_prefixes.join("epic-hash-Windows");
     std::fs::create_dir_all(prefix.join("drive_c")).unwrap();
 
@@ -360,7 +363,7 @@ fn an_uninstalled_windows_build_loses_its_prefix_and_a_mac_build_has_none() {
     assert!(!prefix.exists());
     assert_eq!(fixture.content.remove_prefix(&mac), None);
     assert_eq!(
-        fixture.content.directory_name(&windows, &request),
+        fixture.content.directory_name(&windows),
         epic_kit::client::installation_directory_name("sandbox", "catalog", "game", "Windows")
     );
 }
@@ -368,7 +371,7 @@ fn an_uninstalled_windows_build_loses_its_prefix_and_a_mac_build_has_none() {
 #[tokio::test]
 async fn an_older_receipt_learns_its_catalog_item_from_the_installation_itself() {
     let fixture = Fixture::new();
-    let (mut receipt, _) = fixture.installed("Mac");
+    let mut receipt = fixture.installed("Mac");
     let installed = epic_kit::client::Installation {
         app_name: "game".into(),
         namespace: "sandbox".into(),
@@ -388,7 +391,7 @@ async fn an_older_receipt_learns_its_catalog_item_from_the_installation_itself()
         serde_json::to_vec(&installed).unwrap(),
     )
     .unwrap();
-    receipt.catalog_item_id.clear();
+    receipt.product.catalog_item_id.clear();
     let file = fixture.locations.library.join("epic-installations.json");
     // An older receipt file has no catalog item at all.
     let mut older = serde_json::to_value([&receipt]).unwrap();
@@ -416,10 +419,13 @@ async fn an_older_receipt_learns_its_catalog_item_from_the_installation_itself()
         },
     );
 
-    assert_eq!(installations.state().receipts[0].catalog_item_id, "catalog");
-    let saved: Vec<Receipt> = serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap();
     assert_eq!(
-        saved[0].catalog_item_id, "catalog",
+        installations.state().receipts[0].product.catalog_item_id,
+        "catalog"
+    );
+    let saved: Vec<Receipt<Epic>> = serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap();
+    assert_eq!(
+        saved[0].product.catalog_item_id, "catalog",
         "the file keeps what it learnt"
     );
 }
@@ -434,7 +440,7 @@ async fn a_windows_transfer_gets_voile_before_the_game_and_a_mac_one_does_not() 
 
         fixture
             .content
-            .download(&fixture.request(platform))
+            .download(&fixture.transfer(platform))
             .await
             .unwrap();
 
@@ -454,7 +460,7 @@ async fn voile_that_fails_to_download_fails_the_transfer_before_the_game() {
     let failure = Failure::Failed("backend.voile.downloadFailed".into());
     fixture.runtimes.fail(failure.clone());
 
-    let downloaded = fixture.content.download(&fixture.request("Windows")).await;
+    let downloaded = fixture.content.download(&fixture.transfer("Windows")).await;
 
     assert_eq!(downloaded, Err(failure));
     assert!(

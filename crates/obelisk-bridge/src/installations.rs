@@ -181,13 +181,12 @@ pub struct InstallationsState {
     pub queued: Vec<String>,
 }
 
-/// How a storefront's games, receipts and offers cross UniFFI.
+/// How a storefront's games and offers cross UniFFI.
 pub(crate) trait Named: installations::Storefront {
     fn name(game: &Self::Game) -> String;
     /// The game Swift names `name`.
     fn named(name: &str) -> Option<Self::Game>;
-    fn offer(offer: GameOffer) -> Option<Self::Offer>;
-    fn installation(receipt: Self::Receipt) -> Installation;
+    fn offer(offer: GameOffer) -> Option<installations::Offer<Self>>;
 }
 
 impl Named for steam::Steam {
@@ -197,32 +196,19 @@ impl Named for steam::Steam {
     fn named(name: &str) -> Option<u32> {
         name.parse().ok()
     }
-    fn offer(offer: GameOffer) -> Option<steam::Offer> {
+    fn offer(offer: GameOffer) -> Option<installations::Offer<Self>> {
         match offer {
             GameOffer::Steam {
                 app_id,
                 name,
                 platform,
                 language,
-            } => Some(steam::Offer {
-                app_id,
+            } => Some(installations::Offer {
+                product: steam::Product { app_id, language },
                 name,
                 platform,
-                language,
             }),
             _ => None,
-        }
-    }
-    fn installation(receipt: steam::Receipt) -> Installation {
-        Installation {
-            id: <Self as installations::Storefront>::receipt_id(&receipt),
-            game: receipt.app_id.to_string(),
-            name: receipt.name,
-            directory: receipt.directory,
-            platform: receipt.platform,
-            total_bytes: receipt.total_bytes,
-            needs_verification: receipt.needs_verification,
-            update_available: false,
         }
     }
 }
@@ -239,7 +225,7 @@ impl Named for epic::Epic {
             app_name: app_name.into(),
         })
     }
-    fn offer(offer: GameOffer) -> Option<epic::Offer> {
+    fn offer(offer: GameOffer) -> Option<installations::Offer<Self>> {
         match offer {
             GameOffer::Epic {
                 namespace,
@@ -247,26 +233,16 @@ impl Named for epic::Epic {
                 app_name,
                 title,
                 platform,
-            } => Some(epic::Offer {
-                namespace,
-                catalog_item_id,
-                app_name,
-                title,
+            } => Some(installations::Offer {
+                product: epic::Product {
+                    namespace,
+                    catalog_item_id,
+                    app_name,
+                },
+                name: title,
                 platform,
             }),
             _ => None,
-        }
-    }
-    fn installation(receipt: epic::Receipt) -> Installation {
-        Installation {
-            id: <Self as installations::Storefront>::receipt_id(&receipt),
-            game: Self::name(&<Self as installations::Storefront>::receipt_game(&receipt)),
-            name: receipt.name,
-            directory: receipt.directory,
-            platform: receipt.platform,
-            total_bytes: receipt.total_bytes,
-            needs_verification: receipt.needs_verification,
-            update_available: false,
         }
     }
 }
@@ -278,31 +254,34 @@ impl Named for gog::Gog {
     fn named(name: &str) -> Option<String> {
         gog_kit::client::valid_product_id(name).then(|| name.to_owned())
     }
-    fn offer(offer: GameOffer) -> Option<gog::Offer> {
+    fn offer(offer: GameOffer) -> Option<installations::Offer<Self>> {
         match offer {
             GameOffer::Gog {
                 product_id,
                 title,
                 platform,
-            } => Some(gog::Offer {
-                product_id,
-                title,
+            } => Some(installations::Offer {
+                product: gog::Product { product_id },
+                name: title,
                 platform,
             }),
             _ => None,
         }
     }
-    fn installation(receipt: gog::Receipt) -> Installation {
-        Installation {
-            id: <Self as installations::Storefront>::receipt_id(&receipt),
-            game: receipt.product_id,
-            name: receipt.name,
-            directory: receipt.directory,
-            platform: receipt.platform,
-            total_bytes: receipt.total_bytes,
-            needs_verification: receipt.needs_verification,
-            update_available: false,
-        }
+}
+
+/// An installation as Swift shows it, under the id its actions name.
+fn installation<S: Named>(receipt: installations::Receipt<S>, updates: &[String]) -> Installation {
+    let (id, game) = (receipt.id(), S::name(&receipt.game()));
+    Installation {
+        update_available: updates.contains(&id),
+        id,
+        game,
+        name: receipt.name,
+        directory: receipt.directory,
+        platform: receipt.platform,
+        total_bytes: receipt.total_bytes,
+        needs_verification: receipt.needs_verification,
     }
 }
 
@@ -332,11 +311,7 @@ fn state<S: Named>(state: installations::State<S>) -> InstallationsState {
         installations: state
             .receipts
             .into_iter()
-            .map(|receipt| {
-                let mut installation = S::installation(receipt);
-                installation.update_available = state.updates.contains(&installation.id);
-                installation
-            })
+            .map(|receipt| installation(receipt, &state.updates))
             .collect(),
         transfer: state.transfer.map(Into::into),
         transfer_game: name(state.transfer_game),
@@ -345,7 +320,12 @@ fn state<S: Named>(state: installations::State<S>) -> InstallationsState {
         verifying_before_launch: state.verifying_before_launch,
         launch_game: name(state.launch_game),
         uninstall_game: name(state.uninstall_game),
-        resumable: name(state.last_download.as_ref().map(S::request_game)),
+        resumable: name(
+            state
+                .last_download
+                .as_ref()
+                .map(installations::Transfer::game),
+        ),
         report: state.report.map(Into::into),
         warning: state
             .warning
@@ -687,23 +667,23 @@ mod tests {
 
     #[test]
     fn an_installation_crosses_under_the_id_its_actions_name() {
-        let receipt = epic::Receipt {
-            namespace: "sandbox".into(),
-            catalog_item_id: "catalog".into(),
-            app_name: "game".into(),
+        let receipt = installations::Receipt {
+            product: epic::Product {
+                namespace: "sandbox".into(),
+                catalog_item_id: "catalog".into(),
+                app_name: "game".into(),
+            },
             name: "Fixture".into(),
             directory: "/library/Games/Epic/epic-hash-Windows".into(),
             platform: "Windows".into(),
             total_bytes: 7,
             needs_verification: true,
         };
-        let installation = <epic::Epic as Named>::installation(receipt.clone());
-        assert_eq!(
-            installation.id,
-            <epic::Epic as installations::Storefront>::receipt_id(&receipt)
-        );
+        let installation = installation::<epic::Epic>(receipt, &["sandbox:game:Windows".into()]);
+        assert_eq!(installation.id, "sandbox:game:Windows");
         assert_eq!(installation.game, "sandbox:game");
         assert!(installation.needs_verification);
+        assert!(installation.update_available);
         let offer = GameOffer::Steam {
             app_id: 620,
             name: "Portal 2".into(),
@@ -716,7 +696,7 @@ mod tests {
             "an offer of the other storefront is refused"
         );
         assert_eq!(
-            <steam::Steam as Named>::offer(offer).map(|offer| offer.app_id),
+            <steam::Steam as Named>::offer(offer).map(|offer| offer.product.app_id),
             Some(620)
         );
     }

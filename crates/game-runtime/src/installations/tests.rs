@@ -1,9 +1,11 @@
 //! Installations through their interface, against a storefront session the
-//! test drives. Steam stands in for every storefront.
+//! test drives. Steam stands in for every storefront: the records and their
+//! rules are the same for each, and `receipt/tests.rs` covers what differs
+//! per storefront.
 use super::*;
 use crate::{
     sessions::{Observation, Supervised},
-    steam::{Download, Offer, Receipt, Steam, Store},
+    steam::{Product, Steam, Store},
     supervisor::{FailureReason, Phase},
 };
 use std::{
@@ -28,8 +30,8 @@ struct Script {
     prefix: Option<Result<(), String>>,
     held: bool,
     calls: Vec<String>,
-    /// Each Transfer's request, launches' verifications included.
-    requests: Vec<Download>,
+    /// Each Transfer, launches' verifications included.
+    transfers: Vec<Transfer<Steam>>,
     progress: Option<TransferProgress>,
     /// The games the storefront has a newer build of, until a Transfer
     /// installs it.
@@ -86,18 +88,21 @@ impl Fake {
 struct Content(Arc<Fake>);
 
 impl super::Content<Steam> for Content {
-    fn download<'a>(&'a self, request: &'a Download) -> BoxFuture<'a, Result<Receipt, Failure>> {
+    fn download<'a>(
+        &'a self,
+        transfer: &'a Transfer<Steam>,
+    ) -> BoxFuture<'a, Result<Receipt<Steam>, Failure>> {
         Box::pin(async move {
             // Each Transfer starts uncancelled, as a storefront's does.
             self.0.cancelled.store(false, Ordering::Release);
             self.0.with(|script| {
-                script.calls.push(format!("download:{}", request.app_id));
-                script.requests.push(request.clone());
+                script.calls.push(format!("download:{}", transfer.game()));
+                script.transfers.push(transfer.clone());
                 script.progress = Some(TransferProgress {
                     state: TransferState::Downloading,
                     completed_bytes: 50,
                     total_bytes: 100,
-                    ..TransferProgress::new(request.app_id.to_string())
+                    ..TransferProgress::new(transfer.progress_name())
                 });
             });
             self.0.wait().await;
@@ -115,24 +120,23 @@ impl super::Content<Steam> for Content {
                 .unwrap_or(Ok(()));
             outcome?;
             // Steam picks the native build of a game that ships one.
-            let platform = request.platform.clone().unwrap_or_else(|| "macos".into());
-            let directory = request
+            let platform = transfer.platform.clone().unwrap_or_else(|| "macos".into());
+            let directory = transfer
                 .directory
-                .join(format!("steam-{}-{platform}", request.app_id));
+                .join(format!("steam-{}-{platform}", transfer.game()));
             std::fs::create_dir_all(&directory).unwrap();
             self.0.with(|script| {
                 if let Some(progress) = &mut script.progress {
                     progress.state = TransferState::Complete;
                     progress.completed_bytes = 100;
                 }
-                script.newer.retain(|app| *app != request.app_id);
+                script.newer.retain(|app| *app != transfer.game());
             });
             Ok(Receipt {
-                app_id: request.app_id,
-                name: request.name.clone(),
+                product: transfer.product.clone(),
+                name: transfer.name.clone(),
                 directory: directory.to_string_lossy().into_owned(),
                 platform,
-                language: request.language.clone(),
                 total_bytes: 100,
                 needs_verification: false,
             })
@@ -147,27 +151,26 @@ impl super::Content<Steam> for Content {
     }
     fn update_available<'a>(
         &'a self,
-        receipt: &'a Receipt,
+        receipt: &'a Receipt<Steam>,
     ) -> BoxFuture<'a, Result<bool, Failure>> {
         Box::pin(async move {
             self.0.with(|script| {
-                script.checks.push(receipt.app_id);
+                script.checks.push(receipt.game());
                 if script.unreachable {
                     return Err(Failure::Failed("backend.steam.content.network".into()));
                 }
-                Ok(script.newer.contains(&receipt.app_id))
+                Ok(script.newer.contains(&receipt.game()))
             })
         })
     }
     fn launch<'a>(
         &'a self,
-        receipt: &'a Receipt,
-        _: &'a Download,
+        receipt: &'a Receipt<Steam>,
         admission: Admission<Steam>,
     ) -> BoxFuture<'a, Result<(), Failure>> {
         Box::pin(async move {
             let free = self.0.with(|script| {
-                script.calls.push(format!("launch:{}", receipt.app_id));
+                script.calls.push(format!("launch:{}", receipt.game()));
                 script.launches_free
             });
             if !free {
@@ -186,33 +189,25 @@ impl super::Content<Steam> for Content {
             }
         })
     }
-    fn archive<'a>(
-        &'a self,
-        receipt: &'a Receipt,
-        _: &'a Download,
-    ) -> BoxFuture<'a, Result<(), Failure>> {
+    fn archive<'a>(&'a self, receipt: &'a Receipt<Steam>) -> BoxFuture<'a, Result<(), Failure>> {
         Box::pin(async move {
             self.0.with(|script| {
-                script.calls.push(format!("archive:{}", receipt.app_id));
+                script.calls.push(format!("archive:{}", receipt.game()));
                 script.archive.take().map_or(Ok(()), Err)
             })
         })
     }
-    fn removed<'a>(
-        &'a self,
-        receipt: &'a Receipt,
-        _: &'a Download,
-    ) -> BoxFuture<'a, Result<(), Failure>> {
+    fn removed<'a>(&'a self, receipt: &'a Receipt<Steam>) -> BoxFuture<'a, Result<(), Failure>> {
         Box::pin(async move {
             self.0
-                .with(|script| script.calls.push(format!("removed:{}", receipt.app_id)));
+                .with(|script| script.calls.push(format!("removed:{}", receipt.game())));
             Ok(())
         })
     }
-    fn directory_name(&self, receipt: &Receipt, _: &Download) -> String {
-        format!("steam-{}-{}", receipt.app_id, receipt.platform)
+    fn directory_name(&self, receipt: &Receipt<Steam>) -> String {
+        format!("steam-{}-{}", receipt.game(), receipt.platform)
     }
-    fn remove_prefix(&self, receipt: &Receipt) -> Option<Result<(), String>> {
+    fn remove_prefix(&self, receipt: &Receipt<Steam>) -> Option<Result<(), String>> {
         (receipt.platform == "windows").then(|| {
             self.0.with(|script| {
                 script.calls.push("prefix".into());
@@ -224,7 +219,7 @@ impl super::Content<Steam> for Content {
     fn maintain<'a>(
         &'a self,
         game: &'a u32,
-        installed: Option<(&'a Receipt, &'a Download)>,
+        installed: Option<&'a Receipt<Steam>>,
         control: Arc<cloud::Control>,
     ) -> BoxFuture<'a, Result<(), Failure>> {
         Box::pin(async move {
@@ -426,42 +421,43 @@ impl Fixture {
             installations,
         }
     }
-    fn request(&self, platform: &str) -> Download {
-        Download {
-            app_id: 620,
+    fn transfer(&self, platform: &str) -> Transfer<Steam> {
+        Transfer {
+            product: portal(),
             name: "Portal 2".into(),
             platform: Some(platform.into()),
-            language: "french".into(),
             directory: self.root.join("Games/Steam"),
         }
     }
-    fn offer(&self, platform: &str) -> Offer {
+    fn offer(&self, platform: &str) -> Offer<Steam> {
         Offer {
-            app_id: 620,
+            product: portal(),
             name: "Portal 2".into(),
             platform: Some(platform.into()),
-            language: "french".into(),
         }
     }
-    fn receipt(&self) -> Receipt {
+    fn receipt(&self) -> Receipt<Steam> {
         self.installations.state().receipts[0].clone()
     }
-    fn saved(&self) -> Vec<Receipt> {
-        load(
-            &self.root.join("steam-installations-42.json"),
-            |receipt: &Receipt| &receipt.directory,
-        )
-        .unwrap()
+    fn saved(&self) -> Vec<Receipt<Steam>> {
+        load(&self.root.join("steam-installations-42.json")).unwrap()
     }
 }
 
-fn receipt(directory: &Path, platform: &str) -> Receipt {
-    Receipt {
+/// Portal 2, with its French depots.
+fn portal() -> Product {
+    Product {
         app_id: 620,
+        language: "french".into(),
+    }
+}
+
+fn receipt(directory: &Path, platform: &str) -> Receipt<Steam> {
+    Receipt {
+        product: portal(),
         name: "Portal 2".into(),
         directory: directory.to_string_lossy().into_owned(),
         platform: platform.into(),
-        language: "french".into(),
         total_bytes: 100,
         needs_verification: false,
     }
@@ -477,7 +473,7 @@ fn maintainable(installations: &Installations<Steam>, game: u32) -> bool {
     installations.state().gate.maintain.allows(&game)
 }
 
-async fn eventually(predicate: impl Fn() -> bool) {
+pub(crate) async fn eventually(predicate: impl Fn() -> bool) {
     let deadline = Instant::now() + Duration::from_secs(3);
     while !predicate() {
         assert!(Instant::now() < deadline, "timed out");
@@ -603,7 +599,7 @@ async fn a_failed_transfer_is_reported_and_stays_resumable_and_its_installation_
         Some(Report::Storefront("backend.steam.content.network".into()))
     );
     assert_eq!(state.transfer.unwrap().state, TransferState::Failed);
-    assert_eq!(state.last_download, Some(fixture.request("macos")));
+    assert_eq!(state.last_download, Some(fixture.transfer("macos")));
     assert!(state.receipts[0].needs_verification);
     assert!(fixture.saved()[0].needs_verification);
 
@@ -613,6 +609,35 @@ async fn a_failed_transfer_is_reported_and_stays_resumable_and_its_installation_
     assert_eq!(state.report, None);
     assert!(!state.receipts[0].needs_verification);
     assert_eq!(fixture.fake.calls(), ["download:620", "download:620"]);
+}
+
+/// The ids of the receipts a Transfer started over.
+fn unverified(receipts: &[Receipt<Steam>]) -> Vec<String> {
+    receipts
+        .iter()
+        .filter(|receipt| receipt.needs_verification)
+        .map(Receipt::id)
+        .collect()
+}
+
+#[tokio::test]
+async fn a_transfer_marks_only_the_installation_it_goes_over_for_verification() {
+    let fixture = Fixture::new(true).await;
+    fixture.installations.install(fixture.offer("windows"));
+    idle(&fixture.installations).await;
+
+    fixture.fake.hold();
+    fixture.installations.update("620-windows");
+    eventually(|| fixture.fake.calls().len() == 2).await;
+    assert_eq!(
+        unverified(&fixture.installations.state().receipts),
+        ["620-windows"]
+    );
+    assert_eq!(unverified(&fixture.saved()), ["620-windows"]);
+
+    fixture.fake.release();
+    idle(&fixture.installations).await;
+    assert!(unverified(&fixture.installations.state().receipts).is_empty());
 }
 
 #[tokio::test]
@@ -709,8 +734,8 @@ async fn a_launch_installs_the_newer_build_first_unless_the_storefront_cannot_te
     eventually(|| !fixture.installations.state().launching).await;
     assert_eq!(fixture.fake.calls(), ["download:620", "launch:620"]);
     assert_eq!(
-        fixture.fake.with(|script| script.requests.clone()),
-        [fixture.request("macos")],
+        fixture.fake.with(|script| script.transfers.clone()),
+        [fixture.transfer("macos")],
         "the update stays where the game is"
     );
     assert!(fixture.installations.state().updates.is_empty());
@@ -764,7 +789,10 @@ async fn another_games_transfer_leaves_this_launch_open_and_cancelling_it_stops_
     });
     fixture.fake.hold();
     fixture.installations.install(Offer {
-        app_id: 730,
+        product: Product {
+            app_id: 730,
+            ..portal()
+        },
         ..fixture.offer("macos")
     });
     eventually(|| fixture.fake.calls() == ["download:730"]).await;
@@ -805,7 +833,10 @@ async fn a_launch_that_needs_a_transfer_goes_first_and_pauses_the_one_under_way(
     });
     fixture.fake.hold();
     fixture.installations.install(Offer {
-        app_id: 730,
+        product: Product {
+            app_id: 730,
+            ..portal()
+        },
         ..fixture.offer("macos")
     });
     eventually(|| fixture.fake.calls() == ["download:730"]).await;
@@ -847,7 +878,7 @@ async fn downloads_queue_behind_the_transfer_under_way_and_cancelling_one_takes_
     eventually(|| fixture.fake.calls() == ["download:620"]).await;
     for app_id in [730, 440] {
         fixture.installations.install(Offer {
-            app_id,
+            product: Product { app_id, ..portal() },
             ..fixture.offer("macos")
         });
     }
@@ -907,8 +938,8 @@ async fn automatic_updates_install_each_newer_build_once_a_game_no_longer_runs()
     eventually(|| fixture.fake.calls() == ["download:620"]).await;
     eventually(|| fixture.installations.state().updates.is_empty()).await;
     assert_eq!(
-        fixture.fake.with(|script| script.requests.clone()),
-        [fixture.request("macos")]
+        fixture.fake.with(|script| script.transfers.clone()),
+        [fixture.transfer("macos")]
     );
 }
 
@@ -1092,6 +1123,49 @@ async fn a_removal_is_recorded_even_when_the_receipts_cannot_be_saved_after_it()
     );
     assert!(matches!(state.report, Some(Report::Uninstall(_))));
     assert_eq!(fixture.fake.calls(), ["archive:620", "removed:620"]);
+}
+
+#[tokio::test]
+async fn an_uninstall_forgets_only_the_stopped_transfer_of_its_own_platform() {
+    let fixture = Fixture::new(true).await;
+    let installations = &fixture.installations;
+    let fail = || {
+        fixture.fake.with(|script| {
+            script
+                .downloads
+                .push_back(Err(Failure::Failed("backend.steam.content.network".into())))
+        })
+    };
+    let uninstalled = || installations.state().uninstall_game.is_none();
+    fail();
+    installations.install(fixture.offer("windows"));
+    idle(installations).await;
+    assert_eq!(
+        installations.state().last_download,
+        Some(fixture.transfer("windows"))
+    );
+
+    installations.uninstall("620-macos");
+    eventually(uninstalled).await;
+    assert!(installations.state().receipts.is_empty());
+    assert_eq!(
+        installations.state().last_download,
+        Some(fixture.transfer("windows")),
+        "the other platform's Transfer still resumes"
+    );
+
+    installations.install(fixture.offer("windows"));
+    idle(installations).await;
+    fail();
+    installations.update("620-windows");
+    idle(installations).await;
+    assert_eq!(
+        installations.state().last_download,
+        Some(fixture.transfer("windows"))
+    );
+    installations.uninstall("620-windows");
+    eventually(uninstalled).await;
+    assert_eq!(installations.state().last_download, None);
 }
 
 #[tokio::test]
@@ -1315,8 +1389,8 @@ async fn a_new_installation_goes_to_the_library_and_an_update_or_launch_stays_wh
     let fixture = Fixture::new(false).await;
     fixture.installations.install(fixture.offer("windows"));
     idle(&fixture.installations).await;
-    let requests = fixture.fake.with(|script| script.requests.clone());
-    assert_eq!(requests, [fixture.request("windows")]);
+    let transfers = fixture.fake.with(|script| script.transfers.clone());
+    assert_eq!(transfers, [fixture.transfer("windows")]);
 
     // An installation Obelisk made in another folder keeps it.
     let previous = fixture.root.join("Previous location");
@@ -1324,7 +1398,7 @@ async fn a_new_installation_goes_to_the_library_and_an_update_or_launch_stays_wh
     std::fs::create_dir_all(&installed).unwrap();
     let file = fixture.root.join("steam-installations-43.json");
     let mut receipt = receipt(&installed, "macos");
-    receipt.language = "english".into();
+    receipt.product.language = "english".into();
     receipt.needs_verification = true;
     save(&file, &[receipt]).unwrap();
     let fake = Fake::new();
@@ -1346,13 +1420,16 @@ async fn a_new_installation_goes_to_the_library_and_an_update_or_launch_stays_wh
         ..fixture.offer("macos")
     });
     eventually(|| fake.calls().len() == 4).await;
-    let update = Download {
-        language: "english".into(),
+    let update = Transfer {
+        product: Product {
+            app_id: 620,
+            language: "english".into(),
+        },
         directory: previous,
-        ..fixture.request("macos")
+        ..fixture.transfer("macos")
     };
     assert_eq!(
-        fake.with(|script| script.requests.clone()),
+        fake.with(|script| script.transfers.clone()),
         [update.clone(), update.clone(), update],
         "a launch's verification, an update and an offer of the installed build"
     );
@@ -1361,6 +1438,15 @@ async fn a_new_installation_goes_to_the_library_and_an_update_or_launch_stays_wh
         fake.calls().len(),
         4,
         "the account has no such installation"
+    );
+
+    idle(&moved).await;
+    moved.install(fixture.offer("windows"));
+    eventually(|| fake.calls().len() == 5).await;
+    assert_eq!(
+        fake.with(|script| script.transfers.last().cloned()),
+        Some(fixture.transfer("windows")),
+        "another platform installs in the library, beside the build in Previous location"
     );
 }
 

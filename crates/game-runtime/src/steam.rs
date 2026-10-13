@@ -217,117 +217,33 @@ pub(crate) fn start_command(
     )?)
 }
 
-/// A Steam Installation receipt, as the account's receipt file records it.
+/// What a Steam installation names of its game: the app, and the language
+/// whose depots it installs.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct Receipt {
+pub struct Product {
     pub app_id: u32,
-    pub name: String,
-    pub directory: String,
-    pub platform: String,
-    pub language: String,
-    pub total_bytes: u64,
-    /// A Transfer started over this installation and has not succeeded since.
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub needs_verification: bool,
-}
-
-/// A Steam Transfer: `language` picks the depots.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Download {
-    pub app_id: u32,
-    pub name: String,
-    /// None while Steam picks the build the account can install.
-    pub platform: Option<String>,
-    pub language: String,
-    /// The parent folder the installation directory goes in.
-    pub directory: PathBuf,
-}
-
-/// A Steam game Obelisk can install: its build for `platform`, with the
-/// depots of `language`.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Offer {
-    pub app_id: u32,
-    pub name: String,
-    /// None for the build the account can install, the native one first.
-    pub platform: Option<String>,
     pub language: String,
 }
 
 impl crate::installations::Storefront for Steam {
-    type Receipt = Receipt;
-    type Request = Download;
-    type Offer = Offer;
+    type Product = Product;
+    /// None while Steam picks the build the account can install, the native
+    /// one first.
+    type Platform = Option<String>;
     const RECEIPTS_UNAVAILABLE: &'static str = "model.steam.receiptsUnavailable";
     const RECEIPTS_NOT_SAVED: &'static str = "model.steam.receiptsNotSaved";
     const GAMES_DIRECTORY: &'static str = "Games/Steam";
     const QUEUE: crate::queue::Storefront = crate::queue::Storefront::Steam;
-    fn receipt_game(receipt: &Receipt) -> u32 {
-        receipt.app_id
+    fn product_game(product: &Product) -> u32 {
+        product.app_id
     }
-    fn receipt_id(receipt: &Receipt) -> String {
-        format!("{}-{}", receipt.app_id, receipt.platform)
+    fn receipt_id(app_id: &u32, platform: &str) -> String {
+        format!("{app_id}-{platform}")
     }
-    fn receipt_platform(receipt: &Receipt) -> &str {
-        &receipt.platform
+    fn transfer_name(app_id: &u32) -> String {
+        app_id.to_string()
     }
-    fn receipt_directory(receipt: &Receipt) -> &str {
-        &receipt.directory
-    }
-    fn needs_verification(receipt: &Receipt) -> bool {
-        receipt.needs_verification
-    }
-    fn mark_needs_verification(receipt: &mut Receipt) {
-        receipt.needs_verification = true;
-    }
-    fn request_game(request: &Download) -> u32 {
-        request.app_id
-    }
-    fn request_platform(request: &Download) -> Option<&str> {
-        request.platform.as_deref()
-    }
-    fn request_directory(request: &Download) -> &Path {
-        &request.directory
-    }
-    fn transfer_name(request: &Download) -> String {
-        request.app_id.to_string()
-    }
-    fn request_name(request: &Download) -> String {
-        request.name.clone()
-    }
-    fn offer_game(offer: &Offer) -> u32 {
-        offer.app_id
-    }
-    fn offer_platform(offer: &Offer) -> Option<&str> {
-        offer.platform.as_deref()
-    }
-    fn install_request(offer: &Offer, directory: &Path) -> Download {
-        Download {
-            app_id: offer.app_id,
-            name: offer.name.clone(),
-            platform: offer.platform.clone(),
-            language: offer.language.clone(),
-            directory: directory.to_owned(),
-        }
-    }
-    fn update_request(receipt: &Receipt) -> Download {
-        Download {
-            app_id: receipt.app_id,
-            name: receipt.name.clone(),
-            platform: Some(receipt.platform.clone()),
-            language: receipt.language.clone(),
-            directory: parent(&receipt.directory),
-        }
-    }
-}
-
-/// The folder an installation's own folder sits in.
-pub(crate) fn parent(directory: &str) -> PathBuf {
-    Path::new(directory)
-        .parent()
-        .map(Path::to_owned)
-        .unwrap_or_default()
 }
 
 impl crate::sessions::Storefront for Steam {

@@ -153,100 +153,28 @@ struct Request {
     wine: Option<crate::wine::Config>,
 }
 
-/// A GOG Installation receipt, as the account's receipt file records it.
+/// What a GOG installation names of its game: its product.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct Receipt {
+pub struct Product {
     pub product_id: String,
-    pub name: String,
-    pub directory: String,
-    pub platform: String,
-    pub total_bytes: u64,
-    /// A Transfer started over this installation and has not succeeded since.
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub needs_verification: bool,
-}
-
-/// A GOG Transfer of one game's build.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Download {
-    pub product_id: String,
-    pub title: String,
-    pub platform: String,
-    /// The parent folder the installation directory goes in.
-    pub directory: PathBuf,
-}
-
-/// A GOG game Obelisk can install: its build for `platform`.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Offer {
-    pub product_id: String,
-    pub title: String,
-    pub platform: String,
 }
 
 impl crate::installations::Storefront for Gog {
-    type Receipt = Receipt;
-    type Request = Download;
-    type Offer = Offer;
+    type Product = Product;
+    type Platform = String;
     const RECEIPTS_UNAVAILABLE: &'static str = "model.gog.receiptsUnavailable";
     const RECEIPTS_NOT_SAVED: &'static str = "model.gog.receiptsNotSaved";
     const GAMES_DIRECTORY: &'static str = "Games/GOG";
     const QUEUE: crate::queue::Storefront = crate::queue::Storefront::Gog;
-    fn receipt_game(receipt: &Receipt) -> String {
-        receipt.product_id.clone()
+    fn product_game(product: &Product) -> String {
+        product.product_id.clone()
     }
-    fn receipt_id(receipt: &Receipt) -> String {
-        format!("{}:{}", receipt.product_id, receipt.platform)
+    fn receipt_id(product_id: &String, platform: &str) -> String {
+        format!("{product_id}:{platform}")
     }
-    fn receipt_platform(receipt: &Receipt) -> &str {
-        &receipt.platform
-    }
-    fn receipt_directory(receipt: &Receipt) -> &str {
-        &receipt.directory
-    }
-    fn needs_verification(receipt: &Receipt) -> bool {
-        receipt.needs_verification
-    }
-    fn mark_needs_verification(receipt: &mut Receipt) {
-        receipt.needs_verification = true;
-    }
-    fn request_game(request: &Download) -> String {
-        request.product_id.clone()
-    }
-    fn request_platform(request: &Download) -> Option<&str> {
-        Some(&request.platform)
-    }
-    fn request_directory(request: &Download) -> &std::path::Path {
-        &request.directory
-    }
-    fn transfer_name(request: &Download) -> String {
-        request.product_id.clone()
-    }
-    fn request_name(request: &Download) -> String {
-        request.title.clone()
-    }
-    fn offer_game(offer: &Offer) -> String {
-        offer.product_id.clone()
-    }
-    fn offer_platform(offer: &Offer) -> Option<&str> {
-        Some(&offer.platform)
-    }
-    fn install_request(offer: &Offer, directory: &std::path::Path) -> Download {
-        Download {
-            product_id: offer.product_id.clone(),
-            title: offer.title.clone(),
-            platform: offer.platform.clone(),
-            directory: directory.to_owned(),
-        }
-    }
-    fn update_request(receipt: &Receipt) -> Download {
-        Download {
-            product_id: receipt.product_id.clone(),
-            title: receipt.name.clone(),
-            platform: receipt.platform.clone(),
-            directory: crate::steam::parent(&receipt.directory),
-        }
+    fn transfer_name(product_id: &String) -> String {
+        product_id.clone()
     }
 }
 

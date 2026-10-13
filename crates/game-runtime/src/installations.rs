@@ -6,12 +6,16 @@
 //! action names one of them: the Transfers it needs are built here and wait
 //! in the process's download queue. So is the account's one Cloud question,
 //! whichever sync asks it.
+mod receipt;
+
 use crate::{
     cloud, cloud_status,
     queue::{self, DownloadQueue, Owner},
     sessions::{self, Admission, Canceller, Failure, Sessions},
 };
 use obelisk_core::{installation::TransferProgress, transfer::TransferState};
+pub use receipt::{Offer, PlatformChoice, Receipt, Transfer};
+use receipt::{load, save};
 use serde::{Serialize, de::DeserializeOwned};
 use std::{
     fmt,
@@ -37,13 +41,14 @@ pub use crate::sessions::BoxFuture;
 
 /// What a storefront adds to its installations.
 pub trait Storefront: sessions::Storefront {
-    /// An Installation receipt, as the account's receipt file records it.
-    type Receipt: Clone + fmt::Debug + PartialEq + Serialize + DeserializeOwned + Send + Sync;
-    /// One Transfer: a game's platform, installed under a parent folder.
-    type Request: Clone + fmt::Debug + PartialEq + Send + Sync;
-    /// What the storefront offers to install: one game's build, before any
-    /// folder is chosen.
-    type Offer: Clone + fmt::Debug + PartialEq + Send + Sync;
+    /// What an Offer, a Transfer and an Installation receipt name of one game
+    /// beside its platform: Steam's app and depot language, Epic's catalog
+    /// item, GOG's product. The receipt file keeps its fields beside the
+    /// receipt's own.
+    type Product: Clone + fmt::Debug + PartialEq + Eq + Serialize + DeserializeOwned + Send + Sync;
+    /// A Transfer's or Offer's platform: `Option<String>` for a storefront
+    /// that may pick the build as the Transfer starts, as Steam does.
+    type Platform: PlatformChoice;
     /// Shown when the receipt file cannot be read, or saved.
     const RECEIPTS_UNAVAILABLE: &'static str;
     const RECEIPTS_NOT_SAVED: &'static str;
@@ -52,33 +57,15 @@ pub trait Storefront: sessions::Storefront {
     /// The storefront, as the download queue shows it.
     const QUEUE: queue::Storefront;
 
-    fn receipt_game(receipt: &Self::Receipt) -> Self::Game;
-    /// A receipt's identity: one per game and platform.
-    fn receipt_id(receipt: &Self::Receipt) -> String;
-    fn receipt_platform(receipt: &Self::Receipt) -> &str;
-    fn receipt_directory(receipt: &Self::Receipt) -> &str;
-    fn needs_verification(receipt: &Self::Receipt) -> bool;
-    fn mark_needs_verification(receipt: &mut Self::Receipt);
-    fn request_game(request: &Self::Request) -> Self::Game;
-    /// None while the storefront picks the build, as the Transfer starts.
-    fn request_platform(request: &Self::Request) -> Option<&str>;
-    /// The parent folder the storefront's installation directory goes in.
-    fn request_directory(request: &Self::Request) -> &Path;
+    /// The game `product` names.
+    fn product_game(product: &Self::Product) -> Self::Game;
+    /// An installation's id, one per game and platform, as Swift names it.
+    fn receipt_id(game: &Self::Game, platform: &str) -> String;
     /// The name a Transfer's progress gives the game.
-    fn transfer_name(request: &Self::Request) -> String;
-    /// The game's title, as the download queue shows it.
-    fn request_name(request: &Self::Request) -> String;
-    fn offer_game(offer: &Self::Offer) -> Self::Game;
-    /// None when the storefront picks the build.
-    fn offer_platform(offer: &Self::Offer) -> Option<&str>;
-    /// The Transfer that installs `offer` under `directory`.
-    fn install_request(offer: &Self::Offer, directory: &Path) -> Self::Request;
-    /// The Transfer that verifies `receipt`'s installation, or updates it in
-    /// place, with the build it records.
-    fn update_request(receipt: &Self::Receipt) -> Self::Request;
+    fn transfer_name(game: &Self::Game) -> String;
     /// Fills in what an older receipt file did not record, from the
     /// installation itself. `true` when it changed the receipt.
-    fn complete(receipt: &mut Self::Receipt) -> bool {
+    fn complete(receipt: &mut Receipt<Self>) -> bool {
         let _ = receipt;
         false
     }
@@ -91,48 +78,39 @@ pub trait Content<S: Storefront>: Send + Sync {
     /// Runs one Transfer and returns the receipt of the completed installation.
     fn download<'a>(
         &'a self,
-        request: &'a S::Request,
-    ) -> BoxFuture<'a, Result<S::Receipt, Failure>>;
+        transfer: &'a Transfer<S>,
+    ) -> BoxFuture<'a, Result<Receipt<S>, Failure>>;
     fn progress(&self) -> Option<TransferProgress>;
     fn cancel(&self);
     /// Whether the storefront offers a newer build than the one `receipt`
     /// installed. It asks the storefront, never reads the game's files.
     fn update_available<'a>(
         &'a self,
-        receipt: &'a S::Receipt,
+        receipt: &'a Receipt<S>,
     ) -> BoxFuture<'a, Result<bool, Failure>>;
     /// Hands a verified installation to its supervisor for its admission, and
     /// returns once the session is finished.
     fn launch<'a>(
         &'a self,
-        receipt: &'a S::Receipt,
-        request: &'a S::Request,
+        receipt: &'a Receipt<S>,
         admission: Admission<S>,
     ) -> BoxFuture<'a, Result<(), Failure>>;
     /// Saves the game's Cloud archive before its files go.
-    fn archive<'a>(
-        &'a self,
-        receipt: &'a S::Receipt,
-        request: &'a S::Request,
-    ) -> BoxFuture<'a, Result<(), Failure>>;
+    fn archive<'a>(&'a self, receipt: &'a Receipt<S>) -> BoxFuture<'a, Result<(), Failure>>;
     /// Records the removal for Cloud sync. Runs even after sign-out.
-    fn removed<'a>(
-        &'a self,
-        receipt: &'a S::Receipt,
-        request: &'a S::Request,
-    ) -> BoxFuture<'a, Result<(), Failure>>;
+    fn removed<'a>(&'a self, receipt: &'a Receipt<S>) -> BoxFuture<'a, Result<(), Failure>>;
     /// The dedicated folder name the storefront installed `receipt` into.
-    fn directory_name(&self, receipt: &S::Receipt, request: &S::Request) -> String;
+    fn directory_name(&self, receipt: &Receipt<S>) -> String;
     /// Deletes a Windows installation's Wine prefix once its folder is gone.
     /// `None` when the installation has none.
-    fn remove_prefix(&self, receipt: &S::Receipt) -> Option<Result<(), String>>;
+    fn remove_prefix(&self, receipt: &Receipt<S>) -> Option<Result<(), String>>;
     /// Syncs the game's Cloud saves on the player's request: those of
     /// `installed`, or, for an uninstalled game, those its saved Cloud context
     /// names. `control` shows the sync's progress and asks the player.
     fn maintain<'a>(
         &'a self,
         game: &'a S::Game,
-        installed: Option<(&'a S::Receipt, &'a S::Request)>,
+        installed: Option<&'a Receipt<S>>,
         control: Arc<cloud::Control>,
     ) -> BoxFuture<'a, Result<(), Failure>>;
     /// The Cloud indicators of `games` from their journals, and of every other
@@ -248,7 +226,7 @@ pub enum Report {
 #[derive(Clone, Debug, PartialEq)]
 pub struct State<S: Storefront> {
     pub revision: u64,
-    pub receipts: Vec<S::Receipt>,
+    pub receipts: Vec<Receipt<S>>,
     /// The last Transfer progress.
     pub transfer: Option<TransferProgress>,
     /// The game the last Transfer progress belongs to.
@@ -261,7 +239,7 @@ pub struct State<S: Storefront> {
     pub launch_game: Option<S::Game>,
     pub uninstall_game: Option<S::Game>,
     /// A Transfer that stopped before its receipt, which the player can resume.
-    pub last_download: Option<S::Request>,
+    pub last_download: Option<Transfer<S>>,
     /// The failure shown, until the next action clears it.
     pub report: Option<Report>,
     /// A storage warning, a localization key, with an id that changes each
@@ -279,7 +257,7 @@ pub struct State<S: Storefront> {
 /// One of the account's Transfers in the download queue.
 struct Queued<S: Storefront> {
     id: u64,
-    request: S::Request,
+    transfer: Transfer<S>,
     /// The receipt Obelisk updates on its own.
     automatic: Option<String>,
     /// A launch runs it itself, once its turn came.
@@ -355,7 +333,7 @@ impl<S: Storefront> Owner for Shared<S> {
         let Some(queued) = inner.queued.iter().find(|queued| queued.id == id) else {
             return false;
         };
-        let game = S::request_game(&queued.request);
+        let game = queued.transfer.game();
         let sessions = self.sessions.state();
         !inner.signed_out
             && !inner.diagnostic
@@ -370,19 +348,19 @@ impl<S: Storefront> Owner for Shared<S> {
     fn start(self: Arc<Self>, id: u64) {
         let started = self.update(|inner| {
             let queued = inner.queued.iter().find(|queued| queued.id == id)?;
-            let (request, automatic) = (queued.request.clone(), queued.automatic.clone());
+            let (transfer, automatic) = (queued.transfer.clone(), queued.automatic.clone());
             if let Some(receipt) = &automatic {
                 inner.automatic_skipped.push(receipt.clone());
             }
-            self.begin_in(inner, id, &request);
-            Some((request, automatic.is_some()))
+            self.begin_in(inner, id, &transfer);
+            Some((transfer, automatic.is_some()))
         });
-        let Some((request, automatic)) = started else {
+        let Some((transfer, automatic)) = started else {
             self.queueing.queue.finished(id);
             return;
         };
         runtime().spawn(async move {
-            let outcome = self.run(id, &request).await;
+            let outcome = self.run(id, &transfer).await;
             self.update(|inner| {
                 if let Err(Failure::Failed(key)) = outcome
                     && !automatic
@@ -446,11 +424,11 @@ impl<S: Storefront> Shared<S> {
             let State {
                 updates, receipts, ..
             } = &mut inner.state;
-            updates.retain(|id| receipts.iter().any(|receipt| S::receipt_id(receipt) == *id));
+            updates.retain(|id| receipts.iter().any(|receipt| receipt.id() == *id));
         }
         let mut queued = Vec::new();
         for waiting in &inner.queued {
-            let game = S::request_game(&waiting.request);
+            let game = waiting.transfer.game();
             if Some(waiting.id) != inner.running && !waiting.launch && !queued.contains(&game) {
                 queued.push(game);
             }
@@ -501,48 +479,50 @@ impl<S: Storefront> Shared<S> {
 
     /// Marks the queued Transfer `id`'s game before its first progress
     /// snapshot arrives.
-    fn begin_in(&self, inner: &mut Inner<S>, id: u64, request: &S::Request) {
+    fn begin_in(&self, inner: &mut Inner<S>, id: u64, transfer: &Transfer<S>) {
         inner.running = Some(id);
         inner.transfer_cancelled = false;
-        inner.state.last_download = Some(request.clone());
-        inner.state.transfer_game = Some(S::request_game(request));
-        inner.state.transfer = Some(TransferProgress::new(S::transfer_name(request)));
-        let (game, platform) = (S::request_game(request), S::request_platform(request));
-        if let Some(receipt) = inner.state.receipts.iter_mut().find(|receipt| {
-            S::receipt_game(receipt) == game && Some(S::receipt_platform(receipt)) == platform
-        }) {
-            S::mark_needs_verification(receipt);
+        inner.state.last_download = Some(transfer.clone());
+        inner.state.transfer_game = Some(transfer.game());
+        inner.state.transfer = Some(TransferProgress::new(transfer.progress_name()));
+        if let Some(receipt) = inner
+            .state
+            .receipts
+            .iter_mut()
+            .find(|receipt| transfer.lands_on(receipt))
+        {
+            receipt.needs_verification = true;
             self.save(inner);
         }
     }
 
-    /// What the queue shows of `request`'s Transfer.
+    /// What the queue shows of `transfer`.
     fn queue_request(
         &self,
-        request: &S::Request,
+        transfer: &Transfer<S>,
         kind: queue::Kind,
         automatic: bool,
     ) -> queue::Request {
         queue::Request {
             storefront: S::QUEUE,
             account: self.queueing.account.clone(),
-            game: (self.queueing.name)(&S::request_game(request)),
-            name: S::request_name(request),
+            game: (self.queueing.name)(&transfer.game()),
+            name: transfer.name.clone(),
             kind,
             automatic,
         }
     }
 
-    /// Queues `request`'s Transfer when the gate lets it. `automatic` names
-    /// the receipt Obelisk updates on its own: its failure shows only on its
-    /// game, and it waits for the next update check.
-    fn download(self: &Arc<Self>, request: S::Request, automatic: Option<String>) {
+    /// Queues `transfer` when the gate lets it. `automatic` names the receipt
+    /// Obelisk updates on its own: its failure shows only on its game, and it
+    /// waits for the next update check.
+    fn download(self: &Arc<Self>, transfer: Transfer<S>, automatic: Option<String>) {
         let queued = self.update(|inner| {
-            let game = S::request_game(&request);
+            let game = transfer.game();
             if !self.gate(inner).modify.allows(&game) {
                 return false;
             }
-            if let Err(error) = std::fs::create_dir_all(S::request_directory(&request)) {
+            if let Err(error) = std::fs::create_dir_all(&transfer.directory) {
                 if automatic.is_none() {
                     inner.state.report = Some(Report::DownloadDirectory(error.to_string()));
                 }
@@ -551,26 +531,24 @@ impl<S: Storefront> Shared<S> {
             if automatic.is_none() {
                 inner.state.report = None;
             }
-            let installed = inner.state.receipts.iter().find(|receipt| {
-                S::receipt_game(receipt) == game
-                    && S::request_platform(&request)
-                        .is_none_or(|platform| S::receipt_platform(receipt) == platform)
-            });
+            let installed = inner
+                .state
+                .receipts
+                .iter()
+                .find(|receipt| transfer.lands_on(receipt));
             let kind = match installed {
                 None => queue::Kind::Install,
-                Some(receipt) if inner.state.updates.contains(&S::receipt_id(receipt)) => {
-                    queue::Kind::Update
-                }
+                Some(receipt) if inner.state.updates.contains(&receipt.id()) => queue::Kind::Update,
                 Some(_) => queue::Kind::Repair,
             };
             // The queue calls no owner while it adds: the game is queued at once.
             let id = self.queueing.queue.push(
                 &self.owner(),
-                self.queue_request(&request, kind, automatic.is_some()),
+                self.queue_request(&transfer, kind, automatic.is_some()),
             );
             inner.queued.push(Queued {
                 id,
-                request: request.clone(),
+                transfer: transfer.clone(),
                 automatic: automatic.clone(),
                 launch: false,
             });
@@ -586,15 +564,15 @@ impl<S: Storefront> Shared<S> {
     /// queued becomes this one.
     async fn launch_transfer(
         self: &Arc<Self>,
-        request: &S::Request,
+        transfer: &Transfer<S>,
         kind: queue::Kind,
-    ) -> Result<S::Receipt, Failure> {
-        let game = S::request_game(request);
+    ) -> Result<Receipt<S>, Failure> {
+        let game = transfer.game();
         let superseded: Vec<u64> = self.update(|inner| {
             inner
                 .queued
                 .iter()
-                .filter(|queued| S::request_game(&queued.request) == game)
+                .filter(|queued| queued.transfer.game() == game)
                 .map(|queued| queued.id)
                 .collect()
         });
@@ -604,11 +582,11 @@ impl<S: Storefront> Shared<S> {
         let (id, turn) = self
             .queueing
             .queue
-            .push_first(&self.owner(), self.queue_request(request, kind, false));
+            .push_first(&self.owner(), self.queue_request(transfer, kind, false));
         self.update(|inner| {
             inner.queued.push(Queued {
                 id,
-                request: request.clone(),
+                transfer: transfer.clone(),
                 automatic: None,
                 launch: true,
             })
@@ -617,14 +595,14 @@ impl<S: Storefront> Shared<S> {
             self.update(|inner| inner.queued.retain(|queued| queued.id != id));
             return Err(Failure::Cancelled);
         }
-        self.update(|inner| self.begin_in(inner, id, request));
-        self.run(id, request).await
+        self.update(|inner| self.begin_in(inner, id, transfer));
+        self.run(id, transfer).await
     }
 
     /// Runs the queued Transfer `id` `begin_in` announced, and ends it in
     /// the queue. One the queue stopped to pause it stays queued.
-    async fn run(self: &Arc<Self>, id: u64, request: &S::Request) -> Result<S::Receipt, Failure> {
-        let outcome = self.perform(request).await;
+    async fn run(self: &Arc<Self>, id: u64, transfer: &Transfer<S>) -> Result<Receipt<S>, Failure> {
+        let outcome = self.perform(transfer).await;
         let requeued = self.queueing.queue.finished(id);
         if !requeued {
             self.update(|inner| inner.queued.retain(|queued| queued.id != id));
@@ -640,7 +618,7 @@ impl<S: Storefront> Shared<S> {
     /// player keeps games up to date. The queue runs them one at a time, and
     /// holds them while a game runs.
     fn update_automatically(self: &Arc<Self>) {
-        let requests: Vec<(S::Request, String)> = {
+        let transfers: Vec<(Transfer<S>, String)> = {
             let inner = self.inner.lock().unwrap();
             if !inner.automatic_updates || inner.signed_out {
                 return;
@@ -651,27 +629,27 @@ impl<S: Storefront> Shared<S> {
                 .receipts
                 .iter()
                 .filter(|receipt| {
-                    let id = S::receipt_id(receipt);
+                    let id = receipt.id();
                     inner.state.updates.contains(&id)
                         && !inner.automatic_skipped.contains(&id)
-                        && modify.allows(&S::receipt_game(receipt))
+                        && modify.allows(&receipt.game())
                 })
                 .map(|receipt| {
-                    let request = inner
-                        .resumable(&S::receipt_game(receipt))
-                        .unwrap_or_else(|| S::update_request(receipt));
-                    (request, S::receipt_id(receipt))
+                    let transfer = inner
+                        .resumable(&receipt.game())
+                        .unwrap_or_else(|| receipt.transfer());
+                    (transfer, receipt.id())
                 })
                 .collect()
         };
-        for (request, id) in requests {
-            self.download(request, Some(id));
+        for (transfer, id) in transfers {
+            self.download(transfer, Some(id));
         }
     }
 
     /// Whether the storefront offers a newer build of `receipt`'s
     /// installation. `None` when it could not tell in time.
-    async fn ask_update(&self, receipt: &S::Receipt) -> Option<bool> {
+    async fn ask_update(&self, receipt: &Receipt<S>) -> Option<bool> {
         tokio::time::timeout(UPDATE_TIMEOUT, self.content.update_available(receipt))
             .await
             .ok()?
@@ -688,19 +666,19 @@ impl<S: Storefront> Shared<S> {
     }
 
     /// Asks whether `receipt`'s installation has a newer build, and records it.
-    async fn newer_build(&self, receipt: &S::Receipt) -> Option<bool> {
+    async fn newer_build(&self, receipt: &Receipt<S>) -> Option<bool> {
         let available = self.ask_update(receipt).await?;
-        self.update(|inner| Self::mark_update(inner, S::receipt_id(receipt), available));
+        self.update(|inner| Self::mark_update(inner, receipt.id(), available));
         Some(available)
     }
 
     /// Runs the Transfer `begin_in` announced, whose turn came in the queue.
-    async fn perform(self: &Arc<Self>, request: &S::Request) -> Result<S::Receipt, Failure> {
-        let name = S::transfer_name(request);
+    async fn perform(self: &Arc<Self>, transfer: &Transfer<S>) -> Result<Receipt<S>, Failure> {
+        let name = transfer.progress_name();
         if self.inner.lock().unwrap().transfer_cancelled {
             self.update(|inner| {
-                if let Some(transfer) = &mut inner.state.transfer {
-                    transfer.state = TransferState::Cancelled;
+                if let Some(progress) = &mut inner.state.transfer {
+                    progress.state = TransferState::Cancelled;
                 }
                 inner.running = None;
             });
@@ -724,7 +702,7 @@ impl<S: Storefront> Shared<S> {
                 }
             })
         };
-        let result = self.content.download(request).await;
+        let result = self.content.download(transfer).await;
         polling.abort();
         let outcome = match result {
             // A receipt that arrives after its cancellation is refused.
@@ -751,11 +729,8 @@ impl<S: Storefront> Shared<S> {
             .filter(|progress| progress.game == name && progress.state == settled);
         self.update(|inner| {
             if let Ok(receipt) = &outcome {
-                let id = S::receipt_id(receipt);
-                inner
-                    .state
-                    .receipts
-                    .retain(|kept| S::receipt_id(kept) != id);
+                let id = receipt.id();
+                inner.state.receipts.retain(|kept| kept.id() != id);
                 inner.state.receipts.push(receipt.clone());
                 inner.state.updates.retain(|kept| *kept != id);
                 inner.state.last_download = None;
@@ -764,13 +739,13 @@ impl<S: Storefront> Shared<S> {
             match last {
                 Some(progress) => inner.state.transfer = Some(progress),
                 None => {
-                    if let Some(transfer) = &mut inner.state.transfer {
-                        transfer.message.clear();
+                    if let Some(progress) = &mut inner.state.transfer {
+                        progress.message.clear();
                     }
                 }
             }
-            if let Some(transfer) = &mut inner.state.transfer {
-                transfer.state = settled;
+            if let Some(progress) = &mut inner.state.transfer {
+                progress.state = settled;
             }
             inner.running = None;
         });
@@ -864,12 +839,7 @@ fn gate<S: Storefront>(inner: &Inner<S>, sessions: &sessions::State<S>) -> Gate<
         .active
         .iter()
         .map(|active| active.game.clone())
-        .chain(
-            inner
-                .queued
-                .iter()
-                .map(|queued| S::request_game(&queued.request)),
-        )
+        .chain(inner.queued.iter().map(|queued| queued.transfer.game()))
         .collect();
     // A Transfer waits in the queue: one per game, never of a game a Game
     // session, a Transfer or an uninstall holds.
@@ -986,46 +956,21 @@ fn maintenance_source(number: u64) -> String {
 
 impl<S: Storefront> Inner<S> {
     /// The receipt `id` names, of this account's installations.
-    fn receipt(&self, id: &str) -> Option<S::Receipt> {
+    fn receipt(&self, id: &str) -> Option<Receipt<S>> {
         self.state
             .receipts
             .iter()
-            .find(|receipt| S::receipt_id(receipt) == id)
+            .find(|receipt| receipt.id() == id)
             .cloned()
     }
 
     /// The Transfer of `game` that stopped before its receipt.
-    fn resumable(&self, game: &S::Game) -> Option<S::Request> {
+    fn resumable(&self, game: &S::Game) -> Option<Transfer<S>> {
         self.state
             .last_download
             .clone()
-            .filter(|last| &S::request_game(last) == game)
+            .filter(|last| &last.game() == game)
     }
-}
-
-/// The receipts in `file`, without those whose folder has vanished: the game
-/// was removed outside Obelisk.
-fn load<R: DeserializeOwned>(
-    file: &Path,
-    directory: impl Fn(&R) -> &str,
-) -> std::io::Result<Vec<R>> {
-    let bytes = match std::fs::read(file) {
-        Ok(bytes) => bytes,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(error) => return Err(error),
-    };
-    let receipts: Vec<R> = serde_json::from_slice(&bytes)?;
-    Ok(receipts
-        .into_iter()
-        .filter(|receipt| Path::new(directory(receipt)).is_dir())
-        .collect())
-}
-
-fn save<R: Serialize>(file: &Path, receipts: &[R]) -> std::io::Result<()> {
-    if let Some(parent) = file.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    obelisk_core::write_atomic(file, &serde_json::to_vec(receipts)?)
 }
 
 /// One account's installations of one storefront. A clone is the same
@@ -1095,9 +1040,7 @@ impl<S: Storefront> Installations<S> {
             queued: Vec::new(),
             running: None,
         };
-        match load(&receipts_file, |receipt: &S::Receipt| {
-            S::receipt_directory(receipt)
-        }) {
+        match load(&receipts_file) {
             Ok(mut receipts) => {
                 // Every receipt is completed, not only the first that changes.
                 let mut completed = false;
@@ -1189,44 +1132,42 @@ impl<S: Storefront> Installations<S> {
     /// installation of its platform in place; an offer that leaves the build
     /// to the storefront updates the game's installation. A Transfer of the
     /// game that stopped before its receipt resumes instead.
-    pub fn install(&self, offer: S::Offer) {
-        let request = {
+    pub fn install(&self, offer: Offer<S>) {
+        let fresh = offer.transfer(self.shared.library.join(S::GAMES_DIRECTORY));
+        let transfer = {
             let inner = self.shared.inner.lock().unwrap();
-            let game = S::offer_game(&offer);
-            let installed = inner.state.receipts.iter().find(|receipt| {
-                S::receipt_game(receipt) == game
-                    && S::offer_platform(&offer)
-                        .is_none_or(|platform| S::receipt_platform(receipt) == platform)
-            });
+            let installed = inner
+                .state
+                .receipts
+                .iter()
+                .find(|receipt| fresh.lands_on(receipt));
             inner
-                .resumable(&game)
-                .or_else(|| installed.map(S::update_request))
-                .unwrap_or_else(|| {
-                    S::install_request(&offer, &self.shared.library.join(S::GAMES_DIRECTORY))
-                })
+                .resumable(&fresh.game())
+                .or_else(|| installed.map(Receipt::transfer))
+                .unwrap_or(fresh)
         };
-        self.download(request);
+        self.download(transfer);
     }
 
     /// Verifies the files of the installation `receipt` names, and repairs or
     /// updates them in place with the build it records. A Transfer of the
     /// game that stopped before its receipt resumes instead.
     pub fn update(&self, receipt: &str) {
-        let request = {
+        let transfer = {
             let inner = self.shared.inner.lock().unwrap();
             inner.receipt(receipt).map(|receipt| {
                 inner
-                    .resumable(&S::receipt_game(&receipt))
-                    .unwrap_or_else(|| S::update_request(&receipt))
+                    .resumable(&receipt.game())
+                    .unwrap_or_else(|| receipt.transfer())
             })
         };
-        if let Some(request) = request {
-            self.download(request);
+        if let Some(transfer) = transfer {
+            self.download(transfer);
         }
     }
 
-    fn download(&self, request: S::Request) {
-        self.shared.download(request, None);
+    fn download(&self, transfer: Transfer<S>) {
+        self.shared.download(transfer, None);
     }
 
     /// Whether Obelisk queues each newer build as soon as it is known,
@@ -1266,7 +1207,7 @@ impl<S: Storefront> Installations<S> {
             let queued: Vec<u64> = inner
                 .queued
                 .iter()
-                .filter(|queued| &S::request_game(&queued.request) == game)
+                .filter(|queued| &queued.transfer.game() == game)
                 .map(|queued| queued.id)
                 .collect();
             // A launch's own Transfer ends it once taken out.
@@ -1307,7 +1248,7 @@ impl<S: Storefront> Installations<S> {
             let mut checks = tokio::task::JoinSet::new();
             for receipt in receipts {
                 // An interrupted Transfer is repaired before its game launches.
-                if S::needs_verification(&receipt) {
+                if receipt.needs_verification {
                     continue;
                 }
                 let shared = shared.clone();
@@ -1330,7 +1271,7 @@ impl<S: Storefront> Installations<S> {
                     // A Transfer replaced the receipt meanwhile: its answer is
                     // about the build it replaced.
                     if inner.state.receipts.contains(&receipt) {
-                        Shared::mark_update(inner, S::receipt_id(&receipt), available);
+                        Shared::mark_update(inner, receipt.id(), available);
                     }
                 }
             });
@@ -1346,14 +1287,14 @@ impl<S: Storefront> Installations<S> {
         let shared = &self.shared;
         let admission = shared.update(|inner| {
             let receipt = inner.receipt(receipt)?;
-            let game = S::receipt_game(&receipt);
+            let game = receipt.game();
             if !shared.gate(inner).launch.allows(&game) {
                 return None;
             }
             let admission = shared
                 .sessions
                 .admit(game.clone(), shared.account.clone())?;
-            let verify = S::needs_verification(&receipt);
+            let verify = receipt.needs_verification;
             inner.state.launching = true;
             inner.state.verifying_before_launch = verify;
             inner.state.launch_game = Some(game.clone());
@@ -1365,7 +1306,7 @@ impl<S: Storefront> Installations<S> {
         let Some((admission, verify, receipt, game)) = admission else {
             return;
         };
-        let verification = S::update_request(&receipt);
+        let verification = receipt.transfer();
         let canceller = admission.canceller();
         let shared = shared.clone();
         runtime().spawn(async move {
@@ -1409,10 +1350,7 @@ impl<S: Storefront> Installations<S> {
                     return Err(Failure::Cancelled);
                 }
                 shared.update(|inner| inner.state.verifying_before_launch = false);
-                shared
-                    .content
-                    .launch(&ready, &verification, admission)
-                    .await
+                shared.content.launch(&ready, admission).await
             }
             .await;
             let was_running = running.is_finished();
@@ -1442,7 +1380,7 @@ impl<S: Storefront> Installations<S> {
         let shared = &self.shared;
         let remaining = shared.update(|inner| {
             let receipt = inner.receipt(receipt)?;
-            let game = S::receipt_game(&receipt);
+            let game = receipt.game();
             if !shared.gate(inner).uninstall.allows(&game) {
                 return None;
             }
@@ -1460,21 +1398,20 @@ impl<S: Storefront> Installations<S> {
         let Some((remaining, receipt, game)) = remaining else {
             return;
         };
-        let request = S::update_request(&receipt);
         let shared = shared.clone();
         runtime().spawn(async move {
-            let outcome = shared.remove(&receipt, &request, &remaining).await;
+            let outcome = shared.remove(&receipt, &remaining).await;
             shared.update(|inner| {
                 inner.state.uninstall_game = None;
                 match outcome {
                     Ok(true) => {
                         inner.state.receipts = remaining;
-                        if inner.state.last_download.as_ref().is_some_and(|last| {
-                            S::request_game(last) == game
-                                && S::request_platform(last).is_none_or(|platform| {
-                                    platform == S::receipt_platform(&receipt)
-                                })
-                        }) {
+                        if inner
+                            .state
+                            .last_download
+                            .as_ref()
+                            .is_some_and(|last| last.lands_on(&receipt))
+                        {
                             inner.state.last_download = None;
                         }
                         if inner.state.transfer_game.as_ref() == Some(&game) {
@@ -1487,7 +1424,7 @@ impl<S: Storefront> Installations<S> {
                         inner
                             .state
                             .receipts
-                            .retain(|kept| Path::new(S::receipt_directory(kept)).is_dir());
+                            .retain(|kept| Path::new(&kept.directory).is_dir());
                         if !inner.signed_out {
                             inner.state.report = Some(Report::Uninstall(reason));
                         }
@@ -1531,13 +1468,7 @@ impl<S: Storefront> Installations<S> {
         let started = shared.update(|inner| {
             let installed = match installed {
                 None => None,
-                Some(id) => {
-                    let receipt = inner
-                        .receipt(id)
-                        .filter(|receipt| S::receipt_game(receipt) == game)?;
-                    let request = S::update_request(&receipt);
-                    Some((receipt, request))
-                }
+                Some(id) => Some(inner.receipt(id).filter(|receipt| receipt.game() == game)?),
             };
             if !shared.gate(inner).maintain.allows(&game) {
                 return None;
@@ -1565,10 +1496,10 @@ impl<S: Storefront> Installations<S> {
         };
         let shared = shared.clone();
         runtime().spawn(async move {
-            let installed = installed
-                .as_ref()
-                .map(|(receipt, request)| (receipt, request));
-            let _ = shared.content.maintain(&game, installed, control).await;
+            let _ = shared
+                .content
+                .maintain(&game, installed.as_ref(), control)
+                .await;
             shared.update(|inner| {
                 if inner
                     .maintenance
@@ -1655,20 +1586,19 @@ impl<S: Storefront> Shared<S> {
     /// Removes the installation; `Ok(false)` when sign-out came first.
     async fn remove(
         &self,
-        receipt: &S::Receipt,
-        request: &S::Request,
-        remaining: &[S::Receipt],
+        receipt: &Receipt<S>,
+        remaining: &[Receipt<S>],
     ) -> Result<bool, Failure> {
         let signed_out = || self.inner.lock().unwrap().signed_out;
         if signed_out() {
             return Ok(false);
         }
-        self.content.archive(receipt, request).await?;
+        self.content.archive(receipt).await?;
         if signed_out() {
             return Ok(false);
         }
-        let directory = PathBuf::from(S::receipt_directory(receipt));
-        let expected = self.content.directory_name(receipt, request);
+        let directory = PathBuf::from(&receipt.directory);
+        let expected = self.content.directory_name(receipt);
         let protected: Vec<_> = self.protected.clone();
         let file = self.receipts_file.clone();
         let remaining = remaining.to_vec();
@@ -1685,13 +1615,13 @@ impl<S: Storefront> Shared<S> {
         if let Err(error) = removal {
             // Receipt persistence can fail after the folder was removed. The
             // Cloud fence must still record that removal.
-            if !Path::new(S::receipt_directory(receipt)).exists() {
-                self.content.removed(receipt, request).await?;
+            if !Path::new(&receipt.directory).exists() {
+                self.content.removed(receipt).await?;
             }
             return Err(error);
         }
         // Removal is never a Cloud delete.
-        self.content.removed(receipt, request).await?;
+        self.content.removed(receipt).await?;
         // As Steam deletes a Proton prefix, the prefix goes with its game,
         // after the Cloud archive took its saves.
         let (content, receipt) = (self.content.clone(), receipt.clone());
