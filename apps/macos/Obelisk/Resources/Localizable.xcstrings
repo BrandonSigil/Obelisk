@@ -6635,6 +6635,74 @@
         }
       }
     },
+    "ui.game.metric.expected_fps": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "EXPECTED FPS"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "FPS ATTENDUS"
+          }
+        }
+      }
+    },
+    "ui.game.metric.expected_fps_value": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "≈ %@"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "≈ %@"
+          }
+        }
+      }
+    },
+    "ui.game.metric.expected_fps_value_other_chip": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "≈ %1$@ on %2$@"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "≈ %1$@ sur %2$@"
+          }
+        }
+      }
+    },
+    "ui.game.metric.expected_fps_help": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The median of %1$@ sessions Obelisk players played on %2$@. Click to see every chip on getobelisk.app."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "La médiane de %1$@ parties jouées par des joueurs d'Obelisk sur %2$@. Cliquez pour voir toutes les puces sur getobelisk.app."
+          }
+        }
+      }
+    },
     "ui.game.metric.size": {
       "extractionState": "manual",
       "localizations": {

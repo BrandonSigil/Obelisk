@@ -69,6 +69,8 @@ final class AppModel {
     }
     static let sharePerformanceKey = "obelisk.games.sharePerformance"
     @ObservationIgnored let performance: PerformanceReports
+    /// How each game runs on this Mac's chip, as other players measured it.
+    let estimates: PerformanceEstimates
 
     /// The last library of every storefront account.
     @ObservationIgnored let libraryCache: LibraryCache
@@ -79,7 +81,7 @@ final class AppModel {
     init(directory: URL = AppIdentity.libraryDirectory, defaults: UserDefaults = .standard,
          defaultsDomain: String = Bundle.main.bundleIdentifier ?? AppIdentity.storageIdentifier, steam: SteamModel? = nil,
          epic: EpicModel? = nil, gog: GogModel? = nil, downloads: DownloadsModel? = nil,
-         performance: PerformanceReports? = nil,
+         performance: PerformanceReports? = nil, estimates: PerformanceEstimates? = nil,
          overlay: GameOverlayEnvironment = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil
             ? .live : .inert) {
         libraryDirectory = directory.path
@@ -102,6 +104,7 @@ final class AppModel {
         let performance = performance ?? PerformanceReports(isEnabled: sharesGamePerformance)
         performance.isEnabled = sharesGamePerformance
         self.performance = performance
+        self.estimates = estimates ?? PerformanceEstimates()
         self.downloads.progress = { [weak self] item in self?.downloadTransfer(item) }
         applyAutomaticUpdates()
         reportPerformance()
@@ -110,16 +113,17 @@ final class AppModel {
     /// Each storefront's ended games go to the performance reports, with the
     /// title its library knows them by.
     private func reportPerformance() {
+        report(steam.gameSessions) { [steam] in steam.gameName(appId: $0) }
+        report(epic.gameSessions) { [epic] id in epic.games.first { $0.id == id }?.title }
+        report(gog.gameSessions) { [gog] id in gog.games.first { $0.id == id }?.title }
+    }
+
+    private func report<Store: GameStorefront>(_ sessions: GameSessions<Store>,
+                                               title: @escaping (Store.GameID) -> String?) {
         let performance = performance
-        steam.gameSessions.reportPlayed = { [steam] appId, played in
-            performance.report(played, of: String(appId), titled: steam.gameName(appId: appId), in: .steam)
-        }
-        epic.gameSessions.reportPlayed = { [epic] id, played in
-            guard let appName = epicGameID(id)?.appName else { return }
-            performance.report(played, of: appName, titled: epic.games.first { $0.id == id }?.title, in: .epic)
-        }
-        gog.gameSessions.reportPlayed = { [gog] id, played in
-            performance.report(played, of: id, titled: gog.games.first { $0.id == id }?.title, in: .gog)
+        sessions.reportPlayed = { game, played in
+            guard let id = Store.storeGameID(game) else { return }
+            performance.report(played, of: id, titled: title(game), in: Store.storefront)
         }
     }
 

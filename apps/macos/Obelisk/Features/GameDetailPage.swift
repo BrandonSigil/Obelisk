@@ -20,6 +20,7 @@ struct GameDetailPage<Model: LibraryStorefront, HeroArtwork: View, Cover: View, 
     @Environment(\.storefrontBar) private var bar
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(PerformanceEstimates.self) private var estimates: PerformanceEstimates?
 
     /// The artwork's height below the bar it reaches under, as a library hero's.
     private static var heroHeight: CGFloat { ObeliskStyle.libraryHeroHeight }
@@ -86,7 +87,10 @@ struct GameDetailPage<Model: LibraryStorefront, HeroArtwork: View, Cover: View, 
                 .ignoresSafeArea()
         }
         .ignoresSafeArea(.container, edges: .top)
-        .onAppear { appeared = true }
+        .onAppear {
+            appeared = true
+            estimates?.refresh()
+        }
         .sheet(isPresented: $achievements.isPresented) {
             GameAchievementsView(model: achievements, gameName: name, retry: model.reloadAchievements)
         }
@@ -183,7 +187,8 @@ struct GameDetailPage<Model: LibraryStorefront, HeroArtwork: View, Cover: View, 
             cloud: installations.cloudIndicator.map {
                 CloudIndicatorButton(presentation: $0, canSync: installations.canSyncCloud, sync: model.syncCloud)
             },
-            achievements: model.achievements
+            achievements: model.achievements,
+            estimate: Model.Store.storeGameID(game.id).flatMap { estimates?.estimate(store: Model.Store.storefront, id: $0) }
         )
     }
 

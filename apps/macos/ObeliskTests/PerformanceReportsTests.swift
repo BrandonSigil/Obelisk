@@ -100,3 +100,55 @@ private actor Sent {
     var count: Int { reports.count }
     func add(_ report: SessionReport) { reports.append(report) }
 }
+
+@MainActor
+final class PerformanceEstimatesTests: XCTestCase {
+    /// An answer as getobelisk.app gives it, for an M4.
+    private static let answer = Data("""
+    {"chip":"Apple M4","games":[
+      {"store":"steam","id":"1245620","name":"ELDEN RING","slug":"elden-ring","measured_on":"Apple M3",
+       "sessions":4,"fps_median":32,"fps_low_1pct":18,"crash_rate":0},
+      {"store":"epic","id":"Sugar","name":"Rocket League","slug":"rocket-league","measured_on":"Apple M4",
+       "sessions":3,"fps_median":null,"fps_low_1pct":null,"crash_rate":1}
+    ]}
+    """.utf8)
+
+    private struct Answer: Decodable { let games: [PerformanceEstimates.Estimate] }
+
+    func testEachGameIsFoundByItsStoreAndID() async throws {
+        let games = try JSONDecoder().decode(Answer.self, from: Self.answer).games
+        let estimates = PerformanceEstimates(chip: "Apple M4") { _ in games }
+        estimates.refresh()
+        try await eventually { estimates.estimate(store: .steam, id: "1245620") != nil }
+        let eldenRing = try XCTUnwrap(estimates.estimate(store: .steam, id: "1245620"))
+        XCTAssertEqual(eldenRing.measuredOn, "Apple M3")
+        XCTAssertEqual(eldenRing.fpsMedian, 32)
+        XCTAssertEqual(eldenRing.page, URL(string: "https://getobelisk.app/games/elden-ring"))
+        XCTAssertNil(estimates.estimate(store: .epic, id: "Sugar")?.fpsMedian, "every session ended too soon")
+        XCTAssertNil(estimates.estimate(store: .gog, id: "1245620"), "the store is part of the ID")
+    }
+
+    func testTheTableIsAskedForOnceAnHourAndAFailureKeepsTheLastOne() async throws {
+        let games = try JSONDecoder().decode(Answer.self, from: Self.answer).games
+        let calls = Calls()
+        let estimates = PerformanceEstimates(chip: "Apple M4") { chip in
+            await calls.add(chip)
+            return await calls.count == 1 ? games : nil
+        }
+        let start = Date.now
+        estimates.refresh(now: start)
+        try await eventually { await calls.count == 1 && estimates.estimate(store: .steam, id: "1245620") != nil }
+        estimates.refresh(now: start.addingTimeInterval(60))
+        estimates.refresh(now: start.addingTimeInterval(PerformanceEstimates.lifetime))
+        try await eventually { await calls.count == 2 }
+        let chips = await calls.chips
+        XCTAssertEqual(chips, ["Apple M4", "Apple M4"])
+        XCTAssertNotNil(estimates.estimate(store: .steam, id: "1245620"), "a failed answer keeps the last table")
+    }
+}
+
+private actor Calls {
+    private(set) var chips: [String] = []
+    var count: Int { chips.count }
+    func add(_ chip: String) { chips.append(chip) }
+}

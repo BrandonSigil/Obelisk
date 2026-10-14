@@ -50,11 +50,7 @@ struct SessionReport: Encodable, Equatable {
     /// The report of `game`, as `store` names it, which played `played` on `mac`.
     init(store: SessionStorefront, game: String, title: String, played: GamePlayed, mac: MacHardware,
          obeliskVersion: String) {
-        self.store = switch store {
-        case .steam: "steam"
-        case .epic: "epic"
-        case .gog: "gog"
-        }
+        self.store = store.siteName
         storeGameID = game
         gameName = title
         // Rust names the engine of a Windows game only.

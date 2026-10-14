@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		016CDD4F01CA11E5ED771418 /* EpicKeychain.swift in Sources */ = {isa = PBXBuildFile; fileRef = A723841678981CE2F86D0E9A /* EpicKeychain.swift */; };
 		01B0BAD8AC5542C383FBCD99 /* PerformanceReportsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3EFDB7A53D56AC5DBAF68DFF /* PerformanceReportsTests.swift */; };
+		01C8D856E96DD6CD8CD5F3DE /* PerformanceEstimates.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1DC759FD0238E580F0191E23 /* PerformanceEstimates.swift */; };
 		04767C894B3CAE4266D2E075 /* SteamLoginView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94FC6A066FC924074EF9F63F /* SteamLoginView.swift */; };
 		06A2E7B35FF8CDD974CB154C /* HomeShelvesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 772284AC32E9CF1E955A5C2C /* HomeShelvesTests.swift */; };
 		07746A47248B5F6B29285D8B /* SteamChatTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 98896818E177E50643B725E4 /* SteamChatTests.swift */; };
@@ -165,6 +166,7 @@
 		15F3297FD4BFB48F4C62413B /* GameOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GameOverlay.swift; sourceTree = "<group>"; };
 		1614CF7FBF3DDD00B5219A01 /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
 		1D5405CB088EA19AD505B1A0 /* FriendsPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FriendsPanel.swift; sourceTree = "<group>"; };
+		1DC759FD0238E580F0191E23 /* PerformanceEstimates.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PerformanceEstimates.swift; sourceTree = "<group>"; };
 		26271A38AE614A8FF717BBEE /* AppIcon.icon */ = {isa = PBXFileReference; lastKnownFileType = wrapper.icon; path = AppIcon.icon; sourceTree = "<group>"; };
 		2814FFCECA443BD312EBE9ED /* FakeSessions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FakeSessions.swift; sourceTree = "<group>"; };
 		2C14FE47CD2D41668ED13588 /* SteamInviteNotifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SteamInviteNotifier.swift; sourceTree = "<group>"; };
@@ -422,6 +424,7 @@
 				F342192BE655D715D208BD7D /* GogModel.swift */,
 				EE0F686CB722D6757F5466EC /* LaunchHistory.swift */,
 				5D959CDD795E6B0BF162B9CF /* LibrarySection.swift */,
+				1DC759FD0238E580F0191E23 /* PerformanceEstimates.swift */,
 				A012110E8261B945C6400232 /* PerformanceReports.swift */,
 				3C0880046EB4E1E1E0E37E50 /* RememberedSession.swift */,
 				FA8AA40F77D5B08D2F79B1B1 /* RosettaModel.swift */,
@@ -833,6 +836,7 @@
 				4F2E7ADCF151628CAC75717D /* ObeliskBridge.swift in Sources */,
 				602460D0381A3B4EDF7683D0 /* ObeliskStyle.swift in Sources */,
 				E416B019B13CD50583F8A869 /* OverlaySteamPages.swift in Sources */,
+				01C8D856E96DD6CD8CD5F3DE /* PerformanceEstimates.swift in Sources */,
 				41E3F4EE847FD70B01ABF63A /* PerformanceReports.swift in Sources */,
 				90F186AD582F8B291ADD3F9C /* RememberedSession.swift in Sources */,
 				2777146C9AFA065E8DB52F2C /* RootView.swift in Sources */,

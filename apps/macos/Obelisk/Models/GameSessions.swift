@@ -13,6 +13,8 @@ protocol GameStorefront {
     static func identity(_ game: GameID, account: AccountID) -> GameIdentity?
     static func account(_ account: AccountID) -> GameAccount
     static func account(of account: GameAccount) -> AccountID?
+    /// How getobelisk.app names `game`: its ID in the store.
+    static func storeGameID(_ game: GameID) -> String?
     /// A refused or failed session call, as this storefront reports errors.
     static func failure(_ key: String) -> Error
     static var invalidSession: String { get }
@@ -32,6 +34,7 @@ enum SteamGames: GameStorefront {
         guard case let .steam(steamId) = account else { return nil }
         return steamId
     }
+    static func storeGameID(_ game: UInt32) -> String? { String(game) }
     /// Steam's own errors keep their meaning, such as a sign-in to renew.
     static func failure(_ key: String) -> Error {
         switch key {
@@ -62,6 +65,7 @@ enum EpicGames: GameStorefront {
         guard case let .epic(accountId) = account else { return nil }
         return accountId
     }
+    static func storeGameID(_ game: String) -> String? { epicGameID(game)?.appName }
     /// A signed-out account still signs Obelisk out, as any Epic call does.
     static func failure(_ key: String) -> Error {
         switch key {
@@ -92,6 +96,7 @@ enum GogGames: GameStorefront {
         guard case let .gog(userId) = account else { return nil }
         return userId
     }
+    static func storeGameID(_ game: String) -> String? { game }
     /// A signed-out account still signs Obelisk out, as any GOG call does.
     static func failure(_ key: String) -> Error {
         switch key {

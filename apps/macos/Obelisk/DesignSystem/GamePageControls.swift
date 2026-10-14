@@ -71,6 +71,8 @@ struct GameMetrics {
     var playtime: String?
     var cloud: CloudIndicatorButton?
     var achievements: GameAchievementsModel
+    /// How the game runs on this Mac's chip, as other players measured it.
+    var estimate: PerformanceEstimates.Estimate?
 }
 
 /// A game page's metrics, under its launch button.
@@ -114,6 +116,9 @@ struct GameMetricsRow: View {
                     Text(playtime)
                 }
             }
+            if level < 3, let estimate = metrics.estimate, let fps = estimate.fpsMedian {
+                GameExpectedFPSButton(estimate: estimate, fps: fps)
+            }
             GameAchievementsButton(model: metrics.achievements)
             // An installed game's size moves last, where it leaves first.
             if metrics.isInstalled, level < 1, let size = metrics.size {
@@ -126,6 +131,43 @@ struct GameMetricsRow: View {
         }
         // Aligns the first metric's symbol with the launch button's edge.
         .padding(.leading, -10)
+    }
+}
+
+/// The frame rate other players measured on this Mac's chip, or on the
+/// nearest weaker one. It opens the game's page on getobelisk.app, with
+/// every chip's numbers.
+struct GameExpectedFPSButton: View {
+    let estimate: PerformanceEstimates.Estimate
+    let fps: Double
+    @State private var isHovered = false
+    @Environment(\.openURL) private var openURL
+
+    private var value: String {
+        let rate = String(Int(fps.rounded()))
+        guard estimate.measuredOn != MacHardware.current.chip else {
+            return L10n.string("ui.game.metric.expected_fps_value", rate)
+        }
+        let name = estimate.measuredOn
+        let chip = name.hasPrefix("Apple ") ? String(name.dropFirst("Apple ".count)) : name
+        return L10n.string("ui.game.metric.expected_fps_value_other_chip", rate, chip)
+    }
+
+    var body: some View {
+        Button { estimate.page.map { openURL($0) } } label: {
+            GameMetricLabel(caption: L10n.string("ui.game.metric.expected_fps"), isHighlighted: isHovered) {
+                GameMetricSymbol(name: "gauge.with.needle")
+            } value: {
+                Text(value).monospacedDigit()
+            }
+        }
+        .obeliskButtonStyle(.plain)
+        .onHover { isHovered = $0 }
+        .fixedSize()
+        .accessibilityLabel(L10n.string("ui.game.metric.expected_fps"))
+        .accessibilityValue(value)
+        .accessibilityIdentifier("game-expected-fps")
+        .help(L10n.string("ui.game.metric.expected_fps_help", String(estimate.sessions), estimate.measuredOn))
     }
 }
 
