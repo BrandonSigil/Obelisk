@@ -120,6 +120,23 @@ async fn the_development_runtime_takes_precedence_over_any_release() {
 }
 
 #[tokio::test]
+async fn the_installed_release_is_the_runtime_games_run_in() {
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path().join("Voile");
+    let (archive, release) = release_archive(directory.path(), "v1.0.0-2", "v1.0.0-2");
+    assert_eq!(installed(&root, &release), None);
+    Install::new()
+        .install(&root, &release, Some(&archive))
+        .await
+        .unwrap();
+    assert_eq!(installed(&root, &release), Some("v1.0.0-2".into()));
+    fs::create_dir_all(root.join("current/bin")).unwrap();
+    fs::write(root.join("current/bin/wine"), "wine").unwrap();
+    fs::write(root.join("current").join(MANIFEST), r#"{"version": "dev"}"#).unwrap();
+    assert_eq!(installed(&root, &release), Some("dev".into()));
+}
+
+#[tokio::test]
 async fn a_cancelled_install_stops_before_it_starts() {
     let directory = tempfile::tempdir().unwrap();
     let root = directory.path().join("Voile");

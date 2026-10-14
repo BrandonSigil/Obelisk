@@ -173,7 +173,7 @@ When a game closes, Obelisk sends its frame rate, how it ended and your Mac's ch
 
 ## Privacy
 
-Obelisk has no account of its own and does not track what you do in it. It talks to Steam, Epic Games and GOG to sign you in and get your games, and to getobelisk.app for [how games run](#how-games-run).
+Obelisk has no account of its own and does not track what you do in it. It talks to Steam, Epic Games and GOG to sign you in and get your games, and to getobelisk.app for [how games run](#how-games-run) and for the bug reports you send.
 
 - **What Obelisk sends.** When a game closes, one report goes to getobelisk.app:
   - the game: its store, its ID in that store and its name,
@@ -183,6 +183,7 @@ Obelisk has no account of its own and does not track what you do in it. It talks
   - the versions of Obelisk and Voile it ran with.
 - **What it never sends.** Nothing in a report names you or ties two reports together: no account, no store ID of yours, no device ID. The site's database keeps each report and the time it arrived, not your IP address.
 - **Turning it off.** Turn off **Share game performance** in **Settings → Games**. It is on by default. With it off, Obelisk sends nothing when a game closes, and still shows Expected FPS.
+- **Bug reports.** Obelisk sends one only when you send it yourself, from **SOS** on a game's page or **I found a bug** in **Settings → Help**. It holds what you wrote, the contact you gave if any, your Mac's chip, model and macOS version, and the versions of Obelisk and Voile. With **Attach logs** on, it adds the files the sheet lists: the game's logs, Obelisk's log from the last hour and recent crash reports. Obelisk removes your user name from file paths and the device identifiers macOS writes in crash reports. getobelisk.app passes the report to a private channel of Obelisk's Discord server and keeps nothing.
 
 ## Known limitations
 
@@ -258,7 +259,9 @@ Deleting the app alone leaves your games and settings on the Mac. To remove ever
 
 ## Support
 
-Found a bug or a game that does not work? [Open an issue](https://github.com/Zagrios/obelisk/issues/new) and include:
+Found a bug or a game that does not work? The quickest way to tell us is from Obelisk: press **SOS** on the game's page, or **I found a bug** in **Settings → Help** for a problem with Obelisk itself. Say what happened, keep **Attach logs** on and send. Obelisk then shows a code. Mention it if you also open an issue, so we can find your report.
+
+You can also [open an issue](https://github.com/Zagrios/obelisk/issues/new) and include:
 
 - your Mac model and macOS version,
 - your Obelisk version, shown in **Settings**,

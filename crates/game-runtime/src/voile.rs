@@ -108,6 +108,16 @@ fn has_engine(runtime: &Path) -> bool {
     runtime.join("engine/fexdarwin-run").is_file() && runtime.join("wine/bin/wine").exists()
 }
 
+/// The Voile release Windows games run in now, as its runtime.json names it:
+/// the development runtime's, else the pinned release once installed.
+pub fn installed_release(root: &Path) -> Option<String> {
+    installed(root, release())
+}
+
+fn installed(root: &Path, release: &Release) -> Option<String> {
+    release_of(&located(root, release)?)
+}
+
 /// The Voile release `runtime` comes from: a Rosetta runtime, or the Linux
 /// engine's runtime inside one.
 pub(crate) fn release_of(runtime: &Path) -> Option<String> {

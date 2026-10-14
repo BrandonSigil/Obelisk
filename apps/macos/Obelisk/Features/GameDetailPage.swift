@@ -118,6 +118,10 @@ struct GameDetailPage<Model: LibraryStorefront, HeroArtwork: View, Cover: View, 
                 Color.clear.frame(height: Self.coverOverlap)
                 GameLaunchRow(metrics: metrics) {
                     GamePageAction(installations: installations, gameName: name)
+                    if let id = Model.Store.storeGameID(game.id) {
+                        GameReportButton(subject: .game(store: Model.Store.storefront, id: id, name: name),
+                                         gameName: name)
+                    }
                     if let receipt = installations.selectedReceipt {
                         GameManagementButton(
                             gameName: name,

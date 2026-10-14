@@ -46,6 +46,10 @@ struct RootView: View {
                        height: max(460, windowSize.height - 50))
         }
         .environment(\.presentStore) { model.presentedStore = $0 }
+        .sheet(item: $model.bugReport) { report in
+            BugReportSheet(model: report) { model.bugReport = nil }
+        }
+        .environment(\.reportBug) { model.reportBug($0) }
         .environment(model.estimates)
         // A store belongs to the library it opened from.
         .onChange(of: model.selection) { model.presentedStore = nil }

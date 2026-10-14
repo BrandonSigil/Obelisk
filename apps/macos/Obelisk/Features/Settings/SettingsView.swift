@@ -3,7 +3,7 @@ import SwiftUI
 
 /// Obelisk's settings: a hero drawn from Obelisk's icon, its prism and the
 /// stores' beams, reaching under the title bar band; then the appearance, the
-/// language, the games, the storage and the storefronts, each a card of rows
+/// language, the games, the storage, the storefronts and help, each a card of rows
 /// as a game page's. The
 /// bar's backdrop and the page's title show once the hero scrolled under it.
 struct SettingsView: View {
@@ -61,6 +61,11 @@ struct SettingsView: View {
                                     model.selection = section
                                 }
                             }
+                        }
+                    }
+                    GamePageSection(title: L10n.string("ui.settings.help")) {
+                        SettingsCard {
+                            reportBug
                         }
                     }
                 }
@@ -138,6 +143,19 @@ struct SettingsView: View {
             }
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(L10n.string("ui.settings.overlay_shortcut"))
+        }
+    }
+
+    private var reportBug: some View {
+        SettingsRow(title: L10n.string("ui.settings.report_bug")) {
+            SettingsSymbol(name: "ladybug.fill", colors: [Color(red: 0.98, green: 0.45, blue: 0.42), Color(red: 0.86, green: 0.22, blue: 0.3)])
+        } detail: {
+            Text(L10n.string("ui.settings.report_bug_description", AppIdentity.name))
+        } accessory: {
+            SettingsGlassButton(title: L10n.string("ui.settings.report"), systemImage: "paperplane",
+                                identifier: "settings-report-bug") {
+                model.reportBug(.app)
+            }
         }
     }
 

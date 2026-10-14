@@ -30,6 +30,8 @@ final class AppModel {
     let downloads: DownloadsModel
     /// The storefront's store, open over the whole window.
     var presentedStore: StorePresentation?
+    /// The bug report being written, open over the whole window.
+    var bugReport: BugReportModel?
     private(set) var activeFriendsAccount: FriendsAccountIdentity?
     /// The game whose page Home opened, while its storefront still shows it.
     var homeGame: HomeGame.ID?
@@ -125,6 +127,11 @@ final class AppModel {
             guard let id = Store.storeGameID(game) else { return }
             performance.report(played, of: id, titled: title(game), in: Store.storefront)
         }
+    }
+
+    /// Opens the bug report sheet on `subject`.
+    func reportBug(_ subject: BugReportSubject) {
+        bugReport = BugReportModel(subject: subject, sources: .live)
     }
 
     /// A queued Transfer's progress, from its storefront's installations.

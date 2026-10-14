@@ -63,6 +63,13 @@ pub fn end_orphaned_windows_games(locations: ObeliskLocations) -> u32 {
     game_runtime::wine::end_orphans(Path::new(&locations.voile)) as u32
 }
 
+/// The Voile release Windows games run in now, once one is installed. Bug
+/// reports name it.
+#[uniffi::export]
+pub fn installed_voile_release(locations: ObeliskLocations) -> Option<String> {
+    game_runtime::voile::installed_release(Path::new(&locations.voile))
+}
+
 impl From<&ObeliskLocations> for game_runtime::Locations {
     fn from(locations: &ObeliskLocations) -> Self {
         Self {

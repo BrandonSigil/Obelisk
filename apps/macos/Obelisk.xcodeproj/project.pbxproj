@@ -37,6 +37,7 @@
 		4153837C806F2E9BC86213F5 /* SteamModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6DDA40BCB74AB6466C8480A8 /* SteamModel.swift */; };
 		41E3F4EE847FD70B01ABF63A /* PerformanceReports.swift in Sources */ = {isa = PBXBuildFile; fileRef = A012110E8261B945C6400232 /* PerformanceReports.swift */; };
 		42C503113D9A38FD621CA278 /* SteamGameRequests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A046C384B58E0E92CD7FB47F /* SteamGameRequests.swift */; };
+		466AAAF79F3062826801EC3F /* BugReportsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 65508813D23BE1945B9257C8 /* BugReportsTests.swift */; };
 		48E216D81E9FEB92647DE10D /* HomeGame.swift in Sources */ = {isa = PBXBuildFile; fileRef = C28C555A011FBFB87AAC6316 /* HomeGame.swift */; };
 		48E773255F143848FF3BC492 /* EpicAuthorizationCallbackTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A8B31EA27EBFCBF55111A574 /* EpicAuthorizationCallbackTests.swift */; };
 		4F2E7ADCF151628CAC75717D /* ObeliskBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = BAD5AF6789B146C00B82131E /* ObeliskBridge.swift */; };
@@ -62,6 +63,7 @@
 		8448D779F833EB8A9FBFCAC6 /* FakeInstallations.swift in Sources */ = {isa = PBXBuildFile; fileRef = EAB2A93A1E1E6028B8B03C93 /* FakeInstallations.swift */; };
 		88D9A2E026D696E0CA1AC075 /* KeychainStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3C4EC52AA5CAB971287DAE38 /* KeychainStore.swift */; };
 		8A561DE50DEE40B5C09DD513 /* LaunchHistory.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE0F686CB722D6757F5466EC /* LaunchHistory.swift */; };
+		8B02B34486F629D52B28DA07 /* BugReports.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49248047556E326B522E5CE9 /* BugReports.swift */; };
 		8BCD97905A976576349CA14D /* GameInstallations.swift in Sources */ = {isa = PBXBuildFile; fileRef = 68653F3AE8D231E10D5D4BDD /* GameInstallations.swift */; };
 		90F186AD582F8B291ADD3F9C /* RememberedSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3C0880046EB4E1E1E0E37E50 /* RememberedSession.swift */; };
 		90FDA129C02A8FA8F7AAE4E0 /* CoverShelf.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B20627E357FFAEBA65BACEF /* CoverShelf.swift */; };
@@ -138,6 +140,7 @@
 		F311E0E4BD1F93C942487E8E /* SteamChatText.swift in Sources */ = {isa = PBXBuildFile; fileRef = 08D960F5E9DFF5A3F67F1214 /* SteamChatText.swift */; };
 		F4828A6FBF2E5A1E96B2FF9B /* EpicDownloadTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6BA7860DE0C2DA6C6B9A10A1 /* EpicDownloadTests.swift */; };
 		F60F3A240C2889D1CBB5B688 /* FriendsPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = A725C09D79F7AAE15FF19636 /* FriendsPresentation.swift */; };
+		FE45550C7AAADD5203DF3178 /* BugReportSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6AC1669AF812D0030EAEAE29 /* BugReportSheet.swift */; };
 		FFA164D07D4F94ADA7C57693 /* CloudIndicator.swift in Sources */ = {isa = PBXBuildFile; fileRef = EFAE53AFCA080DC262609117 /* CloudIndicator.swift */; };
 /* End PBXBuildFile section */
 
@@ -189,6 +192,7 @@
 		4136776D42036B28DFCDB629 /* EpicWebAuthenticationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EpicWebAuthenticationTests.swift; sourceTree = "<group>"; };
 		4773A183BA103C16DCCF99BE /* SteamCloudModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SteamCloudModelTests.swift; sourceTree = "<group>"; };
 		47939AD0E720E95F3632E442 /* SteamArtwork.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SteamArtwork.swift; sourceTree = "<group>"; };
+		49248047556E326B522E5CE9 /* BugReports.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BugReports.swift; sourceTree = "<group>"; };
 		4BFED8E9D46E4887DDA7EC6C /* Obelisk.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Obelisk.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		4EF7FBF80230D766B29E0046 /* GameOverlayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GameOverlayView.swift; sourceTree = "<group>"; };
 		513D153BB2AFAAD3B75C6107 /* StorefrontScrollView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StorefrontScrollView.swift; sourceTree = "<group>"; };
@@ -197,10 +201,12 @@
 		5A93224C60170D9DC5BE88E6 /* GamePageControls.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GamePageControls.swift; sourceTree = "<group>"; };
 		5D959CDD795E6B0BF162B9CF /* LibrarySection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibrarySection.swift; sourceTree = "<group>"; };
 		6065CF30EEBD01C8C123E72B /* EpicFriendsIntegrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EpicFriendsIntegrationTests.swift; sourceTree = "<group>"; };
+		65508813D23BE1945B9257C8 /* BugReportsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BugReportsTests.swift; sourceTree = "<group>"; };
 		65D7B961D611935E491DAAB4 /* LibraryTile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryTile.swift; sourceTree = "<group>"; };
 		671E6DBCB5F68AC4C9553B75 /* GameDetailPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GameDetailPage.swift; sourceTree = "<group>"; };
 		68653F3AE8D231E10D5D4BDD /* GameInstallations.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GameInstallations.swift; sourceTree = "<group>"; };
 		69A52CBDF11147EF8F197B50 /* SidebarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SidebarView.swift; sourceTree = "<group>"; };
+		6AC1669AF812D0030EAEAE29 /* BugReportSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BugReportSheet.swift; sourceTree = "<group>"; };
 		6AFE98D57B90D79D12C5A772 /* GameSessions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GameSessions.swift; sourceTree = "<group>"; };
 		6B7436ED3349489C9B7701E9 /* L10n.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = L10n.swift; sourceTree = "<group>"; };
 		6BA7860DE0C2DA6C6B9A10A1 /* EpicDownloadTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EpicDownloadTests.swift; sourceTree = "<group>"; };
@@ -390,6 +396,7 @@
 		6993086A162E041E04FE7204 /* Features */ = {
 			isa = PBXGroup;
 			children = (
+				6AC1669AF812D0030EAEAE29 /* BugReportSheet.swift */,
 				671E6DBCB5F68AC4C9553B75 /* GameDetailPage.swift */,
 				1614CF7FBF3DDD00B5219A01 /* RootView.swift */,
 				74702AF1D02D1FB7FC66DBDB /* StorefrontBrowser.swift */,
@@ -412,6 +419,7 @@
 			isa = PBXGroup;
 			children = (
 				33402992E2BE7F752EAEFFF9 /* AppAppearance.swift */,
+				49248047556E326B522E5CE9 /* BugReports.swift */,
 				0972C37E6066B1BD402A0C44 /* CloudModel.swift */,
 				FAF73BDBA41BEE185C11F0A2 /* DownloadsModel.swift */,
 				2C2249CAA2BF6A77AF8E4C67 /* EpicModel.swift */,
@@ -502,6 +510,7 @@
 			isa = PBXGroup;
 			children = (
 				B54E7E0E34135C2C899C048C /* AppModelTests.swift */,
+				65508813D23BE1945B9257C8 /* BugReportsTests.swift */,
 				4024CE602258C52687872633 /* CloudIndicatorTests.swift */,
 				40D38B649E55B64C5CEDFA36 /* DownloadsModelTests.swift */,
 				A8B31EA27EBFCBF55111A574 /* EpicAuthorizationCallbackTests.swift */,
@@ -734,6 +743,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				D2B777736CACE64774C38376 /* AppModelTests.swift in Sources */,
+				466AAAF79F3062826801EC3F /* BugReportsTests.swift in Sources */,
 				58051F6838D9275B09507C87 /* CloudIndicatorTests.swift in Sources */,
 				F0659BEF43036151114C0AAD /* DownloadsModelTests.swift in Sources */,
 				48E773255F143848FF3BC492 /* EpicAuthorizationCallbackTests.swift in Sources */,
@@ -786,6 +796,8 @@
 				67E410310ED5E3C09C281EC5 /* AppIdentity.swift in Sources */,
 				64321D66A64C67E9EB3F525E /* AppLifecycle.swift in Sources */,
 				B151A7F54ABB00ACFE73EA6D /* AppModel.swift in Sources */,
+				FE45550C7AAADD5203DF3178 /* BugReportSheet.swift in Sources */,
+				8B02B34486F629D52B28DA07 /* BugReports.swift in Sources */,
 				B3B05906FF7E3CA901417773 /* CachedArtwork.swift in Sources */,
 				FFA164D07D4F94ADA7C57693 /* CloudIndicator.swift in Sources */,
 				5D721DE96425D4812689BD9E /* CloudModel.swift in Sources */,

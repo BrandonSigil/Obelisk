@@ -13927,6 +13927,18 @@ public func endOrphanedWindowsGames(locations: ObeliskLocations) -> UInt32  {
     )
 })
 }
+/**
+ * The Voile release Windows games run in now, once one is installed. Bug
+ * reports name it.
+ */
+public func installedVoileRelease(locations: ObeliskLocations) -> String?  {
+    return try!  FfiConverterOptionString.lift(try! rustCall() {
+        uniffiCallStatus in
+    uniffi_obelisk_bridge_fn_func_installed_voile_release(
+        FfiConverterTypeObeliskLocations_lower(locations),uniffiCallStatus
+    )
+})
+}
 public func obeliskLocations(library: String, bundle: String, home: String) -> ObeliskLocations  {
     return try!  FfiConverterTypeObeliskLocations_lift(try! rustCall() {
         uniffiCallStatus in
@@ -14006,6 +14018,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_obelisk_bridge_checksum_func_end_orphaned_windows_games() != 9000) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_obelisk_bridge_checksum_func_installed_voile_release() != 5445) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_obelisk_bridge_checksum_func_obelisk_locations() != 18961) {

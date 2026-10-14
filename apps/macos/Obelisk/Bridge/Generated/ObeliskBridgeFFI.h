@@ -1110,6 +1110,11 @@ RustBuffer uniffi_obelisk_bridge_fn_func_gog_login_url(RustCallStatus *_Nonnull 
 uint32_t uniffi_obelisk_bridge_fn_func_end_orphaned_windows_games(RustBuffer locations, RustCallStatus *_Nonnull out_status
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_OBELISK_BRIDGE_FN_FUNC_INSTALLED_VOILE_RELEASE
+#define UNIFFI_FFIDEF_UNIFFI_OBELISK_BRIDGE_FN_FUNC_INSTALLED_VOILE_RELEASE
+RustBuffer uniffi_obelisk_bridge_fn_func_installed_voile_release(RustBuffer locations, RustCallStatus *_Nonnull out_status
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_OBELISK_BRIDGE_FN_FUNC_OBELISK_LOCATIONS
 #define UNIFFI_FFIDEF_UNIFFI_OBELISK_BRIDGE_FN_FUNC_OBELISK_LOCATIONS
 RustBuffer uniffi_obelisk_bridge_fn_func_obelisk_locations(RustBuffer library, RustBuffer bundle, RustBuffer home, RustCallStatus *_Nonnull out_status
@@ -1429,6 +1434,12 @@ uint16_t uniffi_obelisk_bridge_checksum_func_gog_login_url(void
 #ifndef UNIFFI_FFIDEF_UNIFFI_OBELISK_BRIDGE_CHECKSUM_FUNC_END_ORPHANED_WINDOWS_GAMES
 #define UNIFFI_FFIDEF_UNIFFI_OBELISK_BRIDGE_CHECKSUM_FUNC_END_ORPHANED_WINDOWS_GAMES
 uint16_t uniffi_obelisk_bridge_checksum_func_end_orphaned_windows_games(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_OBELISK_BRIDGE_CHECKSUM_FUNC_INSTALLED_VOILE_RELEASE
+#define UNIFFI_FFIDEF_UNIFFI_OBELISK_BRIDGE_CHECKSUM_FUNC_INSTALLED_VOILE_RELEASE
+uint16_t uniffi_obelisk_bridge_checksum_func_installed_voile_release(void
     
 );
 #endif
