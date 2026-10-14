@@ -345,7 +345,12 @@ enum BugReportPayload {
         return body
     }
 
-    struct Refused: Error {}
+    enum Failure: Error {
+        /// The site or Discord refused the report, or the network failed.
+        case refused
+        /// The site's firewall turned away more reports from this network.
+        case tooMany
+    }
 
     /// Sends `report` with `logs`, returning the code the site gave it.
     static func send(_ report: BugReport, logs: [BugReportLog],
@@ -360,8 +365,11 @@ enum BugReportPayload {
         request.httpBody = body(report: json, logs: logs, boundary: boundary)
         let (data, response) = try await post(request)
         struct Answer: Decodable { let code: String }
-        guard (response as? HTTPURLResponse)?.statusCode == 201,
-              let answer = try? JSONDecoder().decode(Answer.self, from: data) else { throw Refused() }
+        let status = (response as? HTTPURLResponse)?.statusCode
+        if status == 429 { throw Failure.tooMany }
+        guard status == 201, let answer = try? JSONDecoder().decode(Answer.self, from: data) else {
+            throw Failure.refused
+        }
         return answer.code
     }
 
@@ -381,7 +389,9 @@ final class BugReportModel: Identifiable {
         case editing
         case sending
         case sent(code: String)
-        case failed
+        /// Sending failed; `tooMany` when the site turned away more reports
+        /// from this network for a while.
+        case failed(tooMany: Bool)
     }
 
     let subject: BugReportSubject
@@ -406,7 +416,10 @@ final class BugReportModel: Identifiable {
     }
 
     var canSend: Bool {
-        (phase == .editing || phase == .failed) && !description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        switch phase {
+        case .editing, .failed: !description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        case .sending, .sent: false
+        }
     }
 
     /// Lists the files the report attaches.
@@ -429,8 +442,10 @@ final class BugReportModel: Identifiable {
             }.value
             issue = GitHubIssues.bug(report, code: code)
             phase = .sent(code: code)
+        } catch BugReportPayload.Failure.tooMany {
+            phase = .failed(tooMany: true)
         } catch {
-            phase = .failed
+            phase = .failed(tooMany: false)
         }
     }
 

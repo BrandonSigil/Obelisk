@@ -72,8 +72,8 @@ struct BugReportSheet: View {
                     .accessibilityIdentifier("bug-report-contact")
             }
             logs
-            if model.phase == .failed {
-                Text(L10n.string("ui.report.failed"))
+            if case let .failed(tooMany) = model.phase {
+                Text(tooMany ? L10n.string("ui.report.too_many") : L10n.string("ui.report.failed"))
                     .font(.system(size: 12))
                     .foregroundStyle(.red)
                     .fixedSize(horizontal: false, vertical: true)

@@ -13712,6 +13712,23 @@
           }
         }
       }
+    },
+    "ui.report.too_many": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Too many reports were sent from your network. Try again in a few minutes."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Trop de rapports ont été envoyés depuis votre réseau. Réessayez dans quelques minutes."
+          }
+        }
+      }
     }
   },
   "version": "1.0"

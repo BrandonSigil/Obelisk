@@ -293,11 +293,22 @@ final class BugReportsTests: XCTestCase {
         model.description = "It crashes."
         model.attachesLogs = false
         await model.send()
-        XCTAssertEqual(model.phase, .failed)
+        XCTAssertEqual(model.phase, .failed(tooMany: false))
         XCTAssertTrue(model.canSend, "a failed report can be sent again")
         let sent = await requests.all
         let body = String(decoding: try XCTUnwrap(sent.first?.httpBody), as: UTF8.self)
         XCTAssertFalse(body.contains(#"name="log""#))
+    }
+
+    func testAReportRefusedForTooManyFromThisNetworkSaysSo() async throws {
+        let model = BugReportModel(subject: .app, sources: sources, mac: Self.mac) { request in
+            (Data("Too Many Requests".utf8),
+             HTTPURLResponse(url: request.url!, statusCode: 429, httpVersion: nil, headerFields: nil)!)
+        }
+        model.description = "The library is empty."
+        await model.send()
+        XCTAssertEqual(model.phase, .failed(tooMany: true))
+        XCTAssertTrue(model.canSend)
     }
 
     private func gunzip(_ data: Data) throws -> Data {
