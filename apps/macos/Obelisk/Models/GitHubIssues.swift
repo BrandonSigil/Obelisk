@@ -30,8 +30,9 @@ enum GitHubIssues {
         return url(fields)
     }
 
+    /// The feature form, its title started for the player.
     static func feature(obeliskVersion: String) -> URL {
-        url([("template", "feature_request.yml"), ("obelisk-version", obeliskVersion)])
+        url([("template", "feature_request.yml"), ("title", "FEATURE : "), ("obelisk-version", obeliskVersion)])
     }
 
     private static func storeName(_ store: String) -> String {

@@ -1,5 +1,6 @@
 name: Feature request
 description: Suggest something Obelisk should do.
+title: "FEATURE : "
 labels: ["enhancement"]
 body:
   - type: textarea

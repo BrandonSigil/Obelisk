@@ -120,9 +120,9 @@ final class BugReportsTests: XCTestCase {
         XCTAssertLessThanOrEqual(try XCTUnwrap(fields["what-happened"]).utf16.count, GitHubIssues.textLimit)
     }
 
-    func testAFeatureIssueOpensTheFeatureFormWithObelisksVersion() throws {
+    func testAFeatureIssueOpensTheFeatureFormWithItsTitlePrefixAndObelisksVersion() throws {
         XCTAssertEqual(try fields(GitHubIssues.feature(obeliskVersion: "0.1.0")),
-                       ["template": "feature_request.yml", "obelisk-version": "0.1.0"])
+                       ["template": "feature_request.yml", "title": "FEATURE : ", "obelisk-version": "0.1.0"])
     }
 
     // MARK: What goes out
