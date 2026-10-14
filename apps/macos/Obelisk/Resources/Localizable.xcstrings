@@ -13627,6 +13627,91 @@
           }
         }
       }
+    },
+    "ui.report.open_issue": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open a GitHub issue"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ouvrir une issue GitHub"
+          }
+        }
+      }
+    },
+    "ui.report.open_issue_help": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Opens GitHub's bug form with this report filled in. An issue is public; your logs and contact stay private."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ouvre le formulaire de bug de GitHub, rempli avec ce rapport. Une issue est publique, vos logs et votre contact restent privés."
+          }
+        }
+      }
+    },
+    "ui.settings.request_feature": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Request a feature"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Proposer une fonctionnalité"
+          }
+        }
+      }
+    },
+    "ui.settings.request_feature_description": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Suggest an idea on GitHub. %@ opens the form for you."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Proposez une idée sur GitHub. %@ vous ouvre le formulaire."
+          }
+        }
+      }
+    },
+    "ui.settings.suggest": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Suggest…"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Proposer…"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

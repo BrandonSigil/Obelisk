@@ -14,9 +14,9 @@
     ·
     <a href="https://discord.gg/h5a7F4rZ6f">Discord</a>
     ·
-    <a href="https://github.com/Zagrios/obelisk/issues/new">Report a bug</a>
+    <a href="https://github.com/Zagrios/obelisk/issues/new?template=bug_report.yml">Report a bug</a>
     ·
-    <a href="https://github.com/Zagrios/obelisk/issues/new">Request a feature</a>
+    <a href="https://github.com/Zagrios/obelisk/issues/new?template=feature_request.yml">Request a feature</a>
   </p>
   <p>
     <a href="https://github.com/Zagrios/obelisk/releases/latest"><img src="https://img.shields.io/github/v/release/Zagrios/obelisk?style=for-the-badge&label=version" alt="Latest version"></a>
@@ -261,13 +261,11 @@ Deleting the app alone leaves your games and settings on the Mac. To remove ever
 
 ## Support
 
-Found a bug or a game that does not work? The quickest way to tell us is from Obelisk: press **SOS** on the game's page, or **I found a bug** in **Settings → Help** for a problem with Obelisk itself. Say what happened, keep **Attach logs** on and send. Obelisk then shows a code. Mention it on [Discord](https://discord.gg/h5a7F4rZ6f) or in an issue, so we can find your report.
+Found a bug or a game that does not work? The quickest way to tell us is from Obelisk: press **SOS** on the game's page, or **I found a bug** in **Settings → Help** for a problem with Obelisk itself. Say what happened, keep **Attach logs** on and send. Obelisk then shows a code. Mention it on [Discord](https://discord.gg/h5a7F4rZ6f), or press **Open a GitHub issue** to get GitHub's bug form with your report already filled in.
 
-You can also [open an issue](https://github.com/Zagrios/obelisk/issues/new) and include:
+You can also [open an issue](https://github.com/Zagrios/obelisk/issues/new?template=bug_report.yml) yourself. The form asks for your Mac, its macOS version, your Obelisk version (shown in **Settings**) and what happened.
 
-- your Mac model and macOS version,
-- your Obelisk version, shown in **Settings**,
-- the game, its store, and what happened.
+Have an idea? [Request a feature](https://github.com/Zagrios/obelisk/issues/new?template=feature_request.yml), or press **Request a feature** in **Settings → Help**.
 
 Logs help a lot. They are in `~/Library/Logs/Obelisk` (Finder: **Go → Go to Folder…**). Attach the ones of the game you tried, after checking they show nothing you want to keep private.
 

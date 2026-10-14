@@ -390,6 +390,8 @@ final class BugReportModel: Identifiable {
     var attachesLogs = true
     private(set) var files: [BugReportFile] = []
     private(set) var phase = Phase.editing
+    /// GitHub's bug form with the sent report filled in.
+    private(set) var issue: URL?
 
     @ObservationIgnored private let sources: BugReportSources
     @ObservationIgnored private let mac: MacHardware
@@ -419,15 +421,21 @@ final class BugReportModel: Identifiable {
         let sources = self.sources, post = self.post, files = attachesLogs ? self.files : []
         let subject = self.subject, description = self.description, contact = self.contact, mac = self.mac
         do {
-            let code = try await Task.detached {
+            let (report, code) = try await Task.detached {
                 let report = BugReport(subject: subject, description: description, contact: contact, mac: mac,
                                        obeliskVersion: AppIdentity.version, voileVersion: sources.voile())
-                return try await BugReportPayload.send(report, logs: await sources.contents(of: files), post: post)
+                let code = try await BugReportPayload.send(report, logs: await sources.contents(of: files), post: post)
+                return (report, code)
             }.value
+            issue = GitHubIssues.bug(report, code: code)
             phase = .sent(code: code)
         } catch {
             phase = .failed
         }
+    }
+
+    func openIssue() {
+        if let issue { NSWorkspace.shared.open(issue) }
     }
 
     /// Shows the attached files that are on disk in Finder.

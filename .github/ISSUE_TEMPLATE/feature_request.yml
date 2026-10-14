@@ -1,0 +1,27 @@
+name: Feature request
+description: Suggest something Obelisk should do.
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: idea
+    attributes:
+      label: What should Obelisk do?
+      description: Describe the feature as you would use it.
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Why?
+      description: What it would let you do, or what is hard to do today.
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: How do you do it today?
+      description: Another app, a workaround, or not at all.
+  - type: input
+    id: obelisk-version
+    attributes:
+      label: Obelisk version
+      description: Shown in Settings.
+      placeholder: "0.1.0"

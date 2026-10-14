@@ -66,6 +66,8 @@ struct SettingsView: View {
                     GamePageSection(title: L10n.string("ui.settings.help")) {
                         SettingsCard {
                             reportBug
+                            SettingsDivider()
+                            requestFeature
                         }
                     }
                 }
@@ -155,6 +157,19 @@ struct SettingsView: View {
             SettingsGlassButton(title: L10n.string("ui.settings.report"), systemImage: "paperplane",
                                 identifier: "settings-report-bug") {
                 model.reportBug(.app)
+            }
+        }
+    }
+
+    private var requestFeature: some View {
+        SettingsRow(title: L10n.string("ui.settings.request_feature")) {
+            SettingsSymbol(name: "lightbulb.fill", colors: [Color(red: 1, green: 0.8, blue: 0.3), Color(red: 0.95, green: 0.6, blue: 0.1)])
+        } detail: {
+            Text(L10n.string("ui.settings.request_feature_description", AppIdentity.name))
+        } accessory: {
+            SettingsGlassButton(title: L10n.string("ui.settings.suggest"), systemImage: "arrow.up.right",
+                                identifier: "settings-request-feature") {
+                NSWorkspace.shared.open(GitHubIssues.feature(obeliskVersion: AppIdentity.version))
             }
         }
     }

@@ -84,6 +84,47 @@ final class BugReportsTests: XCTestCase {
         XCTAssertEqual(report.description.utf16.count, BugReport.descriptionLimit)
     }
 
+    // MARK: GitHub issues
+
+    private func fields(_ url: URL) throws -> [String: String] {
+        let items = try XCTUnwrap(URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems)
+        return Dictionary(uniqueKeysWithValues: items.map { ($0.name, $0.value ?? "") })
+    }
+
+    func testABugIssueOpensGitHubsBugFormWithTheReportFilledIn() throws {
+        let report = BugReport(subject: Self.eldenRing, description: "It crashes in C++ code & co = boom.\nThen it quits.",
+                               contact: "zag@example.com", mac: Self.mac, obeliskVersion: "0.1.0",
+                               voileVersion: "v26.3.0-13")
+        let url = GitHubIssues.bug(report, code: "K7F3-9QX2")
+        XCTAssertTrue(url.absoluteString.hasPrefix("https://github.com/Zagrios/obelisk/issues/new?"))
+        XCTAssertEqual(try fields(url), [
+            "template": "bug_report.yml",
+            "title": "ELDEN RING: It crashes in C++ code & co = boom.",
+            "report-code": "K7F3-9QX2",
+            "game": "ELDEN RING (Steam 1245620)",
+            "what-happened": "It crashes in C++ code & co = boom.\nThen it quits.",
+            "obelisk-version": "0.1.0 (Voile v26.3.0-13)",
+            "mac": "Apple M2 Pro, Mac14,12, macOS 27.0",
+        ], "the contact stays out of a public issue")
+        XCTAssertFalse(url.absoluteString.contains("+"), "a + in a query reads as a space")
+    }
+
+    func testAnAppIssueHasNoGameAndKeepsItsTitleAndTextShort() throws {
+        let report = BugReport(subject: .app, description: String(repeating: "word ", count: 1000), contact: "",
+                               mac: Self.mac, obeliskVersion: "0.1.0", voileVersion: nil)
+        let fields = try fields(GitHubIssues.bug(report, code: "K7F3-9QX2"))
+        XCTAssertNil(fields["game"])
+        XCTAssertEqual(fields["obelisk-version"], "0.1.0")
+        XCTAssertLessThanOrEqual(try XCTUnwrap(fields["title"]).count, GitHubIssues.titleLimit)
+        XCTAssertTrue(try XCTUnwrap(fields["title"]).hasSuffix("word…"))
+        XCTAssertLessThanOrEqual(try XCTUnwrap(fields["what-happened"]).utf16.count, GitHubIssues.textLimit)
+    }
+
+    func testAFeatureIssueOpensTheFeatureFormWithObelisksVersion() throws {
+        XCTAssertEqual(try fields(GitHubIssues.feature(obeliskVersion: "0.1.0")),
+                       ["template": "feature_request.yml", "obelisk-version": "0.1.0"])
+    }
+
     // MARK: What goes out
 
     func testRedactionDropsMetalHUDLinesTheHomeFolderAndDeviceIDs() {
@@ -226,6 +267,9 @@ final class BugReportsTests: XCTestCase {
         model.description = "It crashes."
         await model.send()
         XCTAssertEqual(model.phase, .sent(code: "K7F3-9QX2"))
+        let issue = try fields(XCTUnwrap(model.issue))
+        XCTAssertEqual(issue["report-code"], "K7F3-9QX2")
+        XCTAssertEqual(issue["what-happened"], "It crashes.")
         let sent = await requests.all
         let request = try XCTUnwrap(sent.first)
         XCTAssertEqual(request.url, BugReportPayload.endpoint)

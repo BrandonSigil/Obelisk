@@ -1,0 +1,50 @@
+name: Bug report
+description: Something in Obelisk or in a game doesn't work.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report it. The quickest way to send us your logs is from Obelisk itself: **SOS** on the game's page, or **Settings → Help → I found a bug**. The logs stay private, and Obelisk gives you a code to paste below. After sending, **Open a GitHub issue** fills this form in for you.
+  - type: input
+    id: report-code
+    attributes:
+      label: Report code
+      description: The code Obelisk showed after you sent a report, if you sent one.
+      placeholder: K7F3-9QX2
+  - type: input
+    id: game
+    attributes:
+      label: Game
+      description: The game and its store, if the problem is with a game.
+      placeholder: ELDEN RING (Steam)
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: How to make it happen again
+      placeholder: |
+        1. Open the game's page
+        2. Press Play
+        3. ...
+  - type: input
+    id: obelisk-version
+    attributes:
+      label: Obelisk version
+      description: Shown in Settings.
+      placeholder: "0.1.0"
+    validations:
+      required: true
+  - type: input
+    id: mac
+    attributes:
+      label: Mac and macOS
+      placeholder: Apple M2 Pro, Mac14,12, macOS 27.0
+    validations:
+      required: true

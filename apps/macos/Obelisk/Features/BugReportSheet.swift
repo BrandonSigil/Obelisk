@@ -180,6 +180,10 @@ struct BugReportSheet: View {
             .padding(.vertical, 12)
             .background(fieldBackground, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
             HStack {
+                Button(L10n.string("ui.report.open_issue"), systemImage: "arrow.up.right", action: model.openIssue)
+                    .obeliskButtonStyle(.bordered)
+                    .help(L10n.string("ui.report.open_issue_help"))
+                    .accessibilityIdentifier("bug-report-open-issue")
                 Spacer()
                 Button(L10n.string("ui.report.done"), action: close)
                     .obeliskButtonStyle(.borderedProminent)
