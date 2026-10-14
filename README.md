@@ -94,6 +94,10 @@ Obelisk is signed and notarized by Apple, so it opens without a security warning
 - A game's page shows your playtime, when you last played, its size, its achievements, its news on Steam and its details on Epic Games and GOG.
 - It also shows the game's **Expected FPS** on your Mac: see [How games run](#how-games-run).
 
+<p align="center">
+  <img src="assets/readme/library.jpg" alt="The Steam library in Obelisk: ELDEN RING, the last game played, above 127 games with filters and a sort" width="800">
+</p>
+
 ### Downloads and updates
 
 - **Download** picks the Mac version of a game when there is one, otherwise the Windows version. Games download in your language when they offer it, in English otherwise.
@@ -102,6 +106,10 @@ Obelisk is signed and notarized by Apple, so it opens without a security warning
 - Games update automatically when a new version comes out. Updates wait while you play. To update only when you launch a game, turn off **Update games automatically** in **Settings → Games**.
 - You can play an installed game while another one downloads.
 - **Verify game files**, in the gear menu next to the **Play** button, repairs missing or damaged files. **Uninstall** is in the same menu.
+
+<p align="center">
+  <img src="assets/readme/downloads.jpg" alt="Frostpunk downloading from its page, with the downloads panel open: the download speed, its graph and the queue" width="800">
+</p>
 
 ### Cloud saves
 
