@@ -12,6 +12,8 @@
     ·
     <a href="https://github.com/Zagrios/obelisk/releases/latest"><b>Download</b></a>
     ·
+    <a href="https://discord.gg/h5a7F4rZ6f">Discord</a>
+    ·
     <a href="https://github.com/Zagrios/obelisk/issues/new">Report a bug</a>
     ·
     <a href="https://github.com/Zagrios/obelisk/issues/new">Request a feature</a>
@@ -259,7 +261,7 @@ Deleting the app alone leaves your games and settings on the Mac. To remove ever
 
 ## Support
 
-Found a bug or a game that does not work? The quickest way to tell us is from Obelisk: press **SOS** on the game's page, or **I found a bug** in **Settings → Help** for a problem with Obelisk itself. Say what happened, keep **Attach logs** on and send. Obelisk then shows a code. Mention it if you also open an issue, so we can find your report.
+Found a bug or a game that does not work? The quickest way to tell us is from Obelisk: press **SOS** on the game's page, or **I found a bug** in **Settings → Help** for a problem with Obelisk itself. Say what happened, keep **Attach logs** on and send. Obelisk then shows a code. Mention it on [Discord](https://discord.gg/h5a7F4rZ6f) or in an issue, so we can find your report.
 
 You can also [open an issue](https://github.com/Zagrios/obelisk/issues/new) and include:
 
