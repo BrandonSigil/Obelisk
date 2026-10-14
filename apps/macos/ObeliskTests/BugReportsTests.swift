@@ -99,7 +99,7 @@ final class BugReportsTests: XCTestCase {
         XCTAssertTrue(url.absoluteString.hasPrefix("https://github.com/Zagrios/obelisk/issues/new?"))
         XCTAssertEqual(try fields(url), [
             "template": "bug_report.yml",
-            "title": "ELDEN RING: It crashes in C++ code & co = boom.",
+            "title": "BUG : ELDEN RING: It crashes in C++ code & co = boom.",
             "report-code": "K7F3-9QX2",
             "game": "ELDEN RING (Steam 1245620)",
             "what-happened": "It crashes in C++ code & co = boom.\nThen it quits.",
@@ -115,8 +115,10 @@ final class BugReportsTests: XCTestCase {
         let fields = try fields(GitHubIssues.bug(report, code: "K7F3-9QX2"))
         XCTAssertNil(fields["game"])
         XCTAssertEqual(fields["obelisk-version"], "0.1.0")
-        XCTAssertLessThanOrEqual(try XCTUnwrap(fields["title"]).count, GitHubIssues.titleLimit)
-        XCTAssertTrue(try XCTUnwrap(fields["title"]).hasSuffix("word…"))
+        let title = try XCTUnwrap(fields["title"])
+        XCTAssertTrue(title.hasPrefix("BUG : word word"))
+        XCTAssertLessThanOrEqual(title.utf16.count, "BUG : ".utf16.count + GitHubIssues.titleLimit)
+        XCTAssertTrue(title.hasSuffix("word…"))
         XCTAssertLessThanOrEqual(try XCTUnwrap(fields["what-happened"]).utf16.count, GitHubIssues.textLimit)
     }
 

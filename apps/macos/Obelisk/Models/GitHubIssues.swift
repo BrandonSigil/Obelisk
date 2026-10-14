@@ -5,17 +5,19 @@ import Foundation
 /// from query items named after their ids.
 enum GitHubIssues {
     static let newIssue = URL(string: "https://github.com/Zagrios/obelisk/issues/new")!
+    /// How long the description's start may be in a title, after its prefix.
     static let titleLimit = 80
     /// GitHub refuses very long URLs; the report keeps the whole description.
     static let textLimit = 2000
 
-    /// The bug form for `report`, which the site gave `code`. The contact the
-    /// player gave stays out: an issue is public.
+    /// The bug form for `report`, which the site gave `code`, titled "BUG : "
+    /// then the game and the description's start. The contact the player gave
+    /// stays out: an issue is public.
     static func bug(_ report: BugReport, code: String) -> URL {
         let summary = shortened(report.description.prefix { !$0.isNewline }, to: titleLimit)
         var fields = [
             ("template", "bug_report.yml"),
-            ("title", report.game.map { "\($0.name): \(summary)" } ?? summary),
+            ("title", "BUG : " + (report.game.map { "\($0.name): \(summary)" } ?? summary)),
             ("report-code", code),
         ]
         if let game = report.game {
