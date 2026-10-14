@@ -12,6 +12,7 @@ This guide covers building Obelisk from source, testing it and finding your way 
 - [Interface text and translations](#interface-text-and-translations)
 - [Editing the Xcode project](#editing-the-xcode-project)
 - [Releases](#releases)
+- [License](#license)
 
 ## Requirements
 
@@ -125,3 +126,7 @@ The app's display name and version are in `apps/macos/Config/App.xcconfig`. The 
 This builds the Release app, signs it with the Developer ID set as `DISTRIBUTION_CODE_SIGN_IDENTITY`, and creates `build/dist/Obelisk-<version>-arm64.dmg` with its SHA-256. It then notarizes and staples the disk image, with the notarytool keychain profile `obelisk-notary` (or `$OBELISK_NOTARY_PROFILE`), or the App Store Connect API key given by `OBELISK_NOTARY_KEY`, `OBELISK_NOTARY_KEY_ID` and `OBELISK_NOTARY_ISSUER`. `--no-notarize` skips that step for a local test.
 
 To publish a version, set `MARKETING_VERSION` in `apps/macos/Config/App.xcconfig`, commit, and push a tag `v<version>`, such as `v0.2.0`. The Release workflow checks the tag against the app version, builds the notarized DMG and drafts the GitHub release with it.
+
+## License
+
+Obelisk is under the [GNU General Public License v3.0](LICENSE). By sending a contribution, you agree that it is shared under the same license.

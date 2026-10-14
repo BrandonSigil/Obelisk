@@ -23,6 +23,7 @@
     <a href="https://github.com/Zagrios/obelisk/releases"><img src="https://img.shields.io/github/downloads/Zagrios/obelisk/total?style=for-the-badge" alt="Downloads"></a>
     <img src="https://img.shields.io/badge/macOS-26%2B-000000?style=for-the-badge&logo=apple&logoColor=white" alt="macOS 26 or later">
     <img src="https://img.shields.io/badge/Apple%20silicon-only-000000?style=for-the-badge" alt="Apple silicon only">
+    <a href="LICENSE"><img src="https://img.shields.io/github/license/Zagrios/obelisk?style=for-the-badge" alt="License: GPL-3.0"></a>
   </p>
 </div>
 
@@ -46,6 +47,7 @@
 - [Support](#support)
 - [Credits](#credits)
 - [Contributing](#contributing)
+- [License](#license)
 
 ## What is Obelisk?
 
@@ -288,6 +290,10 @@ Obelisk is not affiliated with or endorsed by Valve, Epic Games, GOG or Apple. S
 ## Contributing
 
 Want to build Obelisk from source or help with its development? Read the [contributing guide](CONTRIBUTING.md).
+
+## License
+
+Obelisk is free software under the [GNU General Public License v3.0](LICENSE): you may share and change it, and anything you distribute that is built from it must be under the same license, with its source code. Voile and the other runtimes Obelisk downloads keep their own licenses.
 
 <div align="right">
 
