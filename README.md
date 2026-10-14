@@ -4,9 +4,8 @@
   <img src="assets/readme/icon.png" alt="Obelisk icon" width="200" height="200">
   <h1>Obelisk</h1>
   <p>
-    <b>You want to play? Let's play.</b><br>
-    Your Steam, Epic Games and GOG games together on your Mac.<br>
-    Download, update and play them from one app, Windows games included.
+    One launcher for every store.<br>
+    Download, update and play your games from one app.
   </p>
   <p>
     <a href="https://getobelisk.app"><b>Website</b></a>
@@ -176,8 +175,6 @@ Obelisk has no account of its own and does not track what you do in it. It talks
   - the versions of Obelisk and Voile it ran with.
 - **What it never sends.** Nothing in a report names you or ties two reports together: no account, no store ID of yours, no device ID. The site's database keeps each report and the time it arrived, not your IP address.
 - **Turning it off.** Turn off **Share game performance** in **Settings → Games**. It is on by default. With it off, Obelisk sends nothing when a game closes, and still shows Expected FPS.
-- **Reading the numbers.** Obelisk downloads the numbers of every game in one go and keeps them for an hour, so the site never learns which game you look at.
-- **Measuring the frame rate.** Obelisk turns on Apple's Metal Performance HUD for each game, invisible, and reads what it logged once the game closes. Those lines are in the game's log, in `~/Library/Logs/Obelisk`.
 
 ## Known limitations
 
