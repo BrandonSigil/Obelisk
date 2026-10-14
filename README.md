@@ -4,10 +4,13 @@
   <img src="assets/readme/icon.png" alt="Obelisk icon" width="200" height="200">
   <h1>Obelisk</h1>
   <p>
-    <b>Your Steam, Epic Games and GOG games together on your Mac.</b><br>
+    <b>You want to play? Let's play.</b><br>
+    Your Steam, Epic Games and GOG games together on your Mac.<br>
     Download, update and play them from one app, Windows games included.
   </p>
   <p>
+    <a href="https://getobelisk.app"><b>Website</b></a>
+    ·
     <a href="https://github.com/Zagrios/obelisk/releases/latest"><b>Download</b></a>
     ·
     <a href="https://github.com/Zagrios/obelisk/issues/new">Report a bug</a>
@@ -22,6 +25,10 @@
   </p>
 </div>
 
+<p align="center">
+  <a href="https://getobelisk.app"><img src="assets/readme/macbook.png" alt="Obelisk's Home on a MacBook Pro: Rocket League, the recently played games and the games installed on this Mac" width="800"></a>
+</p>
+
 ## Contents
 
 - [What is Obelisk?](#what-is-obelisk)
@@ -31,6 +38,8 @@
 - [Features](#features)
 - [Store support](#store-support)
 - [Windows games](#windows-games)
+- [How games run](#how-games-run)
+- [Privacy](#privacy)
 - [Known limitations](#known-limitations)
 - [FAQ](#faq)
 - [Support](#support)
@@ -46,6 +55,7 @@ Windows games play too. Obelisk sets everything up for you: no bottles to create
 - **One library.** Every store in one place, with search across all of them, your recently played games and what is installed on this Mac.
 - **No other launcher needed.** Steam, the Epic Games Launcher and GOG Galaxy do not need to be installed. Obelisk downloads, updates and launches games itself.
 - **Windows games without setup.** Windows versions run through Voile, Obelisk's Windows runtime, which Obelisk installs and keeps up to date on its own.
+- **Know how a game runs before you play.** A game's page shows the frame rate other players measured on a Mac with your chip.
 - **Your saves follow you.** Steam and Epic Cloud saves sync before you play and after you quit.
 - **Your friends are here.** See who is online and what they play, chat with Steam friends, and invite them or join their games.
 - **Made for the Mac.** A native macOS app, in light or dark appearance, in English and French.
@@ -83,6 +93,7 @@ Obelisk is signed and notarized by Apple, so it opens without a security warning
 - **Home** shows your last game, your recently played games and the games installed on this Mac, and searches all your libraries at once.
 - Each store has its own library with cover art, sorted by last played, name or playtime, and filtered to installed games, games compatible with macOS or games you have already played.
 - A game's page shows your playtime, when you last played, its size, its achievements, its news on Steam and its details on Epic Games and GOG.
+- It also shows the game's **Expected FPS** on your Mac: see [How games run](#how-games-run).
 
 ### Downloads and updates
 
@@ -144,6 +155,30 @@ When a game has no Mac version, Obelisk installs its Windows version and runs it
 
 We cannot test every game that exists. If a game does not work well, or does not work at all, please [open an issue](#support).
 
+## How games run
+
+When a game closes, Obelisk sends its frame rate, how it ended and your Mac's chip to [getobelisk.app](https://getobelisk.app) (see [Privacy](#privacy)). Put together, players' sessions show how each game runs on each Apple chip.
+
+- **In Obelisk**, a game's page shows **Expected FPS**: the median frame rate of the sessions players played on your Mac's chip. When nobody has played the game on your chip yet, it shows the numbers of the nearest weaker chip, and names that chip. Hover over it to see how many sessions it comes from. Click it to open the game on getobelisk.app.
+- **On [getobelisk.app](https://getobelisk.app)**, one table lists every game players ran, the most played first. It has a column per chip, from the M1 to the newest. Each cell shows the median frame rate, and its 1% low on hover: the rate the slowest 1% of frames stay under. The last columns show how often the game crashed and when it was last played.
+- A session counts toward the frame rate once it lasts a minute. Shorter ones are mostly loading screens and menus, so they only count toward crashes. A crash is a game that ends on an error by itself, never one you stopped from Obelisk.
+- Players use different settings and resolutions, so read these numbers as an order of magnitude.
+
+## Privacy
+
+Obelisk has no account of its own and does not track what you do in it. It talks to Steam, Epic Games and GOG to sign you in and get your games, and to getobelisk.app for [how games run](#how-games-run).
+
+- **What Obelisk sends.** When a game closes, one report goes to getobelisk.app:
+  - the game: its store, its ID in that store and its name,
+  - how it ran: how long, how many frames it showed, the median frame rate, the 1% low and the hitches (frames shown more than 100 ms after the previous one),
+  - how it ended: its exit code or signal, and whether you stopped it from Obelisk,
+  - the Mac: its chip, GPU cores, model, memory and macOS version,
+  - the versions of Obelisk and Voile it ran with.
+- **What it never sends.** Nothing in a report names you or ties two reports together: no account, no store ID of yours, no device ID. The site's database keeps each report and the time it arrived, not your IP address.
+- **Turning it off.** Turn off **Share game performance** in **Settings → Games**. It is on by default. With it off, Obelisk sends nothing when a game closes, and still shows Expected FPS.
+- **Reading the numbers.** Obelisk downloads the numbers of every game in one go and keeps them for an hour, so the site never learns which game you look at.
+- **Measuring the frame rate.** Obelisk turns on Apple's Metal Performance HUD for each game, invisible, and reads what it logged once the game closes. Those lines are in the game's log, in `~/Library/Logs/Obelisk`.
+
 ## Known limitations
 
 - Only games you own through Steam, Epic Games or GOG appear. Adding other games by hand is not supported yet.
@@ -185,6 +220,18 @@ Closing Obelisk's window keeps the game running, and Obelisk stays in the menu b
 </details>
 
 <details>
+<summary><b>Will a game run well on my Mac?</b></summary>
+<br>
+Look at its <b>Expected FPS</b> on its page in Obelisk, or find it in the table on <a href="https://getobelisk.app">getobelisk.app</a>. If nobody has played it yet, play it once: your session fills in the table for the next players.
+</details>
+
+<details>
+<summary><b>Does Obelisk collect data about me?</b></summary>
+<br>
+Not about you. When a game closes, Obelisk sends how the game ran and which Mac it ran on, with nothing that identifies you, and you can turn that off. See <a href="#privacy">Privacy</a>.
+</details>
+
+<details>
 <summary><b>Is Obelisk free?</b></summary>
 <br>
 Yes. Obelisk is free, and you only play games you own.
@@ -213,6 +260,8 @@ Found a bug or a game that does not work? [Open an issue](https://github.com/Zag
 - the game, its store, and what happened.
 
 Logs help a lot. They are in `~/Library/Logs/Obelisk` (Finder: **Go → Go to Folder…**). Attach the ones of the game you tried, after checking they show nothing you want to keep private.
+
+Enjoying Obelisk? Star the repository: it helps other Mac players find it.
 
 ## Credits
 
