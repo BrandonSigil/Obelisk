@@ -45,13 +45,29 @@ impl Locations {
             helpers,
             steam_runtime_package: crate::valve::payload(&steam_runtime_cache),
             steam_runtime_cache,
-            steam_diagnostics: home.join("Library/Logs/Obelisk/Steam"),
-            epic_diagnostics: home.join("Library/Logs/Obelisk/Epic"),
-            gog_diagnostics: home.join("Library/Logs/Obelisk/GOG"),
+            steam_diagnostics: home.join(LOGS).join("Steam"),
+            epic_diagnostics: home.join(LOGS).join("Epic"),
+            gog_diagnostics: home.join(LOGS).join("GOG"),
             voile: library.join("Voile"),
             wine_prefixes: library.join("Prefixes"),
             library: library.to_owned(),
             home: home.to_owned(),
         }
     }
+}
+
+/// Obelisk's logs, in the user's home.
+const LOGS: &str = "Library/Logs/Obelisk";
+
+/// The file `game`'s standard error goes to while it runs, in its
+/// storefront's diagnostics folder under `home`. `kind` starts its name:
+/// `wine` for a Windows build, `game` for a Mac one.
+pub(crate) fn game_log(home: &Path, game: crate::profile::Game<'_>, kind: &str) -> PathBuf {
+    use crate::profile::Game::{Epic, Gog, Steam};
+    let (store, id) = match game {
+        Steam { app_id } => ("Steam", app_id.to_string()),
+        Epic { app_name, .. } => ("Epic", app_name.to_owned()),
+        Gog { product_id } => ("GOG", product_id.to_owned()),
+    };
+    home.join(LOGS).join(store).join(format!("{kind}-{id}.log"))
 }

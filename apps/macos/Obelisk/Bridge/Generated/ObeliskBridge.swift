@@ -6047,6 +6047,112 @@ public func FfiConverterTypeGameLaunch_lower(_ value: GameLaunch) -> RustBuffer 
 }
 
 
+/**
+ * What a session's game did once it ran, for the player's performance
+ * reports. Frame rates are absent when Metal reported no frame.
+ */
+public struct GamePlayed: Equatable, Hashable {
+    public var seconds: UInt64
+    public var frames: UInt64
+    public var medianFps: Double?
+    public var low1pctFps: Double?
+    public var hitches: UInt64
+    public var exitCode: Int32?
+    public var exitSignal: Int32?
+    public var endedByObelisk: Bool
+    /**
+     * `rosetta` or `linux` for a Windows game, absent for a Mac one.
+     */
+    public var engine: String?
+    /**
+     * `dxmt` or `d3dmetal` on the Linux engine.
+     */
+    public var graphics: String?
+    public var voile: String?
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(seconds: UInt64, frames: UInt64, medianFps: Double?, low1pctFps: Double?, hitches: UInt64, exitCode: Int32?, exitSignal: Int32?, endedByObelisk: Bool, 
+        /**
+         * `rosetta` or `linux` for a Windows game, absent for a Mac one.
+         */engine: String?, 
+        /**
+         * `dxmt` or `d3dmetal` on the Linux engine.
+         */graphics: String?, voile: String?) {
+        self.seconds = seconds
+        self.frames = frames
+        self.medianFps = medianFps
+        self.low1pctFps = low1pctFps
+        self.hitches = hitches
+        self.exitCode = exitCode
+        self.exitSignal = exitSignal
+        self.endedByObelisk = endedByObelisk
+        self.engine = engine
+        self.graphics = graphics
+        self.voile = voile
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension GamePlayed: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeGamePlayed: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> GamePlayed {
+        return
+            try GamePlayed(
+                seconds: FfiConverterUInt64.read(from: &buf), 
+                frames: FfiConverterUInt64.read(from: &buf), 
+                medianFps: FfiConverterOptionDouble.read(from: &buf), 
+                low1pctFps: FfiConverterOptionDouble.read(from: &buf), 
+                hitches: FfiConverterUInt64.read(from: &buf), 
+                exitCode: FfiConverterOptionInt32.read(from: &buf), 
+                exitSignal: FfiConverterOptionInt32.read(from: &buf), 
+                endedByObelisk: FfiConverterBool.read(from: &buf), 
+                engine: FfiConverterOptionString.read(from: &buf), 
+                graphics: FfiConverterOptionString.read(from: &buf), 
+                voile: FfiConverterOptionString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: GamePlayed, into buf: inout [UInt8]) {
+        FfiConverterUInt64.write(value.seconds, into: &buf)
+        FfiConverterUInt64.write(value.frames, into: &buf)
+        FfiConverterOptionDouble.write(value.medianFps, into: &buf)
+        FfiConverterOptionDouble.write(value.low1pctFps, into: &buf)
+        FfiConverterUInt64.write(value.hitches, into: &buf)
+        FfiConverterOptionInt32.write(value.exitCode, into: &buf)
+        FfiConverterOptionInt32.write(value.exitSignal, into: &buf)
+        FfiConverterBool.write(value.endedByObelisk, into: &buf)
+        FfiConverterOptionString.write(value.engine, into: &buf)
+        FfiConverterOptionString.write(value.graphics, into: &buf)
+        FfiConverterOptionString.write(value.voile, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeGamePlayed_lift(_ buf: RustBuffer) throws -> GamePlayed {
+    return try FfiConverterTypeGamePlayed.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeGamePlayed_lower(_ value: GamePlayed) -> RustBuffer {
+    return FfiConverterTypeGamePlayed.lower(value)
+}
+
+
 public struct GameSessionState: Equatable, Hashable {
     public var id: String
     public var game: GameIdentity
@@ -6098,6 +6204,10 @@ public struct GameSessionState: Equatable, Hashable {
      * The purchase the Steam game waits on the player to confirm.
      */
     public var microTxn: SteamMicroTxn?
+    /**
+     * What the game did, once it ran and exited.
+     */
+    public var played: GamePlayed?
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
@@ -6137,7 +6247,10 @@ public struct GameSessionState: Equatable, Hashable {
          */receivedInvites: [SteamReceivedInvite] = [], 
         /**
          * The purchase the Steam game waits on the player to confirm.
-         */microTxn: SteamMicroTxn? = nil) {
+         */microTxn: SteamMicroTxn? = nil, 
+        /**
+         * What the game did, once it ran and exited.
+         */played: GamePlayed? = nil) {
         self.id = id
         self.game = game
         self.phase = phase
@@ -6152,6 +6265,7 @@ public struct GameSessionState: Equatable, Hashable {
         self.overlayRequest = overlayRequest
         self.receivedInvites = receivedInvites
         self.microTxn = microTxn
+        self.played = played
     }
 
     
@@ -6183,7 +6297,8 @@ public struct FfiConverterTypeGameSessionState: FfiConverterRustBuffer {
                 lobbyId: FfiConverterOptionUInt64.read(from: &buf), 
                 overlayRequest: FfiConverterOptionTypeSteamOverlayRequest.read(from: &buf), 
                 receivedInvites: FfiConverterSequenceTypeSteamReceivedInvite.read(from: &buf), 
-                microTxn: FfiConverterOptionTypeSteamMicroTxn.read(from: &buf)
+                microTxn: FfiConverterOptionTypeSteamMicroTxn.read(from: &buf), 
+                played: FfiConverterOptionTypeGamePlayed.read(from: &buf)
         )
     }
 
@@ -6202,6 +6317,7 @@ public struct FfiConverterTypeGameSessionState: FfiConverterRustBuffer {
         FfiConverterOptionTypeSteamOverlayRequest.write(value.overlayRequest, into: &buf)
         FfiConverterSequenceTypeSteamReceivedInvite.write(value.receivedInvites, into: &buf)
         FfiConverterOptionTypeSteamMicroTxn.write(value.microTxn, into: &buf)
+        FfiConverterOptionTypeGamePlayed.write(value.played, into: &buf)
     }
 }
 
@@ -12332,6 +12448,30 @@ fileprivate struct FfiConverterOptionUInt32: FfiConverterRustBuffer {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterOptionInt32: FfiConverterRustBuffer {
+    typealias SwiftType = Int32?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterInt32.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterInt32.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterOptionUInt64: FfiConverterRustBuffer {
     typealias SwiftType = UInt64?
 
@@ -12348,6 +12488,30 @@ fileprivate struct FfiConverterOptionUInt64: FfiConverterRustBuffer {
         switch try readInt(&buf) as Int8 {
         case 0: return nil
         case 1: return try FfiConverterUInt64.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterOptionDouble: FfiConverterRustBuffer {
+    typealias SwiftType = Double?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterDouble.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterDouble.read(from: &buf)
         default: throw UniffiInternalError.unexpectedOptionalTag
         }
     }
@@ -12492,6 +12656,30 @@ fileprivate struct FfiConverterOptionTypeEpicFriendActivity: FfiConverterRustBuf
         switch try readInt(&buf) as Int8 {
         case 0: return nil
         case 1: return try FfiConverterTypeEpicFriendActivity.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterOptionTypeGamePlayed: FfiConverterRustBuffer {
+    typealias SwiftType = GamePlayed?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypeGamePlayed.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypeGamePlayed.read(from: &buf)
         default: throw UniffiInternalError.unexpectedOptionalTag
         }
     }

@@ -137,7 +137,7 @@ pub fn prepare(
             (Some(wine), launched, None)
         }
         None => {
-            let (launched, steam_api) = native_target(install, target, home)?;
+            let (launched, steam_api) = native_target(install, target, home, app_id)?;
             (None, launched, Some(steam_api))
         }
     };
@@ -172,6 +172,7 @@ fn native_target(
     install: &Path,
     target: &obelisk_core::launch::LaunchTarget,
     home: &Path,
+    app_id: u32,
 ) -> Result<(Target, PathBuf), Error> {
     let steam_api = launch::steam_api(target)?;
     let (target, _) = crate::native::target(
@@ -179,6 +180,7 @@ fn native_target(
         target,
         target.arguments.clone(),
         crate::native::environment(home),
+        crate::locations::game_log(home, crate::profile::Game::Steam { app_id }, "game"),
     )?;
     Ok((target, steam_api))
 }

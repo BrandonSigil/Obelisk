@@ -336,6 +336,7 @@ impl Game {
                 reconnecting: false,
                 rosetta: None,
                 cloud: Default::default(),
+                played: None,
             }),
             changed: Condvar::new(),
             choices: Mutex::new(Vec::new()),

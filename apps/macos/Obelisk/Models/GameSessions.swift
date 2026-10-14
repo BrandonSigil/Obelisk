@@ -199,6 +199,8 @@ final class GameSessions<Store: GameStorefront> {
         /// When this Obelisk saw the game start, even if it already exited. A
         /// game recovered running started before, and has none.
         var startedAt: Date?
+        /// What the game did, once it ran and exited.
+        var played: GamePlayed?
         var running: Bool { phase == .running }
 
         init?(_ state: GameSessionState) {
@@ -218,6 +220,7 @@ final class GameSessions<Store: GameStorefront> {
             observed = state.observed
             runtimeInstall = state.runtimeInstall
             startedAt = state.startedAt.map { Date(timeIntervalSince1970: TimeInterval($0)) }
+            played = state.played
         }
     }
 
@@ -251,6 +254,10 @@ final class GameSessions<Store: GameStorefront> {
     @ObservationIgnored let history: LaunchHistory
     /// The last session whose launch `history` recorded.
     @ObservationIgnored private var recordedLaunch: String?
+    /// Told once of each session whose game ran and exited, with what it played.
+    @ObservationIgnored var reportPlayed: ((Store.GameID, GamePlayed) -> Void)?
+    /// The last session `reportPlayed` was told of.
+    @ObservationIgnored private var reportedSession: String?
     @ObservationIgnored private var revision: UInt64 = 0
     @ObservationIgnored private var escalation: Task<Void, Never>?
 
@@ -295,6 +302,10 @@ final class GameSessions<Store: GameStorefront> {
         if let last, let startedAt = last.startedAt, last.id != recordedLaunch {
             recordedLaunch = last.id
             history.record(last.game, account: last.account, in: Store.self, at: startedAt)
+        }
+        if let last, let played = last.played, last.id != reportedSession {
+            reportedSession = last.id
+            reportPlayed?(last.game, played)
         }
         // Repeated states do not invalidate unchanged presentation.
         if self.active != active { self.active = active }

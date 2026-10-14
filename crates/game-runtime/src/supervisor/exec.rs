@@ -4,9 +4,10 @@
 //! message: losing the supervisor first closes the pipe and prevents exec.
 use serde::{Deserialize, Serialize};
 use std::{
+    fs::File,
     io::{self, BufRead, Read, Write},
     os::unix::process::CommandExt,
-    path::PathBuf,
+    path::{Path, PathBuf},
     process::{Command, Stdio},
 };
 
@@ -55,17 +56,24 @@ pub fn receive(input: impl Read) -> io::Result<Admission> {
 
 /// The game's standard error: its log, emptied for this launch, or nothing.
 pub fn standard_error(admission: &Admission) -> io::Result<Stdio> {
-    use std::os::unix::fs::OpenOptionsExt;
     Ok(match &admission.log {
-        Some(log) => std::fs::OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .mode(0o600)
-            .open(log)?
-            .into(),
+        Some(log) => open_log(log)?.into(),
         None => Stdio::null(),
     })
+}
+
+/// Opens `log` empty for a new launch. The last launch's log stays beside it
+/// as `<name>.previous.log`: a player who relaunches a game that crashed
+/// still has the crash's log to send.
+pub fn open_log(log: &Path) -> io::Result<File> {
+    use std::os::unix::fs::OpenOptionsExt;
+    let _ = std::fs::rename(log, log.with_extension("previous.log"));
+    std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .mode(0o600)
+        .open(log)
 }
 
 /// The arm64 helper. `std` exec restores the default SIGPIPE disposition
@@ -84,3 +92,6 @@ fn exec(input: impl Read) -> io::Result<()> {
         .stderr(standard_error(&admission)?)
         .exec())
 }
+
+#[cfg(test)]
+mod tests;

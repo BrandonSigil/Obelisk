@@ -107,6 +107,7 @@ impl<P: Sample> Fixture<P> {
             phase,
             cloud: Default::default(),
             exit_code: None,
+            played: None,
             error: None,
             failure_reason: None,
             revision: 1,

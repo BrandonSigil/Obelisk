@@ -59,6 +59,16 @@ final class AppModel {
         }
     }
     static let automaticUpdatesKey = "obelisk.games.updateAutomatically"
+    /// Whether Obelisk reports each game's frame rate and how it ended to
+    /// getobelisk.app, which shows how games run on each Mac.
+    var sharesGamePerformance: Bool {
+        didSet {
+            defaults.set(sharesGamePerformance, forKey: Self.sharePerformanceKey)
+            performance.isEnabled = sharesGamePerformance
+        }
+    }
+    static let sharePerformanceKey = "obelisk.games.sharePerformance"
+    @ObservationIgnored let performance: PerformanceReports
 
     /// The last library of every storefront account.
     @ObservationIgnored let libraryCache: LibraryCache
@@ -69,6 +79,7 @@ final class AppModel {
     init(directory: URL = AppIdentity.libraryDirectory, defaults: UserDefaults = .standard,
          defaultsDomain: String = Bundle.main.bundleIdentifier ?? AppIdentity.storageIdentifier, steam: SteamModel? = nil,
          epic: EpicModel? = nil, gog: GogModel? = nil, downloads: DownloadsModel? = nil,
+         performance: PerformanceReports? = nil,
          overlay: GameOverlayEnvironment = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil
             ? .live : .inert) {
         libraryDirectory = directory.path
@@ -76,6 +87,8 @@ final class AppModel {
         appearance = AppAppearance(rawValue: defaults.string(forKey: "appearance") ?? "system") ?? .system
         language = AppLanguage(defaults: defaults, domain: defaultsDomain)
         updatesGamesAutomatically = defaults.object(forKey: Self.automaticUpdatesKey) as? Bool ?? true
+        let sharesGamePerformance = defaults.object(forKey: Self.sharePerformanceKey) as? Bool ?? true
+        self.sharesGamePerformance = sharesGamePerformance
         // Every storefront's library shares one cache, as every cache of the
         // directory does, `LaunchHistory.live`'s included.
         libraryCache = LibraryCache(directory: directory.path)
@@ -86,8 +99,28 @@ final class AppModel {
         self.steam.overlay = self.overlay
         self.steam.notifier = overlay.notifier
         self.downloads = downloads ?? DownloadsModel()
+        let performance = performance ?? PerformanceReports(isEnabled: sharesGamePerformance)
+        performance.isEnabled = sharesGamePerformance
+        self.performance = performance
         self.downloads.progress = { [weak self] item in self?.downloadTransfer(item) }
         applyAutomaticUpdates()
+        reportPerformance()
+    }
+
+    /// Each storefront's ended games go to the performance reports, with the
+    /// title its library knows them by.
+    private func reportPerformance() {
+        let performance = performance
+        steam.gameSessions.reportPlayed = { [steam] appId, played in
+            performance.report(played, of: String(appId), titled: steam.gameName(appId: appId), in: .steam)
+        }
+        epic.gameSessions.reportPlayed = { [epic] id, played in
+            guard let appName = epicGameID(id)?.appName else { return }
+            performance.report(played, of: appName, titled: epic.games.first { $0.id == id }?.title, in: .epic)
+        }
+        gog.gameSessions.reportPlayed = { [gog] id, played in
+            performance.report(played, of: id, titled: gog.games.first { $0.id == id }?.title, in: .gog)
+        }
     }
 
     /// A queued Transfer's progress, from its storefront's installations.

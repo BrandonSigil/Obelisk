@@ -108,6 +108,12 @@ fn has_engine(runtime: &Path) -> bool {
     runtime.join("engine/fexdarwin-run").is_file() && runtime.join("wine/bin/wine").exists()
 }
 
+/// The Voile release `runtime` comes from: a Rosetta runtime, or the Linux
+/// engine's runtime inside one.
+pub(crate) fn release_of(runtime: &Path) -> Option<String> {
+    version(runtime).or_else(|| version(runtime.parent()?))
+}
+
 fn version(runtime: &Path) -> Option<String> {
     #[derive(Deserialize)]
     struct Manifest {

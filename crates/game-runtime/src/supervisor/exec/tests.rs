@@ -1,0 +1,19 @@
+use super::*;
+use std::{fs, io::Write, os::unix::fs::PermissionsExt};
+
+#[test]
+fn a_new_launch_keeps_the_last_launchs_log_beside_its_own() {
+    let directory = tempfile::tempdir().unwrap();
+    let log = directory.path().join("wine-1245620.log");
+    open_log(&log).unwrap().write_all(b"first launch").unwrap();
+    open_log(&log).unwrap().write_all(b"second").unwrap();
+    assert_eq!(fs::read_to_string(&log).unwrap(), "second");
+    let previous = directory.path().join("wine-1245620.previous.log");
+    assert_eq!(fs::read_to_string(&previous).unwrap(), "first launch");
+    assert_eq!(
+        fs::metadata(&log).unwrap().permissions().mode() & 0o777,
+        0o600
+    );
+    open_log(&log).unwrap();
+    assert_eq!(fs::read_to_string(&previous).unwrap(), "second");
+}

@@ -67,12 +67,14 @@ fn bundle_executable(bundle: &Path) -> Result<PathBuf, Error> {
 }
 
 /// The Mac game `launched` names inside `install`, started with `arguments`
-/// and `environment`, and the architecture it runs as.
+/// and `environment`, and the architecture it runs as. Its standard error
+/// goes to `log`.
 pub fn target(
     install: &Path,
     launched: &LaunchTarget,
     arguments: Vec<String>,
     environment: HashMap<String, String>,
+    log: PathBuf,
 ) -> Result<(Target, Architecture), Error> {
     let (executable, architecture) = executable(install, launched)?;
     Ok((
@@ -81,7 +83,7 @@ pub fn target(
             arguments,
             working_directory: launched.working_directory.clone().into(),
             environment,
-            log: None,
+            log: Some(log),
             installation: Some(install.to_owned()),
             program: None,
         },

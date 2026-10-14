@@ -515,6 +515,12 @@ pub(crate) fn a_launch_prepares_in_order_then_runs_its_game_and_settles_cloud<H:
     assert_eq!(finished.phase, Phase::Finished);
     assert_eq!(finished.exit_code, Some(5));
     assert!(finished.failure_reason().is_none());
+    let played = finished
+        .played
+        .expect("a game that ran reports what it played");
+    assert_eq!((played.exit_code, played.exit_signal), (Some(5), None));
+    assert!(!played.ended_by_obelisk, "the game exited by itself");
+    assert_eq!(played.frames.count, 0, "without a log, no frames are known");
     assert!(run.ran());
     assert_eq!(
         run.events(),
@@ -711,6 +717,7 @@ pub(crate) fn quitting_asks_the_running_game_to_close_and_kills_nothing<H: Harne
     assert!(run.directory.join("quit-asked").exists());
     assert_eq!(finished.phase, Phase::Finished);
     assert_eq!(finished.exit_code, Some(4), "the game quit by itself");
+    assert!(finished.played.unwrap().ended_by_obelisk);
     assert_eq!(
         run.events().last().map(String::as_str),
         Some("cloud.finished:true")
@@ -734,6 +741,9 @@ pub(crate) fn force_quitting_ends_a_game_that_ignored_quit_and_what_it_started<H
         "a game force quit is no failure"
     );
     assert!(finished.game.is_none());
+    let played = finished.played.unwrap();
+    assert_eq!((played.exit_code, played.exit_signal), (None, Some(9)));
+    assert!(played.ended_by_obelisk);
     assert_eq!(
         run.events().last().map(String::as_str),
         Some("cloud.finished:true"),

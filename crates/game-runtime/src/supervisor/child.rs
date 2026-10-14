@@ -13,10 +13,11 @@ pub(crate) enum Execution {
     ExitedUnconfirmed,
 }
 
-pub(crate) async fn wait_for_exit(child: &mut Child) -> i32 {
+/// How the child ended: its exit code, or the signal that ended it.
+pub(crate) async fn wait_for_exit(child: &mut Child) -> std::process::ExitStatus {
     loop {
         match child.wait().await {
-            Ok(status) => return status.code().unwrap_or(-1),
+            Ok(status) => return status,
             // Losing an observation never releases ownership of a live game.
             Err(_) => tokio::time::sleep(Duration::from_millis(100)).await,
         }
@@ -157,7 +158,7 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(10)).await;
             progress.store(true, Ordering::Release);
         });
-        assert_eq!(wait_for_exit(&mut game).await, 7);
+        assert_eq!(wait_for_exit(&mut game).await.code(), Some(7));
         assert!(progressed.load(Ordering::Acquire));
     }
 
@@ -168,13 +169,13 @@ mod tests {
             confirm_execution(&mut failed, Path::new("/bin/sh"), |_| None).await,
             Execution::Failed
         );
-        assert_eq!(wait_for_exit(&mut failed).await, 126);
+        assert_eq!(wait_for_exit(&mut failed).await.code(), Some(126));
         let mut unknown = child("exit 0", false);
         assert_eq!(
             confirm_execution(&mut unknown, Path::new("/bin/sh"), |_| None).await,
             Execution::ExitedUnconfirmed
         );
-        assert_eq!(wait_for_exit(&mut unknown).await, 0);
+        assert_eq!(wait_for_exit(&mut unknown).await.code(), Some(0));
     }
 
     #[tokio::test]
@@ -186,7 +187,7 @@ mod tests {
             Execution::ExitedUnconfirmed
         );
         assert!(start.elapsed() >= Duration::from_millis(80));
-        assert_eq!(wait_for_exit(&mut game).await, 4);
+        assert_eq!(wait_for_exit(&mut game).await.code(), Some(4));
     }
 
     #[tokio::test]
@@ -203,6 +204,6 @@ mod tests {
         })
         .await;
         assert!(identity.is_none());
-        assert_eq!(wait_for_exit(&mut game).await, 0);
+        assert_eq!(wait_for_exit(&mut game).await.code(), Some(0));
     }
 }

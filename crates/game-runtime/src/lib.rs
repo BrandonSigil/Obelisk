@@ -8,6 +8,7 @@ mod input;
 pub mod installations;
 pub mod linux_engine;
 mod locations;
+pub mod metal_hud;
 mod native;
 pub mod package;
 mod process;

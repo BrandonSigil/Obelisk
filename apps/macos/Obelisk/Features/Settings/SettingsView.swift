@@ -44,6 +44,8 @@ struct SettingsView: View {
                             automaticUpdates
                             SettingsDivider()
                             overlay
+                            SettingsDivider()
+                            sharePerformance
                         }
                     }
                     GamePageSection(title: L10n.string("ui.settings.storage")) {
@@ -107,6 +109,20 @@ struct SettingsView: View {
                 .labelsHidden()
                 .pointerCursor()
                 .accessibilityIdentifier("settings-update-automatically")
+        }
+    }
+
+    private var sharePerformance: some View {
+        SettingsRow(title: L10n.string("ui.settings.share_performance")) {
+            SettingsSymbol(name: "chart.bar.fill", colors: [ObeliskStyle.accent, Color(red: 0.45, green: 0.2, blue: 0.85)])
+        } detail: {
+            Text(L10n.string("ui.settings.share_performance_description"))
+        } accessory: {
+            Toggle(L10n.string("ui.settings.share_performance"), isOn: $model.sharesGamePerformance)
+                .toggleStyle(.switch)
+                .labelsHidden()
+                .pointerCursor()
+                .accessibilityIdentifier("settings-share-performance")
         }
     }
 

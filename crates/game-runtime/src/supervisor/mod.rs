@@ -159,6 +159,26 @@ pub trait Provider: Clone + std::fmt::Debug + PartialEq + Eq + Send + Sync + 'st
     fn orphaned(record: &mut Record<Self>, owned: bool);
 }
 
+/// What a session's game did once it ran: for how long, how smoothly, how it
+/// ended and what ran it. Obelisk reports it when the player shares game
+/// performance.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct Played {
+    pub seconds: u64,
+    pub frames: crate::metal_hud::Frames,
+    /// Absent when a signal ended the game.
+    pub exit_code: Option<i32>,
+    pub exit_signal: Option<i32>,
+    /// The player quit or stopped the game from Obelisk.
+    pub ended_by_obelisk: bool,
+    /// What ran a Windows game; absent for a Mac one.
+    pub engine: Option<crate::wine::Engine>,
+    /// What rendered its Direct3D on the Linux engine.
+    pub graphics: Option<crate::wine::Graphics>,
+    /// The Voile release a Windows game ran in.
+    pub voile: Option<String>,
+}
+
 /// A Game session as its supervisor journals it. Ownership (the supervisor,
 /// game, starting helper and socket) decides the Reservation.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -171,6 +191,9 @@ pub struct Record<P: Provider> {
     pub phase: Phase,
     pub cloud: crate::cloud::Status,
     pub exit_code: Option<i32>,
+    /// Set once the game ran and exited.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub played: Option<Played>,
     pub error: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub failure_reason: Option<FailureReason>,

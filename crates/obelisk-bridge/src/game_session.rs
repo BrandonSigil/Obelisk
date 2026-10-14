@@ -481,6 +481,58 @@ pub struct GameSessionState {
     /// The purchase the Steam game waits on the player to confirm.
     #[uniffi(default = None)]
     pub micro_txn: Option<SteamMicroTxn>,
+    /// What the game did, once it ran and exited.
+    #[uniffi(default = None)]
+    pub played: Option<GamePlayed>,
+}
+
+/// What a session's game did once it ran, for the player's performance
+/// reports. Frame rates are absent when Metal reported no frame.
+#[derive(Clone, Debug, PartialEq, uniffi::Record)]
+pub struct GamePlayed {
+    pub seconds: u64,
+    pub frames: u64,
+    pub median_fps: Option<f64>,
+    pub low_1pct_fps: Option<f64>,
+    pub hitches: u64,
+    pub exit_code: Option<i32>,
+    pub exit_signal: Option<i32>,
+    pub ended_by_obelisk: bool,
+    /// `rosetta` or `linux` for a Windows game, absent for a Mac one.
+    pub engine: Option<String>,
+    /// `dxmt` or `d3dmetal` on the Linux engine.
+    pub graphics: Option<String>,
+    pub voile: Option<String>,
+}
+impl From<game_runtime::supervisor::Played> for GamePlayed {
+    fn from(played: game_runtime::supervisor::Played) -> Self {
+        use game_runtime::wine::{Engine, Graphics};
+        Self {
+            seconds: played.seconds,
+            frames: played.frames.count,
+            median_fps: played.frames.median_fps(),
+            low_1pct_fps: played.frames.low_1pct_fps(),
+            hitches: played.frames.hitches,
+            exit_code: played.exit_code,
+            exit_signal: played.exit_signal,
+            ended_by_obelisk: played.ended_by_obelisk,
+            engine: played.engine.map(|engine| {
+                match engine {
+                    Engine::Rosetta => "rosetta",
+                    Engine::Linux => "linux",
+                }
+                .to_owned()
+            }),
+            graphics: played.graphics.map(|graphics| {
+                match graphics {
+                    Graphics::Dxmt => "dxmt",
+                    Graphics::D3DMetal => "d3dmetal",
+                }
+                .to_owned()
+            }),
+            voile: played.voile,
+        }
+    }
 }
 
 /// A Rosetta requirement the player can answer.
@@ -528,6 +580,7 @@ fn session_state<P: Bridged>(session: sessions::Session<P>) -> GameSessionState 
         observed: session.observed,
         runtime_install: session.runtime_install.map(Into::into),
         started_at: session.started_at,
+        played: session.played.map(Into::into),
     }
 }
 

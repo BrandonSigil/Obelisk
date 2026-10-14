@@ -7261,6 +7261,40 @@
         }
       }
     },
+    "ui.settings.share_performance": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Share game performance"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Partager les performances des jeux"
+          }
+        }
+      }
+    },
+    "ui.settings.share_performance_description": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "When a game closes, sends its frame rate, how it ended and your Mac's chip to getobelisk.app, which shows how each game runs on each Mac. Nothing in it identifies you."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Quand un jeu se ferme, envoie sa fréquence d'images, la façon dont il s'est terminé et la puce de votre Mac à getobelisk.app, qui montre comment chaque jeu tourne sur chaque Mac. Rien de tout cela ne vous identifie."
+          }
+        }
+      }
+    },
     "ui.settings.open_store": {
       "extractionState": "manual",
       "localizations": {

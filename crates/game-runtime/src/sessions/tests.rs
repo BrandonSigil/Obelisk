@@ -62,6 +62,7 @@ impl<P: Provider> Fake<P> {
                     reconnecting: false,
                     rosetta: None,
                     cloud: CloudStatus::default(),
+                    played: None,
                 },
                 owns_process: false,
                 observation_failure: false,

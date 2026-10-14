@@ -57,6 +57,8 @@ pub struct Observation<P: Provider> {
     /// The decision a Rosetta requirement waits on.
     pub rosetta: Option<u64>,
     pub cloud: CloudStatus,
+    /// What the game did, once it ran and exited.
+    pub played: Option<supervisor::Played>,
 }
 impl<P: Provider> From<Record<P>> for Observation<P> {
     fn from(record: Record<P>) -> Self {
@@ -72,6 +74,7 @@ impl<P: Provider> From<Record<P>> for Observation<P> {
             reconnecting: record.reconnecting,
             rosetta: record.rosetta.map(|request| request.decision_id),
             cloud: record.cloud,
+            played: record.played,
         }
     }
 }
@@ -241,6 +244,8 @@ pub struct Session<P: Storefront> {
     /// epoch: once a session it saw preparing is past it, even if its game
     /// already exited. A game recovered running started before, and has none.
     pub started_at: Option<u64>,
+    /// What the game did, once it ran and exited.
+    pub played: Option<supervisor::Played>,
     rosetta: Option<u64>,
 }
 impl<P: Storefront> Session<P> {
@@ -256,6 +261,7 @@ impl<P: Storefront> Session<P> {
             observed: false,
             runtime_install: None,
             started_at: None,
+            played: None,
             rosetta: None,
         }
     }
@@ -271,6 +277,7 @@ impl<P: Storefront> Session<P> {
             observed: true,
             runtime_install: None,
             started_at: None,
+            played: observation.played.clone(),
             rosetta: observation.rosetta,
         }
     }

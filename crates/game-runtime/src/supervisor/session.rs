@@ -287,6 +287,9 @@ pub(crate) struct Session<P: Provider> {
     /// nothing to it.
     quitting: AtomicBool,
     forcing: AtomicBool,
+    /// The player quit or stopped the game from Obelisk, which its exit
+    /// then reports.
+    ended_by_obelisk: AtomicBool,
     /// The running game's controls, from its start until its exit.
     control: Mutex<Option<Control<P>>>,
     /// The Force Quit underway, which the session waits for before it ends:
@@ -317,6 +320,7 @@ impl<P: Provider> Session<P> {
         let Some(pid) = self.state.lock().unwrap().game else {
             return;
         };
+        self.ended_by_obelisk.store(true, Ordering::Release);
         let wine = self.wine.get().cloned().flatten();
         self.signal(pid, "-TERM");
         if let Some(wine) = &wine {
@@ -334,6 +338,7 @@ impl<P: Provider> Session<P> {
         let Some(pid) = self.state.lock().unwrap().game else {
             return;
         };
+        self.ended_by_obelisk.store(true, Ordering::Release);
         match (self.wine.get().cloned().flatten(), self.launched.get()) {
             (Some(wine), Some(game)) => {
                 crate::wine::quit(&wine, &game.environment, game.program.as_deref(), pid)
@@ -348,6 +353,7 @@ impl<P: Provider> Session<P> {
     fn force_quit_game(&self) {
         let wine = self.wine.get().cloned().flatten();
         let pid = self.state.lock().unwrap().game;
+        self.ended_by_obelisk.store(true, Ordering::Release);
         if let Some(pid) = pid {
             // The Linux engine's launcher stops its window, render and input
             // servers itself: they are not frozen with the game, and SIGTERM
@@ -525,6 +531,7 @@ pub(crate) fn serve<L: Launch>(
         phase: Phase::Preparing,
         cloud: Default::default(),
         exit_code: None,
+        played: None,
         error: None,
         failure_reason: None,
         revision: 1,
@@ -571,6 +578,7 @@ pub(crate) fn serve<L: Launch>(
         launched: OnceLock::new(),
         quitting: AtomicBool::new(false),
         forcing: AtomicBool::new(false),
+        ended_by_obelisk: AtomicBool::new(false),
         control: Mutex::new(None),
         forced: Mutex::new(None),
     });
@@ -707,6 +715,10 @@ async fn run<L: Launch>(
             );
             service
         });
+    // Metal reports the game's frames to its log, without showing anything.
+    prepared.environment.extend(
+        crate::metal_hud::ENVIRONMENT.map(|(name, value)| (name.to_owned(), value.to_owned())),
+    );
     let _ = session.launched.set(super::quit::Game {
         environment: target.environment.clone(),
         installation: target.installation.clone(),
@@ -775,7 +787,7 @@ async fn run<L: Launch>(
     // A helper that never became the game keeps its ownership until it is
     // reaped, outside the admission lock.
     let reap = async |mut game: tokio::process::Child, error: Error| {
-        let exit = wait_for_exit(&mut game).await;
+        let exit = wait_for_exit(&mut game).await.code().unwrap_or(-1);
         session.state.lock().unwrap().game = None;
         launch.stopped(&host, Some(exit));
         session.state.lock().unwrap().spawned = false;
@@ -811,7 +823,10 @@ async fn run<L: Launch>(
         });
     }
     let watching = launch.watch(&host, session);
-    let exit = wait_for_exit(&mut game).await;
+    let began = Instant::now();
+    let status = wait_for_exit(&mut game).await;
+    let seconds = began.elapsed().as_secs();
+    let exit = status.code().unwrap_or(-1);
     drop(input);
     session.control.lock().unwrap().take();
     session.state.lock().unwrap().game = None;
@@ -823,11 +838,39 @@ async fn run<L: Launch>(
     // What a Force Quit kills after the game is gone before its saves are
     // read.
     session.forced().await;
+    let played = if started {
+        let log = target.log.clone();
+        let frames = tokio::task::spawn_blocking(move || {
+            log.map(|log| crate::metal_hud::read(&log))
+                .unwrap_or_default()
+        })
+        .await
+        .unwrap_or_default();
+        let wine = session.wine.get().cloned().flatten();
+        Some(Played {
+            seconds,
+            frames,
+            exit_code: status.code(),
+            exit_signal: std::os::unix::process::ExitStatusExt::signal(&status),
+            ended_by_obelisk: session.ended_by_obelisk.load(Ordering::Acquire),
+            graphics: wine
+                .as_ref()
+                .filter(|wine| wine.engine == crate::wine::Engine::Linux)
+                .map(|wine| wine.graphics),
+            voile: wine
+                .as_ref()
+                .and_then(|wine| crate::voile::release_of(&wine.runtime)),
+            engine: wine.map(|wine| wine.engine),
+        })
+    } else {
+        None
+    };
     // After exit every write is best effort: finalization always runs, and a
     // success never turns into a failure.
     let _ = session.update(|r| {
         r.phase = Phase::Finalizing;
         r.exit_code = Some(exit);
+        r.played = played;
         r.game = None;
         r.starting = None;
     });

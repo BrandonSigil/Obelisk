@@ -521,18 +521,7 @@ pub(crate) fn windows_build(platform: &str) -> bool {
 
 /// Where Wine logs `game`: in its storefront's diagnostics folder.
 fn log(locations: &crate::Locations, game: crate::profile::Game<'_>) -> PathBuf {
-    use crate::profile::Game::{Epic, Gog, Steam};
-    match game {
-        Steam { app_id } => locations
-            .steam_diagnostics
-            .join(format!("wine-{app_id}.log")),
-        Epic { app_name, .. } => locations
-            .epic_diagnostics
-            .join(format!("wine-{app_name}.log")),
-        Gog { product_id } => locations
-            .gog_diagnostics
-            .join(format!("wine-{product_id}.log")),
-    }
+    crate::locations::game_log(&locations.home, game, "wine")
 }
 
 /// Deletes a Rosetta prefix, after its Wine server.
