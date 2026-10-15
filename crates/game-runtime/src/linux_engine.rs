@@ -346,11 +346,7 @@ pub(crate) fn target<S: wine::Storefront>(
         install.to_string_lossy().into_owned(),
         working_directory,
         "--graphics".to_owned(),
-        match config.graphics {
-            wine::Graphics::Dxmt => "dxmt",
-            wine::Graphics::D3DMetal => "d3dmetal",
-        }
-        .to_owned(),
+        config.graphics.name().to_owned(),
     ];
     for (path, folder) in &guest.binds {
         arguments.push("--bind".to_owned());

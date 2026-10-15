@@ -500,13 +500,13 @@ pub struct GamePlayed {
     pub ended_by_obelisk: bool,
     /// `rosetta` or `linux` for a Windows game, absent for a Mac one.
     pub engine: Option<String>,
-    /// `dxmt` or `d3dmetal` on the Linux engine.
+    /// `dxmt` or `d3dmetal` for a Windows game, absent for a Mac one.
     pub graphics: Option<String>,
     pub voile: Option<String>,
 }
 impl From<game_runtime::supervisor::Played> for GamePlayed {
     fn from(played: game_runtime::supervisor::Played) -> Self {
-        use game_runtime::wine::{Engine, Graphics};
+        use game_runtime::wine::Engine;
         Self {
             seconds: played.seconds,
             frames: played.frames.count,
@@ -523,13 +523,7 @@ impl From<game_runtime::supervisor::Played> for GamePlayed {
                 }
                 .to_owned()
             }),
-            graphics: played.graphics.map(|graphics| {
-                match graphics {
-                    Graphics::Dxmt => "dxmt",
-                    Graphics::D3DMetal => "d3dmetal",
-                }
-                .to_owned()
-            }),
+            graphics: played.graphics.map(|graphics| graphics.name().to_owned()),
             voile: played.voile,
         }
     }

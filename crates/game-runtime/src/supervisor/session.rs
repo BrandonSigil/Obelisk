@@ -776,6 +776,11 @@ async fn run<L: Launch>(
                     arguments: target.arguments.clone(),
                     working_directory: target.working_directory.clone(),
                     log: target.log.clone(),
+                    log_header: session
+                        .wine
+                        .get()
+                        .and_then(Option::as_ref)
+                        .map(crate::wine::Config::log_header),
                 },
             )
             .map_err(|_| Error::StartFailed)?;
@@ -853,10 +858,7 @@ async fn run<L: Launch>(
             exit_code: status.code(),
             exit_signal: std::os::unix::process::ExitStatusExt::signal(&status),
             ended_by_obelisk: session.ended_by_obelisk.load(Ordering::Acquire),
-            graphics: wine
-                .as_ref()
-                .filter(|wine| wine.engine == crate::wine::Engine::Linux)
-                .map(|wine| wine.graphics),
+            graphics: wine.as_ref().map(|wine| wine.graphics),
             voile: wine
                 .as_ref()
                 .and_then(|wine| crate::voile::release_of(&wine.runtime)),

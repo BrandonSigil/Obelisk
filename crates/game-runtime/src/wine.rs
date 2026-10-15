@@ -135,6 +135,14 @@ impl Graphics {
             Engine::Linux => Self::Dxmt,
         }
     }
+
+    /// The name Wine, Neptune and Obelisk's reports know it by.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::D3DMetal => "d3dmetal",
+            Self::Dxmt => "dxmt",
+        }
+    }
 }
 
 /// What a game asks of D3DMetal on Rosetta's Wine. The Linux engine's render
@@ -218,10 +226,11 @@ impl Config {
     /// carries it: Wine reports the hardware scheduling D3D12 expects from
     /// D3DMetal alone.
     fn active_graphics(&self) -> Option<&'static str> {
-        match self.graphics {
-            Graphics::D3DMetal => self.d3dmetal().map(|_| "d3dmetal"),
-            Graphics::Dxmt => self.runtime.join(DXMT_DLLS).is_dir().then_some("dxmt"),
-        }
+        let carried = match self.graphics {
+            Graphics::D3DMetal => self.d3dmetal().is_some(),
+            Graphics::Dxmt => self.runtime.join(DXMT_DLLS).is_dir(),
+        };
+        carried.then_some(self.graphics.name())
     }
 
     /// The GStreamer plugins the runtime carries, which decode games' videos
@@ -328,6 +337,43 @@ impl Config {
             environment.insert("D3DM_SUPPORT_DXR".into(), "0".into());
         }
         environment
+    }
+
+    /// The line the game's log starts with: how Obelisk runs it, for whoever
+    /// reads the log, such as a bug report's reader. Of the arguments, only
+    /// those its player adds: a storefront's may carry credentials.
+    pub(crate) fn log_header(&self) -> String {
+        let engine = match self.engine {
+            Engine::Rosetta => "wine-macos",
+            Engine::Linux => "wine-linux",
+        };
+        let mut header = format!("obelisk: engine={engine} graphics={}", self.graphics.name());
+        let ray_tracing = crate::launch_settings::offer(self.engine)
+            .graphics(self.graphics)
+            .is_some_and(|offer| {
+                offer
+                    .options
+                    .contains(&crate::launch_settings::GraphicsOption::RayTracing)
+            });
+        if ray_tracing {
+            let state = if self.options.ray_tracing {
+                "on"
+            } else {
+                "off"
+            };
+            header.push_str(&format!(" ray_tracing={state}"));
+        }
+        // Only a development runtime has no manifest.
+        let voile = crate::voile::release_of(&self.runtime);
+        header.push_str(&format!(
+            " voile={}",
+            voile.as_deref().unwrap_or("development")
+        ));
+        if !self.arguments.is_empty() {
+            header.push_str(&format!(" arguments={}", typed(&self.arguments)));
+        }
+        header.push('\n');
+        header
     }
 }
 
@@ -983,6 +1029,21 @@ fn command_line(line: &str) -> Vec<String> {
         arguments.push(current);
     }
     arguments
+}
+
+/// `arguments` as a command line `command_line` splits back into them.
+fn typed(arguments: &[String]) -> String {
+    arguments
+        .iter()
+        .map(|argument| {
+            if argument.is_empty() || argument.contains([' ', '\t']) {
+                format!("\"{argument}\"")
+            } else {
+                argument.clone()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// Whether `path` starts like a Windows program: a DOS header naming a PE header.

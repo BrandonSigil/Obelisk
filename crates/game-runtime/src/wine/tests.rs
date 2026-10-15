@@ -639,6 +639,51 @@ fn the_player_s_launch_settings_arguments_follow_the_storefront_s() {
 }
 
 #[test]
+fn the_game_s_log_starts_with_how_obelisk_runs_it_and_only_the_player_s_arguments() {
+    let (_directory, root) = installation();
+    let config = Config {
+        options: GraphicsOptions { ray_tracing: false },
+        arguments: vec!["-dx11".into(), "+exec auto exec.cfg".into(), String::new()],
+        ..config(&root)
+    };
+    assert_eq!(
+        config.log_header(),
+        "obelisk: engine=wine-macos graphics=d3dmetal ray_tracing=off voile=development \
+         arguments=-dx11 \"+exec auto exec.cfg\" \"\"\n"
+    );
+    assert_eq!(
+        command_line(
+            config
+                .log_header()
+                .split_once("arguments=")
+                .unwrap()
+                .1
+                .trim_end()
+        ),
+        config.arguments
+    );
+
+    // The Linux engine's render servers take no options; a release names
+    // itself in its manifest, which the engine's runtime sits inside.
+    fs::create_dir_all(root.join("v26.3.0-15/linux")).unwrap();
+    fs::write(
+        root.join("v26.3.0-15/runtime.json"),
+        r#"{"version": "v26.3.0-15"}"#,
+    )
+    .unwrap();
+    let linux = Config {
+        runtime: root.join("v26.3.0-15/linux"),
+        engine: Engine::Linux,
+        graphics: Graphics::Dxmt,
+        ..self::config(&root)
+    };
+    assert_eq!(
+        linux.log_header(),
+        "obelisk: engine=wine-linux graphics=dxmt voile=v26.3.0-15\n"
+    );
+}
+
+#[test]
 fn a_missing_runtime_is_reported_before_any_prefix_is_created() {
     let (_directory, root) = installation();
     let locations = locations(&root);

@@ -6119,7 +6119,7 @@ public struct GamePlayed: Equatable, Hashable {
      */
     public var engine: String?
     /**
-     * `dxmt` or `d3dmetal` on the Linux engine.
+     * `dxmt` or `d3dmetal` for a Windows game, absent for a Mac one.
      */
     public var graphics: String?
     public var voile: String?
@@ -6131,7 +6131,7 @@ public struct GamePlayed: Equatable, Hashable {
          * `rosetta` or `linux` for a Windows game, absent for a Mac one.
          */engine: String?, 
         /**
-         * `dxmt` or `d3dmetal` on the Linux engine.
+         * `dxmt` or `d3dmetal` for a Windows game, absent for a Mac one.
          */graphics: String?, voile: String?) {
         self.seconds = seconds
         self.frames = frames

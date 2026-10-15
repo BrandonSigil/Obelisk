@@ -173,7 +173,8 @@ pub struct Played {
     pub ended_by_obelisk: bool,
     /// What ran a Windows game; absent for a Mac one.
     pub engine: Option<crate::wine::Engine>,
-    /// What rendered its Direct3D on the Linux engine.
+    /// The graphics backend a Windows game ran with, as its launch settings
+    /// picked it; absent for a Mac one.
     pub graphics: Option<crate::wine::Graphics>,
     /// The Voile release a Windows game ran in.
     pub voile: Option<String>,

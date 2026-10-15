@@ -270,7 +270,7 @@ You can also [open an issue](https://github.com/Zagrios/obelisk/issues/new?templ
 
 Have an idea? [Request a feature](https://github.com/Zagrios/obelisk/issues/new?template=feature_request.yml), or press **Request a feature** in **Settings → Help**.
 
-Logs help a lot. They are in `~/Library/Logs/Obelisk` (Finder: **Go → Go to Folder…**). Attach the ones of the game you tried, after checking they show nothing you want to keep private.
+Logs help a lot. They are in `~/Library/Logs/Obelisk` (Finder: **Go → Go to Folder…**). Attach the ones of the game you tried, after checking they show nothing you want to keep private. A Windows game's log starts with a line that says how Obelisk ran it: its engine, graphics backend, Voile release and the launch arguments you added.
 
 Enjoying Obelisk? Star the repository: it helps other Mac players find it.
 

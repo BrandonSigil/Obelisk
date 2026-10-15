@@ -20,6 +20,9 @@ pub struct Admission {
     pub working_directory: PathBuf,
     #[serde(default)]
     pub log: Option<PathBuf>,
+    /// What the log starts with, before the game writes to it.
+    #[serde(default)]
+    pub log_header: Option<String>,
 }
 
 /// Game arguments are bounded like the kernel's ARG_MAX, not like a record.
@@ -54,12 +57,17 @@ pub fn receive(input: impl Read) -> io::Result<Admission> {
     Ok(admission)
 }
 
-/// The game's standard error: its log, emptied for this launch, or nothing.
+/// The game's standard error: its log, emptied for this launch and started
+/// with its header, or nothing.
 pub fn standard_error(admission: &Admission) -> io::Result<Stdio> {
-    Ok(match &admission.log {
-        Some(log) => open_log(log)?.into(),
-        None => Stdio::null(),
-    })
+    let Some(log) = &admission.log else {
+        return Ok(Stdio::null());
+    };
+    let mut log = open_log(log)?;
+    if let Some(header) = &admission.log_header {
+        log.write_all(header.as_bytes())?;
+    }
+    Ok(log.into())
 }
 
 /// Opens `log` empty for a new launch. The last launch's log stays beside it
