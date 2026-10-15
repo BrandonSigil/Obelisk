@@ -13878,7 +13878,7 @@
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Obelisk n'a pas pu enregistrer ces réglages de lancement."
+            "value": "Obelisk n'a pas pu enregistrer ces options de lancement."
           }
         }
       }
@@ -13895,7 +13895,7 @@
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Réglages de lancement"
+            "value": "Options de lancement"
           }
         }
       }
@@ -13912,7 +13912,7 @@
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Chargement des réglages de lancement…"
+            "value": "Chargement des options de lancement…"
           }
         }
       }
@@ -14252,7 +14252,7 @@
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Rétablir les réglages par défaut"
+            "value": "Rétablir les options par défaut"
           }
         }
       }
