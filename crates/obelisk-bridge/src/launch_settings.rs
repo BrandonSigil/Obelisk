@@ -192,7 +192,10 @@ mod tests {
     #[test]
     fn a_game_s_settings_cross_with_every_engine_s_offer_and_default_backend() {
         let view = View::new(
-            &profile::of(profile::Game::Steam { app_id: 42 }),
+            &profile::of(
+                profile::Game::Steam { app_id: 42 },
+                std::path::Path::new("/nowhere"),
+            ),
             Choices::default(),
         );
 

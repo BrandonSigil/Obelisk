@@ -1397,7 +1397,10 @@ impl<S: Storefront> Installations<S> {
             return None;
         }
         let game = receipt.wine_game();
-        Some((crate::profile::of(game.id), game.install.to_owned()))
+        Some((
+            crate::profile::of(game.id, game.install),
+            game.install.to_owned(),
+        ))
     }
 
     /// Asks the storefront whether each installation has a newer build, at

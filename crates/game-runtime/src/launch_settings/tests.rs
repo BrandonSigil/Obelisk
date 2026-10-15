@@ -6,21 +6,26 @@ const OTHER: Game<'static> = Game::Steam { app_id: 42 };
 /// A game whose profile names the Linux engine and D3DMetal.
 const ELDEN_RING: Game<'static> = Game::Steam { app_id: 1245620 };
 
+/// The profile of `game`, in an installation that holds no file of the table.
+fn profile_of(game: Game<'_>) -> Profile {
+    profile::of(game, std::path::Path::new("/nowhere"))
+}
+
 #[test]
 fn a_game_without_choices_runs_as_its_profile_says() {
-    let settings = Choices::default().apply(&profile::of(OTHER));
+    let settings = Choices::default().apply(&profile_of(OTHER));
     assert_eq!(settings.engine, Engine::Rosetta);
     assert_eq!(settings.graphics, Graphics::D3DMetal);
     assert!(settings.options.ray_tracing);
 
-    let settings = Choices::default().apply(&profile::of(ELDEN_RING));
+    let settings = Choices::default().apply(&profile_of(ELDEN_RING));
     assert_eq!(settings.engine, Engine::Linux);
     assert_eq!(settings.graphics, Graphics::D3DMetal);
 }
 
 #[test]
 fn another_engine_renders_with_its_own_default_backend_unless_the_player_picked_one() {
-    let other = profile::of(OTHER);
+    let other = profile_of(OTHER);
     let linux = Choices {
         engine: Some(Engine::Linux),
         ..Choices::default()
@@ -38,14 +43,14 @@ fn another_engine_renders_with_its_own_default_backend_unless_the_player_picked_
         ..Choices::default()
     };
     assert_eq!(
-        rosetta.apply(&profile::of(ELDEN_RING)).graphics,
+        rosetta.apply(&profile_of(ELDEN_RING)).graphics,
         Graphics::D3DMetal
     );
 }
 
 #[test]
 fn only_what_differs_from_the_profile_is_kept() {
-    let other = profile::of(OTHER);
+    let other = profile_of(OTHER);
     let same = Choices {
         arguments: Some("   ".into()),
         engine: Some(Engine::Rosetta),
@@ -143,7 +148,7 @@ fn the_view_shows_each_engine_s_defaults_and_the_player_s_choices() {
         engine: Some(Engine::Rosetta),
         ..Choices::default()
     };
-    let view = View::new(&profile::of(ELDEN_RING), choices.clone());
+    let view = View::new(&profile_of(ELDEN_RING), choices.clone());
 
     assert_eq!(view.settings.engine, Engine::Rosetta);
     assert_eq!(view.choices, choices);

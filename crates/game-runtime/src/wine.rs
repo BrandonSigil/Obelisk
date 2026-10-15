@@ -486,7 +486,7 @@ pub(crate) fn target<S: Storefront>(
     target: &LaunchTarget,
     environment: HashMap<String, String>,
 ) -> Result<Target, Error> {
-    let mut launched = crate::profile::of(game.id).target(game.install, target);
+    let mut launched = crate::profile::of(game.id, game.install).target(game.install, target);
     launched.arguments.extend(config.arguments.iter().cloned());
     if config.engine == Engine::Linux {
         return crate::linux_engine::target::<S>(
@@ -678,7 +678,7 @@ impl Installation {
         }
         let choices = crate::launch_settings::load(&locations.library, install);
         let arguments = command_line(choices.arguments.as_deref().unwrap_or_default());
-        let profile = choices.apply(&crate::profile::of(game));
+        let profile = choices.apply(&crate::profile::of(game, install));
         let prefix = prefix(&locations.wine_prefixes, install)?;
         let prefix = match profile.engine {
             Engine::Rosetta => prefix,
@@ -853,12 +853,20 @@ fn run_prerequisite(
         } else {
             command.arg(&program);
         }
+        let mut environment = config.environment();
+        // Wine's msvcp140, msvcp140_2 and vcruntime140_1 claim the version of
+        // the newest Visual C++ runtime, so its installer keeps them over
+        // Microsoft's. With their versions hidden, it installs Microsoft's,
+        // which a game whose profile loads them native first then gets.
+        if visual_cpp_installer(&program) {
+            environment.insert("CX_HIDE_BUILTIN_VERSION_RESOURCES".into(), "1".into());
+        }
         command
             .args(command_line(arguments))
             .current_dir(program.parent().unwrap_or(&config.prefix))
             .env_clear()
             .envs(crate::native::environment(home))
-            .envs(config.environment())
+            .envs(environment)
             .stdin(Stdio::null())
             .stdout(log.try_clone()?)
             .stderr(log.try_clone()?);
@@ -871,6 +879,15 @@ fn run_prerequisite(
         }
     }
     Ok(true)
+}
+
+/// Whether `program` installs a Visual C++ runtime, as Microsoft names its
+/// installers: vc_redist or, before 2015, vcredist.
+fn visual_cpp_installer(program: &Path) -> bool {
+    program
+        .file_name()
+        .map(|name| name.to_string_lossy().to_ascii_lowercase())
+        .is_some_and(|name| name.starts_with("vc_redist") || name.starts_with("vcredist"))
 }
 
 /// The exit code of `child`, or `None` once it ran for `timeout` and was killed.

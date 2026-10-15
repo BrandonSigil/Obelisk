@@ -2,6 +2,12 @@ use super::*;
 use crate::launch_settings::Choices;
 use std::{collections::HashSet, path::Component};
 
+/// The profile of `game` found by its id, in an installation that holds no
+/// file of the table.
+fn by_id(game: Game<'_>) -> Profile {
+    of(game, Path::new("/nowhere"))
+}
+
 const ROCKET_LEAGUE: Game<'static> = Game::Epic {
     namespace: "9773aa1aa54f4f7b80e44bef04986cea",
     app_name: "Sugar",
@@ -9,8 +15,8 @@ const ROCKET_LEAGUE: Game<'static> = Game::Epic {
 
 #[test]
 fn rocket_league_and_elden_ring_run_on_the_linux_engine_and_nothing_else_does() {
-    assert_eq!(of(ROCKET_LEAGUE).engine, Engine::Linux);
-    assert_eq!(of(Game::Steam { app_id: 1245620 }).engine, Engine::Linux);
+    assert_eq!(by_id(ROCKET_LEAGUE).engine, Engine::Linux);
+    assert_eq!(by_id(Game::Steam { app_id: 1245620 }).engine, Engine::Linux);
     for other in [
         Game::Epic {
             namespace: "9773aa1aa54f4f7b80e44bef04986cea",
@@ -25,18 +31,18 @@ fn rocket_league_and_elden_ring_run_on_the_linux_engine_and_nothing_else_does() 
             product_id: "1245620",
         },
     ] {
-        assert_eq!(of(other), Profile::default(), "{other:?}");
-        assert_eq!(of(other).engine, Engine::Rosetta);
+        assert_eq!(by_id(other), Profile::default(), "{other:?}");
+        assert_eq!(by_id(other).engine, Engine::Rosetta);
     }
 }
 
 #[test]
 fn elden_ring_renders_through_d3dmetal_rocket_league_through_dxmt_and_others_through_d3dmetal() {
     assert_eq!(
-        of(Game::Steam { app_id: 1245620 }).graphics,
+        by_id(Game::Steam { app_id: 1245620 }).graphics,
         Graphics::D3DMetal
     );
-    assert_eq!(of(ROCKET_LEAGUE).graphics, Graphics::Dxmt);
+    assert_eq!(by_id(ROCKET_LEAGUE).graphics, Graphics::Dxmt);
     assert_eq!(Profile::default().graphics, Graphics::D3DMetal);
     assert_eq!(Profile::default().options, GraphicsOptions::default());
 }
@@ -49,12 +55,12 @@ fn the_player_s_launch_settings_apply_over_the_profile_and_keep_its_program() {
         ..Choices::default()
     };
 
-    let profile = choices.apply(&of(ROCKET_LEAGUE));
+    let profile = choices.apply(&by_id(ROCKET_LEAGUE));
 
     assert_eq!(profile.engine, Engine::Rosetta);
     assert_eq!(profile.graphics, Graphics::D3DMetal);
     assert!(!profile.options.ray_tracing);
-    assert_eq!(profile.executable, of(ROCKET_LEAGUE).executable);
+    assert_eq!(profile.executable, by_id(ROCKET_LEAGUE).executable);
 }
 
 #[test]
@@ -67,7 +73,7 @@ fn rocket_league_starts_its_anti_cheat_bootstrapper_instead_of_its_dotnet_launch
         is_application_bundle: false,
     };
 
-    let started = of(ROCKET_LEAGUE).target(install, &publisher);
+    let started = by_id(ROCKET_LEAGUE).target(install, &publisher);
 
     assert_eq!(
         started.executable,
@@ -87,7 +93,7 @@ fn a_game_without_a_substitute_starts_its_publisher_s_program() {
     };
     let install = Path::new("/games/er");
     assert_eq!(
-        of(Game::Steam { app_id: 1245620 }).target(install, &publisher),
+        by_id(Game::Steam { app_id: 1245620 }).target(install, &publisher),
         publisher
     );
     assert_eq!(Profile::default().target(install, &publisher), publisher);
@@ -105,13 +111,14 @@ fn entries() -> Vec<serde_json::Map<String, serde_json::Value>> {
 }
 
 #[test]
-fn every_game_of_the_table_has_a_name_a_note_a_storefront_and_only_what_obelisk_reads() {
-    const KEYS: [&str; 11] = [
+fn every_game_of_the_table_has_a_name_a_note_an_id_or_a_file_and_only_what_obelisk_reads() {
+    const KEYS: [&str; 12] = [
         "name",
         "note",
         "steam",
         "epic",
         "gog",
+        "path",
         "engine",
         "graphics",
         "executable",
@@ -128,9 +135,9 @@ fn every_game_of_the_table_has_a_name_a_note_a_storefront_and_only_what_obelisk_
             "{name}"
         );
         assert!(
-            ["steam", "epic", "gog"]
+            ["steam", "epic", "gog", "path"]
                 .iter()
-                .any(|store| entry.contains_key(*store)),
+                .any(|key| entry.contains_key(*key)),
             "{name}"
         );
         for key in entry.keys() {
@@ -237,5 +244,52 @@ fn a_game_of_the_table_keeps_the_defaults_it_does_not_change_and_adds_its_argume
     assert_eq!(
         profile.target(Path::new("/games/g"), &publisher).arguments,
         ["-AUTH_TYPE=exchangecode", "-dx11"]
+    );
+}
+
+#[test]
+fn a_file_of_the_table_is_inside_the_installation_and_only_one_game_holds_it() {
+    const SHARED: [&str; 10] = [
+        "start_protected_game.exe",
+        "launcher.exe",
+        "game.exe",
+        "client.exe",
+        "start.exe",
+        "setup.exe",
+        "play.exe",
+        "crashreportclient.exe",
+        "unitycrashhandler64.exe",
+        "unitycrashhandler32.exe",
+    ];
+    let mut paths = HashSet::new();
+    for path in table().iter().filter_map(|known| known.path.as_deref()) {
+        let file = Path::new(path);
+        assert!(
+            file.components()
+                .all(|component| matches!(component, Component::Normal(_))),
+            "{path}"
+        );
+        let name = file.file_name().unwrap().to_string_lossy().to_lowercase();
+        assert!(!SHARED.contains(&name.as_str()), "{path}");
+        assert!(paths.insert(path.to_lowercase()), "{path}");
+    }
+}
+
+#[test]
+fn a_game_is_found_by_its_storefront_s_id_first_then_by_a_file_of_its_installation() {
+    let directory = tempfile::tempdir().unwrap();
+    let install = directory.path();
+    let fallout_4 = by_id(Game::Steam { app_id: 377160 });
+    let gog = Game::Gog {
+        product_id: "not in the table",
+    };
+    assert_eq!(of(gog, install), Profile::default());
+
+    std::fs::write(install.join("Fallout4.exe"), "").unwrap();
+
+    assert_eq!(of(gog, install), fallout_4);
+    assert_eq!(
+        of(Game::Steam { app_id: 1245620 }, install),
+        by_id(Game::Steam { app_id: 1245620 })
     );
 }

@@ -2,9 +2,11 @@
 //! storefront: the engine that runs one, the graphics backend its Direct3D
 //! goes through there, the program started instead of its publisher's, and
 //! what that program needs besides: arguments, environment variables and DLL
-//! overrides. The table is `profiles.json`, built into Obelisk. Every game it
-//! does not name runs with the defaults, in Rosetta's Wine with D3DMetal. The
-//! player's launch settings apply over it.
+//! overrides. The table is `profiles.json`, built into Obelisk. It names a
+//! game by its storefronts' ids, or by a file of its installation, which
+//! finds the game whatever the storefront. Every game it does not name runs
+//! with the defaults, in Rosetta's Wine with D3DMetal. The player's launch
+//! settings apply over it.
 use crate::wine::{Engine, Graphics, GraphicsOptions};
 use obelisk_core::launch::LaunchTarget;
 use serde::Deserialize;
@@ -71,13 +73,15 @@ struct Table {
     games: Vec<Known>,
 }
 
-/// One game of the table: the storefronts' names for it, and what its profile
-/// changes from the defaults.
+/// One game of the table: the storefronts' names for it, a file only its
+/// installation holds, and what its profile changes from the defaults.
 #[derive(Debug, Deserialize)]
 struct Known {
     steam: Option<u32>,
     epic: Option<EpicGame>,
     gog: Option<String>,
+    /// Relative to the installation.
+    path: Option<String>,
     engine: Option<Engine>,
     graphics: Option<Graphics>,
     executable: Option<String>,
@@ -103,7 +107,7 @@ fn table() -> &'static [Known] {
 }
 
 impl Known {
-    /// Whether this entry is `game`.
+    /// Whether this entry names `game` by its storefront's id.
     fn names(&self, game: Game<'_>) -> bool {
         match game {
             Game::Steam { app_id } => self.steam == Some(app_id),
@@ -130,13 +134,24 @@ impl Known {
             dll_overrides: &self.dll_overrides,
         }
     }
+
+    /// Whether the installation in `install` holds this entry's file.
+    fn found_in(&self, install: &Path) -> bool {
+        self.path
+            .as_ref()
+            .is_some_and(|path| install.join(path).is_file())
+    }
 }
 
-/// The profile of `game`: the one the table gives it, else the defaults.
-pub fn of(game: Game<'_>) -> Profile {
-    table()
+/// The profile of `game`, installed in `install`: the one the table gives
+/// its storefront's id, else the one whose file the installation holds, else
+/// the defaults.
+pub fn of(game: Game<'_>, install: &Path) -> Profile {
+    let table = table();
+    table
         .iter()
         .find(|known| known.names(game))
+        .or_else(|| table.iter().find(|known| known.found_in(install)))
         .map(Known::profile)
         .unwrap_or_default()
 }

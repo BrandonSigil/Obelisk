@@ -964,6 +964,42 @@ fn each_prerequisite_runs_once_and_a_failed_one_again_on_the_next_launch() {
 }
 
 #[test]
+fn a_visual_cpp_installer_runs_with_the_versions_of_wine_s_own_dlls_hidden() {
+    let (_directory, root) = installation();
+    let config = recording_runtime(&root);
+    fs::write(
+        config.runtime.join("bin/wine"),
+        "#!/bin/sh\nprintf '%s %s\\n' \"${1##*/}\" \"${CX_HIDE_BUILTIN_VERSION_RESOURCES:-shown}\" \
+         >> \"$WINEPREFIX/../calls\"\n",
+    )
+    .unwrap();
+    let redist = root.join("game/redist");
+    fs::create_dir_all(&redist).unwrap();
+    let names = ["VC_redist.x64.exe", "vcredist_x86.exe", "DXSETUP.exe"];
+    for name in names {
+        fs::write(redist.join(name), "").unwrap();
+    }
+    let prerequisite = Prerequisite {
+        id: "redist".into(),
+        programs: names
+            .iter()
+            .map(|name| (redist.join(name), String::new()))
+            .collect(),
+    };
+
+    install_prerequisites(&config, &root, &[prerequisite]).unwrap();
+
+    assert_eq!(
+        calls(&root),
+        [
+            "VC_redist.x64.exe 1",
+            "vcredist_x86.exe 1",
+            "DXSETUP.exe shown"
+        ]
+    );
+}
+
+#[test]
 fn a_missing_program_leaves_its_prerequisite_pending() {
     let (_directory, root) = installation();
     let config = recording_runtime(&root);
