@@ -1,5 +1,6 @@
 use super::*;
 use crate::launch_settings::Choices;
+use std::{collections::HashSet, path::Component};
 
 const ROCKET_LEAGUE: Game<'static> = Game::Epic {
     namespace: "9773aa1aa54f4f7b80e44bef04986cea",
@@ -90,4 +91,151 @@ fn a_game_without_a_substitute_starts_its_publisher_s_program() {
         publisher
     );
     assert_eq!(Profile::default().target(install, &publisher), publisher);
+}
+
+/// Every game of `profiles.json` as written there.
+fn entries() -> Vec<serde_json::Map<String, serde_json::Value>> {
+    let table: serde_json::Value = serde_json::from_str(TABLE).unwrap();
+    table["games"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|entry| entry.as_object().unwrap().clone())
+        .collect()
+}
+
+#[test]
+fn every_game_of_the_table_has_a_name_a_note_a_storefront_and_only_what_obelisk_reads() {
+    const KEYS: [&str; 11] = [
+        "name",
+        "note",
+        "steam",
+        "epic",
+        "gog",
+        "engine",
+        "graphics",
+        "executable",
+        "arguments",
+        "variables",
+        "dll_overrides",
+    ];
+    assert_eq!(entries().len(), table().len());
+    for entry in entries() {
+        let name = entry["name"].as_str().unwrap();
+        assert!(!name.is_empty());
+        assert!(
+            entry["note"].as_str().is_some_and(|note| !note.is_empty()),
+            "{name}"
+        );
+        assert!(
+            ["steam", "epic", "gog"]
+                .iter()
+                .any(|store| entry.contains_key(*store)),
+            "{name}"
+        );
+        for key in entry.keys() {
+            assert!(KEYS.contains(&key.as_str()), "{name}: {key}");
+        }
+        if let Some(epic) = entry.get("epic") {
+            let keys: Vec<_> = epic.as_object().unwrap().keys().collect();
+            assert_eq!(keys, ["app_name", "namespace"], "{name}");
+        }
+    }
+}
+
+#[test]
+fn no_two_games_of_the_table_share_a_storefront_s_name() {
+    let mut names = HashSet::new();
+    for known in table() {
+        let ids = [
+            known.steam.map(|app_id| format!("steam {app_id}")),
+            known
+                .epic
+                .as_ref()
+                .map(|epic| format!("epic {}:{}", epic.namespace, epic.app_name)),
+            known.gog.as_ref().map(|product| format!("gog {product}")),
+        ];
+        for id in ids.into_iter().flatten() {
+            assert!(names.insert(id.clone()), "{id}");
+        }
+    }
+}
+
+#[test]
+fn the_table_leaves_obelisk_s_own_wine_settings_alone() {
+    const OWN_VARIABLES: [&str; 4] = [
+        "WINEPREFIX",
+        "WINEDLLOVERRIDES",
+        "WINEDEBUG",
+        "WINEDLLPATH_PREPEND",
+    ];
+    const OWN_DLLS: [&str; 6] = [
+        "mscoree",
+        "mshtml",
+        "winemenubuilder.exe",
+        "d3d11",
+        "dxgi",
+        "d3d12",
+    ];
+    const MODES: [&str; 6] = ["", "n", "b", "n,b", "b,n", "d"];
+    for known in table() {
+        for name in known.variables.keys() {
+            let mut characters = name.chars();
+            assert!(
+                characters
+                    .next()
+                    .is_some_and(|first| first.is_ascii_alphabetic() || first == '_')
+                    && characters.all(|next| next.is_ascii_alphanumeric() || next == '_'),
+                "{name}"
+            );
+            assert!(!OWN_VARIABLES.contains(&name.as_str()), "{name}");
+        }
+        for (dll, mode) in &known.dll_overrides {
+            assert!(!dll.is_empty() && !dll.contains([',', '=', ';']), "{dll}");
+            assert!(
+                !OWN_DLLS.contains(&dll.to_ascii_lowercase().as_str()),
+                "{dll}"
+            );
+            assert!(MODES.contains(&mode.as_str()), "{dll}={mode}");
+        }
+        if let Some(executable) = &known.executable {
+            assert!(
+                Path::new(executable)
+                    .components()
+                    .all(|component| matches!(component, Component::Normal(_))),
+                "{executable}"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_game_of_the_table_keeps_the_defaults_it_does_not_change_and_adds_its_arguments() {
+    let known: &'static Known = Box::leak(Box::new(
+        serde_json::from_str(
+            r#"{
+                "steam": 42,
+                "arguments": ["-dx11"],
+                "variables": {"WINENCPU": "10"},
+                "dll_overrides": {"xaudio2_7": "n,b"}
+            }"#,
+        )
+        .unwrap(),
+    ));
+    let profile = known.profile();
+    assert_eq!(profile.engine, Engine::Rosetta);
+    assert_eq!(profile.graphics, Graphics::D3DMetal);
+    assert_eq!(profile.variables["WINENCPU"], "10");
+    assert_eq!(profile.dll_overrides["xaudio2_7"], "n,b");
+
+    let publisher = LaunchTarget {
+        executable: "/games/g/Game.exe".into(),
+        arguments: vec!["-AUTH_TYPE=exchangecode".into()],
+        working_directory: "/games/g".into(),
+        is_application_bundle: false,
+    };
+    assert_eq!(
+        profile.target(Path::new("/games/g"), &publisher).arguments,
+        ["-AUTH_TYPE=exchangecode", "-dx11"]
+    );
 }

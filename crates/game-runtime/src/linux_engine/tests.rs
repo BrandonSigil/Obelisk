@@ -10,6 +10,8 @@ fn linux_config(root: &Path) -> wine::Config {
         graphics: wine::Graphics::Dxmt,
         options: wine::GraphicsOptions::default(),
         arguments: Vec::new(),
+        variables: Default::default(),
+        dll_overrides: Default::default(),
     }
 }
 
@@ -121,6 +123,35 @@ fn a_game_starts_through_the_native_launcher_with_guest_paths() {
     // Without a title, the Dock names the game after its program.
     assert_eq!(target.environment[APP_NAME], "Game");
     assert_eq!(target.log, Some(config.log.clone()));
+}
+
+#[test]
+fn the_guest_runs_with_the_profile_s_variables_and_dll_overrides() {
+    let (_directory, root) = installation();
+    let install = root.join("install");
+    fs::create_dir_all(&install).unwrap();
+    let executable = install.join("Game.exe");
+    fs::write(&executable, pe()).unwrap();
+    let config = wine::Config {
+        variables: [("WINENCPU".to_owned(), "10".to_owned())].into(),
+        dll_overrides: [("xaudio2_7".to_owned(), "n,b".to_owned())].into(),
+        ..linux_config(&root)
+    };
+
+    let target = target::<Plain>(
+        &install,
+        &launch_target(&executable, &[]),
+        "",
+        HashMap::new(),
+        &config,
+    )
+    .unwrap();
+
+    let variables = options(&target, "--env");
+    assert!(variables.contains(&"WINENCPU=10"));
+    assert!(variables.contains(
+        &"WINEDLLOVERRIDES=mscoree,mshtml=;winemenubuilder.exe=d;d3d11,dxgi,d3d12=n;xaudio2_7=n,b"
+    ));
 }
 
 #[test]
@@ -620,6 +651,8 @@ fn smoke() {
         },
         options: wine::GraphicsOptions::default(),
         arguments: Vec::new(),
+        variables: Default::default(),
+        dll_overrides: Default::default(),
     };
     let arguments: Vec<&str> = arguments.split_whitespace().collect();
     let launch = launch_target(&executable, &arguments);

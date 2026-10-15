@@ -66,6 +66,8 @@ pub(crate) fn config(root: &Path) -> Config {
         graphics: Graphics::D3DMetal,
         options: GraphicsOptions::default(),
         arguments: Vec::new(),
+        variables: Default::default(),
+        dll_overrides: Default::default(),
     }
 }
 
@@ -735,6 +737,37 @@ fn every_wine_command_syncs_through_mach_and_gives_32_bit_games_4_gb() {
 
     assert_eq!(environment["WINEMSYNC"], "1");
     assert_eq!(environment["WINE_LARGE_ADDRESS_AWARE"], "1");
+}
+
+#[test]
+fn a_profile_s_variables_and_dll_overrides_come_after_obelisk_s_own_and_open_the_log() {
+    let (_directory, root) = installation();
+    let config = Config {
+        variables: BTreeMap::from([
+            ("ROSETTA_ADVERTISE_AVX".to_owned(), String::new()),
+            ("WINENCPU".to_owned(), "10".to_owned()),
+        ]),
+        dll_overrides: BTreeMap::from([
+            ("xaudio2_7".to_owned(), "n,b".to_owned()),
+            ("SpeechSynthWrapper".to_owned(), String::new()),
+        ]),
+        ..config(&root)
+    };
+
+    let environment = environment(&config);
+
+    assert_eq!(environment["WINENCPU"], "10");
+    assert_eq!(environment["ROSETTA_ADVERTISE_AVX"], "");
+    assert_eq!(
+        environment["WINEDLLOVERRIDES"],
+        "mscoree,mshtml=;winemenubuilder.exe=d;SpeechSynthWrapper=;xaudio2_7=n,b"
+    );
+    assert_eq!(
+        config.log_header(),
+        "obelisk: engine=wine-macos graphics=d3dmetal ray_tracing=on voile=development \
+         variables=ROSETTA_ADVERTISE_AVX= WINENCPU=10 \
+         dll_overrides=SpeechSynthWrapper=;xaudio2_7=n,b\n"
+    );
 }
 
 #[test]

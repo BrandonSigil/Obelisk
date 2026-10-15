@@ -9,7 +9,7 @@ use crate::{
 use obelisk_core::launch::LaunchTarget;
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::{BTreeSet, HashMap},
+    collections::{BTreeMap, BTreeSet, HashMap},
     fs,
     io::Read,
     path::{Path, PathBuf},
@@ -56,7 +56,9 @@ pub fn profile(prefix: &Path) -> PathBuf {
 /// How one Windows installation runs: the Wine runtime, the installation's
 /// prefix, the log Wine writes while its game runs, the engine that runs
 /// that Wine, the graphics backend that renders its Direct3D, with that
-/// backend's options, and the arguments its player adds to its command line.
+/// backend's options, the arguments its player adds to its command line, and
+/// the environment variables and DLL overrides its game's profile adds to
+/// Wine's.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(from = "SavedConfig")]
 pub struct Config {
@@ -67,6 +69,8 @@ pub struct Config {
     pub graphics: Graphics,
     pub options: GraphicsOptions,
     pub arguments: Vec<String>,
+    pub variables: BTreeMap<String, String>,
+    pub dll_overrides: BTreeMap<String, String>,
 }
 
 /// A configuration as an earlier Obelisk may have saved it: one without a
@@ -83,6 +87,10 @@ struct SavedConfig {
     options: GraphicsOptions,
     #[serde(default)]
     arguments: Vec<String>,
+    #[serde(default)]
+    variables: BTreeMap<String, String>,
+    #[serde(default)]
+    dll_overrides: BTreeMap<String, String>,
 }
 
 impl From<SavedConfig> for Config {
@@ -97,6 +105,8 @@ impl From<SavedConfig> for Config {
                 .unwrap_or_else(|| Graphics::default_on(saved.engine)),
             options: saved.options,
             arguments: saved.arguments,
+            variables: saved.variables,
+            dll_overrides: saved.dll_overrides,
         }
     }
 }
@@ -251,13 +261,29 @@ impl Config {
 
     /// No Gecko installer prompt and no menu entries. .NET games run on the
     /// Wine Mono a runtime carries; without it, mscoree stays off so that no
-    /// Mono installer prompt appears either.
-    fn dll_overrides(&self) -> &'static str {
-        if self.mono().is_some() {
+    /// Mono installer prompt appears either. The profile's overrides follow.
+    fn overrides(&self) -> String {
+        let own = if self.mono().is_some() {
             "mshtml=;winemenubuilder.exe=d"
         } else {
             "mscoree,mshtml=;winemenubuilder.exe=d"
-        }
+        };
+        self.with_profile_overrides(own)
+    }
+
+    /// Wine's `own` DLL overrides, then the profile's.
+    pub(crate) fn with_profile_overrides(&self, own: &str) -> String {
+        std::iter::once(own.to_owned())
+            .chain(self.profile_overrides())
+            .collect::<Vec<_>>()
+            .join(";")
+    }
+
+    /// The profile's DLL overrides, each as `WINEDLLOVERRIDES` spells it.
+    fn profile_overrides(&self) -> impl Iterator<Item = String> + '_ {
+        self.dll_overrides
+            .iter()
+            .map(|(dll, mode)| format!("{dll}={mode}"))
     }
 
     /// Wine's errors, unless a development runtime's `winedebug` file names
@@ -276,10 +302,7 @@ impl Config {
                 "WINEPREFIX".to_owned(),
                 self.prefix.to_string_lossy().into_owned(),
             ),
-            (
-                "WINEDLLOVERRIDES".to_owned(),
-                self.dll_overrides().to_owned(),
-            ),
+            ("WINEDLLOVERRIDES".to_owned(), self.overrides()),
             ("WINEDEBUG".to_owned(), self.debug_channels()),
             // Events, mutexes and semaphores become Mach semaphores instead of
             // wineserver requests. The server and every process of the prefix
@@ -336,6 +359,9 @@ impl Config {
         if self.graphics == Graphics::D3DMetal && !self.options.ray_tracing {
             environment.insert("D3DM_SUPPORT_DXR".into(), "0".into());
         }
+        // The profile's variables come last, so that they may replace
+        // Obelisk's own for their game.
+        environment.extend(self.variables.clone());
         environment
     }
 
@@ -369,6 +395,18 @@ impl Config {
             " voile={}",
             voile.as_deref().unwrap_or("development")
         ));
+        if !self.variables.is_empty() {
+            let variables: Vec<_> = self
+                .variables
+                .iter()
+                .map(|(name, value)| format!("{name}={value}"))
+                .collect();
+            header.push_str(&format!(" variables={}", typed(&variables)));
+        }
+        if !self.dll_overrides.is_empty() {
+            let overrides: Vec<_> = self.profile_overrides().collect();
+            header.push_str(&format!(" dll_overrides={}", overrides.join(";")));
+        }
         if !self.arguments.is_empty() {
             header.push_str(&format!(" arguments={}", typed(&self.arguments)));
         }
@@ -691,6 +729,8 @@ impl Installation {
             graphics: self.profile.graphics,
             options: self.profile.options,
             arguments: self.arguments.clone(),
+            variables: self.profile.variables.clone(),
+            dll_overrides: self.profile.dll_overrides.clone(),
         })
     }
 

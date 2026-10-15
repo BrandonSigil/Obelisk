@@ -85,9 +85,10 @@ pub(crate) fn home(prefix: &Path) -> Result<&Path, Error> {
     prefix.parent().ok_or(Error::Storage)
 }
 
-/// What every Wine command of the engine runs with in the guest.
-fn guest_environment(config: &wine::Config) -> Vec<(&'static str, String)> {
-    vec![
+/// What every Wine command of the engine runs with in the guest, then the
+/// variables the game's profile adds.
+fn guest_environment(config: &wine::Config) -> Vec<(String, String)> {
+    let own = [
         ("HOME", HOME.into()),
         ("USER", "user".into()),
         ("LOGNAME", "user".into()),
@@ -98,11 +99,16 @@ fn guest_environment(config: &wine::Config) -> Vec<(&'static str, String)> {
         ("WINEDEBUG", config.debug_channels()),
         (
             "WINEDLLOVERRIDES",
-            "mscoree,mshtml=;winemenubuilder.exe=d;d3d11,dxgi,d3d12=n".into(),
+            config
+                .with_profile_overrides("mscoree,mshtml=;winemenubuilder.exe=d;d3d11,dxgi,d3d12=n"),
         ),
         ("VTEST_SOCKET_NAME", "/run/obelisk/vtest.sock".into()),
         ("NPT_DEBUG", "force_vtest".into()),
-    ]
+    ];
+    own.into_iter()
+        .map(|(name, value)| (name.to_owned(), value))
+        .chain(config.variables.clone())
+        .collect()
 }
 
 /// The guest path of the Windows program `target` names inside `install`.
@@ -352,9 +358,12 @@ pub(crate) fn target<S: wine::Storefront>(
         arguments.push("--bind".to_owned());
         arguments.push(format!("{path}={}:ro", folder.display()));
     }
-    let variables = guest_environment(config)
-        .into_iter()
-        .chain(guest.environment.iter().cloned());
+    let variables = guest_environment(config).into_iter().chain(
+        guest
+            .environment
+            .iter()
+            .map(|(name, value)| ((*name).to_owned(), value.clone())),
+    );
     for (name, value) in variables {
         arguments.push("--env".to_owned());
         arguments.push(format!("{name}={value}"));

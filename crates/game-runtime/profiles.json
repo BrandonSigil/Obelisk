@@ -1,0 +1,108 @@
+{
+  "games": [
+    {
+      "name": "Rocket League",
+      "note": "Its Easy Anti-Cheat refuses Rosetta's Wine (code 206) and loads its Linux module on the Linux engine. Its publisher executable, Launcher.exe, is a .NET program and the engine's Wine has no Mono: the game starts with the Easy Anti-Cheat bootstrapper Launcher.exe would start, with the same arguments.",
+      "epic": {
+        "namespace": "9773aa1aa54f4f7b80e44bef04986cea",
+        "app_name": "Sugar"
+      },
+      "engine": "Linux",
+      "graphics": "Dxmt",
+      "executable": "Binaries/Win64/RocketLeague_EAC.exe"
+    },
+    {
+      "name": "ELDEN RING",
+      "note": "Easy Anti-Cheat, as Rocket League's. It only has Direct3D 12, which D3DMetal renders and DXMT does not. Steam's launch already starts its bootstrapper, start_protected_game.exe.",
+      "steam": 1245620,
+      "engine": "Linux",
+      "graphics": "D3DMetal"
+    },
+    {
+      "name": "Counter-Strike 2",
+      "note": "Renders through DXMT rather than D3DMetal. Not tested on Obelisk yet.",
+      "steam": 730,
+      "graphics": "Dxmt"
+    },
+    {
+      "name": "Fallout 4",
+      "note": "Renders through DXMT rather than D3DMetal. Loads the XAudio2 and X3DAudio DLLs that DirectX's installer puts in the prefix before Wine's own. Not tested on Obelisk yet.",
+      "steam": 377160,
+      "graphics": "Dxmt",
+      "dll_overrides": {
+        "x3daudio1_6": "n,b",
+        "x3daudio1_7": "n,b",
+        "xaudio2_6": "n,b",
+        "xaudio2_7": "n,b"
+      }
+    },
+    {
+      "name": "The Elder Scrolls V: Skyrim Special Edition",
+      "note": "Renders through DXMT rather than D3DMetal. Loads the XAudio2 and X3DAudio DLLs that DirectX's installer puts in the prefix before Wine's own. Not tested on Obelisk yet.",
+      "steam": 489830,
+      "graphics": "Dxmt",
+      "dll_overrides": {
+        "x3daudio1_6": "n,b",
+        "x3daudio1_7": "n,b",
+        "xaudio2_6": "n,b",
+        "xaudio2_7": "n,b"
+      }
+    },
+    {
+      "name": "Clair Obscur: Expedition 33",
+      "note": "Renders through DXMT rather than D3DMetal. Loads the Visual C++ runtime DLLs it installs before Wine's own. Not tested on Obelisk yet.",
+      "steam": 1903340,
+      "graphics": "Dxmt",
+      "dll_overrides": {
+        "msvcp140_2": "n,b",
+        "vcruntime140_1": "n,b"
+      }
+    },
+    {
+      "name": "Raft",
+      "note": "Renders through DXMT rather than D3DMetal. Not tested on Obelisk yet.",
+      "steam": 648800,
+      "graphics": "Dxmt"
+    },
+    {
+      "name": "NieR:Automata",
+      "note": "Renders through DXMT rather than D3DMetal. Not tested on Obelisk yet.",
+      "steam": 524220,
+      "graphics": "Dxmt"
+    },
+    {
+      "name": "METAL GEAR SOLID V: THE PHANTOM PAIN",
+      "note": "Renders through DXMT rather than D3DMetal. Not tested on Obelisk yet.",
+      "steam": 287700,
+      "graphics": "Dxmt"
+    },
+    {
+      "name": "Dying Light",
+      "note": "Renders through DXMT rather than D3DMetal. Not tested on Obelisk yet.",
+      "steam": 239140,
+      "graphics": "Dxmt"
+    },
+    {
+      "name": "Guild Wars 2",
+      "note": "Renders through DXMT rather than D3DMetal. Not tested on Obelisk yet.",
+      "steam": 1284210,
+      "graphics": "Dxmt"
+    },
+    {
+      "name": "God of War Ragnarök",
+      "note": "Told it runs on a Steam Deck. Not tested on Obelisk yet.",
+      "steam": 2322010,
+      "variables": {
+        "SteamDeck": "1"
+      }
+    },
+    {
+      "name": "Grounded",
+      "note": "Never loads SpeechSynthWrapper.dll. Not tested on Obelisk yet.",
+      "steam": 962130,
+      "dll_overrides": {
+        "SpeechSynthWrapper": ""
+      }
+    }
+  ]
+}

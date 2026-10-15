@@ -80,6 +80,8 @@ fn each_engine_scopes_the_sweep_to_the_game_and_spares_obelisk() {
         graphics: wine::Graphics::D3DMetal,
         options: wine::GraphicsOptions::default(),
         arguments: Vec::new(),
+        variables: Default::default(),
+        dll_overrides: Default::default(),
     };
     let windows = Scope::of(&game, Some(&rosetta), Some(7), own);
     assert_eq!(
