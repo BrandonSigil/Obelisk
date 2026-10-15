@@ -127,6 +127,8 @@ This builds the Release app, signs it with the Developer ID set as `DISTRIBUTION
 
 To publish a version, set `MARKETING_VERSION` in `apps/macos/Config/App.xcconfig`, commit, and push a tag `v<version>`, such as `v0.2.0`. The Release workflow checks the tag against the app version, builds the notarized DMG and drafts the GitHub release with it.
 
+Obelisk updates itself with [Sparkle](https://sparkle-project.org). It reads `appcast.xml` from the latest release, so players get a version only once its release is published. Publishing a release, or editing its notes afterwards, runs the Appcast workflow: it signs the DMG with the EdDSA key in the `SPARKLE_ED_PRIVATE_KEY` secret, turns the release notes into the HTML Sparkle shows, and attaches `appcast.xml`. `scripts/write-appcast.sh` writes the same feed locally, with the key that `generate_keys --account zagrios` keeps in the login Keychain. The key's public half is `SUPublicEDKey` in `apps/macos/Config/Info.plist`. Without the private key, Obelisks already installed accept no new version, so keep a copy of it outside this Mac. Debug builds never update.
+
 ## License
 
 Obelisk is under the [GNU General Public License v3.0](LICENSE). By sending a contribution, you agree that it is shared under the same license.

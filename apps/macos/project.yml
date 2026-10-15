@@ -16,6 +16,10 @@ settings:
     ARCHS: $(NATIVE_ARCH_ACTUAL)
     ONLY_ACTIVE_ARCH: YES
     SWIFT_STRICT_CONCURRENCY: complete
+packages:
+  Sparkle:
+    url: https://github.com/sparkle-project/Sparkle
+    exactVersion: 2.10.0
 targets:
   Obelisk:
     type: application
@@ -28,9 +32,12 @@ targets:
     configFiles:
       Debug: Config/App.xcconfig
       Release: Config/App.xcconfig
+    dependencies:
+      - package: Sparkle
     settings:
       base:
         GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_FILE: Config/Info.plist
         INFOPLIST_KEY_CFBundleDevelopmentRegion: en
         SWIFT_EMIT_LOC_STRINGS: NO
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
@@ -50,6 +57,10 @@ targets:
         basedOnDependencyAnalysis: false
       - name: Build and sign native Steam helper
         script: '"$SRCROOT/../../scripts/build-steam-native.sh"'
+        basedOnDependencyAnalysis: false
+    postBuildScripts:
+      - name: Sign Sparkle's helpers
+        script: '"$SRCROOT/../../scripts/sign-sparkle.sh"'
         basedOnDependencyAnalysis: false
   ObeliskTests:
     type: bundle.unit-test

@@ -22,6 +22,10 @@ struct ObeliskApp: App {
         .windowStyle(.hiddenTitleBar)
         .windowToolbarStyle(.unified)
         .commands {
+            CommandGroup(after: .appInfo) {
+                Button(L10n.string("app.checkForUpdates"), action: model.updates.check)
+                    .disabled(!model.updates.canCheck)
+            }
             // Obelisk has a single window and nothing to create.
             CommandGroup(replacing: .newItem) {}
             CommandGroup(replacing: .appSettings) {

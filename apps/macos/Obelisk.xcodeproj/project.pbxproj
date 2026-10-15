@@ -31,6 +31,7 @@
 		36F0A07D909FF709C62C5973 /* LibraryHero.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0FDED2B2372EFFDD897E0FC3 /* LibraryHero.swift */; };
 		37DFA75619548460A3E61675 /* GogModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = F342192BE655D715D208BD7D /* GogModel.swift */; };
 		395761DBFFB6CA6EA7FBB1A3 /* EpicWebAuthenticationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4136776D42036B28DFCDB629 /* EpicWebAuthenticationTests.swift */; };
+		3F971538A6735278BE14C140 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = 6C77784ECCBFA4DCCEE08CD7 /* Sparkle */; };
 		3F9F56DF1A6FA13F5D13CB19 /* GamePageControls.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A93224C60170D9DC5BE88E6 /* GamePageControls.swift */; };
 		3FE5A9D391FD4E244143AA5D /* GameOverlayToast.swift in Sources */ = {isa = PBXBuildFile; fileRef = E009587C3E3ED73645B48BDA /* GameOverlayToast.swift */; };
 		400F8AB3C3AE298C8761FD92 /* EpicRememberedSessionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 781A7D748C7BB86682260DC0 /* EpicRememberedSessionTests.swift */; };
@@ -115,6 +116,7 @@
 		D79952394F300AACEEB217CD /* StorefrontSignInPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7ADEAD7043D166CF386F56F /* StorefrontSignInPage.swift */; };
 		D80830B5508E48BBB3109CC4 /* GameActionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D9F07DBF720396724A3E565A /* GameActionTests.swift */; };
 		D8EE14B16F57B7C52C4E99BE /* GameOverlayHotKey.swift in Sources */ = {isa = PBXBuildFile; fileRef = B46590F05420EDE9DB1CCE94 /* GameOverlayHotKey.swift */; };
+		D91F4281F5D572559DF29945 /* AppUpdates.swift in Sources */ = {isa = PBXBuildFile; fileRef = AEEB63EF32B787422D72070A /* AppUpdates.swift */; };
 		D9573A92EA91EF347F971378 /* AppAppearance.swift in Sources */ = {isa = PBXBuildFile; fileRef = 33402992E2BE7F752EAEFFF9 /* AppAppearance.swift */; };
 		DACF2AFE055501604D8AED1F /* GameSessions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6AFE98D57B90D79D12C5A772 /* GameSessions.swift */; };
 		DD0F8BAF57A82FF7F7E37D35 /* SteamSortingPerformanceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE55B619F17FA3BB9C6E2104 /* SteamSortingPerformanceTests.swift */; };
@@ -245,6 +247,7 @@
 		A8B31EA27EBFCBF55111A574 /* EpicAuthorizationCallbackTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EpicAuthorizationCallbackTests.swift; sourceTree = "<group>"; };
 		A930A24645EC4CBF46A76D86 /* EpicFriendsPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EpicFriendsPresentation.swift; sourceTree = "<group>"; };
 		AC8F8335F19E94B8A9966344 /* SteamChatModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SteamChatModel.swift; sourceTree = "<group>"; };
+		AEEB63EF32B787422D72070A /* AppUpdates.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppUpdates.swift; sourceTree = "<group>"; };
 		AF05267D89848A7C52EAEA8E /* WebAccountModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebAccountModelTests.swift; sourceTree = "<group>"; };
 		B1A4722C51B1F6B400BAE3B6 /* GameOverlaySteamTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GameOverlaySteamTests.swift; sourceTree = "<group>"; };
 		B46590F05420EDE9DB1CCE94 /* GameOverlayHotKey.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GameOverlayHotKey.swift; sourceTree = "<group>"; };
@@ -299,6 +302,17 @@
 		FC10483918A67D343770C81F /* SteamIntegrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SteamIntegrationTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
+/* Begin PBXFrameworksBuildPhase section */
+		EDDD927B317391C7D8D39A28 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				3F971538A6735278BE14C140 /* Sparkle in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
 /* Begin PBXGroup section */
 		1E3C95ACA6D803280808099C /* Bridge */ = {
 			isa = PBXGroup;
@@ -350,6 +364,7 @@
 				392C8304CA5920C60F184A09 /* AppIdentity.swift */,
 				E942798E9AD37FBE90168834 /* AppLifecycle.swift */,
 				07228AE3E2D76B31781B0323 /* AppModel.swift */,
+				AEEB63EF32B787422D72070A /* AppUpdates.swift */,
 				15F3297FD4BFB48F4C62413B /* GameOverlay.swift */,
 				B46590F05420EDE9DB1CCE94 /* GameOverlayHotKey.swift */,
 				C9F93405BDF3BA503EAD4854 /* GameOverlayPanel.swift */,
@@ -618,6 +633,8 @@
 				BD34AE01ED34DF218DDC70FB /* Build and sign native Steam helper */,
 				327249B9575C9DE8675A36BC /* Sources */,
 				D053E2A44457CA21E17F53F2 /* Resources */,
+				EDDD927B317391C7D8D39A28 /* Frameworks */,
+				7E6CCCEDC0626253E2EB6373 /* Sign Sparkle's helpers */,
 			);
 			buildRules = (
 			);
@@ -625,6 +642,7 @@
 			);
 			name = Obelisk;
 			packageProductDependencies = (
+				6C77784ECCBFA4DCCEE08CD7 /* Sparkle */,
 			);
 			productName = Obelisk;
 			productReference = 4BFED8E9D46E4887DDA7EC6C /* Obelisk.app */;
@@ -675,6 +693,9 @@
 			);
 			mainGroup = 20610606F53C93E9CC4EE829;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				96BB2C7F68E71DD6F0F68119 /* XCRemoteSwiftPackageReference "Sparkle" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = E5D83CA8502214F5E1BE932A /* Products */;
 			projectDirPath = "";
@@ -718,6 +739,25 @@
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
 			shellScript = "\"$SRCROOT/../../scripts/build-rust.sh\"";
+		};
+		7E6CCCEDC0626253E2EB6373 /* Sign Sparkle's helpers */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Sign Sparkle's helpers";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "\"$SRCROOT/../../scripts/sign-sparkle.sh\"";
 		};
 		BD34AE01ED34DF218DDC70FB /* Build and sign native Steam helper */ = {
 			isa = PBXShellScriptBuildPhase;
@@ -799,6 +839,7 @@
 				67E410310ED5E3C09C281EC5 /* AppIdentity.swift in Sources */,
 				64321D66A64C67E9EB3F525E /* AppLifecycle.swift in Sources */,
 				B151A7F54ABB00ACFE73EA6D /* AppModel.swift in Sources */,
+				D91F4281F5D572559DF29945 /* AppUpdates.swift in Sources */,
 				FE45550C7AAADD5203DF3178 /* BugReportSheet.swift in Sources */,
 				8B02B34486F629D52B28DA07 /* BugReports.swift in Sources */,
 				B3B05906FF7E3CA901417773 /* CachedArtwork.swift in Sources */,
@@ -928,6 +969,7 @@
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				HEADER_SEARCH_PATHS = "$(SRCROOT)/Obelisk/Bridge/Generated";
+				INFOPLIST_FILE = Config/Info.plist;
 				INFOPLIST_KEY_CFBundleDevelopmentRegion = en;
 				INFOPLIST_KEY_NSHighResolutionCapable = YES;
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Games launched by Obelisk can use your microphone for in-game voice chat.";
@@ -1018,6 +1060,7 @@
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				HEADER_SEARCH_PATHS = "$(SRCROOT)/Obelisk/Bridge/Generated";
+				INFOPLIST_FILE = Config/Info.plist;
 				INFOPLIST_KEY_CFBundleDevelopmentRegion = en;
 				INFOPLIST_KEY_NSHighResolutionCapable = YES;
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Games launched by Obelisk can use your microphone for in-game voice chat.";
@@ -1140,6 +1183,25 @@
 			defaultConfigurationName = Debug;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		96BB2C7F68E71DD6F0F68119 /* XCRemoteSwiftPackageReference "Sparkle" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/sparkle-project/Sparkle";
+			requirement = {
+				kind = exactVersion;
+				version = 2.10.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		6C77784ECCBFA4DCCEE08CD7 /* Sparkle */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 96BB2C7F68E71DD6F0F68119 /* XCRemoteSwiftPackageReference "Sparkle" */;
+			productName = Sparkle;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 0E9C444D529A2BDE2A9FEECF /* Project object */;
 }

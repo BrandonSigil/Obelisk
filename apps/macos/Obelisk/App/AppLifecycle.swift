@@ -3,8 +3,8 @@ import SwiftUI
 
 /// Quitting Obelisk, or closing its window, hides it: it keeps running in the
 /// menu bar, as Steam does, so its Game sessions and Transfers go on. It really
-/// quits from its menu bar item, after stopping a running game, or when macOS
-/// logs out, restarts or shuts down.
+/// quits from its menu bar item, after stopping a running game, when macOS
+/// logs out, restarts or shuts down, or for Sparkle to install a new version.
 @MainActor
 final class AppLifecycle: NSObject, NSApplicationDelegate {
     /// Asks the menu bar item, which can open windows, to show the library.
@@ -80,31 +80,41 @@ final class AppLifecycle: NSObject, NSApplicationDelegate {
     /// Really quits: a running game is stopped first, once the player agrees,
     /// and its Cloud saves settle before Obelisk exits.
     func quit() {
-        quit(reopening: false)
+        quit(running: L10n.string("app.quit.running.message"), stop: L10n.string("app.quit.stop")) {
+            NSApp.terminate(nil)
+        }
     }
 
     /// Quits as `quit()` does, then opens Obelisk again once it has exited, so
     /// a new language applies everywhere.
     func restart() {
-        quit(reopening: true)
+        quit(running: L10n.string("app.restart.running.message"), stop: L10n.string("app.restart.stop")) {
+            Self.reopenOnceExited()
+            NSApp.terminate(nil)
+        }
     }
 
-    private func quit(reopening: Bool) {
+    /// Quits as `quit()` does for Sparkle to install Obelisk's new version:
+    /// `install` lets Sparkle end Obelisk, then open the new one.
+    func update(_ install: @escaping () -> Void) {
+        quit(running: L10n.string("app.update.running.message"), stop: L10n.string("app.update.stop"), then: install)
+    }
+
+    private func quit(running message: String, stop: String, then exit: @escaping () -> Void) {
         guard !quitting else { return }
         if games.running() {
             NSApp.activate()
             let alert = NSAlert()
             alert.messageText = L10n.string("app.quit.running.title")
-            alert.informativeText = L10n.string(reopening ? "app.restart.running.message" : "app.quit.running.message")
-            alert.addButton(withTitle: L10n.string(reopening ? "app.restart.stop" : "app.quit.stop"))
+            alert.informativeText = message
+            alert.addButton(withTitle: stop)
             alert.addButton(withTitle: L10n.string("ui.common.cancel"))
             guard alert.runModal() == .alertFirstButtonReturn else { return }
         }
         quitting = true
         Task {
             await stopGames()
-            if reopening { Self.reopenOnceExited() }
-            NSApp.terminate(nil)
+            exit()
         }
     }
 
@@ -151,6 +161,7 @@ struct AppMenuBarLabel: View {
                 lifecycle.libraryCache = model.libraryCache
                 model.overlay.showLibrary = { lifecycle.show() }
                 model.restart = { lifecycle.restart() }
+                model.updates.quitToInstall = { install in lifecycle.update(install) }
                 let (steam, epic, gog) = (model.steam.gameSessions, model.epic.gameSessions, model.gog.gameSessions)
                 lifecycle.games = (
                     running: { steam.active != nil || epic.active != nil || gog.active != nil },

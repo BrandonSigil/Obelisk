@@ -2,7 +2,8 @@
 PRODUCT_NAME = Obelisk
 PRODUCT_BUNDLE_IDENTIFIER = com.zagrios.obelisk
 MARKETING_VERSION = 0.1.0
-CURRENT_PROJECT_VERSION = 1
+// Sparkle compares the build version: each release must raise it, so it follows the version.
+CURRENT_PROJECT_VERSION = $(MARKETING_VERSION)
 INFOPLIST_KEY_CFBundleDisplayName = Obelisk
 INFOPLIST_KEY_LSApplicationCategoryType = public.app-category.games
 

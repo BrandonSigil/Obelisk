@@ -63,6 +63,13 @@ struct SettingsView: View {
                             }
                         }
                     }
+                    GamePageSection(title: L10n.string("ui.settings.updates")) {
+                        SettingsCard {
+                            installUpdates
+                            SettingsDivider()
+                            version
+                        }
+                    }
                     GamePageSection(title: L10n.string("ui.settings.help")) {
                         SettingsCard {
                             reportBug
@@ -145,6 +152,33 @@ struct SettingsView: View {
             }
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(L10n.string("ui.settings.overlay_shortcut"))
+        }
+    }
+
+    private var installUpdates: some View {
+        SettingsRow(title: L10n.string("ui.settings.install_updates", AppIdentity.name)) {
+            SettingsSymbol(name: "arrow.triangle.2.circlepath", colors: [ObeliskStyle.accent, Color(red: 0.45, green: 0.2, blue: 0.85)])
+        } detail: {
+            Text(L10n.string("ui.settings.install_updates_description", AppIdentity.name))
+        } accessory: {
+            Toggle(L10n.string("ui.settings.install_updates", AppIdentity.name),
+                   isOn: Bindable(model.updates).installsAutomatically)
+                .toggleStyle(.switch)
+                .labelsHidden()
+                .pointerCursor()
+                .accessibilityIdentifier("settings-install-updates")
+        }
+    }
+
+    private var version: some View {
+        SettingsRow(title: L10n.string("ui.settings.version", AppIdentity.version)) {
+            SettingsSymbol(name: "info", colors: [Color(red: 0.6, green: 0.6, blue: 0.64), Color(red: 0.42, green: 0.42, blue: 0.46)])
+        } detail: {
+            Text(L10n.string("ui.settings.version_description", AppIdentity.name))
+        } accessory: {
+            SettingsGlassButton(title: L10n.string("ui.settings.check_updates"), systemImage: "arrow.clockwise",
+                                identifier: "settings-check-updates", action: model.updates.check)
+                .disabled(!model.updates.canCheck)
         }
     }
 
@@ -512,6 +546,7 @@ private struct SettingsGlassButton: View {
     var accessibilityLabel: String?
     let identifier: String
     let action: () -> Void
+    @Environment(\.isEnabled) private var isEnabled
 
     var body: some View {
         Button(action: action) {
@@ -523,7 +558,7 @@ private struct SettingsGlassButton: View {
                 Text(title)
             }
             .font(.system(size: 12, weight: .semibold))
-            .foregroundStyle(.primary)
+            .foregroundStyle(isEnabled ? .primary : .tertiary)
             .lineLimit(1)
             .padding(.horizontal, 14)
             .frame(height: 32)

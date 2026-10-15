@@ -78,7 +78,7 @@ Windows games play too. Obelisk sets everything up for you: no bottles to create
 
 Obelisk is signed and notarized by Apple, so it opens without a security warning.
 
-**Updating Obelisk:** Obelisk does not update itself yet. Download the new disk image and replace the app in Applications. Your games, saves and sign-ins stay where they are.
+**Updating Obelisk:** Obelisk looks for a new version once a day. It downloads it in the background and installs it the next time you quit Obelisk from its menu bar item; if you rarely do, it offers the new version in a window after a while. **Check for Updates…** in the Obelisk menu looks right away, and **Settings → Updates** lets Obelisk ask before downloading instead. Your games, saves and sign-ins stay where they are.
 
 ## Getting started
 
@@ -177,7 +177,7 @@ When a game closes, Obelisk sends its frame rate, how it ended and your Mac's ch
 
 ## Privacy
 
-Obelisk has no account of its own and does not track what you do in it. It talks to Steam, Epic Games and GOG to sign you in and get your games, and to getobelisk.app for [how games run](#how-games-run) and for the bug reports you send.
+Obelisk has no account of its own and does not track what you do in it. It talks to Steam, Epic Games and GOG to sign you in and get your games, to getobelisk.app for [how games run](#how-games-run) and for the bug reports you send, and to GitHub to look for a new version of Obelisk.
 
 - **What Obelisk sends.** When a game closes, one report goes to getobelisk.app:
   - the game: its store, its ID in that store and its name,

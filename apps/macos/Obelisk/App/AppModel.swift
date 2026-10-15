@@ -73,6 +73,8 @@ final class AppModel {
     @ObservationIgnored let performance: PerformanceReports
     /// How each game runs on this Mac's chip, as other players measured it.
     let estimates: PerformanceEstimates
+    /// Obelisk's own new versions.
+    let updates: AppUpdates
 
     /// The last library of every storefront account.
     @ObservationIgnored let libraryCache: LibraryCache
@@ -83,7 +85,7 @@ final class AppModel {
     init(directory: URL = AppIdentity.libraryDirectory, defaults: UserDefaults = .standard,
          defaultsDomain: String = Bundle.main.bundleIdentifier ?? AppIdentity.storageIdentifier, steam: SteamModel? = nil,
          epic: EpicModel? = nil, gog: GogModel? = nil, downloads: DownloadsModel? = nil,
-         performance: PerformanceReports? = nil, estimates: PerformanceEstimates? = nil,
+         performance: PerformanceReports? = nil, estimates: PerformanceEstimates? = nil, updates: AppUpdates? = nil,
          overlay: GameOverlayEnvironment = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil
             ? .live : .inert) {
         libraryDirectory = directory.path
@@ -107,6 +109,7 @@ final class AppModel {
         performance.isEnabled = sharesGamePerformance
         self.performance = performance
         self.estimates = estimates ?? PerformanceEstimates()
+        self.updates = updates ?? AppUpdates()
         self.downloads.progress = { [weak self] item in self?.downloadTransfer(item) }
         applyAutomaticUpdates()
         reportPerformance()

@@ -1,0 +1,52 @@
+# Publishing a release signs its DMG for Sparkle and attaches appcast.xml, the
+# feed Obelisk reads from releases/latest/download/appcast.xml: players get the
+# update once the draft is published, never before. Editing the published
+# notes writes the feed again.
+name: Appcast
+
+on:
+  release:
+    types: [published, edited]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: appcast-${{ github.event.release.tag_name }}
+  cancel-in-progress: true
+
+jobs:
+  appcast:
+    # sign_update and hdiutil need macOS.
+    runs-on: macos-latest
+    timeout-minutes: 20
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ github.event.release.tag_name }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Download the DMG and render the notes
+        run: |
+          gh release download "$TAG" -R "$GITHUB_REPOSITORY" --pattern 'Obelisk-*.dmg' --dir "$RUNNER_TEMP/dist"
+          gh release view "$TAG" -R "$GITHUB_REPOSITORY" --json body --jq .body > "$RUNNER_TEMP/notes.md"
+          if [[ -s "$RUNNER_TEMP/notes.md" ]]; then
+            gh api -X POST markdown -f mode=gfm -f context="$GITHUB_REPOSITORY" \
+              -F text=@"$RUNNER_TEMP/notes.md" > "$RUNNER_TEMP/notes.html"
+          else
+            : > "$RUNNER_TEMP/notes.html"
+          fi
+
+      - name: Write and attach appcast.xml
+        env:
+          SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
+        run: |
+          if [[ -z "$SPARKLE_ED_PRIVATE_KEY" ]]; then
+            echo "::error::The SPARKLE_ED_PRIVATE_KEY secret is missing."
+            exit 1
+          fi
+          DMG="$(ls "$RUNNER_TEMP"/dist/Obelisk-*.dmg)"
+          scripts/write-appcast.sh "$DMG" \
+            "https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG/$(basename "$DMG")" \
+            "$RUNNER_TEMP/notes.html" "$RUNNER_TEMP/appcast.xml"
+          gh release upload "$TAG" -R "$GITHUB_REPOSITORY" "$RUNNER_TEMP/appcast.xml" --clobber
