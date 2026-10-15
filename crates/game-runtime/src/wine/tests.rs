@@ -505,6 +505,40 @@ fn every_wine_command_sees_the_avx_rosetta_translates() {
 }
 
 #[test]
+fn dotnet_programs_map_their_jit_code_without_w_xor_x() {
+    let (_directory, root) = installation();
+
+    assert_eq!(
+        environment(&config(&root))["DOTNET_EnableWriteXorExecute"],
+        "0"
+    );
+}
+
+#[test]
+fn gstreamer_loads_only_the_plugins_the_runtime_carries() {
+    let (_directory, root) = installation();
+    let config = config(&root);
+    assert!(!environment(&config).contains_key("GST_PLUGIN_SYSTEM_PATH"));
+    assert!(!environment(&config).contains_key("GST_REGISTRY"));
+
+    let plugins = config.runtime.join("lib/gstreamer-1.0");
+    fs::create_dir_all(&plugins).unwrap();
+
+    let environment = environment(&config);
+    assert_eq!(
+        environment["GST_PLUGIN_SYSTEM_PATH"],
+        plugins.to_string_lossy()
+    );
+    assert_eq!(
+        environment["GST_REGISTRY"],
+        config
+            .prefix
+            .join("obelisk-gstreamer-registry.bin")
+            .to_string_lossy()
+    );
+}
+
+#[test]
 fn a_prefix_profile_stops_linking_into_the_mac_home() {
     let (_directory, root) = installation();
     let home = root.join("home");

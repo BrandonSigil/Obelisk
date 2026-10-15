@@ -28,6 +28,8 @@ const PREREQUISITES: &str = "obelisk-prerequisites";
 const MONO: &str = "obelisk-mono";
 /// Their output, rewritten by each launch that runs one.
 const PREREQUISITES_LOG: &str = "obelisk-prerequisites.log";
+/// The registry GStreamer keeps of the runtime's plugins.
+const GSTREAMER_REGISTRY: &str = "obelisk-gstreamer-registry.bin";
 /// An installer still running after this long is stopped.
 const PREREQUISITE_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 /// Success, "a newer version is already installed" and "restart required".
@@ -146,6 +148,13 @@ impl Config {
         library.is_file().then_some(library)
     }
 
+    /// The GStreamer plugins the runtime carries, which decode games' videos
+    /// and sounds through Media Foundation, DirectShow and WMReader.
+    fn gstreamer_plugins(&self) -> Option<PathBuf> {
+        let plugins = self.runtime.join("lib/gstreamer-1.0");
+        plugins.is_dir().then_some(plugins)
+    }
+
     /// The Wine Mono the runtime carries, such as `wine-mono-10.4.1`.
     fn mono(&self) -> Option<String> {
         fs::read_dir(self.runtime.join("share/wine/mono"))
@@ -197,7 +206,25 @@ impl Config {
             // Rosetta translates AVX and AVX2 but hides them from CPUID unless
             // asked, and some games refuse to start without them.
             ("ROSETTA_ADVERTISE_AVX".to_owned(), "1".to_owned()),
+            // CrossOver turns off the W^X mode in which .NET 7 and 8 map
+            // their JIT code: it breaks those programs under Rosetta.
+            ("DOTNET_EnableWriteXorExecute".to_owned(), "0".to_owned()),
         ]);
+        // Only the runtime's plugins load, never a GStreamer installed on the
+        // Mac or in the home, and the prefix keeps their registry.
+        if let Some(plugins) = self.gstreamer_plugins() {
+            environment.insert(
+                "GST_PLUGIN_SYSTEM_PATH".into(),
+                plugins.to_string_lossy().into_owned(),
+            );
+            environment.insert(
+                "GST_REGISTRY".into(),
+                self.prefix
+                    .join(GSTREAMER_REGISTRY)
+                    .to_string_lossy()
+                    .into_owned(),
+            );
+        }
         if let Some(library) = self.d3dmetal() {
             environment.insert(
                 "CX_APPLEGPTK_LIBD3DSHARED_PATH".into(),
