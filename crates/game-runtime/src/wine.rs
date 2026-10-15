@@ -26,6 +26,15 @@ const USER: &str = "crossover";
 const PREREQUISITES: &str = "obelisk-prerequisites";
 /// The Wine Mono whose .NET registration the prefix holds.
 const MONO: &str = "obelisk-mono";
+/// The runtime's graphics backends whose DLLs the prefix holds placeholders
+/// for, by folder name.
+const BACKENDS: &str = "obelisk-graphics";
+/// D3DMetal's DLLs in a runtime, beside Wine's own.
+const D3DMETAL_DLLS: &str = "lib/d3dmetal";
+/// DXMT's DLLs in a runtime, beside Wine's own.
+const DXMT_DLLS: &str = "lib/dxmt";
+/// D3DMetal's library, which its unix libraries load.
+const D3DMETAL_FRAMEWORK: &str = "lib/external/D3DMetal.framework/D3DMetal";
 /// Their output, rewritten by each launch that runs one.
 const PREREQUISITES_LOG: &str = "obelisk-prerequisites.log";
 /// The registry GStreamer keeps of the runtime's plugins.
@@ -45,17 +54,51 @@ pub fn profile(prefix: &Path) -> PathBuf {
 }
 
 /// How one Windows installation runs: the Wine runtime, the installation's
-/// prefix, the log Wine writes while its game runs, and the engine that runs
-/// that Wine.
+/// prefix, the log Wine writes while its game runs, the engine that runs
+/// that Wine, the graphics backend that renders its Direct3D, with that
+/// backend's options, and the arguments its player adds to its command line.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(from = "SavedConfig")]
 pub struct Config {
     pub runtime: PathBuf,
     pub prefix: PathBuf,
     pub log: PathBuf,
-    #[serde(default)]
     pub engine: Engine,
-    #[serde(default)]
     pub graphics: Graphics,
+    pub options: GraphicsOptions,
+    pub arguments: Vec<String>,
+}
+
+/// A configuration as an earlier Obelisk may have saved it: one without a
+/// backend renders with its engine's default.
+#[derive(Deserialize)]
+struct SavedConfig {
+    runtime: PathBuf,
+    prefix: PathBuf,
+    log: PathBuf,
+    #[serde(default)]
+    engine: Engine,
+    graphics: Option<Graphics>,
+    #[serde(default)]
+    options: GraphicsOptions,
+    #[serde(default)]
+    arguments: Vec<String>,
+}
+
+impl From<SavedConfig> for Config {
+    fn from(saved: SavedConfig) -> Self {
+        Self {
+            runtime: saved.runtime,
+            prefix: saved.prefix,
+            log: saved.log,
+            engine: saved.engine,
+            graphics: saved
+                .graphics
+                .unwrap_or_else(|| Graphics::default_on(saved.engine)),
+            options: saved.options,
+            arguments: saved.arguments,
+        }
+    }
 }
 
 /// What runs a Windows game's Wine.
@@ -69,16 +112,44 @@ pub enum Engine {
     Linux,
 }
 
-/// What renders a Windows game's Direct3D on the Linux engine. Rosetta's
-/// Wine picks its own.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+/// The graphics backend that renders a Windows game's Direct3D 10 to 12
+/// through Metal. dxgi is one per process, so a game has one: on DXMT, it has
+/// no Direct3D 12.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Graphics {
-    /// DXMT, in Neptune's arm64 render server: Direct3D 11.
-    #[default]
+    /// DXMT: Direct3D 10 and 11. On the Linux engine, in Neptune's arm64
+    /// render server.
     Dxmt,
-    /// D3DMetal, in Neptune's Intel render server under Rosetta: Direct3D 11
-    /// and 12.
+    /// D3DMetal: Direct3D 11 and 12, for 64-bit programs only, so 32-bit
+    /// games on Rosetta's Wine render through DXMT. On the Linux engine, in
+    /// Neptune's Intel render server under Rosetta.
     D3DMetal,
+}
+
+impl Graphics {
+    /// What renders on `engine` when neither the game's profile nor its
+    /// player picks another backend.
+    pub fn default_on(engine: Engine) -> Self {
+        match engine {
+            Engine::Rosetta => Self::D3DMetal,
+            Engine::Linux => Self::Dxmt,
+        }
+    }
+}
+
+/// What a game asks of D3DMetal on Rosetta's Wine. The Linux engine's render
+/// servers take none of these.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct GraphicsOptions {
+    /// Direct3D 12 offers DirectX Raytracing, as D3DMetal does by default.
+    pub ray_tracing: bool,
+}
+
+impl Default for GraphicsOptions {
+    fn default() -> Self {
+        Self { ray_tracing: true }
+    }
 }
 
 /// The Wine prefix of the Windows installation in `install`, named after the
@@ -89,37 +160,6 @@ pub fn prefix(prefixes: &Path, install: &Path) -> Result<PathBuf, Error> {
 }
 
 impl Config {
-    /// The runtime installed in `voile` running `prefix`, or `WineUnavailable`
-    /// while no runtime is installed.
-    pub fn locate(voile: &Path, prefix: PathBuf, log: PathBuf) -> Result<Self, Error> {
-        let runtime = crate::voile::runtime(voile).ok_or(Error::WineUnavailable)?;
-        Ok(Self {
-            runtime,
-            prefix,
-            log,
-            engine: Engine::Rosetta,
-            graphics: Graphics::default(),
-        })
-    }
-
-    /// The Linux engine's runtime installed in `voile` running `prefix` with
-    /// `graphics`, or `WineUnavailable` while it is not installed.
-    pub fn locate_linux(
-        voile: &Path,
-        prefix: PathBuf,
-        log: PathBuf,
-        graphics: Graphics,
-    ) -> Result<Self, Error> {
-        let runtime = crate::voile::linux_runtime(voile).ok_or(Error::WineUnavailable)?;
-        Ok(Self {
-            runtime,
-            prefix,
-            log,
-            engine: Engine::Linux,
-            graphics,
-        })
-    }
-
     fn wine(&self) -> PathBuf {
         self.runtime.join("bin/wine")
     }
@@ -146,6 +186,42 @@ impl Config {
     fn d3dmetal(&self) -> Option<PathBuf> {
         let library = self.runtime.join("lib/external/libd3dshared.dylib");
         library.is_file().then_some(library)
+    }
+
+    /// The runtime's graphics backends, D3DMetal's DLLs then DXMT's, each in
+    /// its own folder beside Wine's. A runtime from before them has
+    /// D3DMetal's DLLs over Wine's own, and none.
+    fn backends(&self) -> Vec<PathBuf> {
+        self.dll_folders(&[D3DMETAL_DLLS, DXMT_DLLS])
+    }
+
+    /// The folders Wine searches before its own for the game's DLLs: its
+    /// backend's, then, behind D3DMetal, DXMT's for the 32-bit programs
+    /// D3DMetal does not run.
+    fn graphics_folders(&self) -> Vec<PathBuf> {
+        match self.graphics {
+            Graphics::D3DMetal => self.backends(),
+            Graphics::Dxmt => self.dll_folders(&[DXMT_DLLS]),
+        }
+    }
+
+    /// Those of the DLL `folders` the runtime carries.
+    fn dll_folders(&self, folders: &[&str]) -> Vec<PathBuf> {
+        folders
+            .iter()
+            .map(|folder| self.runtime.join(folder))
+            .filter(|folder| folder.is_dir())
+            .collect()
+    }
+
+    /// The backend CrossOver's Wine is told renders, when the runtime
+    /// carries it: Wine reports the hardware scheduling D3D12 expects from
+    /// D3DMetal alone.
+    fn active_graphics(&self) -> Option<&'static str> {
+        match self.graphics {
+            Graphics::D3DMetal => self.d3dmetal().map(|_| "d3dmetal"),
+            Graphics::Dxmt => self.runtime.join(DXMT_DLLS).is_dir().then_some("dxmt"),
+        }
     }
 
     /// The GStreamer plugins the runtime carries, which decode games' videos
@@ -225,15 +301,43 @@ impl Config {
                     .into_owned(),
             );
         }
+        // CrossOver's Wine preloads libd3dshared whatever renders.
         if let Some(library) = self.d3dmetal() {
             environment.insert(
                 "CX_APPLEGPTK_LIBD3DSHARED_PATH".into(),
                 library.to_string_lossy().into_owned(),
             );
-            environment.insert("CX_ACTIVE_GRAPHICS_BACKEND".into(), "d3dmetal".into());
+        }
+        // Outside Apple's own layout, D3DMetal's unix libraries do not find
+        // their framework by themselves.
+        let framework = self.runtime.join(D3DMETAL_FRAMEWORK);
+        if framework.is_file() {
+            environment.insert(
+                "D3DMETAL_FRAMEWORK_PATH".into(),
+                framework.to_string_lossy().into_owned(),
+            );
+        }
+        if let Some(folders) = search_path(&self.graphics_folders()) {
+            environment.insert("WINEDLLPATH_PREPEND".into(), folders);
+        }
+        if let Some(active) = self.active_graphics() {
+            environment.insert("CX_ACTIVE_GRAPHICS_BACKEND".into(), active.into());
+        }
+        // Direct3D 12 offers DirectX Raytracing unless D3DMetal is told not to.
+        if self.graphics == Graphics::D3DMetal && !self.options.ray_tracing {
+            environment.insert("D3DM_SUPPORT_DXR".into(), "0".into());
         }
         environment
     }
+}
+
+/// `folders` as one search path, or `None` when there are none.
+fn search_path(folders: &[PathBuf]) -> Option<String> {
+    let folders: Vec<_> = folders
+        .iter()
+        .map(|folder| folder.to_string_lossy())
+        .collect();
+    (!folders.is_empty()).then(|| folders.join(":"))
 }
 
 /// What one storefront adds to the prefix of its Windows installations, and
@@ -298,7 +402,8 @@ pub(crate) fn target<S: Storefront>(
     target: &LaunchTarget,
     environment: HashMap<String, String>,
 ) -> Result<Target, Error> {
-    let launched = crate::profile::of(game.id).target(game.install, target);
+    let mut launched = crate::profile::of(game.id).target(game.install, target);
+    launched.arguments.extend(config.arguments.iter().cloned());
     if config.engine == Engine::Linux {
         return crate::linux_engine::target::<S>(
             game.install,
@@ -365,29 +470,48 @@ fn boot(config: &Config, home: &Path) -> Result<(), Error> {
     if created {
         wineboot(config, home, "--init")?;
     }
-    // wineboot installs Mono's .NET registration when it creates a prefix.
-    // A prefix created by a runtime without Mono lacks it: updating the
-    // prefix once adds it.
-    if let Some(mono) = config.mono() {
-        let record = config.prefix.join(MONO);
-        if fs::read_to_string(&record).ok().as_deref() != Some(mono.as_str()) {
-            if !created {
-                wineboot(config, home, "--update")?;
-            }
-            fs::write(&record, &mono)?;
+    // wineboot installs Mono's .NET registration and a placeholder for every
+    // DLL of the graphics backends when it creates a prefix: Wine loads a
+    // DLL only through its placeholder, such as DXMT's winemetal. A prefix
+    // created by a runtime without Mono or without one of the backends lacks
+    // them: updating the prefix once adds them.
+    let backends = config
+        .backends()
+        .iter()
+        .filter_map(|folder| folder.file_name())
+        .map(|name| name.to_string_lossy().into_owned())
+        .collect::<Vec<_>>()
+        .join(" ");
+    let records = [(MONO, config.mono()), (BACKENDS, Some(backends))];
+    let stale: Vec<_> = records
+        .into_iter()
+        .filter_map(|(record, value)| Some((config.prefix.join(record), value?)))
+        .filter(|(record, value)| fs::read_to_string(record).unwrap_or_default() != *value)
+        .collect();
+    if !stale.is_empty() {
+        if !created {
+            wineboot(config, home, "--update")?;
+        }
+        for (record, value) in stale {
+            fs::write(record, value)?;
         }
     }
     unlink_home_folders(&profile(&config.prefix))
 }
 
 /// Runs wineboot in the prefix and waits until its server stops writing the
-/// registry, which the game must not start before.
+/// registry, which the game must not start before. Every backend's folder
+/// comes first, so that the prefix gets a placeholder for each of their DLLs.
 fn wineboot(config: &Config, home: &Path, argument: &str) -> Result<(), Error> {
+    let mut environment = config.environment();
+    if let Some(folders) = search_path(&config.backends()) {
+        environment.insert("WINEDLLPATH_PREPEND".into(), folders);
+    }
     let status = Command::new(config.wine())
         .args(["wineboot", argument])
         .env_clear()
         .envs(crate::native::environment(home))
-        .envs(config.environment())
+        .envs(environment)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -451,11 +575,14 @@ pub struct Installation {
     /// Where Wine logs while its game runs.
     log: PathBuf,
     profile: crate::profile::Profile,
+    /// What its player adds to its game's command line.
+    arguments: Vec<String>,
 }
 
 impl Installation {
     /// The installation of `game` in `install`, when `platform` names a
-    /// Windows build, run as the game's profile says.
+    /// Windows build, run as the game's profile and its player's launch
+    /// settings say.
     pub fn of(
         locations: &crate::Locations,
         game: crate::profile::Game<'_>,
@@ -465,7 +592,9 @@ impl Installation {
         if !windows_build(platform) {
             return Ok(None);
         }
-        let profile = crate::profile::of(game);
+        let choices = crate::launch_settings::load(&locations.library, install);
+        let arguments = command_line(choices.arguments.as_deref().unwrap_or_default());
+        let profile = choices.apply(&crate::profile::of(game));
         let prefix = prefix(&locations.wine_prefixes, install)?;
         let prefix = match profile.engine {
             Engine::Rosetta => prefix,
@@ -476,6 +605,7 @@ impl Installation {
             prefix,
             log: log(locations, game),
             profile,
+            arguments,
         }))
     }
 
@@ -503,40 +633,38 @@ impl Installation {
 
     /// How its game runs, once Voile is installed.
     fn runtime(&self, locations: &crate::Locations) -> Result<Config, Error> {
-        let (prefix, log) = (self.prefix.clone(), self.log.clone());
-        match self.profile.engine {
-            Engine::Rosetta => Config::locate(&locations.voile, prefix, log),
-            Engine::Linux => {
-                Config::locate_linux(&locations.voile, prefix, log, self.profile.graphics)
-            }
-        }
+        let runtime = match self.profile.engine {
+            Engine::Rosetta => crate::voile::runtime(&locations.voile),
+            Engine::Linux => crate::voile::linux_runtime(&locations.voile),
+        };
+        Ok(Config {
+            runtime: runtime.ok_or(Error::WineUnavailable)?,
+            prefix: self.prefix.clone(),
+            log: self.log.clone(),
+            engine: self.profile.engine,
+            graphics: self.profile.graphics,
+            options: self.profile.options,
+            arguments: self.arguments.clone(),
+        })
     }
 
-    /// Deletes the prefix of the uninstalled installation, as Steam deletes a
-    /// Proton prefix. A missing prefix is already gone; a link in its place is
-    /// never followed.
+    /// Deletes the prefixes of the uninstalled installation, as Steam deletes
+    /// a Proton prefix, and its launch settings. Both engines' go, whichever
+    /// runs the game now: an earlier launch may have made the other's before
+    /// the game moved. A missing prefix is already gone; a link in its place
+    /// is never followed.
     pub fn remove(
         &self,
         locations: &crate::Locations,
     ) -> Result<(), obelisk_core::installation::RemovalFailure> {
-        match self.profile.engine {
-            Engine::Rosetta => remove_prefix(locations, &self.prefix),
-            // The engine's folder, and the Rosetta prefix an earlier launch
-            // may have made before the game moved to the engine.
-            Engine::Linux => {
-                let home = crate::linux_engine::home(&self.prefix).map_err(|_| {
-                    obelisk_core::installation::RemovalFailure::Unsafe(self.prefix.clone())
-                })?;
-                remove_folder(home)?;
-                let name = home
-                    .file_name()
-                    .map(|name| name.to_string_lossy().into_owned());
-                match name.as_deref().and_then(|name| name.strip_suffix("-linux")) {
-                    Some(rosetta) => remove_prefix(locations, &home.with_file_name(rosetta)),
-                    None => Ok(()),
-                }
-            }
-        }
+        use obelisk_core::installation::RemovalFailure;
+        let unsafe_prefix = |_| RemovalFailure::Unsafe(self.prefix.clone());
+        let rosetta = prefix(&locations.wine_prefixes, &self.install).map_err(unsafe_prefix)?;
+        let linux = crate::linux_engine::prefix(&rosetta).map_err(unsafe_prefix)?;
+        remove_folder(crate::linux_engine::home(&linux).map_err(unsafe_prefix)?)?;
+        remove_prefix(locations, &rosetta)?;
+        crate::launch_settings::remove(&locations.library, &self.install)?;
+        Ok(())
     }
 }
 

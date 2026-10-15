@@ -51,6 +51,7 @@
 		5D721DE96425D4812689BD9E /* CloudModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0972C37E6066B1BD402A0C44 /* CloudModel.swift */; };
 		5E02A862E8D008C61BC981AC /* GameAchievementsModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8A3FCBBC5DDDA185687F82E /* GameAchievementsModel.swift */; };
 		5F2E8F2E2B818270111A0714 /* EpicIntegrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B0FDD9052AEAC88BF8E1B11 /* EpicIntegrationTests.swift */; };
+		5FEBA7416C0F269E7A89EF1B /* LaunchSettingsModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5482B5E7377BEB2C02345FF6 /* LaunchSettingsModelTests.swift */; };
 		602460D0381A3B4EDF7683D0 /* ObeliskStyle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7EF6516996EFE0D729DCF40E /* ObeliskStyle.swift */; };
 		64321D66A64C67E9EB3F525E /* AppLifecycle.swift in Sources */ = {isa = PBXBuildFile; fileRef = E942798E9AD37FBE90168834 /* AppLifecycle.swift */; };
 		66A1C24EA014CCFE9F04FD53 /* GameManagementButtonTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3870CA70FD0707AC6D50A68 /* GameManagementButtonTests.swift */; };
@@ -119,6 +120,7 @@
 		D91F4281F5D572559DF29945 /* AppUpdates.swift in Sources */ = {isa = PBXBuildFile; fileRef = AEEB63EF32B787422D72070A /* AppUpdates.swift */; };
 		D9573A92EA91EF347F971378 /* AppAppearance.swift in Sources */ = {isa = PBXBuildFile; fileRef = 33402992E2BE7F752EAEFFF9 /* AppAppearance.swift */; };
 		DACF2AFE055501604D8AED1F /* GameSessions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6AFE98D57B90D79D12C5A772 /* GameSessions.swift */; };
+		DBA1DB679CDE9D55614772DD /* LaunchSettingsSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE8EB5C271B1F9B9BD2E0BD2 /* LaunchSettingsSheet.swift */; };
 		DD0F8BAF57A82FF7F7E37D35 /* SteamSortingPerformanceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE55B619F17FA3BB9C6E2104 /* SteamSortingPerformanceTests.swift */; };
 		E0918486CD65F5779B667384 /* GameInstallationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 859EE14F261D8FD0DEFBCC1C /* GameInstallationManager.swift */; };
 		E2084988016292E31F718510 /* SteamKeychain.swift in Sources */ = {isa = PBXBuildFile; fileRef = 365954DE5A28680867FD2CA8 /* SteamKeychain.swift */; };
@@ -201,6 +203,7 @@
 		513D153BB2AFAAD3B75C6107 /* StorefrontScrollView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StorefrontScrollView.swift; sourceTree = "<group>"; };
 		51DD68C9B33BB10A1D2F2FDB /* StorefrontCards.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StorefrontCards.swift; sourceTree = "<group>"; };
 		5448960DE75EF416844F946E /* WebAccountModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebAccountModel.swift; sourceTree = "<group>"; };
+		5482B5E7377BEB2C02345FF6 /* LaunchSettingsModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LaunchSettingsModelTests.swift; sourceTree = "<group>"; };
 		56059ED058F50CD3A3DF6AEF /* GitHubIssues.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitHubIssues.swift; sourceTree = "<group>"; };
 		5A93224C60170D9DC5BE88E6 /* GamePageControls.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GamePageControls.swift; sourceTree = "<group>"; };
 		5D959CDD795E6B0BF162B9CF /* LibrarySection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibrarySection.swift; sourceTree = "<group>"; };
@@ -300,6 +303,7 @@
 		FAF73BDBA41BEE185C11F0A2 /* DownloadsModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DownloadsModel.swift; sourceTree = "<group>"; };
 		FB56EAA78506F58CD007C4AD /* OverlaySteamPages.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OverlaySteamPages.swift; sourceTree = "<group>"; };
 		FC10483918A67D343770C81F /* SteamIntegrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SteamIntegrationTests.swift; sourceTree = "<group>"; };
+		FE8EB5C271B1F9B9BD2E0BD2 /* LaunchSettingsSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LaunchSettingsSheet.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -415,6 +419,7 @@
 			children = (
 				6AC1669AF812D0030EAEAE29 /* BugReportSheet.swift */,
 				671E6DBCB5F68AC4C9553B75 /* GameDetailPage.swift */,
+				FE8EB5C271B1F9B9BD2E0BD2 /* LaunchSettingsSheet.swift */,
 				1614CF7FBF3DDD00B5219A01 /* RootView.swift */,
 				74702AF1D02D1FB7FC66DBDB /* StorefrontBrowser.swift */,
 				C7A9AB12C3E9C6FB88D650ED /* StorefrontLibraryPage.swift */,
@@ -552,6 +557,7 @@
 				C1C4A0FC63EB12053F6FC464 /* GogModelTests.swift */,
 				772284AC32E9CF1E955A5C2C /* HomeShelvesTests.swift */,
 				088B60B85AA18E573664922C /* LaunchHistoryTests.swift */,
+				5482B5E7377BEB2C02345FF6 /* LaunchSettingsModelTests.swift */,
 				04A9D5D2D4BBF0AD6BA1087F /* LocalizationTests.swift */,
 				3EFDB7A53D56AC5DBAF68DFF /* PerformanceReportsTests.swift */,
 				F17790D9EF310DDE4575244C /* StableScroller.swift */,
@@ -810,6 +816,7 @@
 				BB67CD432F281872ED374B17 /* GogModelTests.swift in Sources */,
 				06A2E7B35FF8CDD974CB154C /* HomeShelvesTests.swift in Sources */,
 				56DEA4DE0E0F77E099C3E998 /* LaunchHistoryTests.swift in Sources */,
+				5FEBA7416C0F269E7A89EF1B /* LaunchSettingsModelTests.swift in Sources */,
 				7A65A948ACCB6685A0BA00A4 /* LocalizationTests.swift in Sources */,
 				01B0BAD8AC5542C383FBCD99 /* PerformanceReportsTests.swift in Sources */,
 				5ABAD13D6634706AC072D391 /* StableScroller.swift in Sources */,
@@ -884,6 +891,7 @@
 				88D9A2E026D696E0CA1AC075 /* KeychainStore.swift in Sources */,
 				A798CF83144BC714FCDD4B5E /* L10n.swift in Sources */,
 				8A561DE50DEE40B5C09DD513 /* LaunchHistory.swift in Sources */,
+				DBA1DB679CDE9D55614772DD /* LaunchSettingsSheet.swift in Sources */,
 				BC48D07DC3A0D7D5A473285C /* LibraryCoverCard.swift in Sources */,
 				C5753F5E5BF709B68E3C1EC9 /* LibraryGlassControls.swift in Sources */,
 				36F0A07D909FF709C62C5973 /* LibraryHero.swift in Sources */,

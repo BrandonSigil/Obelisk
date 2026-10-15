@@ -63,7 +63,9 @@ pub(crate) fn config(root: &Path) -> Config {
         prefix: root.join("prefix"),
         log: root.join("logs/wine-game.log"),
         engine: Engine::Rosetta,
-        graphics: Graphics::Dxmt,
+        graphics: Graphics::D3DMetal,
+        options: GraphicsOptions::default(),
+        arguments: Vec::new(),
     }
 }
 
@@ -443,6 +445,199 @@ fn d3dmetal_is_selected_only_when_the_runtime_carries_it() {
     );
 }
 
+/// Lays in `config`'s runtime D3DMetal, its DLLs beside Wine's, and DXMT's.
+fn backends_runtime(config: &Config) {
+    for folder in [
+        "lib/d3dmetal/x86_64-windows",
+        "lib/dxmt/i386-windows",
+        "lib/external/D3DMetal.framework",
+    ] {
+        fs::create_dir_all(config.runtime.join(folder)).unwrap();
+    }
+    for file in [
+        "lib/external/libd3dshared.dylib",
+        "lib/external/D3DMetal.framework/D3DMetal",
+    ] {
+        fs::write(config.runtime.join(file), b"").unwrap();
+    }
+}
+
+#[test]
+fn a_game_s_backend_comes_before_wine_s_own_dlls_with_dxmt_behind_d3dmetal() {
+    let (_directory, root) = installation();
+    let d3dmetal = config(&root);
+    backends_runtime(&d3dmetal);
+    let runtime = d3dmetal.runtime.to_string_lossy().into_owned();
+
+    let environment = environment(&d3dmetal);
+    assert_eq!(
+        environment["WINEDLLPATH_PREPEND"],
+        format!("{runtime}/lib/d3dmetal:{runtime}/lib/dxmt")
+    );
+    assert_eq!(environment["CX_ACTIVE_GRAPHICS_BACKEND"], "d3dmetal");
+    assert_eq!(
+        environment["D3DMETAL_FRAMEWORK_PATH"],
+        format!("{runtime}/lib/external/D3DMetal.framework/D3DMetal")
+    );
+
+    let dxmt = Config {
+        graphics: Graphics::Dxmt,
+        ..d3dmetal
+    };
+    let environment = self::environment(&dxmt);
+    assert_eq!(
+        environment["WINEDLLPATH_PREPEND"],
+        format!("{runtime}/lib/dxmt")
+    );
+    assert_eq!(environment["CX_ACTIVE_GRAPHICS_BACKEND"], "dxmt");
+    assert_eq!(
+        environment["CX_APPLEGPTK_LIBD3DSHARED_PATH"],
+        format!("{runtime}/lib/external/libd3dshared.dylib")
+    );
+}
+
+#[test]
+fn a_runtime_with_d3dmetal_over_wine_s_dlls_searches_wine_s_folder_alone() {
+    let (_directory, root) = installation();
+    let config = config(&root);
+    fs::create_dir_all(config.runtime.join("lib/external")).unwrap();
+    fs::write(config.runtime.join("lib/external/libd3dshared.dylib"), b"").unwrap();
+
+    let environment = environment(&config);
+
+    assert!(!environment.contains_key("WINEDLLPATH_PREPEND"));
+    assert_eq!(environment["CX_ACTIVE_GRAPHICS_BACKEND"], "d3dmetal");
+}
+
+#[test]
+fn turning_ray_tracing_off_reaches_d3dmetal_alone() {
+    let (_directory, root) = installation();
+    let config = config(&root);
+    let defaults = environment(&config);
+    assert!(!defaults.keys().any(|name| name.starts_with("D3DM_")));
+
+    let options = Config {
+        options: GraphicsOptions { ray_tracing: false },
+        ..config
+    };
+    let environment = self::environment(&options);
+    assert_eq!(environment["D3DM_SUPPORT_DXR"], "0");
+
+    let dxmt = Config {
+        graphics: Graphics::Dxmt,
+        ..options
+    };
+    assert!(
+        !self::environment(&dxmt)
+            .keys()
+            .any(|name| name.starts_with("D3DM_"))
+    );
+}
+
+/// A runtime whose wine records each call with the folders it searches
+/// first, in `calls` beside the prefix.
+fn backend_recording_runtime(root: &Path) -> Config {
+    let config = recording_runtime(root);
+    fs::write(
+        config.runtime.join("bin/wine"),
+        "#!/bin/sh\nprintf '%s %s\\n' \"$*\" \"$WINEDLLPATH_PREPEND\" >> \"$WINEPREFIX/../calls\"\n",
+    )
+    .unwrap();
+    config
+}
+
+#[test]
+fn a_prefix_gets_every_backend_s_placeholders_when_created_or_when_its_runtime_gains_one() {
+    let (_directory, root) = installation();
+    let config = Config {
+        graphics: Graphics::Dxmt,
+        ..backend_recording_runtime(&root)
+    };
+    let runtime = config.runtime.to_string_lossy().into_owned();
+    prepare_plain(&config, &root);
+    fs::write(config.prefix.join("system.reg"), "").unwrap();
+    prepare_plain(&config, &root);
+    assert_eq!(calls(&root), ["wineboot --init "]);
+
+    backends_runtime(&config);
+    prepare_plain(&config, &root);
+    prepare_plain(&config, &root);
+
+    assert_eq!(
+        calls(&root),
+        [
+            "wineboot --init ".to_owned(),
+            format!("wineboot --update {runtime}/lib/d3dmetal:{runtime}/lib/dxmt"),
+        ]
+    );
+    assert_eq!(
+        fs::read_to_string(config.prefix.join(BACKENDS)).unwrap(),
+        "d3dmetal dxmt"
+    );
+}
+
+#[test]
+fn launch_settings_move_a_game_to_the_engine_and_backend_its_player_chose() {
+    let (_directory, root) = installation();
+    let library = root.join("library");
+    let locations = locations(&root);
+    engine_runtime(&locations);
+    let install = library.join("Games/Steam/steam-42-windows");
+    let choices = crate::launch_settings::Choices {
+        engine: Some(Engine::Linux),
+        graphics: Some(Graphics::D3DMetal),
+        ..Default::default()
+    };
+    crate::launch_settings::save(&locations.library, &install, &choices).unwrap();
+
+    let windows = Installation::of(&locations, OTHER, "windows", &install)
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(
+        windows.prefix(),
+        library.join("Prefixes/steam-42-windows-linux/prefix")
+    );
+    let config = windows.runtime(&locations).unwrap();
+    assert_eq!(config.engine, Engine::Linux);
+    assert_eq!(config.graphics, Graphics::D3DMetal);
+}
+
+#[test]
+fn the_player_s_launch_settings_arguments_follow_the_storefront_s() {
+    let (_directory, root) = installation();
+    let locations = locations(&root);
+    let install = root.join("library/Games/Steam/steam-42-windows");
+    let choices = crate::launch_settings::Choices {
+        arguments: Some(r#"-dx11 "+exec auto exec.cfg""#.into()),
+        ..Default::default()
+    };
+    crate::launch_settings::save(&locations.library, &install, &choices).unwrap();
+    fs::create_dir_all(locations.voile.join("current/bin")).unwrap();
+    fs::write(locations.voile.join("current/bin/wine"), "").unwrap();
+    let windows = Installation::of(&locations, OTHER, "windows", &install)
+        .unwrap()
+        .unwrap();
+    let config = windows.runtime(&locations).unwrap();
+    assert_eq!(config.arguments, ["-dx11", "+exec auto exec.cfg"]);
+
+    let (install, game_target) = game(&root);
+    let game_target = LaunchTarget {
+        arguments: vec!["-AUTH_TYPE=exchangecode".into()],
+        ..game_target
+    };
+    let config = Config {
+        arguments: vec!["-dx11".into()],
+        ..self::config(&root)
+    };
+    let started =
+        super::target::<Plain>(&config, &plain(&install), &game_target, HashMap::new()).unwrap();
+    assert_eq!(
+        started.arguments[started.arguments.len() - 2..],
+        ["-AUTH_TYPE=exchangecode", "-dx11"]
+    );
+}
+
 #[test]
 fn a_missing_runtime_is_reported_before_any_prefix_is_created() {
     let (_directory, root) = installation();
@@ -739,11 +934,12 @@ fn a_windows_installation_runs_in_the_prefix_named_after_its_folder_whatever_the
 }
 
 #[test]
-fn a_saved_configuration_from_before_engines_and_graphics_runs_rosetta_s_wine() {
+fn a_saved_configuration_from_before_engines_and_graphics_runs_its_engine_s_default_backend() {
     let saved = r#"{"runtime":"/Voile/v1","prefix":"/Prefixes/game","log":"/logs/game.log"}"#;
     let config: Config = serde_json::from_str(saved).unwrap();
     assert_eq!(config.engine, Engine::Rosetta);
-    assert_eq!(config.graphics, Graphics::Dxmt);
+    assert_eq!(config.graphics, Graphics::D3DMetal);
+    assert_eq!(config.options, GraphicsOptions::default());
 
     let saved = r#"{"runtime":"/Voile/v1/linux","prefix":"/Prefixes/game-linux/prefix","log":"/logs/game.log","engine":"Linux"}"#;
     let config: Config = serde_json::from_str(saved).unwrap();
@@ -820,7 +1016,7 @@ fn an_uninstalled_windows_game_loses_its_prefix_but_never_what_a_link_points_to(
 }
 
 #[test]
-fn uninstalling_removes_the_engine_s_folder_and_any_rosetta_prefix() {
+fn uninstalling_removes_both_engines_prefixes_and_the_launch_settings() {
     let (_directory, root) = installation();
     let locations = locations(&root);
     let install = root.join("library/Games/Steam/steam-1245620-windows");
@@ -832,11 +1028,26 @@ fn uninstalling_removes_the_engine_s_folder_and_any_rosetta_prefix() {
         .unwrap()
         .unwrap();
     fs::create_dir_all(linux.prefix().join("drive_c")).unwrap();
+    let choices = crate::launch_settings::Choices {
+        engine: Some(Engine::Rosetta),
+        ..Default::default()
+    };
+    crate::launch_settings::save(&locations.library, &install, &choices).unwrap();
+    let settings = locations
+        .library
+        .join("LaunchSettings/steam-1245620-windows.json");
+    assert!(settings.is_file());
 
-    linux.remove(&locations).unwrap();
+    // The player moved the game back to Rosetta: the engine's folder still goes.
+    Installation::of(&locations, ELDEN_RING, "windows", &install)
+        .unwrap()
+        .unwrap()
+        .remove(&locations)
+        .unwrap();
 
     assert!(!rosetta.prefix().exists());
     assert!(!linux.prefix().parent().unwrap().exists());
+    assert!(!settings.exists());
 }
 
 #[test]

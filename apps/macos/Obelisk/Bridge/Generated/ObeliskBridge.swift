@@ -675,6 +675,12 @@ public protocol AccountInstallationsProtocol: AnyObject, Sendable {
     func launch(installation: String) 
     
     /**
+     * The launch settings of the Windows `installation`; `None` for a Mac
+     * build.
+     */
+    func launchSettings(installation: String) async throws  -> LaunchSettings?
+    
+    /**
      * Syncs the game's Cloud saves: those of `installation`, or, when
      * `None`, those the uninstalled game's saved context names.
      */
@@ -690,6 +696,13 @@ public protocol AccountInstallationsProtocol: AnyObject, Sendable {
      * A DEBUG diagnostic holds the storefront while it runs.
      */
     func setDiagnostic(running: Bool) 
+    
+    /**
+     * Keeps `choices` as the player's launch settings of the Windows
+     * `installation`, from its game's next launch, and returns them as they
+     * then apply.
+     */
+    func setLaunchSettings(installation: String, choices: LaunchChoices) async throws  -> LaunchSettings?
     
     /**
      * Stops the account's Transfer, Cloud maintenance and launch still
@@ -946,6 +959,26 @@ open func launch(installation: String)  {try! rustCall() {
 }
     
     /**
+     * The launch settings of the Windows `installation`; `None` for a Mac
+     * build.
+     */
+open func launchSettings(installation: String)async throws  -> LaunchSettings?  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_obelisk_bridge_fn_method_accountinstallations_launch_settings(
+                        self.uniffiCloneHandle(),FfiConverterString.lower(installation)
+                )
+            },
+            pollFunc: ffi_obelisk_bridge_rust_future_poll_rust_buffer,
+            completeFunc: ffi_obelisk_bridge_rust_future_complete_rust_buffer,
+            freeFunc: ffi_obelisk_bridge_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterOptionTypeLaunchSettings.lift,
+            errorHandler: FfiConverterTypeGameSessionError_lift
+        )
+}
+    
+    /**
      * Syncs the game's Cloud saves: those of `installation`, or, when
      * `None`, those the uninstalled game's saved context names.
      */
@@ -982,6 +1015,27 @@ open func setDiagnostic(running: Bool)  {try! rustCall() {
         FfiConverterBool.lower(running),uniffiCallStatus
     )
 }
+}
+    
+    /**
+     * Keeps `choices` as the player's launch settings of the Windows
+     * `installation`, from its game's next launch, and returns them as they
+     * then apply.
+     */
+open func setLaunchSettings(installation: String, choices: LaunchChoices)async throws  -> LaunchSettings?  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_obelisk_bridge_fn_method_accountinstallations_set_launch_settings(
+                        self.uniffiCloneHandle(),FfiConverterString.lower(installation),FfiConverterTypeLaunchChoices_lower(choices)
+                )
+            },
+            pollFunc: ffi_obelisk_bridge_rust_future_poll_rust_buffer,
+            completeFunc: ffi_obelisk_bridge_rust_future_complete_rust_buffer,
+            freeFunc: ffi_obelisk_bridge_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterOptionTypeLaunchSettings.lift,
+            errorHandler: FfiConverterTypeGameSessionError_lift
+        )
 }
     
     /**
@@ -7301,6 +7355,305 @@ public func FfiConverterTypeInstallationsState_lower(_ value: InstallationsState
 
 
 /**
+ * What the player changed; a missing choice follows Obelisk's defaults.
+ */
+public struct LaunchChoices: Equatable, Hashable {
+    /**
+     * What the player adds to the game's command line, as typed.
+     */
+    public var arguments: String?
+    public var engine: LaunchEngine?
+    public var graphics: LaunchGraphics?
+    public var rayTracing: Bool?
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(
+        /**
+         * What the player adds to the game's command line, as typed.
+         */arguments: String? = nil, engine: LaunchEngine? = nil, graphics: LaunchGraphics? = nil, rayTracing: Bool? = nil) {
+        self.arguments = arguments
+        self.engine = engine
+        self.graphics = graphics
+        self.rayTracing = rayTracing
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension LaunchChoices: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeLaunchChoices: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> LaunchChoices {
+        return
+            try LaunchChoices(
+                arguments: FfiConverterOptionString.read(from: &buf), 
+                engine: FfiConverterOptionTypeLaunchEngine.read(from: &buf), 
+                graphics: FfiConverterOptionTypeLaunchGraphics.read(from: &buf), 
+                rayTracing: FfiConverterOptionBool.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: LaunchChoices, into buf: inout [UInt8]) {
+        FfiConverterOptionString.write(value.arguments, into: &buf)
+        FfiConverterOptionTypeLaunchEngine.write(value.engine, into: &buf)
+        FfiConverterOptionTypeLaunchGraphics.write(value.graphics, into: &buf)
+        FfiConverterOptionBool.write(value.rayTracing, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeLaunchChoices_lift(_ buf: RustBuffer) throws -> LaunchChoices {
+    return try FfiConverterTypeLaunchChoices.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeLaunchChoices_lower(_ value: LaunchChoices) -> RustBuffer {
+    return FfiConverterTypeLaunchChoices.lower(value)
+}
+
+
+/**
+ * One engine's offer.
+ */
+public struct LaunchEngineOffer: Equatable, Hashable {
+    public var engine: LaunchEngine
+    public var translator: LaunchTranslator
+    /**
+     * The backend the game renders with there without choices.
+     */
+    public var defaultGraphics: LaunchGraphics
+    public var graphics: [LaunchGraphicsOffer]
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(engine: LaunchEngine, translator: LaunchTranslator, 
+        /**
+         * The backend the game renders with there without choices.
+         */defaultGraphics: LaunchGraphics, graphics: [LaunchGraphicsOffer]) {
+        self.engine = engine
+        self.translator = translator
+        self.defaultGraphics = defaultGraphics
+        self.graphics = graphics
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension LaunchEngineOffer: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeLaunchEngineOffer: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> LaunchEngineOffer {
+        return
+            try LaunchEngineOffer(
+                engine: FfiConverterTypeLaunchEngine.read(from: &buf), 
+                translator: FfiConverterTypeLaunchTranslator.read(from: &buf), 
+                defaultGraphics: FfiConverterTypeLaunchGraphics.read(from: &buf), 
+                graphics: FfiConverterSequenceTypeLaunchGraphicsOffer.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: LaunchEngineOffer, into buf: inout [UInt8]) {
+        FfiConverterTypeLaunchEngine.write(value.engine, into: &buf)
+        FfiConverterTypeLaunchTranslator.write(value.translator, into: &buf)
+        FfiConverterTypeLaunchGraphics.write(value.defaultGraphics, into: &buf)
+        FfiConverterSequenceTypeLaunchGraphicsOffer.write(value.graphics, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeLaunchEngineOffer_lift(_ buf: RustBuffer) throws -> LaunchEngineOffer {
+    return try FfiConverterTypeLaunchEngineOffer.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeLaunchEngineOffer_lower(_ value: LaunchEngineOffer) -> RustBuffer {
+    return FfiConverterTypeLaunchEngineOffer.lower(value)
+}
+
+
+/**
+ * One backend's offer on one engine.
+ */
+public struct LaunchGraphicsOffer: Equatable, Hashable {
+    public var graphics: LaunchGraphics
+    public var options: [LaunchGraphicsOption]
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(graphics: LaunchGraphics, options: [LaunchGraphicsOption]) {
+        self.graphics = graphics
+        self.options = options
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension LaunchGraphicsOffer: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeLaunchGraphicsOffer: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> LaunchGraphicsOffer {
+        return
+            try LaunchGraphicsOffer(
+                graphics: FfiConverterTypeLaunchGraphics.read(from: &buf), 
+                options: FfiConverterSequenceTypeLaunchGraphicsOption.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: LaunchGraphicsOffer, into buf: inout [UInt8]) {
+        FfiConverterTypeLaunchGraphics.write(value.graphics, into: &buf)
+        FfiConverterSequenceTypeLaunchGraphicsOption.write(value.options, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeLaunchGraphicsOffer_lift(_ buf: RustBuffer) throws -> LaunchGraphicsOffer {
+    return try FfiConverterTypeLaunchGraphicsOffer.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeLaunchGraphicsOffer_lower(_ value: LaunchGraphicsOffer) -> RustBuffer {
+    return FfiConverterTypeLaunchGraphicsOffer.lower(value)
+}
+
+
+/**
+ * How a Windows game runs from its next launch, and what its player can
+ * change.
+ */
+public struct LaunchSettings: Equatable, Hashable {
+    public var engine: LaunchEngine
+    public var graphics: LaunchGraphics
+    /**
+     * Direct3D 12 offers DirectX Raytracing, on D3DMetal.
+     */
+    public var rayTracing: Bool
+    /**
+     * What the player changed from what Obelisk knows of the game.
+     */
+    public var choices: LaunchChoices
+    /**
+     * The engine the game runs on without choices.
+     */
+    public var defaultEngine: LaunchEngine
+    /**
+     * Every engine, with what it offers and how the game runs there
+     * without choices.
+     */
+    public var engines: [LaunchEngineOffer]
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(engine: LaunchEngine, graphics: LaunchGraphics, 
+        /**
+         * Direct3D 12 offers DirectX Raytracing, on D3DMetal.
+         */rayTracing: Bool, 
+        /**
+         * What the player changed from what Obelisk knows of the game.
+         */choices: LaunchChoices, 
+        /**
+         * The engine the game runs on without choices.
+         */defaultEngine: LaunchEngine, 
+        /**
+         * Every engine, with what it offers and how the game runs there
+         * without choices.
+         */engines: [LaunchEngineOffer]) {
+        self.engine = engine
+        self.graphics = graphics
+        self.rayTracing = rayTracing
+        self.choices = choices
+        self.defaultEngine = defaultEngine
+        self.engines = engines
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension LaunchSettings: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeLaunchSettings: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> LaunchSettings {
+        return
+            try LaunchSettings(
+                engine: FfiConverterTypeLaunchEngine.read(from: &buf), 
+                graphics: FfiConverterTypeLaunchGraphics.read(from: &buf), 
+                rayTracing: FfiConverterBool.read(from: &buf), 
+                choices: FfiConverterTypeLaunchChoices.read(from: &buf), 
+                defaultEngine: FfiConverterTypeLaunchEngine.read(from: &buf), 
+                engines: FfiConverterSequenceTypeLaunchEngineOffer.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: LaunchSettings, into buf: inout [UInt8]) {
+        FfiConverterTypeLaunchEngine.write(value.engine, into: &buf)
+        FfiConverterTypeLaunchGraphics.write(value.graphics, into: &buf)
+        FfiConverterBool.write(value.rayTracing, into: &buf)
+        FfiConverterTypeLaunchChoices.write(value.choices, into: &buf)
+        FfiConverterTypeLaunchEngine.write(value.defaultEngine, into: &buf)
+        FfiConverterSequenceTypeLaunchEngineOffer.write(value.engines, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeLaunchSettings_lift(_ buf: RustBuffer) throws -> LaunchSettings {
+    return try FfiConverterTypeLaunchSettings.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeLaunchSettings_lower(_ value: LaunchSettings) -> RustBuffer {
+    return FfiConverterTypeLaunchSettings.lower(value)
+}
+
+
+/**
  * Where Obelisk keeps everything, derived from its library directory, its
  * application bundle and the user's home.
  */
@@ -11196,6 +11549,278 @@ public func FfiConverterTypeInstallationReport_lower(_ value: InstallationReport
 
 
 /**
+ * What runs a Windows game's Wine.
+ */
+
+public enum LaunchEngine: Equatable, Hashable {
+    
+    /**
+     * Wine for macOS, under Rosetta.
+     */
+    case rosetta
+    /**
+     * Wine for Linux, in voile-lkd's engine.
+     */
+    case linux
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension LaunchEngine: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeLaunchEngine: FfiConverterRustBuffer {
+    typealias SwiftType = LaunchEngine
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> LaunchEngine {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .rosetta
+        
+        case 2: return .linux
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: LaunchEngine, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case .rosetta:
+            writeInt(&buf, Int32(1))
+        
+        
+        case .linux:
+            writeInt(&buf, Int32(2))
+        
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeLaunchEngine_lift(_ buf: RustBuffer) throws -> LaunchEngine {
+    return try FfiConverterTypeLaunchEngine.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeLaunchEngine_lower(_ value: LaunchEngine) -> RustBuffer {
+    return FfiConverterTypeLaunchEngine.lower(value)
+}
+
+
+
+/**
+ * What renders a Windows game's Direct3D.
+ */
+
+public enum LaunchGraphics: Equatable, Hashable {
+    
+    case d3dMetal
+    case dxmt
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension LaunchGraphics: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeLaunchGraphics: FfiConverterRustBuffer {
+    typealias SwiftType = LaunchGraphics
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> LaunchGraphics {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .d3dMetal
+        
+        case 2: return .dxmt
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: LaunchGraphics, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case .d3dMetal:
+            writeInt(&buf, Int32(1))
+        
+        
+        case .dxmt:
+            writeInt(&buf, Int32(2))
+        
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeLaunchGraphics_lift(_ buf: RustBuffer) throws -> LaunchGraphics {
+    return try FfiConverterTypeLaunchGraphics.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeLaunchGraphics_lower(_ value: LaunchGraphics) -> RustBuffer {
+    return FfiConverterTypeLaunchGraphics.lower(value)
+}
+
+
+
+
+public enum LaunchGraphicsOption: Equatable, Hashable {
+    
+    case rayTracing
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension LaunchGraphicsOption: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeLaunchGraphicsOption: FfiConverterRustBuffer {
+    typealias SwiftType = LaunchGraphicsOption
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> LaunchGraphicsOption {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .rayTracing
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: LaunchGraphicsOption, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case .rayTracing:
+            writeInt(&buf, Int32(1))
+        
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeLaunchGraphicsOption_lift(_ buf: RustBuffer) throws -> LaunchGraphicsOption {
+    return try FfiConverterTypeLaunchGraphicsOption.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeLaunchGraphicsOption_lower(_ value: LaunchGraphicsOption) -> RustBuffer {
+    return FfiConverterTypeLaunchGraphicsOption.lower(value)
+}
+
+
+
+/**
+ * What translates a game's x86 code on one engine.
+ */
+
+public enum LaunchTranslator: Equatable, Hashable {
+    
+    case rosetta
+    case fex
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension LaunchTranslator: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeLaunchTranslator: FfiConverterRustBuffer {
+    typealias SwiftType = LaunchTranslator
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> LaunchTranslator {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .rosetta
+        
+        case 2: return .fex
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: LaunchTranslator, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case .rosetta:
+            writeInt(&buf, Int32(1))
+        
+        
+        case .fex:
+            writeInt(&buf, Int32(2))
+        
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeLaunchTranslator_lift(_ buf: RustBuffer) throws -> LaunchTranslator {
+    return try FfiConverterTypeLaunchTranslator.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeLaunchTranslator_lower(_ value: LaunchTranslator) -> RustBuffer {
+    return FfiConverterTypeLaunchTranslator.lower(value)
+}
+
+
+
+/**
  * A runtime a launch downloads before its game is prepared.
  */
 
@@ -12520,6 +13145,30 @@ fileprivate struct FfiConverterOptionDouble: FfiConverterRustBuffer {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterOptionBool: FfiConverterRustBuffer {
+    typealias SwiftType = Bool?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterBool.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterBool.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterOptionString: FfiConverterRustBuffer {
     typealias SwiftType = String?
 
@@ -12760,6 +13409,30 @@ fileprivate struct FfiConverterOptionTypeInstallationWarning: FfiConverterRustBu
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterOptionTypeLaunchSettings: FfiConverterRustBuffer {
+    typealias SwiftType = LaunchSettings?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypeLaunchSettings.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypeLaunchSettings.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterOptionTypeRosettaPromptState: FfiConverterRustBuffer {
     typealias SwiftType = RosettaPromptState?
 
@@ -12992,6 +13665,54 @@ fileprivate struct FfiConverterOptionTypeInstallationReport: FfiConverterRustBuf
         switch try readInt(&buf) as Int8 {
         case 0: return nil
         case 1: return try FfiConverterTypeInstallationReport.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterOptionTypeLaunchEngine: FfiConverterRustBuffer {
+    typealias SwiftType = LaunchEngine?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypeLaunchEngine.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypeLaunchEngine.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterOptionTypeLaunchGraphics: FfiConverterRustBuffer {
+    typealias SwiftType = LaunchGraphics?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypeLaunchGraphics.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypeLaunchGraphics.read(from: &buf)
         default: throw UniffiInternalError.unexpectedOptionalTag
         }
     }
@@ -13473,6 +14194,56 @@ fileprivate struct FfiConverterSequenceTypeInstallation: FfiConverterRustBuffer 
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterSequenceTypeLaunchEngineOffer: FfiConverterRustBuffer {
+    typealias SwiftType = [LaunchEngineOffer]
+
+    public static func write(_ value: [LaunchEngineOffer], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeLaunchEngineOffer.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [LaunchEngineOffer] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [LaunchEngineOffer]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeLaunchEngineOffer.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeLaunchGraphicsOffer: FfiConverterRustBuffer {
+    typealias SwiftType = [LaunchGraphicsOffer]
+
+    public static func write(_ value: [LaunchGraphicsOffer], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeLaunchGraphicsOffer.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [LaunchGraphicsOffer] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [LaunchGraphicsOffer]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeLaunchGraphicsOffer.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterSequenceTypeSteamAchievement: FfiConverterRustBuffer {
     typealias SwiftType = [SteamAchievement]
 
@@ -13815,6 +14586,31 @@ fileprivate struct FfiConverterSequenceTypeGameAccount: FfiConverterRustBuffer {
         seq.reserveCapacity(Int(len))
         for _ in 0 ..< len {
             seq.append(try FfiConverterTypeGameAccount.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeLaunchGraphicsOption: FfiConverterRustBuffer {
+    typealias SwiftType = [LaunchGraphicsOption]
+
+    public static func write(_ value: [LaunchGraphicsOption], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeLaunchGraphicsOption.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [LaunchGraphicsOption] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [LaunchGraphicsOption]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeLaunchGraphicsOption.read(from: &buf))
         }
         return seq
     }
@@ -14197,6 +14993,9 @@ private let initializationResult: InitializationResult = {
     if (uniffi_obelisk_bridge_checksum_method_accountinstallations_launch() != 1866) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_obelisk_bridge_checksum_method_accountinstallations_launch_settings() != 38896) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_obelisk_bridge_checksum_method_accountinstallations_maintain_cloud() != 65363) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -14204,6 +15003,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_obelisk_bridge_checksum_method_accountinstallations_set_diagnostic() != 46065) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_obelisk_bridge_checksum_method_accountinstallations_set_launch_settings() != 55881) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_obelisk_bridge_checksum_method_accountinstallations_signed_out() != 26245) {

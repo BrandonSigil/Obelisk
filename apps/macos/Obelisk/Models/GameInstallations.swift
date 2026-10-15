@@ -170,6 +170,13 @@ protocol InstallationsBackend<Store>: AnyObject {
     /// The games' Cloud indicators, and those of every other game of the
     /// account with pending work.
     func cloudIndicators(_ games: [Store.GameID]) async throws -> [(Store.GameID, CloudIndicator)]
+    /// The launch settings of `receipt`'s Windows installation; nil for a Mac
+    /// build.
+    func launchSettings(_ receipt: InstallationReceipt<Store.GameID>) async throws -> LaunchSettings?
+    /// Keeps `choices` as the player's launch settings of `receipt`'s Windows
+    /// installation, and returns them as its next launch applies them.
+    func setLaunchSettings(_ receipt: InstallationReceipt<Store.GameID>, choices: LaunchChoices) async throws
+        -> LaunchSettings?
 }
 
 /// One storefront's installed games and the actions on them, as Rust keeps
@@ -510,6 +517,22 @@ final class GameInstallations<Store: InstallationStorefront> {
         guard account != nil, gate.uninstall.allows(receipt.gameID), receipts.contains(receipt) else { return }
         act { $0.uninstall(receipt) }
     }
+
+    // MARK: Launch settings
+
+    /// The launch settings of an installed Windows build; nil for a Mac build
+    /// or once the account is gone.
+    func launchSettings(_ receipt: Receipt) async throws -> LaunchSettings? {
+        guard let backend, receipts.contains(receipt) else { return nil }
+        return try await backend.launchSettings(receipt)
+    }
+
+    /// Keeps the player's launch settings of an installed Windows build, from
+    /// its next launch.
+    func setLaunchSettings(_ receipt: Receipt, choices: LaunchChoices) async throws -> LaunchSettings? {
+        guard let backend, receipts.contains(receipt) else { return nil }
+        return try await backend.setLaunchSettings(receipt, choices: choices)
+    }
 }
 
 extension GameInstallations where Store == SteamGames {
@@ -584,6 +607,9 @@ final class NoInstallations<Store: InstallationStorefront>: InstallationsBackend
         throw Store.failure(Store.invalidSession)
     }
     func cloudIndicators(_ games: [Store.GameID]) async throws -> [(Store.GameID, CloudIndicator)] { [] }
+    func launchSettings(_ receipt: InstallationReceipt<Store.GameID>) async throws -> LaunchSettings? { nil }
+    func setLaunchSettings(_ receipt: InstallationReceipt<Store.GameID>, choices: LaunchChoices) async throws
+        -> LaunchSettings? { nil }
 }
 
 /// The file that keeps `account`'s Installation receipts in `directory`.
@@ -627,6 +653,15 @@ final class RustInstallations<Store: InstallationStorefront>: InstallationsBacke
         try await core.cloudIndicators(games: games.map(Store.name)).compactMap { shown in
             Store.game(shown.game).map { ($0, shown.indicator) }
         }
+    }
+    func launchSettings(_ receipt: InstallationReceipt<Store.GameID>) async throws -> LaunchSettings? {
+        do { return try await core.launchSettings(installation: receipt.id) }
+        catch { throw GameSessions<Store>.translated(error) }
+    }
+    func setLaunchSettings(_ receipt: InstallationReceipt<Store.GameID>, choices: LaunchChoices) async throws
+        -> LaunchSettings? {
+        do { return try await core.setLaunchSettings(installation: receipt.id, choices: choices) }
+        catch { throw GameSessions<Store>.translated(error) }
     }
 
     private static func snapshot(_ state: InstallationsState) -> InstallationsSnapshot<Store> {

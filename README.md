@@ -160,7 +160,8 @@ When a game has no Mac version, Obelisk installs its Windows version and runs it
 - Obelisk downloads Voile with your first Windows game and keeps it up to date.
 - Each Windows game gets its own Windows environment. Uninstalling the game deletes it, after its Cloud saves are safe.
 - The software a game needs, such as DirectX or Visual C++, installs by itself before its first launch.
-- Direct3D 10, 11 and 12 games draw with Metal through Apple's D3DMetal.
+- Direct3D 10, 11 and 12 games draw with Metal: 64-bit games through Apple's D3DMetal, 32-bit games through DXMT.
+- A Windows game's **Launch Settings**, in the gear menu of its page, add arguments to its command line and choose the engine that runs it and what draws its Direct3D: D3DMetal or DXMT. On D3DMetal, ray tracing can be turned off for a game that renders wrongly with it. DLSS is not supported yet.
 
 **Anti-cheat:** We already run games whose anti-cheat supports Linux, such as **Rocket League** and **ELDEN RING**, and more are coming. We are currently working on BattlEye support, and still studying how to run games whose anti-cheat only supports Windows, such as Easy Anti-Cheat on Windows, or works at a lower level of the system. We never modify or bypass an anti-cheat, so every game runs fully legitimately.
 
@@ -281,8 +282,8 @@ It builds on the work of many open-source projects, without which Windows games 
 
 - [Wine](https://www.winehq.org) and [CrossOver](https://www.codeweavers.com/crossover)'s open-source Wine by CodeWeavers, the base of [voile-wine](https://github.com/Zagrios/voile-wine).
 - [Proton](https://github.com/ValveSoftware/Proton) by Valve, whose Steam bridge connects Windows games to Steam.
-- Apple's [Game Porting Toolkit](https://developer.apple.com/games/game-porting-toolkit/) and its D3DMetal, which draws Direct3D with Metal.
-- [FEX](https://github.com/FEX-Emu/FEX), [UTM](https://github.com/utmapp/UTM)'s Neptune and virglrenderer, and [DXMT](https://github.com/3Shain/dxmt), which power parts of the Linux engine.
+- Apple's [Game Porting Toolkit](https://developer.apple.com/games/game-porting-toolkit/) and its D3DMetal, and [DXMT](https://github.com/3Shain/dxmt), which draw Direct3D with Metal.
+- [FEX](https://github.com/FEX-Emu/FEX), and [UTM](https://github.com/utmapp/UTM)'s Neptune and virglrenderer, which power parts of the Linux engine.
 - [SDL](https://github.com/libsdl-org/SDL), for gamepads, and [Wine Mono](https://gitlab.winehq.org/mono/wine-mono), for .NET games.
 
 Obelisk is not affiliated with or endorsed by Valve, Epic Games, GOG or Apple. Steam, Epic Games, GOG and the games shown are trademarks of their respective owners.

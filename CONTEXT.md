@@ -34,6 +34,14 @@ _Avoid_: last upload, last played
 The Windows machine one Windows installation runs in, shared by every account that launches it. It holds the game's Windows saves, is readied before each launch of the game, and goes when the installation is uninstalled.
 _Avoid_: bottle, Wine folder
 
+**Launch settings**:
+The player's choices for how one Windows installation runs, for every account that launches it: the arguments added after its storefront's on its command line, its engine, then the graphics backend that renders its Direct3D there and that backend's options, each as the engine allows. Only what differs from what Obelisk knows of the game is kept. A change applies from the game's next launch, a game moved to the other engine runs in that engine's Wine prefix, and the settings go when the installation is uninstalled.
+_Avoid_: bottle, container, game settings, profile (what Obelisk itself knows of a game)
+
+**Graphics backend**:
+What renders a Windows game's Direct3D through Metal: D3DMetal, for Direct3D 11 and 12 in 64-bit programs, or DXMT, for Direct3D 10 and 11. A game has one, as Windows has one dxgi per process: on DXMT it has no Direct3D 12. On Rosetta's Wine, a 32-bit program of a game on D3DMetal renders through DXMT.
+_Avoid_: renderer, translation layer
+
 **Prerequisite**:
 A program a storefront names to run once in a Wine prefix before its game first starts, such as a DirectX or Visual C++ installer. One that fails runs again on the next launch; the game starts anyway.
 _Avoid_: redistributable (Steam's name for the package, not the run), dependency

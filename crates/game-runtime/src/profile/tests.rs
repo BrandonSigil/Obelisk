@@ -1,4 +1,5 @@
 use super::*;
+use crate::launch_settings::Choices;
 
 const ROCKET_LEAGUE: Game<'static> = Game::Epic {
     namespace: "9773aa1aa54f4f7b80e44bef04986cea",
@@ -29,13 +30,30 @@ fn rocket_league_and_elden_ring_run_on_the_linux_engine_and_nothing_else_does() 
 }
 
 #[test]
-fn elden_ring_renders_through_d3dmetal_and_rocket_league_through_dxmt() {
+fn elden_ring_renders_through_d3dmetal_rocket_league_through_dxmt_and_others_through_d3dmetal() {
     assert_eq!(
         of(Game::Steam { app_id: 1245620 }).graphics,
         Graphics::D3DMetal
     );
     assert_eq!(of(ROCKET_LEAGUE).graphics, Graphics::Dxmt);
-    assert_eq!(Profile::default().graphics, Graphics::Dxmt);
+    assert_eq!(Profile::default().graphics, Graphics::D3DMetal);
+    assert_eq!(Profile::default().options, GraphicsOptions::default());
+}
+
+#[test]
+fn the_player_s_launch_settings_apply_over_the_profile_and_keep_its_program() {
+    let choices = Choices {
+        engine: Some(Engine::Rosetta),
+        ray_tracing: Some(false),
+        ..Choices::default()
+    };
+
+    let profile = choices.apply(&of(ROCKET_LEAGUE));
+
+    assert_eq!(profile.engine, Engine::Rosetta);
+    assert_eq!(profile.graphics, Graphics::D3DMetal);
+    assert!(!profile.options.ray_tracing);
+    assert_eq!(profile.executable, of(ROCKET_LEAGUE).executable);
 }
 
 #[test]

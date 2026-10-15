@@ -6,6 +6,7 @@ mod files;
 pub mod gog;
 mod input;
 pub mod installations;
+pub mod launch_settings;
 pub mod linux_engine;
 mod locations;
 pub mod metal_hud;

@@ -57,27 +57,8 @@ struct GameAchievementsView: View {
     }
 
     private var header: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 5) {
-                Label(L10n.string("ui.game.achievements.title"), systemImage: "trophy")
-                    .font(.title2.weight(.semibold))
-                Text(gameName).font(.subheadline).foregroundStyle(.secondary)
-            }
-            Spacer()
-            Button { dismiss() } label: {
-                Image(systemName: "xmark")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 28, height: 28)
-                    .background(.primary.opacity(0.08), in: Circle())
-                    .contentShape(Circle())
-            }
-            .obeliskButtonStyle(.plain)
-            .keyboardShortcut(.cancelAction)
-            .accessibilityLabel(L10n.string("ui.common.close"))
-            .accessibilityIdentifier("\(model.storeID)-achievements-close")
-            .help(L10n.string("ui.common.close"))
-        }
+        GameSheetHeader(title: L10n.string("ui.game.achievements.title"), systemImage: "trophy",
+                        gameName: gameName, closeIdentifier: "\(model.storeID)-achievements-close")
     }
 }
 

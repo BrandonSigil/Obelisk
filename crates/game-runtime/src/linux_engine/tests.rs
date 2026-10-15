@@ -8,6 +8,8 @@ fn linux_config(root: &Path) -> wine::Config {
         log: root.join("logs/wine-game.log"),
         engine: wine::Engine::Linux,
         graphics: wine::Graphics::Dxmt,
+        options: wine::GraphicsOptions::default(),
+        arguments: Vec::new(),
     }
 }
 
@@ -616,6 +618,8 @@ fn smoke() {
             Ok("d3dmetal") => wine::Graphics::D3DMetal,
             _ => wine::Graphics::Dxmt,
         },
+        options: wine::GraphicsOptions::default(),
+        arguments: Vec::new(),
     };
     let arguments: Vec<&str> = arguments.split_whitespace().collect();
     let launch = launch_target(&executable, &arguments);

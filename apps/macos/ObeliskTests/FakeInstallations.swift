@@ -87,6 +87,9 @@ final class FakeInstallations<Store: InstallationStorefront>: InstallationsBacke
         indicatorRequests += 1
         return indicators
     }
+    func launchSettings(_ receipt: InstallationReceipt<Store.GameID>) async throws -> LaunchSettings? { nil }
+    func setLaunchSettings(_ receipt: InstallationReceipt<Store.GameID>, choices: LaunchChoices) async throws
+        -> LaunchSettings? { nil }
 
     /// The actions Swift forwarded, without diagnostics or update settings
     /// and checks.

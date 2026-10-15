@@ -15,6 +15,8 @@ struct GameDetailPage<Model: LibraryStorefront, HeroArtwork: View, Cover: View, 
     private let context: GamePageContext<HeroArtwork, Cover>
     private let content: Content
     @State private var appeared = false
+    /// The launch settings sheet of the installed Windows build, while open.
+    @State private var launchSettings: LaunchSettingsModel?
     @State private var isCompact = false
     @Environment(\.gameTransition) private var transition
     @Environment(\.storefrontBar) private var bar
@@ -94,6 +96,7 @@ struct GameDetailPage<Model: LibraryStorefront, HeroArtwork: View, Cover: View, 
         .sheet(isPresented: $achievements.isPresented) {
             GameAchievementsView(model: achievements, gameName: name, retry: model.reloadAchievements)
         }
+        .sheet(item: $launchSettings) { LaunchSettingsSheet(model: $0, gameName: name) }
     }
 
     private var hero: some View {
@@ -129,7 +132,15 @@ struct GameDetailPage<Model: LibraryStorefront, HeroArtwork: View, Cover: View, 
                             canUninstall: installations.canUninstallSelectedGame,
                             verify: { installations.verify(receipt) },
                             uninstall: { installations.uninstall(receipt) },
-                            directory: receipt.directory
+                            directory: receipt.directory,
+                            launchSettings: receipt.platform == Model.Store.nativePlatform ? nil : {
+                                launchSettings = LaunchSettingsModel(
+                                    load: { [installations] in try await installations.launchSettings(receipt) },
+                                    save: { [installations] in
+                                        try await installations.setLaunchSettings(receipt, choices: $0)
+                                    }
+                                )
+                            }
                         )
                         .id(receipt.id + receipt.directory)
                     }

@@ -10,13 +10,21 @@ struct GameManagementButton: View {
     let uninstall: () -> Void
     /// The installed game's directory, revealed in Finder from the menu.
     let directory: String
+    /// Opens a Windows build's launch settings; nil for a Mac build.
+    var launchSettings: (() -> Void)?
     @State private var confirmsUninstall = false
 
-    /// The menu opens while either of its actions may start.
-    private var isAvailable: Bool { canVerify || canUninstall }
+    /// The menu opens while either of its actions may start, and whenever a
+    /// Windows build's launch settings may change.
+    private var isAvailable: Bool { canVerify || canUninstall || launchSettings != nil }
 
     var body: some View {
         Menu {
+            if let launchSettings {
+                Button(L10n.string("ui.launch_settings.title"), systemImage: "slider.horizontal.3",
+                       action: launchSettings)
+                Divider()
+            }
             Button(L10n.string("ui.game.show_files"), systemImage: "folder") {
                 NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: directory)
             }
@@ -225,5 +233,39 @@ struct GameMetricSymbol: View {
             .font(.system(size: 18, weight: .regular))
             .foregroundStyle(isWarning ? AnyShapeStyle(.orange) : AnyShapeStyle(.secondary))
             .frame(width: 26, height: 26)
+    }
+}
+
+/// The header of a game's sheet: its title over the game's name, and the
+/// button that closes the sheet.
+struct GameSheetHeader: View {
+    let title: String
+    let systemImage: String
+    let gameName: String
+    let closeIdentifier: String
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 5) {
+                Label(title, systemImage: systemImage)
+                    .font(.title2.weight(.semibold))
+                Text(gameName).font(.subheadline).foregroundStyle(.secondary)
+            }
+            Spacer()
+            Button { dismiss() } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 28, height: 28)
+                    .background(.primary.opacity(0.08), in: Circle())
+                    .contentShape(Circle())
+            }
+            .obeliskButtonStyle(.plain)
+            .keyboardShortcut(.cancelAction)
+            .accessibilityLabel(L10n.string("ui.common.close"))
+            .accessibilityIdentifier(closeIdentifier)
+            .help(L10n.string("ui.common.close"))
+        }
     }
 }

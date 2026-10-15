@@ -28,6 +28,8 @@ mod locations;
 pub use locations::*;
 mod installations;
 pub use installations::*;
+mod launch_settings;
+pub use launch_settings::*;
 mod downloads;
 pub use downloads::*;
 mod library_cache;

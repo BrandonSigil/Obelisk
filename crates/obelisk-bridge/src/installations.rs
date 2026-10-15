@@ -6,7 +6,8 @@
 //! id; installations as their receipt's id.
 use crate::{
     CloudChoice, CloudIndicator, EpicSession, GameSessionError, GameTransfer, GogSession,
-    ObeliskLocations, SteamCredentials, SteamSession, StorefrontSessions,
+    LaunchChoices, LaunchSettings, ObeliskLocations, SteamCredentials, SteamSession,
+    StorefrontSessions,
     game_session::{Storefronts, blocking, shares_runtimes},
     steam_chat::SteamGameInvite,
 };
@@ -386,6 +387,33 @@ fn maintain_cloud<S: Named>(
 
 /// What a blocking call lost with its thread reports.
 const FAILED: &str = "backend.steam.runtime.startFailed";
+/// What a launch settings change that could not be kept reports.
+const NOT_SAVED: &str = "backend.launchSettings.notSaved";
+
+async fn launch_settings<S: Named>(
+    installations: Installations<S>,
+    installation: String,
+) -> Result<Option<LaunchSettings>, GameSessionError> {
+    let view = blocking(FAILED, move || {
+        Ok(installations.launch_settings(&installation))
+    })
+    .await?;
+    Ok(view.map(Into::into))
+}
+
+async fn set_launch_settings<S: Named>(
+    installations: Installations<S>,
+    installation: String,
+    choices: LaunchChoices,
+) -> Result<Option<LaunchSettings>, GameSessionError> {
+    let view = blocking(NOT_SAVED, move || {
+        installations
+            .set_launch_settings(&installation, choices.into())
+            .map_err(|_| game_runtime::sessions::Failure::Failed(NOT_SAVED.into()))
+    })
+    .await?;
+    Ok(view.map(Into::into))
+}
 
 async fn answer<S: Named>(
     installations: Installations<S>,
@@ -626,6 +654,28 @@ impl AccountInstallations {
 
     pub fn uninstall(&self, installation: String) {
         each!(self, installations => installations.uninstall(&installation))
+    }
+
+    /// The launch settings of the Windows `installation`; `None` for a Mac
+    /// build.
+    pub async fn launch_settings(
+        &self,
+        installation: String,
+    ) -> Result<Option<LaunchSettings>, GameSessionError> {
+        each!(self, installations => launch_settings(installations.clone(), installation).await)
+    }
+
+    /// Keeps `choices` as the player's launch settings of the Windows
+    /// `installation`, from its game's next launch, and returns them as they
+    /// then apply.
+    pub async fn set_launch_settings(
+        &self,
+        installation: String,
+        choices: LaunchChoices,
+    ) -> Result<Option<LaunchSettings>, GameSessionError> {
+        each!(self, installations => {
+            set_launch_settings(installations.clone(), installation, choices).await
+        })
     }
 
     /// Stops the account's Transfer, Cloud maintenance and launch still

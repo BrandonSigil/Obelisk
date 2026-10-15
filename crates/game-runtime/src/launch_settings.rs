@@ -1,0 +1,251 @@
+//! Launch settings: the player's choices for how one Windows installation
+//! runs, over what its game's profile says. The arguments added to its
+//! command line, its engine, then the CPU translator that engine has, then
+//! the graphics backend that renders its Direct3D there and that backend's
+//! options, each offered as the engine allows. Only what differs from the
+//! profile is kept, one file per installation in Obelisk's library, named
+//! after the installation's folder as its Wine prefix is. It goes when the
+//! installation is uninstalled, and a change applies from the game's next
+//! launch.
+use crate::{
+    profile::Profile,
+    wine::{Engine, Graphics, GraphicsOptions},
+};
+use serde::{Deserialize, Serialize};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
+
+/// What the player changed from the profile. A missing choice follows the
+/// profile, or the engine's defaults on another engine than the profile's.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Choices {
+    /// What the player adds to the game's command line, as typed: split on
+    /// the spaces outside double quotes, after the storefront's arguments.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub arguments: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub engine: Option<Engine>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub graphics: Option<Graphics>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ray_tracing: Option<bool>,
+}
+
+/// What translates a game's x86 code on one engine.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Translator {
+    Rosetta,
+    Fex,
+}
+
+/// One of a graphics backend's options.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GraphicsOption {
+    RayTracing,
+}
+
+/// What one engine offers, in the order the player sees it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct EngineOffer {
+    pub engine: Engine,
+    pub translator: Translator,
+    pub graphics: &'static [GraphicsOffer],
+}
+
+/// What one graphics backend offers on one engine.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct GraphicsOffer {
+    pub graphics: Graphics,
+    pub options: &'static [GraphicsOption],
+}
+
+/// Every engine, the translator it has and the backends it renders with.
+/// Rosetta's Wine takes D3DMetal's options; the Linux engine's render
+/// servers take none yet.
+pub const ENGINES: [EngineOffer; 2] = [
+    EngineOffer {
+        engine: Engine::Rosetta,
+        translator: Translator::Rosetta,
+        graphics: &[
+            GraphicsOffer {
+                graphics: Graphics::D3DMetal,
+                options: &[GraphicsOption::RayTracing],
+            },
+            GraphicsOffer {
+                graphics: Graphics::Dxmt,
+                options: &[],
+            },
+        ],
+    },
+    EngineOffer {
+        engine: Engine::Linux,
+        translator: Translator::Fex,
+        graphics: &[
+            GraphicsOffer {
+                graphics: Graphics::Dxmt,
+                options: &[],
+            },
+            GraphicsOffer {
+                graphics: Graphics::D3DMetal,
+                options: &[],
+            },
+        ],
+    },
+];
+
+/// What `engine` offers.
+pub fn offer(engine: Engine) -> &'static EngineOffer {
+    ENGINES
+        .iter()
+        .find(|offer| offer.engine == engine)
+        .expect("every engine has an offer")
+}
+
+impl EngineOffer {
+    /// What `graphics` offers on this engine, when the engine renders with it.
+    pub fn graphics(&self, graphics: Graphics) -> Option<&'static GraphicsOffer> {
+        self.graphics
+            .iter()
+            .find(|offer| offer.graphics == graphics)
+    }
+}
+
+impl Choices {
+    /// How the game of `profile` runs with these choices, its program kept.
+    /// A backend its engine does not offer falls back to the default one.
+    pub fn apply(&self, profile: &Profile) -> Profile {
+        let engine = self.engine.unwrap_or(profile.engine);
+        let graphics = self
+            .graphics
+            .filter(|graphics| offer(engine).graphics(*graphics).is_some())
+            .unwrap_or(default_graphics(profile, engine));
+        let options = default_options(profile, engine, graphics);
+        Profile {
+            engine,
+            graphics,
+            options: GraphicsOptions {
+                ray_tracing: self.ray_tracing.unwrap_or(options.ray_tracing),
+            },
+            ..*profile
+        }
+    }
+
+    /// These choices without those `profile` already gives, or the chosen
+    /// engine gives by default, and without arguments that are only spaces.
+    pub fn normalized(&self, profile: &Profile) -> Self {
+        let applied = self.apply(profile);
+        let graphics = default_graphics(profile, applied.engine);
+        let options = default_options(profile, applied.engine, applied.graphics);
+        Self {
+            arguments: self
+                .arguments
+                .as_deref()
+                .map(str::trim)
+                .filter(|arguments| !arguments.is_empty())
+                .map(str::to_owned),
+            engine: (applied.engine != profile.engine).then_some(applied.engine),
+            graphics: (applied.graphics != graphics).then_some(applied.graphics),
+            ray_tracing: (applied.options.ray_tracing != options.ray_tracing)
+                .then_some(applied.options.ray_tracing),
+        }
+    }
+
+    /// Whether the player changed nothing.
+    pub fn is_empty(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
+/// What renders `profile`'s game on `engine` without choices: what its
+/// profile says on the profile's engine, else that engine's default backend.
+fn default_graphics(profile: &Profile, engine: Engine) -> Graphics {
+    if engine == profile.engine {
+        profile.graphics
+    } else {
+        Graphics::default_on(engine)
+    }
+}
+
+/// The options the profile gives its own engine and backend; any other
+/// pair starts from D3DMetal's own defaults.
+fn default_options(profile: &Profile, engine: Engine, graphics: Graphics) -> GraphicsOptions {
+    if engine == profile.engine && graphics == profile.graphics {
+        profile.options
+    } else {
+        GraphicsOptions::default()
+    }
+}
+
+/// The folder of every installation's launch settings in Obelisk's library.
+const FOLDER: &str = "LaunchSettings";
+
+/// The launch settings file of the installation in `install`, in Obelisk's
+/// `library`.
+fn file(library: &Path, install: &Path) -> Option<PathBuf> {
+    let mut name = install.file_name()?.to_owned();
+    name.push(".json");
+    Some(library.join(FOLDER).join(name))
+}
+
+/// The player's choices for the installation in `install`. An installation
+/// without any, or whose file cannot be read, has none.
+pub fn load(library: &Path, install: &Path) -> Choices {
+    file(library, install)
+        .and_then(|file| fs::read(file).ok())
+        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+        .unwrap_or_default()
+}
+
+/// Keeps `choices` for the installation in `install`. No choice at all
+/// leaves no file.
+pub fn save(library: &Path, install: &Path, choices: &Choices) -> std::io::Result<()> {
+    let Some(file) = file(library, install) else {
+        return Err(std::io::ErrorKind::InvalidInput.into());
+    };
+    if choices.is_empty() {
+        return remove(library, install);
+    }
+    fs::create_dir_all(library.join(FOLDER))?;
+    obelisk_core::write_atomic(&file, &serde_json::to_vec_pretty(choices)?)
+}
+
+/// Forgets the choices for the uninstalled installation in `install`.
+pub fn remove(library: &Path, install: &Path) -> std::io::Result<()> {
+    let Some(file) = file(library, install) else {
+        return Ok(());
+    };
+    match fs::remove_file(file) {
+        Err(error) if error.kind() != std::io::ErrorKind::NotFound => Err(error),
+        _ => Ok(()),
+    }
+}
+
+/// One installation's launch settings as its player sees them: how it runs,
+/// what the player changed, and how it runs without choices.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct View {
+    pub settings: Profile,
+    pub choices: Choices,
+    /// The engine its profile names.
+    pub default_engine: Engine,
+    /// What renders it on each engine without choices, in `ENGINES`' order.
+    pub default_graphics: [Graphics; ENGINES.len()],
+}
+
+impl View {
+    /// The launch settings of `profile`'s game with `choices`.
+    pub fn new(profile: &Profile, choices: Choices) -> Self {
+        Self {
+            settings: choices.apply(profile),
+            choices,
+            default_engine: profile.engine,
+            default_graphics: ENGINES.map(|offer| default_graphics(profile, offer.engine)),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests;

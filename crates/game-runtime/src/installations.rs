@@ -9,7 +9,7 @@
 mod receipt;
 
 use crate::{
-    cloud, cloud_status,
+    cloud, cloud_status, launch_settings,
     queue::{self, DownloadQueue, Owner},
     runtimes::{self, Runtime},
     sessions::{self, Admission, Canceller, Failure, Sessions},
@@ -1363,6 +1363,41 @@ impl<S: Storefront> Installations<S> {
         if let Some(launch) = launch {
             launch.cancel();
         }
+    }
+
+    /// The launch settings of the Windows installation `receipt` names;
+    /// `None` for a Mac build or an installation the account no longer has.
+    pub fn launch_settings(&self, receipt: &str) -> Option<launch_settings::View> {
+        let (profile, install) = self.windows_game(receipt)?;
+        let choices = launch_settings::load(&self.shared.library, &install);
+        Some(launch_settings::View::new(&profile, choices))
+    }
+
+    /// Keeps `choices` as the player's launch settings of the Windows
+    /// installation `receipt` names, without those its game's profile already
+    /// gives, and returns its launch settings from its next launch on.
+    pub fn set_launch_settings(
+        &self,
+        receipt: &str,
+        choices: launch_settings::Choices,
+    ) -> std::io::Result<Option<launch_settings::View>> {
+        let Some((profile, install)) = self.windows_game(receipt) else {
+            return Ok(None);
+        };
+        let choices = choices.normalized(&profile);
+        launch_settings::save(&self.shared.library, &install, &choices)?;
+        Ok(Some(launch_settings::View::new(&profile, choices)))
+    }
+
+    /// The profile and folder of the Windows installation `receipt` names;
+    /// `None` for a Mac build or an installation the account no longer has.
+    fn windows_game(&self, receipt: &str) -> Option<(crate::profile::Profile, PathBuf)> {
+        let receipt = self.shared.inner.lock().unwrap().receipt(receipt)?;
+        if !crate::wine::windows_build(&receipt.platform) {
+            return None;
+        }
+        let game = receipt.wine_game();
+        Some((crate::profile::of(game.id), game.install.to_owned()))
     }
 
     /// Asks the storefront whether each installation has a newer build, at

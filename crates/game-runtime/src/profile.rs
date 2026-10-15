@@ -1,8 +1,9 @@
 //! What Obelisk knows about particular Windows games, whatever their
-//! storefront: the engine that runs one, the graphics its Direct3D goes
-//! through there, and the program started instead of its publisher's. Every
-//! game this table does not name runs with the defaults, in Rosetta's Wine.
-use crate::wine::{Engine, Graphics};
+//! storefront: the engine that runs one, the graphics backend its Direct3D
+//! goes through there, and the program started instead of its publisher's.
+//! Every game this table does not name runs with the defaults, in Rosetta's
+//! Wine with D3DMetal. The player's launch settings apply over it.
+use crate::wine::{Engine, Graphics, GraphicsOptions};
 use obelisk_core::launch::LaunchTarget;
 use std::path::Path;
 
@@ -22,14 +23,27 @@ pub enum Game<'a> {
 }
 
 /// How Obelisk runs one Windows game.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Profile {
     pub engine: Engine,
-    /// What renders its Direct3D on the Linux engine.
+    /// What renders its Direct3D on that engine.
     pub graphics: Graphics,
+    /// What it asks of that backend.
+    pub options: GraphicsOptions,
     /// The program the game starts with instead of its publisher's, relative
     /// to the installation, when that one cannot run there.
     pub executable: Option<&'static str>,
+}
+
+impl Default for Profile {
+    fn default() -> Self {
+        Self {
+            engine: Engine::Rosetta,
+            graphics: Graphics::default_on(Engine::Rosetta),
+            options: GraphicsOptions::default(),
+            executable: None,
+        }
+    }
 }
 
 /// The profile of `game`: the one this table gives it, else the defaults.
@@ -47,6 +61,7 @@ pub fn of(game: Game<'_>) -> Profile {
             engine: Engine::Linux,
             graphics: Graphics::Dxmt,
             executable: Some("Binaries/Win64/RocketLeague_EAC.exe"),
+            ..Profile::default()
         },
         // ELDEN RING: Easy Anti-Cheat, as Rocket League's. It only has
         // Direct3D 12, which D3DMetal renders and DXMT does not. Steam's
@@ -54,7 +69,7 @@ pub fn of(game: Game<'_>) -> Profile {
         Game::Steam { app_id: 1245620 } => Profile {
             engine: Engine::Linux,
             graphics: Graphics::D3DMetal,
-            executable: None,
+            ..Profile::default()
         },
         _ => Profile::default(),
     }
