@@ -21,7 +21,7 @@
   <p>
     <a href="https://github.com/Zagrios/obelisk/releases/latest"><img src="https://img.shields.io/github/v/release/Zagrios/obelisk?style=for-the-badge&label=version" alt="Latest version"></a>
     <a href="https://github.com/Zagrios/obelisk/releases"><img src="https://img.shields.io/github/downloads/Zagrios/obelisk/total?style=for-the-badge" alt="Downloads"></a>
-    <img src="https://img.shields.io/badge/macOS-26%2B-000000?style=for-the-badge&logo=apple&logoColor=white" alt="macOS 26 or later">
+    <img src="https://img.shields.io/badge/macOS-26.4%2B-000000?style=for-the-badge&logo=apple&logoColor=white" alt="macOS 26.4 or later">
     <img src="https://img.shields.io/badge/Apple%20silicon-only-000000?style=for-the-badge" alt="Apple silicon only">
     <a href="LICENSE"><img src="https://img.shields.io/github/license/Zagrios/obelisk?style=for-the-badge" alt="License: GPL-3.0"></a>
   </p>
@@ -66,7 +66,7 @@ Windows games play too. Obelisk sets everything up for you: no bottles to create
 ## Requirements
 
 - A Mac with Apple silicon (M1 or later). Intel Macs are not supported.
-- macOS 26 Tahoe or later.
+- macOS Tahoe 26.4 or later.
 - Rosetta, for Windows games. If it is missing, Obelisk asks macOS to install it the first time a game needs it.
 - Disk space for your games. The first Windows game also downloads Voile, a few hundred MB, once.
 
