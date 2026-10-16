@@ -703,11 +703,12 @@ async fn run<L: Launch>(
     let mut prepared = launch
         .prepare_host(session, &target, architecture, cloud.as_ref())
         .await?;
+    let wine = launch.wine();
     // A game in Wine for macOS reads the Mac's gamepads through the input
     // service while it runs.
-    let input = launch
-        .wine()
-        .and_then(|wine| crate::input::Service::start(&wine))
+    let input = wine
+        .as_ref()
+        .and_then(crate::input::Service::start)
         .map(|(service, socket)| {
             prepared.environment.insert(
                 crate::input::SOCKET.to_owned(),
@@ -715,9 +716,12 @@ async fn run<L: Launch>(
             );
             service
         });
-    // Metal reports the game's frames to its log, without showing anything.
+    // Metal reports the game's frames to its log, and shows them over the
+    // game only to a player who asked in its launch settings.
+    let shown = wine.is_some_and(|wine| wine.performance_hud);
     prepared.environment.extend(
-        crate::metal_hud::ENVIRONMENT.map(|(name, value)| (name.to_owned(), value.to_owned())),
+        crate::metal_hud::environment(shown)
+            .map(|(name, value)| (name.to_owned(), value.to_owned())),
     );
     let _ = session.launched.set(super::quit::Game {
         environment: target.environment.clone(),

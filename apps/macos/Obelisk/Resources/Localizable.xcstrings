@@ -14223,6 +14223,40 @@
         }
       }
     },
+    "ui.launch_settings.performance_hud": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Show the performance HUD"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Afficher le panneau de performances"
+          }
+        }
+      }
+    },
+    "ui.launch_settings.performance_hud_detail": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Metal's HUD shows the frame rate and the time of each frame over the game, whichever backend renders it."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Le panneau de Metal affiche les images par seconde et la durée de chaque image par-dessus le jeu, quel que soit le moteur GPU."
+          }
+        }
+      }
+    },
     "ui.launch_settings.next_launch": {
       "extractionState": "manual",
       "localizations": {

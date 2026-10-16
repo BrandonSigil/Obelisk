@@ -79,3 +79,16 @@ fn a_line_without_a_process_counts_as_process_zero() {
     assert_eq!(pid(b"2026-10-14 09:04:41.290 Game[38516:38256263] "), 38516);
     assert_eq!(pid(b"Df probe[38314:2479811] (libMTLHud.dylib) "), 38314);
 }
+
+#[test]
+fn the_hud_shows_over_the_game_only_when_asked() {
+    let opacity = |shown| {
+        environment(shown)
+            .into_iter()
+            .find(|(name, _)| *name == "MTL_HUD_OPACITY")
+            .map(|(_, value)| value)
+    };
+    assert_eq!(opacity(false), Some("0"));
+    assert_eq!(opacity(true), Some("1"));
+    assert!(environment(true).contains(&("MTL_HUD_LOG_ENABLED", "1")));
+}

@@ -1,9 +1,9 @@
 //! The frames a game presented, as Metal's Performance HUD reports them. Every
-//! game starts with the HUD on but invisible; once per second Metal then writes
-//! a `metal-HUD:` line to the presenting process's standard error, which the
-//! game's log keeps. Read once the game has exited, those lines give its frame
-//! rate whatever runs it: Rosetta's Wine, the Linux engine's wsd or a native
-//! build.
+//! game starts with the HUD on, invisible unless its player shows it; once per
+//! second Metal then writes a `metal-HUD:` line to the presenting process's
+//! standard error, which the game's log keeps. Read once the game has exited,
+//! those lines give its frame rate whatever runs it: Rosetta's Wine, the Linux
+//! engine's wsd or a native build.
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
@@ -12,13 +12,16 @@ use std::{
     path::Path,
 };
 
-/// What turns the HUD on for a process without showing it or its menu.
-pub(crate) const ENVIRONMENT: [(&str, &str); 4] = [
-    ("MTL_HUD_ENABLED", "1"),
-    ("MTL_HUD_LOG_ENABLED", "1"),
-    ("MTL_HUD_OPACITY", "0"),
-    ("MTL_HUD_DISABLE_MENU_BAR", "1"),
-];
+/// What turns the HUD on for a process, without its menu: over the game when
+/// `shown`, else invisible.
+pub(crate) fn environment(shown: bool) -> [(&'static str, &'static str); 4] {
+    [
+        ("MTL_HUD_ENABLED", "1"),
+        ("MTL_HUD_LOG_ENABLED", "1"),
+        ("MTL_HUD_OPACITY", if shown { "1" } else { "0" }),
+        ("MTL_HUD_DISABLE_MENU_BAR", "1"),
+    ]
+}
 
 const MARKER: &[u8] = b"metal-HUD: ";
 /// A frame shown this long after the previous one is a hitch the player sees.

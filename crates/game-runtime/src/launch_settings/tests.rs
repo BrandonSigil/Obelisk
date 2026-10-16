@@ -56,6 +56,7 @@ fn only_what_differs_from_the_profile_is_kept() {
         engine: Some(Engine::Rosetta),
         graphics: Some(Graphics::D3DMetal),
         ray_tracing: Some(true),
+        performance_hud: false,
     };
     assert!(same.normalized(&other).is_empty());
 
@@ -63,6 +64,7 @@ fn only_what_differs_from_the_profile_is_kept() {
         arguments: Some("-dx11 \"+exec autoexec.cfg\"".into()),
         graphics: Some(Graphics::Dxmt),
         ray_tracing: Some(false),
+        performance_hud: true,
         ..Choices::default()
     };
     assert_eq!(dxmt.normalized(&other), dxmt);

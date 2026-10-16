@@ -56,9 +56,9 @@ pub fn profile(prefix: &Path) -> PathBuf {
 /// How one Windows installation runs: the Wine runtime, the installation's
 /// prefix, the log Wine writes while its game runs, the engine that runs
 /// that Wine, the graphics backend that renders its Direct3D, with that
-/// backend's options, the arguments its player adds to its command line, and
-/// the environment variables and DLL overrides its game's profile adds to
-/// Wine's.
+/// backend's options, the arguments its player adds to its command line,
+/// whether Metal's Performance HUD shows over its game, and the environment
+/// variables and DLL overrides its game's profile adds to Wine's.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(from = "SavedConfig")]
 pub struct Config {
@@ -69,6 +69,7 @@ pub struct Config {
     pub graphics: Graphics,
     pub options: GraphicsOptions,
     pub arguments: Vec<String>,
+    pub performance_hud: bool,
     pub variables: BTreeMap<String, String>,
     pub dll_overrides: BTreeMap<String, String>,
 }
@@ -88,6 +89,8 @@ struct SavedConfig {
     #[serde(default)]
     arguments: Vec<String>,
     #[serde(default)]
+    performance_hud: bool,
+    #[serde(default)]
     variables: BTreeMap<String, String>,
     #[serde(default)]
     dll_overrides: BTreeMap<String, String>,
@@ -105,6 +108,7 @@ impl From<SavedConfig> for Config {
                 .unwrap_or_else(|| Graphics::default_on(saved.engine)),
             options: saved.options,
             arguments: saved.arguments,
+            performance_hud: saved.performance_hud,
             variables: saved.variables,
             dll_overrides: saved.dll_overrides,
         }
@@ -661,6 +665,8 @@ pub struct Installation {
     profile: crate::profile::Profile,
     /// What its player adds to its game's command line.
     arguments: Vec<String>,
+    /// Whether its player shows Metal's Performance HUD over its game.
+    performance_hud: bool,
 }
 
 impl Installation {
@@ -690,6 +696,7 @@ impl Installation {
             log: log(locations, game),
             profile,
             arguments,
+            performance_hud: choices.performance_hud,
         }))
     }
 
@@ -729,6 +736,7 @@ impl Installation {
             graphics: self.profile.graphics,
             options: self.profile.options,
             arguments: self.arguments.clone(),
+            performance_hud: self.performance_hud,
             variables: self.profile.variables.clone(),
             dll_overrides: self.profile.dll_overrides.clone(),
         })

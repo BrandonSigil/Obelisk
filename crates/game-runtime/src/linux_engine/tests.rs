@@ -10,6 +10,7 @@ fn linux_config(root: &Path) -> wine::Config {
         graphics: wine::Graphics::Dxmt,
         options: wine::GraphicsOptions::default(),
         arguments: Vec::new(),
+        performance_hud: false,
         variables: Default::default(),
         dll_overrides: Default::default(),
     }
@@ -651,6 +652,7 @@ fn smoke() {
         },
         options: wine::GraphicsOptions::default(),
         arguments: Vec::new(),
+        performance_hud: false,
         variables: Default::default(),
         dll_overrides: Default::default(),
     };

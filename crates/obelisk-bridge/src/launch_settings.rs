@@ -16,6 +16,8 @@ pub struct LaunchSettings {
     pub graphics: LaunchGraphics,
     /// Direct3D 12 offers DirectX Raytracing, on D3DMetal.
     pub ray_tracing: bool,
+    /// Metal's Performance HUD shows over the game, whatever renders it.
+    pub performance_hud: bool,
     /// What the player changed from what Obelisk knows of the game.
     pub choices: LaunchChoices,
     /// The engine the game runs on without choices.
@@ -37,6 +39,8 @@ pub struct LaunchChoices {
     pub graphics: Option<LaunchGraphics>,
     #[uniffi(default = None)]
     pub ray_tracing: Option<bool>,
+    #[uniffi(default = false)]
+    pub performance_hud: bool,
 }
 
 /// What runs a Windows game's Wine.
@@ -90,6 +94,7 @@ impl From<View> for LaunchSettings {
             engine: view.settings.engine.into(),
             graphics: view.settings.graphics.into(),
             ray_tracing: view.settings.options.ray_tracing,
+            performance_hud: view.choices.performance_hud,
             choices: view.choices.into(),
             default_engine: view.default_engine.into(),
             engines: ENGINES
@@ -133,6 +138,7 @@ impl From<Choices> for LaunchChoices {
             engine: choices.engine.map(Into::into),
             graphics: choices.graphics.map(Into::into),
             ray_tracing: choices.ray_tracing,
+            performance_hud: choices.performance_hud,
         }
     }
 }
@@ -144,6 +150,7 @@ impl From<LaunchChoices> for launch_settings::Choices {
             engine: choices.engine.map(Into::into),
             graphics: choices.graphics.map(Into::into),
             ray_tracing: choices.ray_tracing,
+            performance_hud: choices.performance_hud,
         }
     }
 }
@@ -204,6 +211,7 @@ mod tests {
         assert_eq!(settings.engine, LaunchEngine::Rosetta);
         assert_eq!(settings.graphics, LaunchGraphics::D3dMetal);
         assert!(settings.ray_tracing);
+        assert!(!settings.performance_hud);
         assert_eq!(settings.choices, LaunchChoices::default());
         let engines: Vec<_> = settings
             .engines

@@ -2,8 +2,8 @@
 //! runs, over what its game's profile says. The arguments added to its
 //! command line, its engine, then the CPU translator that engine has, then
 //! the graphics backend that renders its Direct3D there and that backend's
-//! options, each offered as the engine allows. Only what differs from the
-//! profile is kept, one file per installation in Obelisk's library, named
+//! options, each offered as the engine allows, and Metal's Performance HUD
+//! over the game. Only what differs from the profile is kept, one file per installation in Obelisk's library, named
 //! after the installation's folder as its Wine prefix is. It goes when the
 //! installation is uninstalled, and a change applies from the game's next
 //! launch.
@@ -32,6 +32,9 @@ pub struct Choices {
     pub graphics: Option<Graphics>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ray_tracing: Option<bool>,
+    /// Metal's Performance HUD shows over the game, whatever renders it.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub performance_hud: bool,
 }
 
 /// What translates a game's x86 code on one engine.
@@ -150,6 +153,7 @@ impl Choices {
             graphics: (applied.graphics != graphics).then_some(applied.graphics),
             ray_tracing: (applied.options.ray_tracing != options.ray_tracing)
                 .then_some(applied.options.ray_tracing),
+            performance_hud: self.performance_hud,
         }
     }
 

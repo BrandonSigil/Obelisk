@@ -7365,17 +7365,19 @@ public struct LaunchChoices: Equatable, Hashable {
     public var engine: LaunchEngine?
     public var graphics: LaunchGraphics?
     public var rayTracing: Bool?
+    public var performanceHud: Bool
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
     public init(
         /**
          * What the player adds to the game's command line, as typed.
-         */arguments: String? = nil, engine: LaunchEngine? = nil, graphics: LaunchGraphics? = nil, rayTracing: Bool? = nil) {
+         */arguments: String? = nil, engine: LaunchEngine? = nil, graphics: LaunchGraphics? = nil, rayTracing: Bool? = nil, performanceHud: Bool = false) {
         self.arguments = arguments
         self.engine = engine
         self.graphics = graphics
         self.rayTracing = rayTracing
+        self.performanceHud = performanceHud
     }
 
     
@@ -7397,7 +7399,8 @@ public struct FfiConverterTypeLaunchChoices: FfiConverterRustBuffer {
                 arguments: FfiConverterOptionString.read(from: &buf), 
                 engine: FfiConverterOptionTypeLaunchEngine.read(from: &buf), 
                 graphics: FfiConverterOptionTypeLaunchGraphics.read(from: &buf), 
-                rayTracing: FfiConverterOptionBool.read(from: &buf)
+                rayTracing: FfiConverterOptionBool.read(from: &buf), 
+                performanceHud: FfiConverterBool.read(from: &buf)
         )
     }
 
@@ -7406,6 +7409,7 @@ public struct FfiConverterTypeLaunchChoices: FfiConverterRustBuffer {
         FfiConverterOptionTypeLaunchEngine.write(value.engine, into: &buf)
         FfiConverterOptionTypeLaunchGraphics.write(value.graphics, into: &buf)
         FfiConverterOptionBool.write(value.rayTracing, into: &buf)
+        FfiConverterBool.write(value.performanceHud, into: &buf)
     }
 }
 
@@ -7565,6 +7569,10 @@ public struct LaunchSettings: Equatable, Hashable {
      */
     public var rayTracing: Bool
     /**
+     * Metal's Performance HUD shows over the game, whatever renders it.
+     */
+    public var performanceHud: Bool
+    /**
      * What the player changed from what Obelisk knows of the game.
      */
     public var choices: LaunchChoices
@@ -7585,6 +7593,9 @@ public struct LaunchSettings: Equatable, Hashable {
          * Direct3D 12 offers DirectX Raytracing, on D3DMetal.
          */rayTracing: Bool, 
         /**
+         * Metal's Performance HUD shows over the game, whatever renders it.
+         */performanceHud: Bool, 
+        /**
          * What the player changed from what Obelisk knows of the game.
          */choices: LaunchChoices, 
         /**
@@ -7597,6 +7608,7 @@ public struct LaunchSettings: Equatable, Hashable {
         self.engine = engine
         self.graphics = graphics
         self.rayTracing = rayTracing
+        self.performanceHud = performanceHud
         self.choices = choices
         self.defaultEngine = defaultEngine
         self.engines = engines
@@ -7621,6 +7633,7 @@ public struct FfiConverterTypeLaunchSettings: FfiConverterRustBuffer {
                 engine: FfiConverterTypeLaunchEngine.read(from: &buf), 
                 graphics: FfiConverterTypeLaunchGraphics.read(from: &buf), 
                 rayTracing: FfiConverterBool.read(from: &buf), 
+                performanceHud: FfiConverterBool.read(from: &buf), 
                 choices: FfiConverterTypeLaunchChoices.read(from: &buf), 
                 defaultEngine: FfiConverterTypeLaunchEngine.read(from: &buf), 
                 engines: FfiConverterSequenceTypeLaunchEngineOffer.read(from: &buf)
@@ -7631,6 +7644,7 @@ public struct FfiConverterTypeLaunchSettings: FfiConverterRustBuffer {
         FfiConverterTypeLaunchEngine.write(value.engine, into: &buf)
         FfiConverterTypeLaunchGraphics.write(value.graphics, into: &buf)
         FfiConverterBool.write(value.rayTracing, into: &buf)
+        FfiConverterBool.write(value.performanceHud, into: &buf)
         FfiConverterTypeLaunchChoices.write(value.choices, into: &buf)
         FfiConverterTypeLaunchEngine.write(value.defaultEngine, into: &buf)
         FfiConverterSequenceTypeLaunchEngineOffer.write(value.engines, into: &buf)

@@ -6,7 +6,7 @@ final class LaunchSettingsModelTests: XCTestCase {
                                  engine: LaunchEngine = .rosetta) -> LaunchSettings {
         LaunchSettings(
             engine: engine, graphics: engine == .rosetta ? .d3dMetal : .dxmt, rayTracing: true,
-            choices: choices, defaultEngine: .rosetta,
+            performanceHud: choices.performanceHud, choices: choices, defaultEngine: .rosetta,
             engines: [
                 LaunchEngineOffer(
                     engine: .rosetta, translator: .rosetta, defaultGraphics: .d3dMetal,
@@ -54,7 +54,8 @@ final class LaunchSettingsModelTests: XCTestCase {
     func testRestoringDefaultsForgetsEveryChoice() async throws {
         var saved: [LaunchChoices] = []
         let model = LaunchSettingsModel(
-            load: { Self.settings(choices: LaunchChoices(arguments: "-windowed", engine: .linux, rayTracing: false),
+            load: { Self.settings(choices: LaunchChoices(arguments: "-windowed", engine: .linux, rayTracing: false,
+                                                                 performanceHud: true),
                                   engine: .linux) },
             save: { choices in
                 saved.append(choices)

@@ -74,7 +74,7 @@ final class LaunchSettingsModel: Identifiable {
 /// The sheet behind a Windows game's Launch Settings: the arguments added to
 /// its command line, its engine, then the CPU translator that engine has,
 /// then the graphics backend and its options, each as the chosen engine
-/// allows, every one said in a sentence.
+/// allows, and Metal's Performance HUD, every one said in a sentence.
 struct LaunchSettingsSheet: View {
     let model: LaunchSettingsModel
     let gameName: String
@@ -181,6 +181,13 @@ struct LaunchSettingsSheet: View {
                     .toggleStyle(.switch)
                     .accessibilityIdentifier("launch-settings-ray-tracing")
                 }
+                Toggle(isOn: Binding(get: { settings.performanceHud },
+                                     set: { shown in model.choose { $0.performanceHud = shown } })) {
+                    Text(L10n.string("ui.launch_settings.performance_hud"))
+                    Text(L10n.string("ui.launch_settings.performance_hud_detail"))
+                }
+                .toggleStyle(.switch)
+                .accessibilityIdentifier("launch-settings-performance-hud")
             }
             Section {
                 HStack {

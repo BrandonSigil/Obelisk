@@ -66,6 +66,7 @@ pub(crate) fn config(root: &Path) -> Config {
         graphics: Graphics::D3DMetal,
         options: GraphicsOptions::default(),
         arguments: Vec::new(),
+        performance_hud: false,
         variables: Default::default(),
         dll_overrides: Default::default(),
     }
@@ -588,6 +589,7 @@ fn launch_settings_move_a_game_to_the_engine_and_backend_its_player_chose() {
     let choices = crate::launch_settings::Choices {
         engine: Some(Engine::Linux),
         graphics: Some(Graphics::D3DMetal),
+        performance_hud: true,
         ..Default::default()
     };
     crate::launch_settings::save(&locations.library, &install, &choices).unwrap();
@@ -603,6 +605,7 @@ fn launch_settings_move_a_game_to_the_engine_and_backend_its_player_chose() {
     let config = windows.runtime(&locations).unwrap();
     assert_eq!(config.engine, Engine::Linux);
     assert_eq!(config.graphics, Graphics::D3DMetal);
+    assert!(config.performance_hud);
 }
 
 #[test]
@@ -1054,6 +1057,7 @@ fn a_saved_configuration_from_before_engines_and_graphics_runs_its_engine_s_defa
     assert_eq!(config.engine, Engine::Rosetta);
     assert_eq!(config.graphics, Graphics::D3DMetal);
     assert_eq!(config.options, GraphicsOptions::default());
+    assert!(!config.performance_hud);
 
     let saved = r#"{"runtime":"/Voile/v1/linux","prefix":"/Prefixes/game-linux/prefix","log":"/logs/game.log","engine":"Linux"}"#;
     let config: Config = serde_json::from_str(saved).unwrap();
