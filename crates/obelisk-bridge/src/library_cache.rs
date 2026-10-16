@@ -3,8 +3,8 @@
 //! of an account while its session connects, records launches and forgets an
 //! account that signs out.
 use crate::{
-    EpicGame, GameAccount, GameIdentity, GogGame, SteamGame, game_session::Bridged,
-    installations::Named,
+    EpicGame, GameAccount, GameIdentity, GogGame, SteamGame, SteamGameArtwork,
+    game_session::Bridged, installations::Named,
 };
 use game_runtime::{epic, gog, steam};
 use obelisk_core::library_cache::{self, AccountLibrary, Entry};
@@ -26,11 +26,14 @@ pub struct LibraryCache {
     inner: library_cache::LibraryCache,
 }
 
-/// A Steam game of the cache, with its platforms once Steam told them.
+/// A Steam game of the cache, with its platforms and library artwork once
+/// Steam told them.
 #[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
 pub struct CachedSteamGame {
     pub game: SteamGame,
     pub platforms: Option<Vec<String>>,
+    #[uniffi(default = None)]
+    pub artwork: Option<SteamGameArtwork>,
 }
 
 /// An Epic game of the cache, with its playtime once Epic told it.
@@ -66,8 +69,9 @@ impl LibraryCache {
         })
     }
 
-    /// The account's last Steam library, empty when it has none.
-    pub fn steam_library(&self, steam_id: u64) -> Vec<CachedSteamGame> {
+    /// The account's last Steam library, empty when it has none, with each
+    /// game's artwork in `language`.
+    pub fn steam_library(&self, steam_id: u64, language: String) -> Vec<CachedSteamGame> {
         // Each field on its own: reading the entry flattened would copy its PICS.
         self.inner.library(STEAM, &steam_id.to_string(), |entry| {
             Some(CachedSteamGame {
@@ -75,6 +79,9 @@ impl LibraryCache {
                 platforms: entry
                     .get("platforms")
                     .and_then(|platforms| Vec::deserialize(platforms).ok()),
+                artwork: entry.get("pics").map(|pics| {
+                    SteamGameArtwork::from(steam_kit::artwork::library_artwork(pics, &language))
+                }),
             })
         })
     }

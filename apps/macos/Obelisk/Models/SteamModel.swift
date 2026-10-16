@@ -297,13 +297,15 @@ final class SteamModel {
 
     /// Shows the account's last library at once, while its session connects.
     private func showCachedLibrary(of account: UInt64) {
-        guard games.isEmpty, let cached = libraryCache?.steamLibrary(steamId: account), !cached.isEmpty else { return }
+        guard games.isEmpty, let cached = libraryCache?.steamLibrary(steamId: account, language: language),
+              !cached.isEmpty else { return }
         cachedAccount = account
         games = cached.map(\.game)
-        libraryPlatforms.show(platforms: Dictionary(
-            cached.compactMap { entry in entry.platforms.map { (entry.game.appId, $0) } },
-            uniquingKeysWith: { first, _ in first }
-        ))
+        func byApp<Value>(_ value: (CachedSteamGame) -> Value?) -> [UInt32: Value] {
+            Dictionary(cached.compactMap { entry in value(entry).map { (entry.game.appId, $0) } },
+                       uniquingKeysWith: { first, _ in first })
+        }
+        libraryPlatforms.show(platforms: byApp(\.platforms), artwork: byApp(\.artwork))
     }
 
     /// Hides a cached library whose session did not restore: another account
@@ -576,7 +578,7 @@ final class SteamModel {
                 selectedGame = updated
             }
             isLoadingGames = false
-            libraryPlatforms.load(appIds: loaded.map(\.appId), session: session)
+            libraryPlatforms.load(appIds: loaded.map(\.appId), language: language, session: session)
         } catch {
             guard current == generation && self.transport == transport else { return }
             isLoadingGames = false

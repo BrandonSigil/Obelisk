@@ -72,17 +72,24 @@ fn a_steam_session_keeps_every_field_steam_returned_and_each_games_platforms() {
     library.platforms(vec![steam_kit::client::GamePlatforms {
         app_id: 620,
         platforms: vec!["macos".into(), "windows".into()],
-        pics: Some(json!({"common": {"review_score": "9"}})),
+        pics: Some(json!({"common": {
+            "review_score": "9",
+            "header_image": {"english": "31bac6/header.jpg", "french": "31bac6/header_french.jpg"},
+        }})),
     }]);
 
     library.games(vec![owned(620, "Portal 2")]);
     assert_eq!(
-        cache.steam_library(7),
+        cache.steam_library(7, "french".into()),
         [CachedSteamGame {
             game: steam_game(620, "Portal 2"),
             platforms: Some(vec!["macos".into(), "windows".into()]),
+            artwork: Some(SteamGameArtwork {
+                header: Some("31bac6/header_french.jpg".into()),
+                ..Default::default()
+            }),
         }],
-        "a reloaded library keeps the platforms loaded before"
+        "a reloaded library keeps the platforms and artwork loaded before"
     );
     let saved = &file(&cache, &directory)["steam"]["7"][0];
     assert_eq!(
@@ -90,7 +97,7 @@ fn a_steam_session_keeps_every_field_steam_returned_and_each_games_platforms() {
         "stored as JSON, not as text"
     );
     assert_eq!(saved["pics"]["common"]["review_score"], "9");
-    assert!(cache.steam_library(8).is_empty());
+    assert!(cache.steam_library(8, "english".into()).is_empty());
 }
 
 #[test]
@@ -168,7 +175,7 @@ fn launches_name_their_game_and_forgetting_an_account_stops_its_session_writing(
     cache.forget(GameAccount::Steam { steam_id: 7 });
     steam.games(vec![owned(620, "Portal 2")]);
     assert!(
-        cache.steam_library(7).is_empty(),
+        cache.steam_library(7, "english".into()).is_empty(),
         "a signed-out session's late answer"
     );
     assert_eq!(
@@ -205,10 +212,11 @@ fn a_cache_written_by_obelisk_before_still_shows() {
     .unwrap();
     let cache = cache(&directory);
     assert_eq!(
-        cache.steam_library(7),
+        cache.steam_library(7, "english".into()),
         [CachedSteamGame {
             game: steam_game(620, "Portal 2"),
             platforms: Some(vec!["macos".into()]),
+            artwork: Some(SteamGameArtwork::default()),
         }]
     );
     let cached = cache.epic_library("epic-a".into());

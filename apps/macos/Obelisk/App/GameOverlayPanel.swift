@@ -75,6 +75,7 @@ final class GameOverlayPanel: NSPanel {
         identifier = NSUserInterfaceItemIdentifier("game-overlay")
         setAccessibilityLabel(L10n.string("ui.overlay.title"))
         contentView = NSHostingView(rootView: GameOverlayView(overlay: overlay)
+            .environment(overlay.steam.libraryPlatforms.artwork)
             .environment(\.locale, L10n.locale)
             .environment(\.colorScheme, .dark)
             .tint(ObeliskStyle.accent))

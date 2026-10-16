@@ -2502,9 +2502,10 @@ public protocol LibraryCacheProtocol: AnyObject, Sendable {
     func recordLaunch(launch: GameLaunch) 
     
     /**
-     * The account's last Steam library, empty when it has none.
+     * The account's last Steam library, empty when it has none, with each
+     * game's artwork in `language`.
      */
-    func steamLibrary(steamId: UInt64)  -> [CachedSteamGame]
+    func steamLibrary(steamId: UInt64, language: String)  -> [CachedSteamGame]
     
 }
 /**
@@ -2652,14 +2653,16 @@ open func recordLaunch(launch: GameLaunch)  {try! rustCall() {
 }
     
     /**
-     * The account's last Steam library, empty when it has none.
+     * The account's last Steam library, empty when it has none, with each
+     * game's artwork in `language`.
      */
-open func steamLibrary(steamId: UInt64) -> [CachedSteamGame]  {
+open func steamLibrary(steamId: UInt64, language: String) -> [CachedSteamGame]  {
     return try!  FfiConverterSequenceTypeCachedSteamGame.lift(try! rustCall() {
         uniffiCallStatus in
     uniffi_obelisk_bridge_fn_method_librarycache_steam_library(
             self.uniffiCloneHandle(),
-        FfiConverterUInt64.lower(steamId),uniffiCallStatus
+        FfiConverterUInt64.lower(steamId),
+        FfiConverterString.lower(language),uniffiCallStatus
     )
 })
 }
@@ -3666,9 +3669,10 @@ public protocol SteamSessionProtocol: AnyObject, Sendable {
     func nextFriends(afterRevision: UInt64) async  -> SteamFriendsSnapshot
     
     /**
-     * Declared application platforms in batches; an empty platform list means unknown.
+     * Declared application platforms in batches; an empty platform list means
+     * unknown. Each game's library artwork comes with them, in `language`.
      */
-    func platforms(appIds: [UInt32]) async throws  -> [SteamGamePlatforms]
+    func platforms(appIds: [UInt32], language: String) async throws  -> [SteamGamePlatforms]
     
     func profile() async throws  -> SteamProfile
     
@@ -3988,14 +3992,15 @@ open func nextFriends(afterRevision: UInt64)async  -> SteamFriendsSnapshot  {
 }
     
     /**
-     * Declared application platforms in batches; an empty platform list means unknown.
+     * Declared application platforms in batches; an empty platform list means
+     * unknown. Each game's library artwork comes with them, in `language`.
      */
-open func platforms(appIds: [UInt32])async throws  -> [SteamGamePlatforms]  {
+open func platforms(appIds: [UInt32], language: String)async throws  -> [SteamGamePlatforms]  {
     return
         try  await uniffiRustCallAsync(
             rustFutureFunc: {
                 uniffi_obelisk_bridge_fn_method_steamsession_platforms(
-                        self.uniffiCloneHandle(),FfiConverterSequenceUInt32.lower(appIds)
+                        self.uniffiCloneHandle(),FfiConverterSequenceUInt32.lower(appIds),FfiConverterString.lower(language)
                 )
             },
             pollFunc: ffi_obelisk_bridge_rust_future_poll_rust_buffer,
@@ -4824,17 +4829,20 @@ public func FfiConverterTypeCachedGogGame_lower(_ value: CachedGogGame) -> RustB
 
 
 /**
- * A Steam game of the cache, with its platforms once Steam told them.
+ * A Steam game of the cache, with its platforms and library artwork once
+ * Steam told them.
  */
 public struct CachedSteamGame: Equatable, Hashable {
     public var game: SteamGame
     public var platforms: [String]?
+    public var artwork: SteamGameArtwork?
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(game: SteamGame, platforms: [String]?) {
+    public init(game: SteamGame, platforms: [String]?, artwork: SteamGameArtwork? = nil) {
         self.game = game
         self.platforms = platforms
+        self.artwork = artwork
     }
 
     
@@ -4854,13 +4862,15 @@ public struct FfiConverterTypeCachedSteamGame: FfiConverterRustBuffer {
         return
             try CachedSteamGame(
                 game: FfiConverterTypeSteamGame.read(from: &buf), 
-                platforms: FfiConverterOptionSequenceString.read(from: &buf)
+                platforms: FfiConverterOptionSequenceString.read(from: &buf), 
+                artwork: FfiConverterOptionTypeSteamGameArtwork.read(from: &buf)
         )
     }
 
     public static func write(_ value: CachedSteamGame, into buf: inout [UInt8]) {
         FfiConverterTypeSteamGame.write(value.game, into: &buf)
         FfiConverterOptionSequenceString.write(value.platforms, into: &buf)
+        FfiConverterOptionTypeSteamGameArtwork.write(value.artwork, into: &buf)
     }
 }
 
@@ -8868,6 +8878,89 @@ public func FfiConverterTypeSteamGame_lower(_ value: SteamGame) -> RustBuffer {
 }
 
 
+/**
+ * A game's library artwork, each image's path under the game's store assets.
+ */
+public struct SteamGameArtwork: Equatable, Hashable {
+    /**
+     * The portrait capsule, 300 × 450.
+     */
+    public var cover: String?
+    /**
+     * The wide hero, 1920 × 620.
+     */
+    public var hero: String?
+    public var logo: String?
+    /**
+     * The library header, or the store's when the game has no library one.
+     */
+    public var header: String?
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(
+        /**
+         * The portrait capsule, 300 × 450.
+         */cover: String?, 
+        /**
+         * The wide hero, 1920 × 620.
+         */hero: String?, logo: String?, 
+        /**
+         * The library header, or the store's when the game has no library one.
+         */header: String?) {
+        self.cover = cover
+        self.hero = hero
+        self.logo = logo
+        self.header = header
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension SteamGameArtwork: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeSteamGameArtwork: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SteamGameArtwork {
+        return
+            try SteamGameArtwork(
+                cover: FfiConverterOptionString.read(from: &buf), 
+                hero: FfiConverterOptionString.read(from: &buf), 
+                logo: FfiConverterOptionString.read(from: &buf), 
+                header: FfiConverterOptionString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: SteamGameArtwork, into buf: inout [UInt8]) {
+        FfiConverterOptionString.write(value.cover, into: &buf)
+        FfiConverterOptionString.write(value.hero, into: &buf)
+        FfiConverterOptionString.write(value.logo, into: &buf)
+        FfiConverterOptionString.write(value.header, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSteamGameArtwork_lift(_ buf: RustBuffer) throws -> SteamGameArtwork {
+    return try FfiConverterTypeSteamGameArtwork.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSteamGameArtwork_lower(_ value: SteamGameArtwork) -> RustBuffer {
+    return FfiConverterTypeSteamGameArtwork.lower(value)
+}
+
+
 public struct SteamGameDetails: Equatable, Hashable {
     public var appId: UInt32
     public var name: String
@@ -8941,12 +9034,20 @@ public func FfiConverterTypeSteamGameDetails_lower(_ value: SteamGameDetails) ->
 public struct SteamGamePlatforms: Equatable, Hashable {
     public var appId: UInt32
     public var platforms: [String]
+    /**
+     * Nil when PICS did not return the game.
+     */
+    public var artwork: SteamGameArtwork?
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(appId: UInt32, platforms: [String]) {
+    public init(appId: UInt32, platforms: [String], 
+        /**
+         * Nil when PICS did not return the game.
+         */artwork: SteamGameArtwork? = nil) {
         self.appId = appId
         self.platforms = platforms
+        self.artwork = artwork
     }
 
     
@@ -8966,13 +9067,15 @@ public struct FfiConverterTypeSteamGamePlatforms: FfiConverterRustBuffer {
         return
             try SteamGamePlatforms(
                 appId: FfiConverterUInt32.read(from: &buf), 
-                platforms: FfiConverterSequenceString.read(from: &buf)
+                platforms: FfiConverterSequenceString.read(from: &buf), 
+                artwork: FfiConverterOptionTypeSteamGameArtwork.read(from: &buf)
         )
     }
 
     public static func write(_ value: SteamGamePlatforms, into buf: inout [UInt8]) {
         FfiConverterUInt32.write(value.appId, into: &buf)
         FfiConverterSequenceString.write(value.platforms, into: &buf)
+        FfiConverterOptionTypeSteamGameArtwork.write(value.artwork, into: &buf)
     }
 }
 
@@ -13567,6 +13670,30 @@ fileprivate struct FfiConverterOptionTypeSteamFriendGame: FfiConverterRustBuffer
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterOptionTypeSteamGameArtwork: FfiConverterRustBuffer {
+    typealias SwiftType = SteamGameArtwork?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypeSteamGameArtwork.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypeSteamGameArtwork.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterOptionTypeSteamInviteRequest: FfiConverterRustBuffer {
     typealias SwiftType = SteamInviteRequest?
 
@@ -15052,7 +15179,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_obelisk_bridge_checksum_method_librarycache_record_launch() != 30827) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_obelisk_bridge_checksum_method_librarycache_steam_library() != 34747) {
+    if (uniffi_obelisk_bridge_checksum_method_librarycache_steam_library() != 3483) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_obelisk_bridge_checksum_method_steamlogin_challenge() != 44547) {
@@ -15094,7 +15221,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_obelisk_bridge_checksum_method_steamsession_next_friends() != 45830) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_obelisk_bridge_checksum_method_steamsession_platforms() != 12501) {
+    if (uniffi_obelisk_bridge_checksum_method_steamsession_platforms() != 20783) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_obelisk_bridge_checksum_method_steamsession_profile() != 34757) {

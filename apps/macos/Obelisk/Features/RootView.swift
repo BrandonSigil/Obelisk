@@ -51,6 +51,7 @@ struct RootView: View {
         }
         .environment(\.reportBug) { model.reportBug($0) }
         .environment(model.estimates)
+        .environment(model.steam.libraryPlatforms.artwork)
         // A store belongs to the library it opened from.
         .onChange(of: model.selection) { model.presentedStore = nil }
         .onChange(of: model.steam.isFriendsPresented, initial: true) { _, presented in

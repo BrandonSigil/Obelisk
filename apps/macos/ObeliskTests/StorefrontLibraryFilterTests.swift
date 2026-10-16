@@ -209,7 +209,7 @@ private final class FilterSteamSession: SteamSessionProtocol, Sendable {
     }
 
     func games() async throws -> [SteamGame] { library }
-    func platforms(appIds: [UInt32]) async throws -> [SteamGamePlatforms] { try await loadPlatforms(appIds) }
+    func platforms(appIds: [UInt32], language: String) async throws -> [SteamGamePlatforms] { try await loadPlatforms(appIds) }
     func profile() async throws -> SteamProfile { SteamProfile(displayName: nil, avatarUrl: nil) }
     func details(appId: UInt32, language: String) async throws -> SteamGameDetails { throw FilterFixtureFailure.unexpectedOperation }
 }

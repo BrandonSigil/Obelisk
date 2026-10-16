@@ -41,8 +41,8 @@ struct SteamView: View {
         SteamArtwork(appId: game.appId, portrait: false, iconHash: game.iconHash)
     }
 
-    static func heroLogo(_ game: SteamGame) -> LibraryHeroLogo {
-        LibraryHeroLogo(url: SteamArtwork.logoURL(appId: game.appId), title: game.name)
+    static func heroLogo(_ game: SteamGame) -> SteamHeroLogo {
+        SteamHeroLogo(appId: game.appId, title: game.name)
     }
 
     static func cover(_ game: SteamGame) -> SteamArtwork {

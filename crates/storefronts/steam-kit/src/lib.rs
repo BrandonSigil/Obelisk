@@ -1,6 +1,7 @@
 //! Obelisk's independent Steam protocol client: authentication, licenses and
 //! verified SteamPipe downloads. No .NET runtime or SteamCMD process is used.
 
+pub mod artwork;
 pub mod auth;
 pub mod chat;
 pub mod client;

@@ -441,7 +441,7 @@ final class SteamPresentationTests: XCTestCase {
         XCTAssertEqual(model.libraryPlatforms.platforms[620], ["windows"])
 
         model.signOut()
-        XCTAssertTrue(cache.steamLibrary(steamId: 42).isEmpty, "Signing out forgets the account's library")
+        XCTAssertTrue(cache.steamLibrary(steamId: 42, language: "english").isEmpty, "Signing out forgets the account's library")
     }
 
     @MainActor
@@ -458,7 +458,7 @@ final class SteamPresentationTests: XCTestCase {
 
         XCTAssertFalse(model.showsLibrary)
         XCTAssertTrue(model.games.isEmpty, "Another account may sign in next")
-        XCTAssertFalse(cache.steamLibrary(steamId: 42).isEmpty, "The account may restore later")
+        XCTAssertFalse(cache.steamLibrary(steamId: 42, language: "english").isEmpty, "The account may restore later")
     }
 
     @MainActor
@@ -1250,7 +1250,7 @@ private final class FixtureSteamSession: SteamSessionProtocol, Sendable {
     }
 
     func games() async throws -> [SteamGame] { library }
-    func platforms(appIds: [UInt32]) async throws -> [SteamGamePlatforms] {
+    func platforms(appIds: [UInt32], language: String) async throws -> [SteamGamePlatforms] {
         try await platformsHandler(appIds)
     }
     func profile() async throws -> SteamProfile { SteamProfile(displayName: nil, avatarUrl: nil) }

@@ -1,24 +1,30 @@
 import SwiftUI
 
+/// A game's library artwork, in the order Steam's library tries it: the image
+/// its PICS app info names, which newer games publish only under a hashed
+/// folder, then the one at Steam's plain name, as while PICS has not told of
+/// the game. A game without a cover has the portrait Steam generates for it.
 struct SteamArtwork: View {
     let appId: UInt32
     var portrait = true
     var iconHash = ""
+    @Environment(SteamLibraryArtwork.self) private var library: SteamLibraryArtwork?
 
-    private static func assets(_ appId: UInt32) -> String {
-        "https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/\(appId)"
+    /// The image at `path` under the game's store assets.
+    static func url(appId: UInt32, path: String) -> URL? {
+        URL(string: "https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/\(appId)/\(path)")
     }
 
-    /// The game's library logo, which some games do not publish.
-    static func logoURL(appId: UInt32) -> URL? {
-        URL(string: "\(assets(appId))/logo.png")
-    }
-
-    /// Some games only publish the standard library hero or the store header.
+    /// The header last, which games without library artwork still have.
     private var urls: [URL] {
-        let names = portrait ? ["library_600x900.jpg", "header.jpg"]
-            : ["library_hero_2x.jpg", "library_hero.jpg", "header.jpg"]
-        return names.compactMap { URL(string: "\(Self.assets(appId))/\($0)") }
+        let artwork = library?.games[appId]
+        let paths: [String?] = portrait
+            ? [artwork?.cover, "library_600x900.jpg", "portrait.png?v=2", artwork?.header, "header.jpg"]
+            : [artwork?.hero, "library_hero.jpg", artwork?.header, "header.jpg"]
+        // A game such as ELDEN RING names its images at the plain names.
+        var seen: Set<String> = []
+        return paths.compactMap { $0 }.filter { seen.insert($0).inserted }
+            .compactMap { Self.url(appId: appId, path: $0) }
     }
 
     var body: some View {
@@ -44,5 +50,18 @@ struct SteamArtwork: View {
         } else {
             ArtworkPlaceholder()
         }
+    }
+}
+
+/// The game's library logo over its hero, or its name where the game
+/// publishes none.
+struct SteamHeroLogo: View {
+    let appId: UInt32
+    let title: String
+    @Environment(SteamLibraryArtwork.self) private var library: SteamLibraryArtwork?
+
+    var body: some View {
+        let path = library?.games[appId]?.logo ?? "logo.png"
+        LibraryHeroLogo(url: SteamArtwork.url(appId: appId, path: path), title: title)
     }
 }

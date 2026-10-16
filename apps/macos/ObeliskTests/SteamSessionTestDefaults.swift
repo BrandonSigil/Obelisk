@@ -7,7 +7,7 @@ extension SteamSessionProtocol {
     func achievements(appId: UInt32, language: String) async throws -> [SteamAchievement] {
         throw CocoaError(.featureUnsupported)
     }
-    func platforms(appIds: [UInt32]) async throws -> [SteamGamePlatforms] { [] }
+    func platforms(appIds: [UInt32], language: String) async throws -> [SteamGamePlatforms] { [] }
     func webCookies() async throws -> [SteamWebCookie] { [] }
     #if DEBUG
     func cloudAutocloudMetadata() async throws -> String {

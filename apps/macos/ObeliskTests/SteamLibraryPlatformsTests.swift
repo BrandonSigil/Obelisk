@@ -7,7 +7,7 @@ final class SteamLibraryPlatformsTests: XCTestCase {
     func testLoadsLibraryInSequentialBatchesAndPublishesIncrementally() async throws {
         let cache = SteamLibraryPlatforms()
         let session = PlatformMetadataSession()
-        cache.load(appIds: Array(1...121), session: session)
+        cache.load(appIds: Array(1...121), language: "english", session: session)
         XCTAssertTrue(cache.isLoading)
 
         try await waitForRequests(1, on: session)
@@ -41,7 +41,7 @@ final class SteamLibraryPlatformsTests: XCTestCase {
     func testDeduplicatesIDsAndKeepsSuccessfulUnknownResults() async throws {
         let cache = SteamLibraryPlatforms()
         let session = PlatformMetadataSession()
-        cache.load(appIds: [42, 42, 7, 42, 7], session: session)
+        cache.load(appIds: [42, 42, 7, 42, 7], language: "english", session: session)
         try await waitForRequests(1, on: session)
         await session.complete(0, with: .success([
             SteamGamePlatforms(appId: 42, platforms: []),
@@ -54,7 +54,7 @@ final class SteamLibraryPlatformsTests: XCTestCase {
         XCTAssertEqual(cache.platforms, [42: [], 7: ["macos"]])
         XCTAssertFalse(cache.hasFailures)
 
-        cache.load(appIds: [], session: session)
+        cache.load(appIds: [], language: "english", session: session)
         XCTAssertTrue(cache.platforms.isEmpty)
         XCTAssertFalse(cache.isLoading)
         XCTAssertFalse(cache.hasFailures)
@@ -63,10 +63,35 @@ final class SteamLibraryPlatformsTests: XCTestCase {
     }
 
     @MainActor
+    func testLoadsEachGamesArtworkInTheLanguageWithItsPlatforms() async throws {
+        let cache = SteamLibraryPlatforms()
+        let session = PlatformMetadataSession()
+        let peak = SteamGameArtwork(cover: "480bd8/library_600x900.jpg", hero: "d75184/library_hero_2x.jpg",
+                                    logo: nil, header: "31bac6/header.jpg")
+        cache.load(appIds: [3_527_290, 7], language: "french", session: session)
+        try await waitForRequests(1, on: session)
+        await session.complete(0, with: .success([
+            SteamGamePlatforms(appId: 3_527_290, platforms: ["windows"], artwork: peak),
+            SteamGamePlatforms(appId: 7, platforms: [])
+        ]))
+        try await eventually { !cache.isLoading }
+
+        let languages = await session.languages
+        XCTAssertEqual(languages, ["french"])
+        XCTAssertEqual(cache.artwork.games, [3_527_290: peak], "A game PICS did not return keeps Steam's plain names")
+
+        cache.load(appIds: [], language: "french", session: session)
+        XCTAssertTrue(cache.artwork.games.isEmpty, "A game that left the library takes its artwork along")
+        cache.show(platforms: [:], artwork: [3_527_290: peak])
+        cache.reset()
+        XCTAssertTrue(cache.artwork.games.isEmpty, "Another account's library replaces the artwork")
+    }
+
+    @MainActor
     func testFailedBatchPreservesSuccessfulBatchesAndContinuesLoading() async throws {
         let cache = SteamLibraryPlatforms()
         let session = PlatformMetadataSession()
-        cache.load(appIds: Array(1...121), session: session)
+        cache.load(appIds: Array(1...121), language: "english", session: session)
         try await waitForRequests(1, on: session)
         await session.complete(0, platforms: [])
         try await waitForRequests(2, on: session)
@@ -93,11 +118,11 @@ final class SteamLibraryPlatformsTests: XCTestCase {
     func testNewLoadRejectsOldAccountReplyAndPreservesReplacementLoad() async throws {
         let cache = SteamLibraryPlatforms()
         let oldSession = PlatformMetadataSession()
-        cache.load(appIds: Array(1...101), session: oldSession)
+        cache.load(appIds: Array(1...101), language: "english", session: oldSession)
         try await waitForRequests(1, on: oldSession)
 
         let newSession = PlatformMetadataSession()
-        cache.load(appIds: Array(1...51), session: newSession)
+        cache.load(appIds: Array(1...51), language: "english", session: newSession)
         try await waitForRequests(1, on: newSession)
         await oldSession.complete(0, platforms: ["windows"])
         try await eventually { await oldSession.returnedRequests == [0] }
@@ -123,7 +148,7 @@ final class SteamLibraryPlatformsTests: XCTestCase {
     func testResetCancelsCurrentBatchAndStopsTheQueue() async throws {
         let cache = SteamLibraryPlatforms()
         let session = PlatformMetadataSession()
-        cache.load(appIds: Array(1...101), session: session)
+        cache.load(appIds: Array(1...101), language: "english", session: session)
         try await waitForRequests(1, on: session)
         cache.reset()
         XCTAssertFalse(cache.isLoading)
@@ -145,7 +170,7 @@ final class SteamLibraryPlatformsTests: XCTestCase {
         var cache: SteamLibraryPlatforms? = SteamLibraryPlatforms()
         weak var releasedCache = cache
         let session = PlatformMetadataSession()
-        cache?.load(appIds: Array(1...101), session: session)
+        cache?.load(appIds: Array(1...101), language: "english", session: session)
         try await waitForRequests(1, on: session)
         cache = nil
         XCTAssertNil(releasedCache)
@@ -182,13 +207,15 @@ private enum PlatformMetadataFailure: Error {
 /// Deliberately ignores cancellation while suspended, like a UniFFI response.
 private actor PlatformMetadataSession: SteamSessionProtocol {
     private(set) var requests: [[UInt32]] = []
+    private(set) var languages: [String] = []
     private(set) var returnedRequests: [Int] = []
     private(set) var cancelledRequests: [Int] = []
     private var pending: [Int: CheckedContinuation<[SteamGamePlatforms], any Error>] = [:]
 
-    func platforms(appIds: [UInt32]) async throws -> [SteamGamePlatforms] {
+    func platforms(appIds: [UInt32], language: String) async throws -> [SteamGamePlatforms] {
         let request = requests.count
         requests.append(appIds)
+        languages.append(language)
         defer {
             returnedRequests.append(request)
             if Task.isCancelled { cancelledRequests.append(request) }

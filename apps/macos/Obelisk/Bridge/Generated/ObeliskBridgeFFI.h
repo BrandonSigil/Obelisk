@@ -747,7 +747,7 @@ void uniffi_obelisk_bridge_fn_method_librarycache_record_launch(uint64_t ptr, Ru
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_OBELISK_BRIDGE_FN_METHOD_LIBRARYCACHE_STEAM_LIBRARY
 #define UNIFFI_FFIDEF_UNIFFI_OBELISK_BRIDGE_FN_METHOD_LIBRARYCACHE_STEAM_LIBRARY
-RustBuffer uniffi_obelisk_bridge_fn_method_librarycache_steam_library(uint64_t ptr, uint64_t steam_id, RustCallStatus *_Nonnull out_status
+RustBuffer uniffi_obelisk_bridge_fn_method_librarycache_steam_library(uint64_t ptr, uint64_t steam_id, RustBuffer language, RustCallStatus *_Nonnull out_status
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_OBELISK_BRIDGE_FN_CLONE_STEAMLOGIN
@@ -853,7 +853,7 @@ uint64_t uniffi_obelisk_bridge_fn_method_steamsession_next_friends(uint64_t ptr,
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_OBELISK_BRIDGE_FN_METHOD_STEAMSESSION_PLATFORMS
 #define UNIFFI_FFIDEF_UNIFFI_OBELISK_BRIDGE_FN_METHOD_STEAMSESSION_PLATFORMS
-uint64_t uniffi_obelisk_bridge_fn_method_steamsession_platforms(uint64_t ptr, RustBuffer app_ids
+uint64_t uniffi_obelisk_bridge_fn_method_steamsession_platforms(uint64_t ptr, RustBuffer app_ids, RustBuffer language
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_OBELISK_BRIDGE_FN_METHOD_STEAMSESSION_PROFILE

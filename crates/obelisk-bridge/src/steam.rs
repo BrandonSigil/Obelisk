@@ -3,7 +3,7 @@
 use crate::{LibraryCache, library_cache::SteamLibrary};
 use game_runtime::{protocol::Credentials, steam::account_session::AccountSession};
 use std::{path::Path, sync::Arc};
-use steam_kit::{auth, client};
+use steam_kit::{artwork, auth, client};
 use tokio::sync::Mutex;
 
 #[uniffi::export]
@@ -224,6 +224,37 @@ impl From<client::OwnedGame> for SteamGame {
 pub struct SteamGamePlatforms {
     pub app_id: u32,
     pub platforms: Vec<String>,
+    /// Nil when PICS did not return the game.
+    #[uniffi(default = None)]
+    pub artwork: Option<SteamGameArtwork>,
+}
+/// A game's library artwork, each image's path under the game's store assets.
+#[derive(Clone, Debug, Default, PartialEq, Eq, uniffi::Record)]
+pub struct SteamGameArtwork {
+    /// The portrait capsule, 300 × 450.
+    pub cover: Option<String>,
+    /// The wide hero, 1920 × 620.
+    pub hero: Option<String>,
+    pub logo: Option<String>,
+    /// The library header, or the store's when the game has no library one.
+    pub header: Option<String>,
+}
+impl From<artwork::LibraryArtwork> for SteamGameArtwork {
+    fn from(
+        artwork::LibraryArtwork {
+            cover,
+            hero,
+            logo,
+            header,
+        }: artwork::LibraryArtwork,
+    ) -> Self {
+        Self {
+            cover,
+            hero,
+            logo,
+            header,
+        }
+    }
 }
 #[derive(Clone, Debug, uniffi::Record)]
 pub struct SteamGameDetails {
@@ -354,10 +385,12 @@ impl SteamSession {
             reason: "Invalid Cloud preference report".into(),
         })
     }
-    /// Declared application platforms in batches; an empty platform list means unknown.
+    /// Declared application platforms in batches; an empty platform list means
+    /// unknown. Each game's library artwork comes with them, in `language`.
     pub async fn platforms(
         &self,
         app_ids: Vec<u32>,
+        language: String,
     ) -> Result<Vec<SteamGamePlatforms>, SteamError> {
         let games = self.client().platforms(&app_ids).await?;
         let platforms = games
@@ -365,6 +398,10 @@ impl SteamSession {
             .map(|game| SteamGamePlatforms {
                 app_id: game.app_id,
                 platforms: game.platforms.clone(),
+                artwork: game
+                    .pics
+                    .as_ref()
+                    .map(|pics| artwork::library_artwork(pics, &language).into()),
             })
             .collect();
         if let Some(library) = &self.library {
