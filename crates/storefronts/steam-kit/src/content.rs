@@ -211,8 +211,7 @@ impl ContentClient {
             .iter()
             .filter(|file| {
                 !file.is_directory()
-                    && file.flags & 512 == 0
-                    && file.link_target.is_empty()
+                    && !file.is_link()
                     && file.size > 0
                     && file.size <= 8 * 1024 * 1024
             })
@@ -311,12 +310,18 @@ impl ContentClient {
         if manifest.depot_id != plan.depot_id || manifest.manifest_id != plan.manifest_id {
             return Err(invalid("backend.steam.content.manifestDepotMismatch"));
         }
-        let total_bytes = manifest.files.iter().map(|file| file.size).sum();
+        // A link holds no content, whatever size its entry gives.
+        let total_bytes = manifest
+            .files
+            .iter()
+            .filter(|file| !file.is_link())
+            .map(|file| file.size)
+            .sum();
         let total_files = u32::try_from(
             manifest
                 .files
                 .iter()
-                .filter(|file| !file.is_directory())
+                .filter(|file| !file.is_directory() && !file.is_link())
                 .count(),
         )
         .map_err(|_| invalid("backend.steam.content.tooManyFiles"))?;
@@ -329,7 +334,11 @@ impl ContentClient {
         let install_scripts = manifest
             .files
             .iter()
-            .filter(|file| !file.is_directory() && file.flags & crate::install_script::FLAG != 0)
+            .filter(|file| {
+                !file.is_directory()
+                    && !file.is_link()
+                    && file.flags & crate::install_script::FLAG != 0
+            })
             .map(|file| file.name.clone())
             .collect();
 
@@ -597,6 +606,9 @@ impl DiskInstall {
                     break;
                 };
                 self.cancel.check()?;
+                if file.is_link() {
+                    continue;
+                }
                 let relative = safe_relative_path(&file.name)?;
                 if file.is_directory() {
                     ensure_directory(&root, &relative)?;
@@ -610,7 +622,7 @@ impl DiskInstall {
                 }
                 let target = checked_file_path(&root, &relative)?;
                 if verified.valid[index] {
-                    apply_permissions(&target, is_executable(file))?;
+                    apply_permissions(&target, is_executable(file, &target)?)?;
                     continue;
                 }
                 let prepared = self.prepare(&partial_root, index, file, relative, target)?;
@@ -639,6 +651,16 @@ impl DiskInstall {
             {
                 reused_bytes += self.publish(file, &root, &mut pending_directory)?;
             }
+        }
+        // Links come once every file is in place. Validation kept every file
+        // and folder from sitting behind one.
+        for file in manifest.files.iter().filter(|file| file.is_link()) {
+            self.cancel.check()?;
+            install::place_link(
+                &root,
+                &safe_relative_path(&file.name)?,
+                Path::new(&file.link_target),
+            )?;
         }
         if let Some(directory) = pending_directory {
             File::open(directory)?.sync_all()?;
@@ -758,7 +780,7 @@ impl DiskInstall {
         if hashed != present.len() || hasher.finalize()[..] != file.sha {
             return Err(invalid("backend.steam.content.assembledHashMismatch"));
         }
-        apply_permissions(&partial_path, is_executable(file))?;
+        apply_permissions(&partial_path, is_executable(file, &partial_path)?)?;
         // Re-check parents before publishing; never follow existing symlinks under root.
         checked_file_path(root, &relative)?;
         let directory = target.parent().unwrap_or(root).to_path_buf();
@@ -777,8 +799,11 @@ fn invalid(reason: &str) -> ContentError {
     ContentError::InvalidData(reason.into())
 }
 
-fn is_executable(file: &ManifestFile) -> bool {
-    file.flags & 32 != 0
+/// Some depots flag only the launch executable: OpenFront's Electron helpers
+/// come unflagged. Programs are then recognised by their header, a Mach-O
+/// binary or a script.
+fn is_executable(file: &ManifestFile, path: &Path) -> std::io::Result<bool> {
+    Ok(file.flags & 32 != 0 || install::starts_as_program(path)?)
 }
 
 fn validate_manifest_files(files: &[ManifestFile]) -> Result<(), ContentError> {
@@ -789,8 +814,11 @@ fn validate_manifest_files(files: &[ManifestFile]) -> Result<(), ContentError> {
         if !paths.insert(path.to_string_lossy().to_lowercase()) {
             return Err(invalid("backend.steam.content.conflictingPaths"));
         }
-        if file.flags & 512 != 0 || !file.link_target.is_empty() {
-            return Err(ContentError::UnsupportedSymlink(file.name.clone()));
+        if file.is_link() {
+            if !link_stays_inside(&path, &file.link_target) {
+                return Err(ContentError::UnsupportedSymlink(file.name.clone()));
+            }
+            continue;
         }
         if file.is_directory() {
             if file.size != 0 || !file.chunks.is_empty() {
@@ -822,6 +850,7 @@ fn validate_manifest_files(files: &[ManifestFile]) -> Result<(), ContentError> {
             return Err(invalid("backend.steam.content.missingChunks"));
         }
     }
+    // Nothing sits inside a file, or behind a link.
     let files_only: HashSet<_> = files
         .iter()
         .filter(|file| !file.is_directory())
@@ -840,6 +869,39 @@ fn validate_manifest_files(files: &[ManifestFile]) -> Result<(), ContentError> {
         }
     }
     Ok(())
+}
+
+/// Whether the link at `path` leads inside the installation. Steam keeps a
+/// target as the link holds it, from the link's own folder. Only a target
+/// that climbs first, then descends, is followed: past a step that may be
+/// another link, `..` could leave the installation.
+fn link_stays_inside(path: &Path, target: &str) -> bool {
+    if target.is_empty() || target.starts_with('/') {
+        return false;
+    }
+    let mut destination: Vec<_> = path
+        .parent()
+        .into_iter()
+        .flat_map(Path::iter)
+        .filter_map(|part| part.to_str())
+        .collect();
+    let mut descending = false;
+    for part in target.split('/') {
+        match part {
+            "" | "." => {}
+            ".." if !descending => {
+                if destination.pop().is_none() {
+                    return false;
+                }
+            }
+            ".." => return false,
+            part => {
+                descending = true;
+                destination.push(part);
+            }
+        }
+    }
+    destination.is_empty() || safe_relative_path(&destination.join("/")).is_ok()
 }
 
 #[cfg(test)]

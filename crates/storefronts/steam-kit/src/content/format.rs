@@ -40,8 +40,14 @@ pub(super) struct ManifestFile {
 }
 
 impl ManifestFile {
+    /// A link to a folder may carry the folder flag too: it stays a link.
     pub fn is_directory(&self) -> bool {
-        self.flags & 64 != 0
+        self.flags & 64 != 0 && !self.is_link()
+    }
+
+    /// A symbolic link, such as a macOS framework's `Versions/Current`.
+    pub fn is_link(&self) -> bool {
+        self.flags & 512 != 0 || !self.link_target.is_empty()
     }
 }
 

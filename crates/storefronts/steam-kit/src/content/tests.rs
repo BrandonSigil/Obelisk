@@ -258,6 +258,198 @@ fn rejects_paths_symlinks_conflicts_and_chunk_gaps_before_installing() {
     assert!(validate_manifest_files(&[gap]).is_err());
 }
 
+fn link(name: &str, target: &str) -> ManifestFile {
+    ManifestFile {
+        name: name.into(),
+        flags: 512,
+        link_target: target.into(),
+        ..Default::default()
+    }
+}
+
+fn folder(name: &str) -> ManifestFile {
+    ManifestFile {
+        name: name.into(),
+        flags: 64,
+        ..Default::default()
+    }
+}
+
+#[test]
+fn links_that_stay_inside_the_installation_are_accepted() {
+    for (name, target) in [
+        (
+            "Game.app/Contents/Frameworks/Squirrel.framework/Versions/Current",
+            "A",
+        ),
+        (
+            "Game.app/Contents/Frameworks/Squirrel.framework/Squirrel",
+            "Versions/Current/Squirrel",
+        ),
+        ("lib/libgame.so", "./libgame.so.1"),
+        ("bin/data", "../shared/data/"),
+        ("bin/root", ".."),
+    ] {
+        assert!(
+            validate_manifest_files(&[link(name, target)]).is_ok(),
+            "{name} -> {target}"
+        );
+    }
+    // A link to a folder may carry the folder flag; it stays a link.
+    let mut current = link("Versions/Current", "A");
+    current.flags |= 64;
+    assert!(current.is_link() && !current.is_directory());
+    assert!(validate_manifest_files(&[current]).is_ok());
+}
+
+#[test]
+fn links_that_leave_the_installation_or_hide_files_are_refused() {
+    for (name, target) in [
+        ("link", ""),
+        ("link", "/Library/Frameworks/Squirrel.framework"),
+        ("link", ".."),
+        ("bin/link", "../.."),
+        ("bin/link", "a/../../.."),
+        ("bin/link", "current/../.."),
+        ("link", ".obelisk-content/manifests"),
+        ("bin/link", "../.obelisk-install.lock"),
+    ] {
+        assert!(
+            matches!(
+                validate_manifest_files(&[link(name, target)]),
+                Err(ContentError::UnsupportedSymlink(_))
+            ),
+            "{name} -> {target}"
+        );
+    }
+    for behind in [
+        file("Versions/Current/Squirrel", &[b"x"]),
+        folder("Versions/Current/Resources"),
+    ] {
+        assert!(validate_manifest_files(&[link("Versions/Current", "A"), behind]).is_err());
+    }
+    assert!(validate_manifest_files(&[link("Squirrel", "A"), file("squirrel", &[b"x"])]).is_err());
+}
+
+#[tokio::test]
+async fn a_framework_installs_its_links_and_keeps_them_on_the_next_run() {
+    let directory = tempfile::tempdir().unwrap();
+    let pieces: &[&[u8]] = &[b"framework binary"];
+    let framework = "Game.app/Contents/Frameworks/Squirrel.framework";
+    let files = vec![
+        folder(framework),
+        folder(&format!("{framework}/Versions")),
+        folder(&format!("{framework}/Versions/A")),
+        file(&format!("{framework}/Versions/A/Squirrel"), pieces),
+        link(&format!("{framework}/Versions/Current"), "A"),
+        link(
+            &format!("{framework}/Squirrel"),
+            "Versions/Current/Squirrel",
+        ),
+    ];
+    let mut routes = HashMap::from([(
+        "/depot/42/manifest/99/5/123".to_string(),
+        zip(&manifest(files, false)),
+    )]);
+    routes.insert(
+        format!("/depot/42/chunk/{}", hex(&Sha1::digest(pieces[0]))),
+        encrypt(&zip(pieces[0])),
+    );
+    let fixture = CdnFixture::new(routes);
+    let client = fixture.client();
+    let root = directory.path().join(framework);
+    for run in 0..2 {
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let summary = client
+            .download_depot(&plan(directory.path()), &CancelToken::new(), {
+                let events = Arc::clone(&events);
+                move |event| events.lock().unwrap().push(event)
+            })
+            .await
+            .unwrap()
+            .summary;
+        assert_eq!(
+            fs::read_link(root.join("Versions/Current")).unwrap(),
+            Path::new("A")
+        );
+        assert_eq!(
+            fs::read_link(root.join("Squirrel")).unwrap(),
+            Path::new("Versions/Current/Squirrel")
+        );
+        assert_eq!(fs::read(root.join("Squirrel")).unwrap(), pieces[0]);
+        assert_eq!(summary.completed_files, 1, "run {run}");
+        let last = events.lock().unwrap().last().unwrap().clone();
+        assert_eq!(last.completed_bytes, last.total_bytes, "run {run}");
+        assert_eq!(last.completed_files, last.total_files, "run {run}");
+    }
+    let chunks = fixture
+        .requests
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|path| path.contains("/chunk/"))
+        .count();
+    assert_eq!(chunks, 1, "the second run reuses the verified framework");
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_link_replaces_what_an_earlier_build_left_at_its_place() {
+    let directory = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    fs::create_dir_all(directory.path().join("Versions/Current")).unwrap();
+    fs::write(directory.path().join("Versions/Current/old"), b"old").unwrap();
+    std::os::unix::fs::symlink(outside.path(), directory.path().join("Squirrel")).unwrap();
+    let files = vec![
+        link("Versions/Current", "A"),
+        link("Squirrel", "Versions/Current/Squirrel"),
+    ];
+    let fixture = CdnFixture::new(HashMap::from([(
+        "/depot/42/manifest/99/5/123".to_string(),
+        zip(&manifest(files, false)),
+    )]));
+    fixture
+        .client()
+        .download_depot(&plan(directory.path()), &CancelToken::new(), |_| {})
+        .await
+        .unwrap();
+    assert_eq!(
+        fs::read_link(directory.path().join("Versions/Current")).unwrap(),
+        Path::new("A")
+    );
+    assert_eq!(
+        fs::read_link(directory.path().join("Squirrel")).unwrap(),
+        Path::new("Versions/Current/Squirrel")
+    );
+    assert!(outside.path().exists());
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn an_unflagged_program_is_installed_executable() {
+    use std::os::unix::fs::PermissionsExt;
+    for (name, contents, mode) in [
+        (
+            "Helpers/chrome_crashpad_handler",
+            &[0xcf, 0xfa, 0xed, 0xfe, 7, 0, 0, 1][..],
+            0o755,
+        ),
+        ("Resources/app.asar", b"{\"files\": {}}", 0o644),
+    ] {
+        let directory = tempfile::tempdir().unwrap();
+        let fixture = CdnFixture::new(routes(file(name, &[contents]), &[contents]));
+        for _ in 0..2 {
+            fixture
+                .client()
+                .download_depot(&plan(directory.path()), &CancelToken::new(), |_| {})
+                .await
+                .unwrap();
+            let installed = fs::metadata(directory.path().join(name)).unwrap();
+            assert_eq!(installed.permissions().mode() & 0o777, mode, "{name}");
+        }
+    }
+}
+
 #[test]
 fn zip_limits_and_checksum_are_enforced() {
     let mut data = zip(b"verified content");

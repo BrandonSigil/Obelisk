@@ -628,22 +628,7 @@ fn copy_chunk(
 fn place_link(root: &Path, path: &str, target: &str) -> Result<(), GogError> {
     let relative = safe_relative_path(path)?;
     safe_relative_path(target)?;
-    let target = relative_target(path, target);
-    let parent = ensure_directory(root, relative.parent().unwrap_or(Path::new("")))?;
-    let location = parent.join(relative.file_name().ok_or(GogError::Protocol)?);
-    match fs::symlink_metadata(&location) {
-        Ok(metadata) if metadata.file_type().is_symlink() => {
-            if fs::read_link(&location)? == Path::new(&target) {
-                return Ok(());
-            }
-            fs::remove_file(&location)?;
-        }
-        Ok(metadata) if metadata.is_dir() => fs::remove_dir_all(&location)?,
-        Ok(_) => fs::remove_file(&location)?,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-        Err(error) => return Err(error.into()),
-    }
-    std::os::unix::fs::symlink(&target, &location)?;
+    install::place_link(root, &relative, Path::new(&relative_target(path, target)))?;
     Ok(())
 }
 

@@ -22,8 +22,9 @@ impl VerificationFile for ManifestFile {
     fn digest(&self) -> FileDigest<'_> {
         FileDigest::Sha1(&self.sha)
     }
+    /// Links are placed, never read: the scheduler passes over them like folders.
     fn is_directory(&self) -> bool {
-        ManifestFile::is_directory(self)
+        ManifestFile::is_directory(self) || self.is_link()
     }
 }
 

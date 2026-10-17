@@ -146,6 +146,31 @@ pub fn checked_file_path(root: &Path, relative: &Path) -> Result<PathBuf, Instal
     Ok(path)
 }
 
+/// Places a symbolic link at `relative` under `root`, pointing at `target` as
+/// given, replacing whatever an earlier build left there. Its parents must be
+/// real directories; confining `target` is the caller's part.
+#[cfg(unix)]
+pub fn place_link(root: &Path, relative: &Path, target: &Path) -> Result<(), InstallError> {
+    let name = relative
+        .file_name()
+        .ok_or_else(|| InstallError::UnsafePath(relative.display().to_string()))?;
+    let location = ensure_directory(root, relative.parent().unwrap_or(Path::new("")))?.join(name);
+    match fs::symlink_metadata(&location) {
+        Ok(metadata) if metadata.file_type().is_symlink() => {
+            if fs::read_link(&location)? == target {
+                return Ok(());
+            }
+            fs::remove_file(&location)?;
+        }
+        Ok(metadata) if metadata.is_dir() => fs::remove_dir_all(&location)?,
+        Ok(_) => fs::remove_file(&location)?,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error.into()),
+    }
+    std::os::unix::fs::symlink(target, &location)?;
+    Ok(())
+}
+
 /// Accepts a missing path or a regular, unlinked file; rejects everything else.
 pub fn reject_link_or_special_file(path: &Path) -> Result<(), InstallError> {
     match fs::symlink_metadata(path) {
