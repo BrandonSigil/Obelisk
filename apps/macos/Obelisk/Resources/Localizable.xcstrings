@@ -4897,23 +4897,6 @@
         }
       }
     },
-    "model.library.sort.releaseDate": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Release date"
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Date de sortie"
-          }
-        }
-      }
-    },
     "model.library.sort.dateAdded": {
       "extractionState": "manual",
       "localizations": {
@@ -4944,40 +4927,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Taille sur le disque"
-          }
-        }
-      }
-    },
-    "model.library.sort.criticScore": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Critic score"
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Note de la presse"
-          }
-        }
-      }
-    },
-    "model.library.sort.playerReviews": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Player reviews"
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Évaluations des joueurs"
           }
         }
       }
@@ -5050,23 +4999,6 @@
         }
       }
     },
-    "model.library.sortMenu.releaseDate": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Sort by release date"
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Trier par date de sortie"
-          }
-        }
-      }
-    },
     "model.library.sortMenu.dateAdded": {
       "extractionState": "manual",
       "localizations": {
@@ -5097,40 +5029,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Trier par taille sur le disque"
-          }
-        }
-      }
-    },
-    "model.library.sortMenu.criticScore": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Sort by critic score"
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Trier par note de la presse"
-          }
-        }
-      }
-    },
-    "model.library.sortMenu.playerReviews": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Sort by player reviews"
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Trier par évaluations des joueurs"
           }
         }
       }

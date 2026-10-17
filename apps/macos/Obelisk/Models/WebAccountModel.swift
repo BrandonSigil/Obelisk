@@ -11,8 +11,8 @@ protocol WebGame: Identifiable, Equatable, Sendable where ID == String {
     var preferredPlatform: String { get }
     /// What the storefront can install of the game; nil when it ships no build.
     var offer: GameOffer? { get }
-    /// What the game tells that `sort` orders it by, among its storefront's
-    /// `librarySorts`; nil when it tells nothing.
+    /// What the game tells that `sort` orders it by; nil when it tells
+    /// nothing.
     func libraryValue(for sort: StorefrontLibrarySort) -> Double?
 }
 
@@ -54,8 +54,6 @@ protocol WebStorefront: InstallationStorefront, SendableMetatype where GameID ==
 
     /// Names the storefront in receipts files and achievements.
     static var storeID: String { get }
-    /// The orders its library offers, as their menu lists them.
-    static var librarySorts: [StorefrontLibrarySort] { get }
     static var webSignIn: WebSignIn { get }
     /// The storefront's store, opened in Obelisk.
     static var storeURL: URL { get }
@@ -182,7 +180,7 @@ final class WebAccountModel<Store: WebStorefront> {
     var filter: StorefrontLibraryFilter = .all
     var availableFilters: [StorefrontLibraryFilter] { [.all, .installed, .played, .macOS] }
     var sort: StorefrontLibrarySort = .name
-    var availableSorts: [StorefrontLibrarySort] { Store.librarySorts }
+    var availableSorts: [StorefrontLibrarySort] { StorefrontLibrarySort.allCases }
     /// The share of each game's achievements the account unlocked, by game
     /// id, which loads after the playtimes.
     let libraryRecords = LibraryRecords<String>()

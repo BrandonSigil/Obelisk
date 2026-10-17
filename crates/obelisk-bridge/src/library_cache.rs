@@ -3,7 +3,7 @@
 //! of an account while its session connects, records launches and forgets an
 //! account that signs out.
 use crate::{
-    EpicGame, GameAccount, GameIdentity, GogGame, SteamGame, SteamGameArtwork, SteamGameFacts,
+    EpicGame, GameAccount, GameIdentity, GogGame, SteamGame, SteamGameArtwork,
     game_session::Bridged, installations::Named,
 };
 use futures_util::{StreamExt, stream};
@@ -71,8 +71,6 @@ pub struct CachedSteamGame {
     pub platforms: Option<Vec<String>>,
     #[uniffi(default = None)]
     pub artwork: Option<SteamGameArtwork>,
-    #[uniffi(default = None)]
-    pub facts: Option<SteamGameFacts>,
     /// When the game joined the library, in seconds since the Unix epoch.
     #[uniffi(default = None)]
     pub added_at: Option<u64>,
@@ -138,9 +136,6 @@ impl LibraryCache {
                 artwork: entry.get("pics").map(|pics| {
                     SteamGameArtwork::from(steam_kit::artwork::library_artwork(pics, &language))
                 }),
-                facts: entry
-                    .get("pics")
-                    .map(|pics| steam_kit::library::library_facts(pics).into()),
                 added_at: entry.get(ADDED_AT).and_then(Value::as_u64),
                 achievement_share: kept(entry).and_then(|kept| unlocked_share(&kept.list)),
             })

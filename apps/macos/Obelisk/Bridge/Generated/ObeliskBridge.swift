@@ -5006,7 +5006,6 @@ public struct CachedSteamGame: Equatable, Hashable {
     public var game: SteamGame
     public var platforms: [String]?
     public var artwork: SteamGameArtwork?
-    public var facts: SteamGameFacts?
     /**
      * When the game joined the library, in seconds since the Unix epoch.
      */
@@ -5019,7 +5018,7 @@ public struct CachedSteamGame: Equatable, Hashable {
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(game: SteamGame, platforms: [String]?, artwork: SteamGameArtwork? = nil, facts: SteamGameFacts? = nil, 
+    public init(game: SteamGame, platforms: [String]?, artwork: SteamGameArtwork? = nil, 
         /**
          * When the game joined the library, in seconds since the Unix epoch.
          */addedAt: UInt64? = nil, 
@@ -5030,7 +5029,6 @@ public struct CachedSteamGame: Equatable, Hashable {
         self.game = game
         self.platforms = platforms
         self.artwork = artwork
-        self.facts = facts
         self.addedAt = addedAt
         self.achievementShare = achievementShare
     }
@@ -5054,7 +5052,6 @@ public struct FfiConverterTypeCachedSteamGame: FfiConverterRustBuffer {
                 game: FfiConverterTypeSteamGame.read(from: &buf), 
                 platforms: FfiConverterOptionSequenceString.read(from: &buf), 
                 artwork: FfiConverterOptionTypeSteamGameArtwork.read(from: &buf), 
-                facts: FfiConverterOptionTypeSteamGameFacts.read(from: &buf), 
                 addedAt: FfiConverterOptionUInt64.read(from: &buf), 
                 achievementShare: FfiConverterOptionDouble.read(from: &buf)
         )
@@ -5064,7 +5061,6 @@ public struct FfiConverterTypeCachedSteamGame: FfiConverterRustBuffer {
         FfiConverterTypeSteamGame.write(value.game, into: &buf)
         FfiConverterOptionSequenceString.write(value.platforms, into: &buf)
         FfiConverterOptionTypeSteamGameArtwork.write(value.artwork, into: &buf)
-        FfiConverterOptionTypeSteamGameFacts.write(value.facts, into: &buf)
         FfiConverterOptionUInt64.write(value.addedAt, into: &buf)
         FfiConverterOptionDouble.write(value.achievementShare, into: &buf)
     }
@@ -9120,98 +9116,6 @@ public func FfiConverterTypeSteamGameDetails_lower(_ value: SteamGameDetails) ->
 }
 
 
-/**
- * What a game's PICS app info tells that the library orders by. Each is nil
- * when the game does not publish it.
- */
-public struct SteamGameFacts: Equatable, Hashable {
-    /**
-     * Seconds since the Unix epoch.
-     */
-    public var releaseDate: UInt64?
-    /**
-     * Out of 100.
-     */
-    public var metacriticScore: UInt32?
-    /**
-     * Steam's verdict on its players' reviews, from 1, overwhelmingly
-     * negative, to 9, overwhelmingly positive.
-     */
-    public var reviewScore: UInt32?
-    /**
-     * The share of positive reviews, out of 100.
-     */
-    public var reviewPercentage: UInt32?
-
-    // Default memberwise initializers are never public by default, so we
-    // declare one manually.
-    public init(
-        /**
-         * Seconds since the Unix epoch.
-         */releaseDate: UInt64?, 
-        /**
-         * Out of 100.
-         */metacriticScore: UInt32?, 
-        /**
-         * Steam's verdict on its players' reviews, from 1, overwhelmingly
-         * negative, to 9, overwhelmingly positive.
-         */reviewScore: UInt32?, 
-        /**
-         * The share of positive reviews, out of 100.
-         */reviewPercentage: UInt32?) {
-        self.releaseDate = releaseDate
-        self.metacriticScore = metacriticScore
-        self.reviewScore = reviewScore
-        self.reviewPercentage = reviewPercentage
-    }
-
-    
-
-    
-}
-
-#if compiler(>=6)
-extension SteamGameFacts: Sendable {}
-#endif
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public struct FfiConverterTypeSteamGameFacts: FfiConverterRustBuffer {
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SteamGameFacts {
-        return
-            try SteamGameFacts(
-                releaseDate: FfiConverterOptionUInt64.read(from: &buf), 
-                metacriticScore: FfiConverterOptionUInt32.read(from: &buf), 
-                reviewScore: FfiConverterOptionUInt32.read(from: &buf), 
-                reviewPercentage: FfiConverterOptionUInt32.read(from: &buf)
-        )
-    }
-
-    public static func write(_ value: SteamGameFacts, into buf: inout [UInt8]) {
-        FfiConverterOptionUInt64.write(value.releaseDate, into: &buf)
-        FfiConverterOptionUInt32.write(value.metacriticScore, into: &buf)
-        FfiConverterOptionUInt32.write(value.reviewScore, into: &buf)
-        FfiConverterOptionUInt32.write(value.reviewPercentage, into: &buf)
-    }
-}
-
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeSteamGameFacts_lift(_ buf: RustBuffer) throws -> SteamGameFacts {
-    return try FfiConverterTypeSteamGameFacts.lift(buf)
-}
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeSteamGameFacts_lower(_ value: SteamGameFacts) -> RustBuffer {
-    return FfiConverterTypeSteamGameFacts.lower(value)
-}
-
-
 public struct SteamGamePlatforms: Equatable, Hashable {
     public var appId: UInt32
     public var platforms: [String]
@@ -9219,24 +9123,16 @@ public struct SteamGamePlatforms: Equatable, Hashable {
      * Nil when PICS did not return the game.
      */
     public var artwork: SteamGameArtwork?
-    /**
-     * Nil when PICS did not return the game.
-     */
-    public var facts: SteamGameFacts?
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
     public init(appId: UInt32, platforms: [String], 
         /**
          * Nil when PICS did not return the game.
-         */artwork: SteamGameArtwork? = nil, 
-        /**
-         * Nil when PICS did not return the game.
-         */facts: SteamGameFacts? = nil) {
+         */artwork: SteamGameArtwork? = nil) {
         self.appId = appId
         self.platforms = platforms
         self.artwork = artwork
-        self.facts = facts
     }
 
     
@@ -9257,8 +9153,7 @@ public struct FfiConverterTypeSteamGamePlatforms: FfiConverterRustBuffer {
             try SteamGamePlatforms(
                 appId: FfiConverterUInt32.read(from: &buf), 
                 platforms: FfiConverterSequenceString.read(from: &buf), 
-                artwork: FfiConverterOptionTypeSteamGameArtwork.read(from: &buf), 
-                facts: FfiConverterOptionTypeSteamGameFacts.read(from: &buf)
+                artwork: FfiConverterOptionTypeSteamGameArtwork.read(from: &buf)
         )
     }
 
@@ -9266,7 +9161,6 @@ public struct FfiConverterTypeSteamGamePlatforms: FfiConverterRustBuffer {
         FfiConverterUInt32.write(value.appId, into: &buf)
         FfiConverterSequenceString.write(value.platforms, into: &buf)
         FfiConverterOptionTypeSteamGameArtwork.write(value.artwork, into: &buf)
-        FfiConverterOptionTypeSteamGameFacts.write(value.facts, into: &buf)
     }
 }
 
@@ -13877,30 +13771,6 @@ fileprivate struct FfiConverterOptionTypeSteamGameArtwork: FfiConverterRustBuffe
         switch try readInt(&buf) as Int8 {
         case 0: return nil
         case 1: return try FfiConverterTypeSteamGameArtwork.read(from: &buf)
-        default: throw UniffiInternalError.unexpectedOptionalTag
-        }
-    }
-}
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-fileprivate struct FfiConverterOptionTypeSteamGameFacts: FfiConverterRustBuffer {
-    typealias SwiftType = SteamGameFacts?
-
-    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
-        guard let value = value else {
-            writeInt(&buf, Int8(0))
-            return
-        }
-        writeInt(&buf, Int8(1))
-        FfiConverterTypeSteamGameFacts.write(value, into: &buf)
-    }
-
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
-        switch try readInt(&buf) as Int8 {
-        case 0: return nil
-        case 1: return try FfiConverterTypeSteamGameFacts.read(from: &buf)
         default: throw UniffiInternalError.unexpectedOptionalTag
         }
     }

@@ -89,14 +89,10 @@ fn a_steam_session_keeps_every_field_steam_returned_and_each_games_platforms() {
                 header: Some("31bac6/header_french.jpg".into()),
                 ..Default::default()
             }),
-            facts: Some(SteamGameFacts {
-                review_score: Some(9),
-                ..Default::default()
-            }),
             added_at: None,
             achievement_share: None,
         }],
-        "a reloaded library keeps the platforms, artwork and facts loaded before"
+        "a reloaded library keeps the platforms and artwork loaded before"
     );
     let saved = &file(&cache, &directory)["steam"]["7"][0];
     assert_eq!(
@@ -224,7 +220,6 @@ fn a_cache_written_by_obelisk_before_still_shows() {
             game: steam_game(620, "Portal 2"),
             platforms: Some(vec!["macos".into()]),
             artwork: Some(SteamGameArtwork::default()),
-            facts: Some(SteamGameFacts::default()),
             added_at: None,
             achievement_share: None,
         }]

@@ -9,11 +9,6 @@ extension GogGames: WebStorefront {
     typealias Details = GogGameDetails
 
     static let storeID = "gog"
-    /// gamesdb dates each game and gives its critics' score; the Galaxy
-    /// library dates its addition.
-    static let librarySorts: [StorefrontLibrarySort] = [
-        .name, .achievements, .playtime, .lastPlayed, .releaseDate, .dateAdded, .size, .criticScore,
-    ]
     /// The store through its site's own sign-in, as its Sign in button
     /// opens it: GOG's site takes no token of the app, but its sign-in page
     /// remembers the account Obelisk's sign-in signed in there, and then
@@ -127,11 +122,6 @@ extension GogGame: WebGame {
     }
 
     func libraryValue(for sort: StorefrontLibrarySort) -> Double? {
-        switch sort {
-        case .releaseDate: releaseDate.map { Double($0) }
-        case .dateAdded: addedAt.map { Double($0) }
-        case .criticScore: rating.map { Double($0) }
-        default: nil
-        }
+        sort == .dateAdded ? addedAt.map { Double($0) } : nil
     }
 }

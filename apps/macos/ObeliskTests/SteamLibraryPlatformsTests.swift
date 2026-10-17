@@ -63,17 +63,15 @@ final class SteamLibraryPlatformsTests: XCTestCase {
     }
 
     @MainActor
-    func testLoadsEachGamesArtworkInTheLanguageAndFactsWithItsPlatforms() async throws {
+    func testLoadsEachGamesArtworkInTheLanguageWithItsPlatforms() async throws {
         let cache = SteamLibraryPlatforms()
         let session = PlatformMetadataSession()
         let peak = SteamGameArtwork(cover: "480bd8/library_600x900.jpg", hero: "d75184/library_hero_2x.jpg",
                                     logo: nil, header: "31bac6/header.jpg")
-        let facts = SteamGameFacts(releaseDate: 1_750_093_257, metacriticScore: nil, reviewScore: 8, reviewPercentage: 94)
         cache.load(appIds: [3_527_290, 7], language: "french", session: session)
         try await waitForRequests(1, on: session)
-        let factsRevision = cache.factsRevision
         await session.complete(0, with: .success([
-            SteamGamePlatforms(appId: 3_527_290, platforms: ["windows"], artwork: peak, facts: facts),
+            SteamGamePlatforms(appId: 3_527_290, platforms: ["windows"], artwork: peak),
             SteamGamePlatforms(appId: 7, platforms: [])
         ]))
         try await eventually { !cache.isLoading }
@@ -81,17 +79,12 @@ final class SteamLibraryPlatformsTests: XCTestCase {
         let languages = await session.languages
         XCTAssertEqual(languages, ["french"])
         XCTAssertEqual(cache.artwork.games, [3_527_290: peak], "A game PICS did not return keeps Steam's plain names")
-        XCTAssertEqual(cache.facts, [3_527_290: facts])
-        XCTAssertNotEqual(cache.factsRevision, factsRevision, "New facts change the library's orders")
 
         cache.load(appIds: [], language: "french", session: session)
         XCTAssertTrue(cache.artwork.games.isEmpty, "A game that left the library takes its artwork along")
-        XCTAssertTrue(cache.facts.isEmpty, "and its facts")
-        cache.show(platforms: [:], artwork: [3_527_290: peak], facts: [3_527_290: facts])
-        XCTAssertEqual(cache.facts, [3_527_290: facts], "The library cache's facts show at once")
+        cache.show(platforms: [:], artwork: [3_527_290: peak])
         cache.reset()
         XCTAssertTrue(cache.artwork.games.isEmpty, "Another account's library replaces the artwork")
-        XCTAssertTrue(cache.facts.isEmpty)
     }
 
     @MainActor

@@ -44,8 +44,7 @@ class WebAccountModelTests: XCTestCase {
             S.playtime("c", minutes: 600), S.playtime("b", minutes: 10), S.playtime("a", minutes: 0),
         ])
         let model = webModel(S.self, MemoryStore(stored), restore: { _ in S.session(session) })
-        XCTAssertTrue(Set<StorefrontLibrarySort>([.name, .playtime, .lastPlayed, .dateAdded, .size])
-            .isSubset(of: model.availableSorts), "Every web storefront dates each game's addition")
+        XCTAssertEqual(model.availableSorts, StorefrontLibrarySort.allCases)
         XCTAssertTrue(model.availableFilters.contains(.played))
         await model.start()
         defer { model.signOut() }

@@ -75,23 +75,15 @@ final class StorefrontLibraryFilterTests: XCTestCase {
         XCTAssertEqual(model.filteredGames.map(\.appId), [51])
     }
 
-    func testSteamOrdersByPICSFactsAndLoadsDatesAndAchievementsWithTheLibrary() async throws {
+    func testSteamLoadsDatesAndAchievementsWithTheLibrary() async throws {
         let root = try temporaryDirectory()
         let games = [steamGame(1, name: "Alpha"), steamGame(2, name: "Beta"), steamGame(3, name: "Gamma")]
         let records = FilterRecordRequests()
-        // PICS tells nothing of Gamma.
-        let model = steamModel(root: root, games: games, platforms: { appIDs in
-            appIDs.filter { $0 != 3 }.map { appID in
-                SteamGamePlatforms(appId: appID, platforms: ["windows"], facts: appID == 1
-                    ? SteamGameFacts(releaseDate: 300, metacriticScore: 80, reviewScore: 8, reviewPercentage: 99)
-                    : SteamGameFacts(releaseDate: 100, metacriticScore: nil, reviewScore: 9, reviewPercentage: 96))
-            }
-        }, records: records)
+        let model = steamModel(root: root, games: games, records: records)
         await model.start()
         defer { model.signOut() }
         try await eventually {
-            !model.libraryPlatforms.isLoading && model.libraryPlatforms.facts.count == 2
-                && model.libraryRecords.value(for: .dateAdded, of: 3) != nil
+            model.libraryRecords.value(for: .dateAdded, of: 3) != nil
                 && model.libraryRecords.value(for: .achievements, of: 3) != nil
         }
         var asked = await records.counts
@@ -99,12 +91,6 @@ final class StorefrontLibraryFilterTests: XCTestCase {
         XCTAssertEqual(asked.achievements, 1)
         XCTAssertEqual(asked.achievementApps, [1, 2, 3], "One request names every game")
 
-        model.sort = .releaseDate
-        XCTAssertEqual(model.filteredGames.map(\.appId), [1, 2, 3], "The newest first, an undated game last")
-        model.sort = .criticScore
-        XCTAssertEqual(model.filteredGames.map(\.appId), [1, 2, 3], "Games without a score follow by name")
-        model.sort = .playerReviews
-        XCTAssertEqual(model.filteredGames.map(\.appId), [2, 1, 3], "Steam's verdict outranks the share")
         model.sort = .dateAdded
         XCTAssertEqual(model.filteredGames.map(\.appId), [3, 1, 2])
         model.sort = .achievements
@@ -140,7 +126,6 @@ final class StorefrontLibraryFilterTests: XCTestCase {
         await model.start()
         defer { model.signOut() }
 
-        XCTAssertEqual(model.availableSorts, [.name, .achievements, .playtime, .lastPlayed, .dateAdded, .size])
         model.sort = .dateAdded
         XCTAssertEqual(model.filteredGames.map(\.appName), ["newer", "older", "undated"])
     }

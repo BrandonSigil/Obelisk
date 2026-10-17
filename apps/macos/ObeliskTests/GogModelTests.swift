@@ -31,26 +31,16 @@ final class GogModelTests: XCTestCase {
         XCTAssertEqual(model.playtime(of: games[1]), .seconds(36_000))
     }
 
-    func testTheLibraryOrdersByWhatGamesdbAndGalaxyTell() async throws {
+    func testTheLibraryOrdersByWhenGalaxyTellsEachGameJoinedIt() async throws {
         var classic = GogGames.game("1", title: "Classic"), recent = GogGames.game("2", title: "Recent")
         let unknown = GogGames.game("3", title: "Unknown")
-        classic.releaseDate = 1_000_000_000
-        classic.rating = 90
         classic.addedAt = 1_700_000_000
-        recent.releaseDate = 1_600_000_000
-        recent.rating = 70
         recent.addedAt = 1_500_000_000
         let model = await connectedModel(GogTestSession(credentials: GogGames.credentials("current"),
                                                         games: [unknown, classic, recent]))
         defer { model.signOut() }
 
-        XCTAssertEqual(model.availableSorts,
-                       [.name, .achievements, .playtime, .lastPlayed, .releaseDate, .dateAdded, .size, .criticScore])
-        XCTAssertEqual(model.libraryValue(of: classic, for: .releaseDate), 1_000_000_000, "Seconds, not their bits")
-        model.sort = .releaseDate
-        XCTAssertEqual(model.filteredGames.map(\.title), ["Recent", "Classic", "Unknown"])
-        model.sort = .criticScore
-        XCTAssertEqual(model.filteredGames.map(\.title), ["Classic", "Recent", "Unknown"])
+        XCTAssertEqual(model.libraryValue(of: classic, for: .dateAdded), 1_700_000_000, "Seconds, not their bits")
         model.sort = .dateAdded
         XCTAssertEqual(model.filteredGames.map(\.title), ["Classic", "Recent", "Unknown"])
     }

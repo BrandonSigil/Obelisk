@@ -31,10 +31,9 @@ enum StorefrontLibraryFilter: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
-/// The orders a storefront library offers, as its menu lists them, each where
-/// its store records what it needs.
+/// The orders every storefront library offers, as its menu lists them.
 enum StorefrontLibrarySort: String, CaseIterable, Identifiable, Sendable {
-    case name, achievements, playtime, lastPlayed, releaseDate, dateAdded, size, criticScore, playerReviews
+    case name, achievements, playtime, lastPlayed, dateAdded, size
 
     var id: String { rawValue }
 
@@ -44,11 +43,8 @@ enum StorefrontLibrarySort: String, CaseIterable, Identifiable, Sendable {
         case .achievements: L10n.string("model.library.sort.achievements")
         case .playtime: L10n.string("model.library.sort.playtime")
         case .lastPlayed: L10n.string("model.library.sort.lastPlayed")
-        case .releaseDate: L10n.string("model.library.sort.releaseDate")
         case .dateAdded: L10n.string("model.library.sort.dateAdded")
         case .size: L10n.string("model.library.sort.size")
-        case .criticScore: L10n.string("model.library.sort.criticScore")
-        case .playerReviews: L10n.string("model.library.sort.playerReviews")
         }
     }
 
@@ -58,11 +54,8 @@ enum StorefrontLibrarySort: String, CaseIterable, Identifiable, Sendable {
         case .achievements: L10n.string("model.library.sortMenu.achievements")
         case .playtime: L10n.string("model.library.sortMenu.playtime")
         case .lastPlayed: L10n.string("model.library.sortMenu.lastPlayed")
-        case .releaseDate: L10n.string("model.library.sortMenu.releaseDate")
         case .dateAdded: L10n.string("model.library.sortMenu.dateAdded")
         case .size: L10n.string("model.library.sortMenu.size")
-        case .criticScore: L10n.string("model.library.sortMenu.criticScore")
-        case .playerReviews: L10n.string("model.library.sortMenu.playerReviews")
         }
     }
 }
@@ -175,7 +168,7 @@ final class LibraryOrdering<Game: Identifiable> where Game.ID: Comparable {
         case .playtime: return { model.playtime(of: $0).map { Double($0.components.seconds) } }
         case .lastPlayed: return { model.lastPlayed(of: $0)?.timeIntervalSince1970 }
         case .size: return { sizes[$0.id].map { Double($0) } }
-        case .achievements, .releaseDate, .dateAdded, .criticScore, .playerReviews:
+        case .achievements, .dateAdded:
             return { model.libraryValue(of: $0, for: sort) }
         }
     }

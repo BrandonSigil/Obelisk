@@ -37,9 +37,18 @@ pub fn library_artwork(pics: &Value, language: &str) -> LibraryArtwork {
         hero: image("library_hero"),
         logo: image("library_logo"),
         header: image("library_header").or_else(|| localized(&common["header_image"])),
-        parent: crate::library::positive(&common["parent"])
-            .and_then(|parent| u32::try_from(parent).ok()),
+        parent: positive(&common["parent"]).and_then(|parent| u32::try_from(parent).ok()),
     }
+}
+
+/// A number of a game's PICS app info, which PICS mostly writes as text;
+/// none when absent or 0.
+fn positive(value: &Value) -> Option<u64> {
+    match value {
+        Value::String(text) => text.parse().ok(),
+        value => value.as_u64(),
+    }
+    .filter(|value| *value > 0)
 }
 
 /// A file name, or one in a single folder, that stays under the game's assets.

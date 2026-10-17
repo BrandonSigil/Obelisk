@@ -10,7 +10,7 @@ use game_runtime::{
     steam::{self, account_session::AccountSession},
 };
 use std::{collections::HashMap, path::Path, sync::Arc};
-use steam_kit::{artwork, auth, client, library};
+use steam_kit::{artwork, auth, client};
 use tokio::sync::Mutex;
 
 /// Games whose achievements a library reads at once: each takes up to two
@@ -229,40 +229,6 @@ pub struct SteamGamePlatforms {
     /// Nil when PICS did not return the game.
     #[uniffi(default = None)]
     pub artwork: Option<SteamGameArtwork>,
-    /// Nil when PICS did not return the game.
-    #[uniffi(default = None)]
-    pub facts: Option<SteamGameFacts>,
-}
-/// What a game's PICS app info tells that the library orders by. Each is nil
-/// when the game does not publish it.
-#[derive(Clone, Debug, Default, PartialEq, Eq, uniffi::Record)]
-pub struct SteamGameFacts {
-    /// Seconds since the Unix epoch.
-    pub release_date: Option<u64>,
-    /// Out of 100.
-    pub metacritic_score: Option<u32>,
-    /// Steam's verdict on its players' reviews, from 1, overwhelmingly
-    /// negative, to 9, overwhelmingly positive.
-    pub review_score: Option<u32>,
-    /// The share of positive reviews, out of 100.
-    pub review_percentage: Option<u32>,
-}
-impl From<library::LibraryFacts> for SteamGameFacts {
-    fn from(
-        library::LibraryFacts {
-            release_date,
-            metacritic_score,
-            review_score,
-            review_percentage,
-        }: library::LibraryFacts,
-    ) -> Self {
-        Self {
-            release_date,
-            metacritic_score,
-            review_score,
-            review_percentage,
-        }
-    }
 }
 /// A game's library artwork, each image's path under the game's store assets.
 #[derive(Clone, Debug, Default, PartialEq, Eq, uniffi::Record)]
@@ -502,10 +468,6 @@ impl SteamSession {
                     .pics
                     .as_ref()
                     .map(|pics| artwork::library_artwork(pics, &language).into()),
-                facts: game
-                    .pics
-                    .as_ref()
-                    .map(|pics| library::library_facts(pics).into()),
             })
             .collect();
         if let Some(library) = &self.library {

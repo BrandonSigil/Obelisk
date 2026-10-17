@@ -254,28 +254,14 @@ final class SteamModel {
         libraryPlatforms.platforms[game.appId].flatMap(GamePlatform.preferred(platforms:))
     }
 
-    /// Nil until Steam told it: the release date and ratings come with the
-    /// platforms, the library date and achievements after them.
+    /// Nil until Steam told it: the library date and achievements load
+    /// after the library.
     func libraryValue(of game: SteamGame, for sort: StorefrontLibrarySort) -> Double? {
-        let facts = libraryPlatforms.facts[game.appId]
-        switch sort {
-        case .achievements, .dateAdded: return libraryRecords.value(for: sort, of: game.appId)
-        case .releaseDate: return facts?.releaseDate.map { Double($0) }
-        case .criticScore: return facts?.metacriticScore.map { Double($0) }
-        // Steam's verdict first, then the share of positive reviews within it.
-        case .playerReviews:
-            guard let score = facts?.reviewScore else { return nil }
-            return Double(score) * 1000 + Double(facts?.reviewPercentage ?? 0)
-        case .name, .playtime, .lastPlayed, .size: return nil
-        }
+        libraryRecords.value(for: sort, of: game.appId)
     }
 
     func valuesRevision(for sort: StorefrontLibrarySort) -> Int {
-        switch sort {
-        case .achievements, .dateAdded: libraryRecords.revision(for: sort)
-        case .releaseDate, .criticScore, .playerReviews: libraryPlatforms.factsRevision
-        case .name, .playtime, .lastPlayed, .size: 0
-        }
+        libraryRecords.revision(for: sort)
     }
 
     var libraryRevision: Int { libraryChanges &+ gameSessions.history.revision }
@@ -350,7 +336,7 @@ final class SteamModel {
             Dictionary(cached.compactMap { entry in value(entry).map { (entry.game.appId, $0) } },
                        uniquingKeysWith: { first, _ in first })
         }
-        libraryPlatforms.show(platforms: byApp(\.platforms), artwork: byApp(\.artwork), facts: byApp(\.facts))
+        libraryPlatforms.show(platforms: byApp(\.platforms), artwork: byApp(\.artwork))
         libraryRecords.show(byApp { $0.addedAt.map { Double($0) } }, for: .dateAdded)
         libraryRecords.show(byApp(\.achievementShare), for: .achievements)
     }

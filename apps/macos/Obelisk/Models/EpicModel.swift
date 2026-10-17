@@ -19,9 +19,6 @@ extension EpicGames: WebStorefront {
     typealias Presence = EpicFriends
 
     static let storeID = "epic"
-    /// Epic's library records date each game's addition. Its catalog dates
-    /// only a game's arrival on Epic, not its release.
-    static let librarySorts: [StorefrontLibrarySort] = [.name, .achievements, .playtime, .lastPlayed, .dateAdded, .size]
     static let storeURL = URL(string: "https://store.epicgames.com/")!
     static let webSignIn = WebSignIn.epic
     static func keychain() -> any CredentialStore<EpicCredentials> { EpicKeychain() }
