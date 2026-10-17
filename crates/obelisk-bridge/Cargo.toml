@@ -23,6 +23,7 @@ game-runtime.workspace = true
 steam-kit.workspace = true
 epic-kit.workspace = true
 gog-kit.workspace = true
+futures-util.workspace = true
 uniffi = { workspace = true, features = ["tokio"] }
 thiserror.workspace = true
 tokio.workspace = true

@@ -10,6 +10,8 @@ final class SteamLibraryArtwork {
     fileprivate(set) var games: [UInt32: SteamGameArtwork] = [:]
 }
 
+/// Each library game's PICS app info as the library reads it: its platforms,
+/// its artwork, and its release date and ratings, which orders read.
 @MainActor
 @Observable
 final class SteamLibraryPlatforms {
@@ -18,8 +20,14 @@ final class SteamLibraryPlatforms {
     }
     /// Apart from the platforms: new artwork changes no filter or order.
     let artwork = SteamLibraryArtwork()
+    /// A game PICS has not told of yet has none.
+    private(set) var facts: [UInt32: SteamGameFacts] = [:] {
+        didSet { factsRevision &+= 1 }
+    }
     /// Changes whenever a game's platforms may have.
     private(set) var revision = 0
+    /// Changes whenever a game's facts may have.
+    private(set) var factsRevision = 0
     private(set) var isLoading = false
     private(set) var hasFailures = false
 
@@ -41,6 +49,8 @@ final class SteamLibraryPlatforms {
         if kept.count != platforms.count { platforms = kept }
         // @Observable notifies no view of an equal value; only `platforms` bumps `revision` regardless.
         artwork.games = artwork.games.filter { seen.contains($0.key) }
+        let keptFacts = facts.filter { seen.contains($0.key) }
+        if keptFacts.count != facts.count { facts = keptFacts }
         guard !appIds.isEmpty else { return }
 
         let loadID = UUID()
@@ -66,6 +76,10 @@ final class SteamLibraryPlatforms {
                     self.artwork.games = self.artwork.games.merging(
                         result.compactMap { game in game.artwork.map { (game.appId, $0) } }
                     ) { _, loaded in loaded }
+                    let facts = self.facts.merging(
+                        result.compactMap { game in game.facts.map { (game.appId, $0) } }
+                    ) { _, loaded in loaded }
+                    if facts != self.facts { self.facts = facts }
                 } catch {
                     guard !Task.isCancelled, let self, self.loadID == loadID else { return }
                     self.hasFailures = true
@@ -75,10 +89,11 @@ final class SteamLibraryPlatforms {
     }
 
     /// Shows what the library cache knew of the games, until a load replaces it.
-    func show(platforms: [UInt32: [String]], artwork: [UInt32: SteamGameArtwork]) {
+    func show(platforms: [UInt32: [String]], artwork: [UInt32: SteamGameArtwork], facts: [UInt32: SteamGameFacts]) {
         reset()
         self.platforms = platforms
         self.artwork.games = artwork
+        self.facts = facts
     }
 
     /// Stops loading, keeping what loaded so far: the same account's next
@@ -96,5 +111,6 @@ final class SteamLibraryPlatforms {
         cancel()
         platforms.removeAll()
         artwork.games.removeAll()
+        facts.removeAll()
     }
 }

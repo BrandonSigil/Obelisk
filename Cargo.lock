@@ -1265,6 +1265,7 @@ name = "obelisk-bridge"
 version = "0.1.0"
 dependencies = [
  "epic-kit",
+ "futures-util",
  "game-runtime",
  "gog-kit",
  "obelisk-core",

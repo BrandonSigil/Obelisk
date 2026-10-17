@@ -9,6 +9,11 @@ extension GogGames: WebStorefront {
     typealias Details = GogGameDetails
 
     static let storeID = "gog"
+    /// gamesdb dates each game and gives its critics' score; the Galaxy
+    /// library dates its addition.
+    static let librarySorts: [StorefrontLibrarySort] = [
+        .name, .achievements, .playtime, .lastPlayed, .releaseDate, .dateAdded, .size, .criticScore,
+    ]
     /// The store through its site's own sign-in, as its Sign in button
     /// opens it: GOG's site takes no token of the app, but its sign-in page
     /// remembers the account Obelisk's sign-in signed in there, and then
@@ -47,17 +52,28 @@ extension GogGames: WebStorefront {
         let loaded = try await session.playtimes(productIds: games.map(\.productId))
         return Dictionary(loaded.map { ($0.productId, played(minutes: $0.minutes)) }, uniquingKeysWith: max)
     }
-    static func cachedLibrary(in cache: LibraryCache, account: String) -> [(game: GogGame, playtime: Duration?)] {
-        cache.gogLibrary(userId: account).map { ($0.game, $0.playtimeMinutes.map(played(minutes:))) }
+    /// GOG answers one game at a time.
+    static func achievementShares(of games: [GogGame], session: Session, language: String) async throws -> [String: Double] {
+        try await session.achievementShares(productIds: games.map(\.productId), locale: achievementLocale(language))
+    }
+    static func cachedLibrary(in cache: LibraryCache, account: String)
+        -> [(game: GogGame, playtime: Duration?, achievements: Double?)] {
+        cache.gogLibrary(userId: account).map {
+            ($0.game, $0.playtimeMinutes.map(played(minutes:)), $0.achievementShare)
+        }
     }
     /// `language` names the depots, such as "fr-FR".
     static func details(of game: GogGame, session: Session, language: String) async throws -> GogGameDetails {
         try await session.gameDetails(productId: game.productId, platform: game.preferredPlatform, language: language)
     }
-    /// GOG names achievements in a full language tag, such as "fr-FR".
-    static func achievements(of game: GogGame, session: Session, language: String) async throws -> [GameAchievement] {
-        try await session.achievements(productId: game.productId, locale: Locale(identifier: language).identifier(.bcp47))
+    static func achievements(of game: GogGame, session: Session, language: String,
+                             fresh: Bool) async throws -> [GameAchievement] {
+        try await session.achievements(productId: game.productId, locale: achievementLocale(language), fresh: fresh)
             .map(GameAchievement.init)
+    }
+    /// GOG names achievements in a full language tag, such as "fr-FR".
+    private static func achievementLocale(_ language: String) -> String {
+        Locale(identifier: language).identifier(.bcp47)
     }
     @MainActor static func installations(of session: Session, account: String, language: String,
                                           sessions: any StorefrontSessionsProtocol, receipts: URL,
@@ -108,5 +124,14 @@ extension GogGame: WebGame {
     var offer: GameOffer? {
         guard macos || windows else { return nil }
         return .gog(productId: productId, title: title, platform: preferredPlatform)
+    }
+
+    func libraryValue(for sort: StorefrontLibrarySort) -> Double? {
+        switch sort {
+        case .releaseDate: releaseDate.map { Double($0) }
+        case .dateAdded: addedAt.map { Double($0) }
+        case .criticScore: rating.map { Double($0) }
+        default: nil
+        }
     }
 }

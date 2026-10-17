@@ -75,6 +75,76 @@ final class StorefrontLibraryFilterTests: XCTestCase {
         XCTAssertEqual(model.filteredGames.map(\.appId), [51])
     }
 
+    func testSteamOrdersByPICSFactsAndLoadsDatesAndAchievementsWithTheLibrary() async throws {
+        let root = try temporaryDirectory()
+        let games = [steamGame(1, name: "Alpha"), steamGame(2, name: "Beta"), steamGame(3, name: "Gamma")]
+        let records = FilterRecordRequests()
+        // PICS tells nothing of Gamma.
+        let model = steamModel(root: root, games: games, platforms: { appIDs in
+            appIDs.filter { $0 != 3 }.map { appID in
+                SteamGamePlatforms(appId: appID, platforms: ["windows"], facts: appID == 1
+                    ? SteamGameFacts(releaseDate: 300, metacriticScore: 80, reviewScore: 8, reviewPercentage: 99)
+                    : SteamGameFacts(releaseDate: 100, metacriticScore: nil, reviewScore: 9, reviewPercentage: 96))
+            }
+        }, records: records)
+        await model.start()
+        defer { model.signOut() }
+        try await eventually {
+            !model.libraryPlatforms.isLoading && model.libraryPlatforms.facts.count == 2
+                && model.libraryRecords.value(for: .dateAdded, of: 3) != nil
+                && model.libraryRecords.value(for: .achievements, of: 3) != nil
+        }
+        var asked = await records.counts
+        XCTAssertEqual(asked.acquisitions, 1, "The library dates load with the library, before any order asks")
+        XCTAssertEqual(asked.achievements, 1)
+        XCTAssertEqual(asked.achievementApps, [1, 2, 3], "One request names every game")
+
+        model.sort = .releaseDate
+        XCTAssertEqual(model.filteredGames.map(\.appId), [1, 2, 3], "The newest first, an undated game last")
+        model.sort = .criticScore
+        XCTAssertEqual(model.filteredGames.map(\.appId), [1, 2, 3], "Games without a score follow by name")
+        model.sort = .playerReviews
+        XCTAssertEqual(model.filteredGames.map(\.appId), [2, 1, 3], "Steam's verdict outranks the share")
+        model.sort = .dateAdded
+        XCTAssertEqual(model.filteredGames.map(\.appId), [3, 1, 2])
+        model.sort = .achievements
+        XCTAssertEqual(model.filteredGames.map(\.appId), [3, 2, 1])
+        XCTAssertNil(model.pendingMetadata)
+        asked = await records.counts
+        XCTAssertEqual(asked.acquisitions + asked.achievements, 2, "Picking an order asks nothing")
+    }
+
+    func testSizeOrderPutsTheLargestInstallationFirstAndFollowsInstallations() async throws {
+        let root = try temporaryDirectory()
+        let small = epicGame("small", title: "Small"), large = epicGame("large", title: "Large")
+        let absent = epicGame("absent", title: "Absent")
+        let fake = FakeInstallations<EpicGames>(receipts: epicReceipts([(small, "windows"), (large, "windows"), (large, "macos")],
+                                                                       root: root, bytes: [small.appName: 10, large.appName: 400]))
+        let model = epicModel(root: root, games: [small, absent, large], installations: fake)
+        await model.start()
+        defer { model.signOut() }
+
+        model.sort = .size
+        XCTAssertEqual(model.filteredGames.map(\.appName), ["large", "small", "absent"],
+                       "Both of a game's installations count, and a game not installed comes last")
+        fake.publish { $0.receipts += self.epicReceipts([(absent, "windows")], root: root, bytes: [absent.appName: 5_000]) }
+        try await eventually { model.filteredGames.map(\.appName) == ["absent", "large", "small"] }
+    }
+
+    func testEpicOrdersByTheDateEachGameJoinedTheLibrary() async throws {
+        var older = epicGame("older", title: "Older"), newer = epicGame("newer", title: "Newer")
+        older.addedAt = 1_590_000_000
+        newer.addedAt = 1_700_000_000
+        let undated = epicGame("undated", title: "Undated")
+        let model = epicModel(root: try temporaryDirectory(), games: [older, undated, newer])
+        await model.start()
+        defer { model.signOut() }
+
+        XCTAssertEqual(model.availableSorts, [.name, .achievements, .playtime, .lastPlayed, .dateAdded, .size])
+        model.sort = .dateAdded
+        XCTAssertEqual(model.filteredGames.map(\.appName), ["newer", "older", "undated"])
+    }
+
     func testSteamSignOutResetsFilterAndCachedLibrary() async throws {
         let model = steamModel(root: try temporaryDirectory(), games: [steamGame(1, name: "Played", playtime: 1)])
         await model.start()
@@ -143,8 +213,9 @@ final class StorefrontLibraryFilterTests: XCTestCase {
     }
 
     private func steamModel(root: URL, games: [SteamGame], receipts: [InstallationReceipt<UInt32>] = [],
-                            platforms: @escaping @Sendable ([UInt32]) async throws -> [SteamGamePlatforms] = { _ in [] }) -> SteamModel {
-        let session = FilterSteamSession(games: games, platforms: platforms)
+                            platforms: @escaping @Sendable ([UInt32]) async throws -> [SteamGamePlatforms] = { _ in [] },
+                            records: FilterRecordRequests = FilterRecordRequests()) -> SteamModel {
+        let session = FilterSteamSession(games: games, platforms: platforms, records: records)
         return SteamModel(directory: root, keychain: FilterSteamCredentials(), connect: { _ in session }, news: { _ in [] },
                           beginLogin: { _ in throw FilterFixtureFailure.unexpectedOperation },
                           gameSessions: SteamGameSessions(),
@@ -156,11 +227,12 @@ final class StorefrontLibraryFilterTests: XCTestCase {
                  description: "", imageUrl: nil, headerImageUrl: nil, developer: "", windows: true, macos: macOS)
     }
 
-    private func epicModel(root: URL, games: [EpicGame], receipts: [InstallationReceipt<String>] = []) -> EpicModel {
+    private func epicModel(root: URL, games: [EpicGame], receipts: [InstallationReceipt<String>] = [],
+                           installations: FakeInstallations<EpicGames>? = nil) -> EpicModel {
         let credentials = EpicCredentials(accountId: "filters", displayName: "Filter fixture", refreshToken: "fixture-only-never-sent")
         let session = EpicTestSession(credentials: credentials, games: games)
         return EpicModel(directory: root, keychain: EpicMemoryStore(credentials), restore: { _ in session },
-                         installations: EpicModel.installations(FakeInstallations(receipts: receipts)))
+                         installations: EpicModel.installations(installations ?? FakeInstallations(receipts: receipts)))
     }
 
     private func steamReceipts(_ entries: [(UInt32, String)], root: URL) -> [InstallationReceipt<UInt32>] {
@@ -170,11 +242,12 @@ final class StorefrontLibraryFilterTests: XCTestCase {
         }
     }
 
-    private func epicReceipts(_ entries: [(EpicGame, String)], root: URL) -> [InstallationReceipt<String>] {
+    private func epicReceipts(_ entries: [(EpicGame, String)], root: URL,
+                              bytes: [String: UInt64] = [:]) -> [InstallationReceipt<String>] {
         entries.map { game, platform in
             InstallationReceipt.epic(namespace: game.namespace, appName: game.appName, name: game.title,
                                directory: root.appending(path: "epic-\(game.namespace)-\(game.appName)-\(platform)").path,
-                               platform: platform, totalBytes: 1)
+                               platform: platform, totalBytes: bytes[game.appName] ?? 1)
         }
     }
 
@@ -202,16 +275,41 @@ private actor FilterSteamCredentials: CredentialStore {
 private final class FilterSteamSession: SteamSessionProtocol, Sendable {
     private let library: [SteamGame]
     private let loadPlatforms: @Sendable ([UInt32]) async throws -> [SteamGamePlatforms]
+    private let records: FilterRecordRequests
 
-    init(games: [SteamGame], platforms: @escaping @Sendable ([UInt32]) async throws -> [SteamGamePlatforms]) {
+    init(games: [SteamGame], platforms: @escaping @Sendable ([UInt32]) async throws -> [SteamGamePlatforms],
+         records: FilterRecordRequests) {
         library = games
         loadPlatforms = platforms
+        self.records = records
     }
 
     func games() async throws -> [SteamGame] { library }
     func platforms(appIds: [UInt32], language: String) async throws -> [SteamGamePlatforms] { try await loadPlatforms(appIds) }
+    func acquisitions() async throws -> [UInt32: UInt64] { await records.acquisitions() }
+    func achievementShares(appIds: [UInt32], language: String) async throws -> [UInt32: Double] {
+        await records.achievementShares(appIds)
+    }
     func profile() async throws -> SteamProfile { SteamProfile(displayName: nil, avatarUrl: nil) }
     func details(appId: UInt32, language: String) async throws -> SteamGameDetails { throw FilterFixtureFailure.unexpectedOperation }
+}
+
+/// Steam's answers about the account's games: Gamma was got last, Alpha
+/// before it and Beta through no license; Gamma's achievements are all
+/// unlocked, half of Beta's, and Alpha has none.
+private actor FilterRecordRequests {
+    private(set) var counts = (acquisitions: 0, achievements: 0, achievementApps: [UInt32]())
+
+    func acquisitions() -> [UInt32: UInt64] {
+        counts.acquisitions += 1
+        return [1: 1_500_000_000, 3: 1_600_000_000]
+    }
+
+    func achievementShares(_ appIDs: [UInt32]) -> [UInt32: Double] {
+        counts.achievements += 1
+        counts.achievementApps = appIDs
+        return [2: 0.5, 3: 1]
+    }
 }
 
 private actor FilterPlatformResponses {

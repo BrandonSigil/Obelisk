@@ -83,6 +83,9 @@ final class SteamModel {
     let cloud: SteamCloudModel
     let rosetta: SteamRosettaModel
     let libraryPlatforms = SteamLibraryPlatforms()
+    /// When the account got each game and its achievements' progress, by app
+    /// ID, which load after the library.
+    let libraryRecords = LibraryRecords<UInt32>()
     /// Chat and game invitations, through the session the friends list follows.
     let chat: SteamChatModel
     /// Friends' invitations, into the running game or another.
@@ -251,6 +254,30 @@ final class SteamModel {
         libraryPlatforms.platforms[game.appId].flatMap(GamePlatform.preferred(platforms:))
     }
 
+    /// Nil until Steam told it: the release date and ratings come with the
+    /// platforms, the library date and achievements after them.
+    func libraryValue(of game: SteamGame, for sort: StorefrontLibrarySort) -> Double? {
+        let facts = libraryPlatforms.facts[game.appId]
+        switch sort {
+        case .achievements, .dateAdded: return libraryRecords.value(for: sort, of: game.appId)
+        case .releaseDate: return facts?.releaseDate.map { Double($0) }
+        case .criticScore: return facts?.metacriticScore.map { Double($0) }
+        // Steam's verdict first, then the share of positive reviews within it.
+        case .playerReviews:
+            guard let score = facts?.reviewScore else { return nil }
+            return Double(score) * 1000 + Double(facts?.reviewPercentage ?? 0)
+        case .name, .playtime, .lastPlayed, .size: return nil
+        }
+    }
+
+    func valuesRevision(for sort: StorefrontLibrarySort) -> Int {
+        switch sort {
+        case .achievements, .dateAdded: libraryRecords.revision(for: sort)
+        case .releaseDate, .criticScore, .playerReviews: libraryPlatforms.factsRevision
+        case .name, .playtime, .lastPlayed, .size: 0
+        }
+    }
+
     var libraryRevision: Int { libraryChanges &+ gameSessions.history.revision }
 
     var filterRevision: Int { libraryPlatforms.revision }
@@ -259,8 +286,26 @@ final class SteamModel {
         filter == .macOS && libraryPlatforms.isLoading ? L10n.string("ui.filter.loading_platforms") : nil
     }
 
+    /// A game Steam did not tell an order's value of goes after the others,
+    /// as one without it: only the macOS filter tells of a failure.
     var missingMetadata: String? {
         filter == .macOS && libraryPlatforms.hasFailures ? L10n.string("ui.filter.platforms_unavailable") : nil
+    }
+
+    /// Loads what Steam tells apart from the library, once it loaded through
+    /// a connection: when the account got each game, from its licenses, and
+    /// the share of each game's achievements it unlocked. The session keeps
+    /// both in the Library cache, and reads again only the achievements of
+    /// the games played since.
+    private func loadLibraryRecords() {
+        guard let session, transport != nil, !games.isEmpty else { return }
+        let appIds = games.map(\.appId), language = language
+        // The licenses also grant DLC and tools, which the library leaves out.
+        let library = Set(appIds)
+        libraryRecords.load(.dateAdded) {
+            try await session.acquisitions().filter { library.contains($0.key) }.mapValues { Double($0) }
+        }
+        libraryRecords.load(.achievements) { try await session.achievementShares(appIds: appIds, language: language) }
     }
 
     /// Restores the saved session once, then offers the QR sign-in when none
@@ -305,7 +350,9 @@ final class SteamModel {
             Dictionary(cached.compactMap { entry in value(entry).map { (entry.game.appId, $0) } },
                        uniquingKeysWith: { first, _ in first })
         }
-        libraryPlatforms.show(platforms: byApp(\.platforms), artwork: byApp(\.artwork))
+        libraryPlatforms.show(platforms: byApp(\.platforms), artwork: byApp(\.artwork), facts: byApp(\.facts))
+        libraryRecords.show(byApp { $0.addedAt.map { Double($0) } }, for: .dateAdded)
+        libraryRecords.show(byApp(\.achievementShare), for: .achievements)
     }
 
     /// Hides a cached library whose session did not restore: another account
@@ -315,6 +362,7 @@ final class SteamModel {
         cachedAccount = nil
         games = []
         libraryPlatforms.reset()
+        libraryRecords.reset()
     }
 
     func beginQR() {
@@ -448,8 +496,12 @@ final class SteamModel {
             stopFriends()
             session?.shutdown()
             // The cached library's platforms show until the reload replaces them.
-            if cachedAccount == credentials.steamId { libraryPlatforms.cancel() }
-            else { libraryPlatforms.reset() }
+            if cachedAccount == credentials.steamId {
+                libraryPlatforms.cancel()
+            } else {
+                libraryPlatforms.reset()
+                libraryRecords.reset()
+            }
             cachedAccount = nil
             session = connected
             transport = 0
@@ -579,6 +631,7 @@ final class SteamModel {
             }
             isLoadingGames = false
             libraryPlatforms.load(appIds: loaded.map(\.appId), language: language, session: session)
+            loadLibraryRecords()
         } catch {
             guard current == generation && self.transport == transport else { return }
             isLoadingGames = false
@@ -828,6 +881,7 @@ final class SteamModel {
         }
         cachedAccount = nil
         libraryPlatforms.reset()
+        libraryRecords.reset()
         rosetta.connect(accountId: nil)
         installations.signedOut()
         cloud.signedOut()
@@ -890,7 +944,7 @@ final class SteamModel {
         let request = detailGeneration
         let current = generation
         reloadDetails()
-        reloadAchievements()
+        loadAchievements(appId: game.appId, into: achievements, fresh: false)
         installations.refreshCloudIndicator()
         Task {
             do {
@@ -906,17 +960,21 @@ final class SteamModel {
         }
     }
 
+    /// Reads the game's achievements from Steam again, as the page's retry asks.
     func reloadAchievements() {
         guard let game = selectedGame else { return }
-        loadAchievements(appId: game.appId, into: achievements)
+        loadAchievements(appId: game.appId, into: achievements, fresh: true)
     }
 
-    /// Loads the achievements of `appId` into `model`, such as the overlay's
-    /// for the running game.
-    func loadAchievements(appId: UInt32, into model: GameAchievementsModel) {
+    /// Loads the achievements of `appId` into `model`: the Library cache's
+    /// while the game was not played since, unless `fresh`, as the overlay
+    /// asks for the running game.
+    func loadAchievements(appId: UInt32, into model: GameAchievementsModel, fresh: Bool = true) {
         guard let session, transport != nil else { return }
         let language = language
-        model.load { try await session.achievements(appId: appId, language: language).map(GameAchievement.init) }
+        model.load {
+            try await session.achievements(appId: appId, language: language, fresh: fresh).map(GameAchievement.init)
+        }
     }
 
     /// Remote details tell which builds the account can download, so an

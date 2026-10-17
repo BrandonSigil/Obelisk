@@ -175,10 +175,13 @@ actor WebTestSession<Store: WebStoreFixture> {
     private var disconnectContinuation: CheckedContinuation<Bool, Never>?
     private(set) var waitingForDisconnect = false
     private(set) var disconnections = 0
-    /// The locale of each achievements request, as the storefront received it.
-    private(set) var achievementLocales: [String] = []
-    /// The game each achievements request names: Epic's namespace, GOG's product.
-    private(set) var achievementGames: [String] = []
+    /// Each achievements request, as the storefront received it.
+    private(set) var achievementReads: [AchievementRead] = []
+    /// Each game's achievements, unlocked or not, by the name requests give
+    /// it; a game not named has one unlocked of two.
+    private var achievementStates: [String: [Bool]] = [:]
+    /// The games whose achievements request fails.
+    private var failingAchievements: Set<String> = []
 
     init(credentials: Store.Credentials, games: [Store.Game], rotated: Store.Credentials? = nil,
          playtimes: [Store.Playtime] = []) {
@@ -292,10 +295,42 @@ actor WebTestSession<Store: WebStoreFixture> {
         return Store.details(bytes: nil)
     }
 
-    private func recordAchievements(of game: String, locale: String) {
-        achievementGames.append(game)
-        achievementLocales.append(locale)
+    func setAchievements(_ states: [String: [Bool]], failing: Set<String> = []) {
+        achievementStates = states
+        failingAchievements = failing
     }
+
+    /// Records the request, then tells which of each game's achievements
+    /// are unlocked, but the `failing` games'; it throws when it could tell
+    /// none.
+    private func readAchievements(_ ids: [String], locale: String, fresh: Bool) throws -> [String: [Bool]] {
+        achievementReads.append(AchievementRead(ids: ids, locale: locale, fresh: fresh))
+        let told = ids.filter { !failingAchievements.contains($0) }.map { ($0, achievementStates[$0] ?? [true, false]) }
+        if told.isEmpty && !ids.isEmpty { throw Store.network }
+        return Dictionary(told, uniquingKeysWith: { first, _ in first })
+    }
+
+    fileprivate func readAchievements(of id: String, locale: String, fresh: Bool) throws -> [LibraryAchievement] {
+        let states = try readAchievements([id], locale: locale, fresh: fresh)[id] ?? []
+        return states.enumerated().map { index, unlocked in
+            LibraryAchievement(id: "\(index)", name: "Achievement \(index)", description: "", iconUrl: "",
+                               hidden: false, unlocked: unlocked, unlockedAt: unlocked ? 1_790_000_000 : nil)
+        }
+    }
+
+    fileprivate func readAchievementShares(_ ids: [String], locale: String) throws -> [String: Double] {
+        try readAchievements(ids, locale: locale, fresh: false).compactMapValues { states in
+            states.isEmpty ? nil : Double(states.count { $0 }) / Double(states.count)
+        }
+    }
+}
+
+/// One achievements request: the games it names (Epic's namespaces, GOG's
+/// products), its locale, and whether it skips the Library cache.
+struct AchievementRead: Equatable, Sendable {
+    let ids: [String]
+    let locale: String
+    let fresh: Bool
 }
 
 extension WebTestSession: EpicSessionProtocol where Store == EpicGames {
@@ -304,14 +339,11 @@ extension WebTestSession: EpicSessionProtocol where Store == EpicGames {
                                                    platform: platform))
     }
     func playtimes() async throws -> [EpicPlaytime] { try await answerPlaytimes() }
-    func achievements(namespace: String, locale: String) async throws -> [EpicAchievement] {
-        recordAchievements(of: namespace, locale: locale)
-        return [
-            EpicAchievement(id: "a", name: "First", description: "", iconUrl: "", hidden: false, unlocked: true,
-                            unlockDate: "2026-09-21T12:00:00Z"),
-            EpicAchievement(id: "b", name: "Second", description: "", iconUrl: "", hidden: true, unlocked: false,
-                            unlockDate: nil),
-        ]
+    func achievements(namespace: String, locale: String, fresh: Bool) async throws -> [LibraryAchievement] {
+        try readAchievements(of: namespace, locale: locale, fresh: fresh)
+    }
+    func achievementShares(namespaces: [String], locale: String) async throws -> [String: Double] {
+        try readAchievementShares(namespaces, locale: locale)
     }
 
     func startFriends() async {}
@@ -331,14 +363,11 @@ extension WebTestSession: GogSessionProtocol where Store == GogGames {
         playtimeRequests.append(productIds)
         return try await answerPlaytimes()
     }
-    func achievements(productId: String, locale: String) async throws -> [GogAchievement] {
-        recordAchievements(of: productId, locale: locale)
-        return [
-            GogAchievement(id: "a", name: "First", description: "", iconUrl: "", hidden: false, unlocked: true,
-                           unlockTime: 1_790_000_000),
-            GogAchievement(id: "b", name: "Second", description: "", iconUrl: "", hidden: true, unlocked: false,
-                           unlockTime: nil),
-        ]
+    func achievements(productId: String, locale: String, fresh: Bool) async throws -> [LibraryAchievement] {
+        try readAchievements(of: productId, locale: locale, fresh: fresh)
+    }
+    func achievementShares(productIds: [String], locale: String) async throws -> [String: Double] {
+        try readAchievementShares(productIds, locale: locale)
     }
     nonisolated func avatarUrl() -> String? { GogGames.expectedAvatar?.absoluteString }
 }

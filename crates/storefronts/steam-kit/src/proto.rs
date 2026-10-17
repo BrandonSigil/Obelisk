@@ -353,6 +353,8 @@ pub(crate) struct LicenseList {
 pub(crate) struct License {
     #[prost(uint32, tag = "1")]
     pub package_id: u32,
+    #[prost(fixed32, tag = "2")]
+    pub time_created: u32,
     #[prost(uint32, tag = "7")]
     pub flags: u32,
     #[prost(uint64, tag = "17")]

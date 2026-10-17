@@ -1,6 +1,6 @@
 //! PICS product metadata: what Steam declares about an app, its depots and
 //! launch options, and the rights a license package grants.
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use super::CmError;
 use crate::kv;
@@ -33,17 +33,31 @@ impl AppInfo {
 pub struct ContentLicenses {
     pub apps: BTreeSet<u32>,
     pub depots: BTreeSet<u32>,
+    /// When the account got each app: the creation of its oldest license
+    /// that grants it, in seconds since the Unix epoch.
+    pub acquired: BTreeMap<u32, u32>,
 }
 
 impl ContentLicenses {
-    pub(super) fn extend_package(&mut self, root: &kv::Kv) {
-        for (field, ids) in [("appids", &mut self.apps), ("depotids", &mut self.depots)] {
-            if let Some(entries) = root.get(field) {
-                ids.extend(entries.children().iter().filter_map(|(_, value)| {
-                    value.text()?.parse::<u32>().ok().filter(|id| *id > 0)
-                }));
+    /// Adds what a package grants, under a license created at `created`
+    /// when Steam told it.
+    pub(super) fn extend_package(&mut self, root: &kv::Kv, created: Option<u32>) {
+        let ids = |field| {
+            root.get(field).into_iter().flat_map(|entries| {
+                entries
+                    .children()
+                    .iter()
+                    .filter_map(|(_, value)| value.text()?.parse::<u32>().ok().filter(|id| *id > 0))
+            })
+        };
+        for app in ids("appids") {
+            self.apps.insert(app);
+            if let Some(created) = created {
+                let acquired = self.acquired.entry(app).or_insert(created);
+                *acquired = (*acquired).min(created);
             }
         }
+        self.depots.extend(ids("depotids"));
     }
 }
 
@@ -228,7 +242,7 @@ mod tests {
     fn package_entitlements_preserve_app_and_depot_namespaces() {
         let package = kv::text(br#""appids" { "0" "588650" } "depotids" { "0" "588651" "1" "588652" "2" "588653" "3" "588654" }"#).unwrap();
         let mut rights = ContentLicenses::default();
-        rights.extend_package(&package);
+        rights.extend_package(&package, None);
         assert_eq!(rights.apps, BTreeSet::from([588650]));
         assert_eq!(
             rights.depots,
@@ -238,12 +252,25 @@ mod tests {
         rights.extend_package(
             &kv::text(br#""appids" { "0" "99" } "depotids" { "0" "1046443" "1" "0" "2" "bad" }"#)
                 .unwrap(),
+            None,
         );
         assert!(rights.depots.contains(&1046443));
         assert!(rights.apps.contains(&99));
         assert!(!rights.apps.contains(&1046443));
         assert!(!rights.depots.contains(&99));
         assert!(!rights.depots.contains(&0));
+    }
+
+    #[test]
+    fn an_app_is_acquired_with_its_oldest_license() {
+        let bundle = kv::text(br#""appids" { "0" "10" "1" "20" }"#).unwrap();
+        let single = kv::text(br#""appids" { "0" "10" }"#).unwrap();
+        let mut rights = ContentLicenses::default();
+        rights.extend_package(&single, Some(2_000));
+        rights.extend_package(&bundle, Some(1_000));
+        rights.extend_package(&kv::text(br#""appids" { "0" "30" }"#).unwrap(), None);
+        assert_eq!(rights.acquired, BTreeMap::from([(10, 1_000), (20, 1_000)]));
+        assert!(rights.apps.contains(&30));
     }
 
     #[test]

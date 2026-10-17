@@ -30,6 +30,9 @@ pub struct Game {
     pub windows: bool,
     pub macos: bool,
     pub info: GameInfo,
+    /// When the game joined the account's library, in seconds since the Unix
+    /// epoch.
+    pub added_at: Option<u64>,
     /// Everything GOG returned for the game: its Galaxy library record,
     /// `release`, and its gamesdb release or store product, `catalog`.
     pub metadata: Value,
@@ -74,7 +77,7 @@ impl GameInfo {
             publishers: names(&game["publishers"]),
             release_date: [&catalog["first_release_date"], &game["first_release_date"]]
                 .into_iter()
-                .find_map(|date| date.as_str().and_then(crate::http::unix_seconds)),
+                .find_map(|date| date.as_str().and_then(obelisk_core::date::unix_seconds)),
             genres: names(&game["genres"]),
             rating: game["aggregated_rating"]
                 .as_f64()
@@ -199,6 +202,7 @@ async fn describe(
     record: Value,
 ) -> Result<Option<Game>, GogError> {
     let id = &release.external_id;
+    let added_at = added_at(&record);
     if let Some(catalog) = gamesdb(api, access_token, &release).await? {
         let kind = catalog["type"].as_str().unwrap_or_default();
         let visible = catalog["game"]["visible_in_library"].as_bool() != Some(false);
@@ -222,6 +226,7 @@ async fn describe(
             windows: systems.contains(&"windows"),
             macos: systems.contains(&"osx"),
             info: GameInfo::of_release(&catalog),
+            added_at,
             metadata: metadata(record, catalog),
         }));
     }
@@ -243,11 +248,22 @@ async fn describe(
         info: GameInfo {
             release_date: product["release_date"]
                 .as_str()
-                .and_then(crate::http::unix_seconds),
+                .and_then(obelisk_core::date::unix_seconds),
             ..GameInfo::default()
         },
+        added_at,
         metadata: metadata(record, product),
     }))
+}
+
+/// When a Galaxy library record says the account got its product: the
+/// earlier of its creation and its ownership, in seconds since the Unix epoch.
+fn added_at(record: &Value) -> Option<u64> {
+    [&record["date_created"], &record["owned_since"]]
+        .into_iter()
+        .filter_map(Value::as_u64)
+        .filter(|seconds| *seconds > 0)
+        .min()
 }
 
 /// What the library cache keeps of a game beyond what it shows: its Galaxy

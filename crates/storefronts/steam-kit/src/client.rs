@@ -1,7 +1,7 @@
 //! Account-scoped orchestration. Authentication, CM messages and content formats
 //! remain independently usable; no UI or platform keychain code lives here.
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{BTreeMap, HashMap, HashSet},
     path::Path,
     sync::{Arc, Mutex, PoisonError},
     time::{Duration, Instant},
@@ -208,9 +208,24 @@ impl Client {
         app_id: u32,
         language: &str,
     ) -> Result<Vec<Achievement>, ClientError> {
-        let schema = self.cm.game_achievements(app_id, language).await?;
+        // A game without achievements needs no request of the player's.
+        let Some(schema) = self
+            .cm
+            .game_achievements(app_id, language)
+            .await?
+            .filter(|schema| !schema.is_empty())
+        else {
+            return Ok(Vec::new());
+        };
         let user = self.cm.user_achievements(app_id).await?;
         crate::cm::achievements::combine(app_id, schema, user).map_err(Into::into)
+    }
+
+    /// When the account got each app its licenses grant, in seconds since
+    /// the Unix epoch. It expands the licenses through PICS, as a download
+    /// does, once until the library loads again.
+    pub async fn acquisitions(&self) -> Result<BTreeMap<u32, u32>, ClientError> {
+        Ok(self.licensed_content().await?.acquired.clone())
     }
     #[cfg(test)]
     pub(crate) fn with_test_connection(cm: SteamConnection) -> Self {
@@ -1253,6 +1268,7 @@ mod tests {
         ContentLicenses {
             apps: apps.into_iter().collect(),
             depots: depots.into_iter().collect(),
+            ..ContentLicenses::default()
         }
     }
 

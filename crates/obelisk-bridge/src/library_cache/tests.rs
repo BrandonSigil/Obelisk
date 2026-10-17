@@ -47,6 +47,7 @@ fn epic(app_name: &str) -> epic_kit::client::Game {
         developer: "Psyonix".into(),
         windows: true,
         macos: false,
+        added_at: Some(1_590_687_234),
         metadata: json!({"catalogItems": {"item": {"id": "item"}}}),
     }
 }
@@ -88,8 +89,14 @@ fn a_steam_session_keeps_every_field_steam_returned_and_each_games_platforms() {
                 header: Some("31bac6/header_french.jpg".into()),
                 ..Default::default()
             }),
+            facts: Some(SteamGameFacts {
+                review_score: Some(9),
+                ..Default::default()
+            }),
+            added_at: None,
+            achievement_share: None,
         }],
-        "a reloaded library keeps the platforms and artwork loaded before"
+        "a reloaded library keeps the platforms, artwork and facts loaded before"
     );
     let saved = &file(&cache, &directory)["steam"]["7"][0];
     assert_eq!(
@@ -217,10 +224,20 @@ fn a_cache_written_by_obelisk_before_still_shows() {
             game: steam_game(620, "Portal 2"),
             platforms: Some(vec!["macos".into()]),
             artwork: Some(SteamGameArtwork::default()),
+            facts: Some(SteamGameFacts::default()),
+            added_at: None,
+            achievement_share: None,
         }]
     );
     let cached = cache.epic_library("epic-a".into());
-    assert_eq!(cached[0].game, EpicGame::from(epic("rocket")));
+    assert_eq!(
+        cached[0].game,
+        EpicGame {
+            added_at: None,
+            ..EpicGame::from(epic("rocket"))
+        },
+        "an entry written before games had a library date has none"
+    );
     assert_eq!(cached[0].playtime_seconds, Some(3600));
     assert_eq!(cache.launches().len(), 1);
 }
@@ -240,6 +257,7 @@ fn gog(product_id: &str) -> gog_kit::client::Game {
             rating: Some(75),
             ..Default::default()
         },
+        added_at: Some(1_500_000_000),
         metadata: json!({"catalog": {"type": "game"}}),
     }
 }
@@ -296,4 +314,187 @@ fn a_gog_game_cached_before_its_page_still_shows() {
     let cached = cache(&directory).gog_library("7".into());
     assert_eq!(cached[0].game.title, "Old");
     assert!(cached[0].game.developers.is_empty());
+}
+
+fn achievement(id: &str, unlocked: bool) -> LibraryAchievement {
+    LibraryAchievement {
+        id: id.into(),
+        name: format!("Achievement {id}"),
+        description: String::new(),
+        icon_url: String::new(),
+        hidden: false,
+        unlocked,
+        unlocked_at: unlocked.then_some(1_790_000_000),
+    }
+}
+
+fn read(id: &str, unlocked: bool) -> GameAchievements {
+    GameAchievements {
+        id: id.into(),
+        achievements: vec![achievement("a", unlocked)],
+    }
+}
+
+/// What a storefront tells of a game it was asked.
+type Told = Result<Vec<LibraryAchievement>, &'static str>;
+
+/// How `achievements` asks the storefront: each id it reads, told unless it
+/// is `failing`.
+fn storefront(
+    asked: &Mutex<Vec<String>>,
+    failing: &'static [&'static str],
+) -> impl Fn(String) -> std::future::Ready<Told> {
+    move |id: String| {
+        let told = match failing.contains(&id.as_str()) {
+            true => Err("unavailable"),
+            false => Ok(vec![achievement("a", true)]),
+        };
+        asked.lock().unwrap().push(id);
+        std::future::ready(told)
+    }
+}
+
+#[test]
+fn a_steam_library_keeps_its_dates_and_achievements_across_loads() {
+    let directory = TempDir::new().unwrap();
+    let cache = cache(&directory);
+    let library = cache.steam(7);
+    library.games(vec![owned(620, "Portal 2"), owned(570, "Dota 2")]);
+    library.acquisitions(&BTreeMap::from([(620, 1_300_000_000)]));
+    library.achievements().keep(&[read("620", true)], "french");
+
+    library.games(vec![owned(620, "Portal 2"), owned(570, "Dota 2")]);
+    let cached = cache.steam_library(7, "english".into());
+    let read: Vec<_> = cached
+        .iter()
+        .map(|cached| {
+            (
+                cached.game.app_id,
+                cached.added_at,
+                cached.achievement_share,
+            )
+        })
+        .collect();
+    assert_eq!(
+        read,
+        [(620, Some(1_300_000_000), Some(1.0)), (570, None, None),]
+    );
+}
+
+#[test]
+fn a_games_achievements_are_read_again_once_it_was_played_or_in_another_language() {
+    let directory = TempDir::new().unwrap();
+    let cache = cache(&directory);
+    let library = cache.gog("7");
+    library.games(vec![gog("1"), gog("2"), gog("3"), gog("4")]);
+    library.playtimes(&BTreeMap::from([
+        ("1".to_owned(), 60),
+        ("2".to_owned(), 60),
+    ]));
+    let ids = ["1", "2", "3", "4", "5"].map(String::from);
+    let (current, stale) = library.achievements().current(ids.to_vec(), "fr-FR");
+    assert!(current.is_empty());
+    assert_eq!(stale, ids, "nothing was read yet");
+
+    library.achievements().keep(
+        &[read("1", true), read("2", false), read("3", true)],
+        "fr-FR",
+    );
+    // 1 was played on another computer, Obelisk launched 3 since.
+    library.playtimes(&BTreeMap::from([
+        ("1".to_owned(), 90),
+        ("2".to_owned(), 60),
+    ]));
+    cache.record_launch(GameLaunch {
+        game: GameIdentity::Gog {
+            account_id: "7".into(),
+            product_id: "3".into(),
+        },
+        at: 4_000_000_000,
+    });
+    library.games(vec![gog("1"), gog("2"), gog("3"), gog("4")]);
+
+    let (current, stale) = library.achievements().current(ids.to_vec(), "fr-FR");
+    assert_eq!(current, [read("2", false)]);
+    assert_eq!(stale, ["1", "3", "4", "5"].map(String::from));
+    let (current, _) = library.achievements().current(ids.to_vec(), "en-US");
+    assert!(
+        current.is_empty(),
+        "another language reads every game again"
+    );
+    assert_eq!(
+        cache.gog_library("7".into())[0].achievement_share,
+        Some(1.0),
+        "what was read shows until it is read again"
+    );
+}
+
+#[test]
+fn games_sharing_an_epic_sandbox_are_read_once() {
+    let directory = TempDir::new().unwrap();
+    let cache = cache(&directory);
+    let library = cache.epic("epic-a");
+    library.games(vec![epic("rocket"), epic("rocket-bonus")]);
+    library.achievements().keep(&[read("space", true)], "fr");
+    let (current, stale) = library
+        .achievements()
+        .current(vec!["space".to_owned()], "fr");
+    assert_eq!(current, [read("space", true)]);
+    assert!(stale.is_empty());
+    let cached = cache.epic_library("epic-a".into());
+    assert!(
+        cached
+            .iter()
+            .all(|cached| cached.achievement_share == Some(1.0))
+    );
+}
+
+#[tokio::test]
+async fn achievements_come_from_the_library_unless_fresh_and_fail_only_when_none_could_be_told() {
+    let directory = TempDir::new().unwrap();
+    let cache = cache(&directory);
+    let library = cache.gog("7");
+    library.games(vec![gog("1"), gog("2")]);
+    let asked = Mutex::new(Vec::new());
+    let ids = vec!["1".to_owned(), "2".to_owned()];
+    let read = |ids: Vec<String>, fresh, failing| {
+        achievements(
+            Some(library.achievements()),
+            ids,
+            "fr-FR",
+            fresh,
+            2,
+            storefront(&asked, failing),
+        )
+    };
+
+    let first = read(ids.clone(), false, &["2"]).await.unwrap();
+    assert_eq!(
+        first
+            .iter()
+            .map(|game| game.id.as_str())
+            .collect::<Vec<_>>(),
+        ["1"],
+        "a failed game is left out"
+    );
+    let again = read(ids.clone(), false, &[]).await.unwrap();
+    assert_eq!(again.len(), 2);
+    read(vec!["1".into()], true, &[]).await.unwrap();
+    assert_eq!(
+        *asked.lock().unwrap(),
+        ["1", "2", "2", "1"],
+        "only the game read last time failed is asked again, and a fresh read asks anyway"
+    );
+    assert_eq!(
+        achievements(
+            None,
+            vec!["2".to_owned()],
+            "fr-FR",
+            false,
+            1,
+            storefront(&asked, &["2"])
+        )
+        .await,
+        Err("unavailable")
+    );
 }

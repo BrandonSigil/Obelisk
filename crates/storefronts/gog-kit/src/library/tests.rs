@@ -102,3 +102,17 @@ fn a_gamesdb_release_tells_the_games_page() {
         "an unrated game has no rating"
     );
 }
+
+#[test]
+fn a_game_joins_the_library_when_its_record_was_created_or_owned_first() {
+    assert_eq!(
+        added_at(&json!({"date_created": 1_590_000_000, "owned_since": 1_500_000_000})),
+        Some(1_500_000_000)
+    );
+    assert_eq!(
+        added_at(&json!({"date_created": 1_590_000_000, "owned_since": null})),
+        Some(1_590_000_000)
+    );
+    assert_eq!(added_at(&json!({"date_created": 0})), None);
+    assert_eq!(added_at(&json!({})), None);
+}

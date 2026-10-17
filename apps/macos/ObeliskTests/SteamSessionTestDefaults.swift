@@ -4,10 +4,10 @@ import Foundation
 // Older library/download fixtures have no social events. Suspend until the
 // model cancels instead of making a network request or polling a fake cache.
 extension SteamSessionProtocol {
-    func achievements(appId: UInt32, language: String) async throws -> [SteamAchievement] {
-        throw CocoaError(.featureUnsupported)
-    }
+    func achievements(appId: UInt32, language: String, fresh: Bool) async throws -> [LibraryAchievement] { [] }
+    func achievementShares(appIds: [UInt32], language: String) async throws -> [UInt32: Double] { [:] }
     func platforms(appIds: [UInt32], language: String) async throws -> [SteamGamePlatforms] { [] }
+    func acquisitions() async throws -> [UInt32: UInt64] { [:] }
     func webCookies() async throws -> [SteamWebCookie] { [] }
     #if DEBUG
     func cloudAutocloudMetadata() async throws -> String {
@@ -102,7 +102,6 @@ extension EpicSessionProtocol {
         saveEveryRotation(credentials) { await session.nextCredentialsRevision(afterRevision: $0) }
     }
 
-    func achievements(namespace: String, locale: String) async throws -> [EpicAchievement] {
-        throw CocoaError(.featureUnsupported)
-    }
+    func achievements(namespace: String, locale: String, fresh: Bool) async throws -> [LibraryAchievement] { [] }
+    func achievementShares(namespaces: [String], locale: String) async throws -> [String: Double] { [:] }
 }

@@ -1554,7 +1554,21 @@ public func FfiConverterTypeDownloads_lower(_ value: Downloads) -> UInt64 {
 
 public protocol EpicSessionProtocol: AnyObject, Sendable {
     
-    func achievements(namespace: String, locale: String) async throws  -> [EpicAchievement]
+    /**
+     * The share of each of `namespaces`' achievements the account unlocked,
+     * by namespace, as `achievements` reads them: none for a sandbox without
+     * achievements or that Epic did not answer for. It fails only when no
+     * sandbox could be told.
+     */
+    func achievementShares(namespaces: [String], locale: String) async throws  -> [String: Double]
+    
+    /**
+     * The game's achievements in `locale`, such as the game page's: the
+     * library's while the game was not played since they were read, unless
+     * `fresh`, else Epic's, which the library then keeps. Epic tells them by
+     * sandbox, which several games may share.
+     */
+    func achievements(namespace: String, locale: String, fresh: Bool) async throws  -> [LibraryAchievement]
     
     func credentials() async throws  -> EpicCredentials
     
@@ -1684,18 +1698,46 @@ public static func signIn(authorizationCode: String, library: LibraryCache?)asyn
     
 
     
-open func achievements(namespace: String, locale: String)async throws  -> [EpicAchievement]  {
+    /**
+     * The share of each of `namespaces`' achievements the account unlocked,
+     * by namespace, as `achievements` reads them: none for a sandbox without
+     * achievements or that Epic did not answer for. It fails only when no
+     * sandbox could be told.
+     */
+open func achievementShares(namespaces: [String], locale: String)async throws  -> [String: Double]  {
     return
         try  await uniffiRustCallAsync(
             rustFutureFunc: {
-                uniffi_obelisk_bridge_fn_method_epicsession_achievements(
-                        self.uniffiCloneHandle(),FfiConverterString.lower(namespace),FfiConverterString.lower(locale)
+                uniffi_obelisk_bridge_fn_method_epicsession_achievement_shares(
+                        self.uniffiCloneHandle(),FfiConverterSequenceString.lower(namespaces),FfiConverterString.lower(locale)
                 )
             },
             pollFunc: ffi_obelisk_bridge_rust_future_poll_rust_buffer,
             completeFunc: ffi_obelisk_bridge_rust_future_complete_rust_buffer,
             freeFunc: ffi_obelisk_bridge_rust_future_free_rust_buffer,
-            liftFunc: FfiConverterSequenceTypeEpicAchievement.lift,
+            liftFunc: FfiConverterDictionaryStringDouble.lift,
+            errorHandler: FfiConverterTypeEpicError_lift
+        )
+}
+    
+    /**
+     * The game's achievements in `locale`, such as the game page's: the
+     * library's while the game was not played since they were read, unless
+     * `fresh`, else Epic's, which the library then keeps. Epic tells them by
+     * sandbox, which several games may share.
+     */
+open func achievements(namespace: String, locale: String, fresh: Bool)async throws  -> [LibraryAchievement]  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_obelisk_bridge_fn_method_epicsession_achievements(
+                        self.uniffiCloneHandle(),FfiConverterString.lower(namespace),FfiConverterString.lower(locale),FfiConverterBool.lower(fresh)
+                )
+            },
+            pollFunc: ffi_obelisk_bridge_rust_future_poll_rust_buffer,
+            completeFunc: ffi_obelisk_bridge_rust_future_complete_rust_buffer,
+            freeFunc: ffi_obelisk_bridge_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterSequenceTypeLibraryAchievement.lift,
             errorHandler: FfiConverterTypeEpicError_lift
         )
 }
@@ -1962,9 +2004,20 @@ public func FfiConverterTypeEpicSession_lower(_ value: EpicSession) -> UInt64 {
 public protocol GogSessionProtocol: AnyObject, Sendable {
     
     /**
-     * The game's achievements, named in `locale`, such as `fr-FR`.
+     * The share of each of `product_ids`' achievements the account unlocked,
+     * by product, as `achievements` reads them: none for a game without
+     * achievements or that GOG did not answer for. It fails only when no
+     * game could be told.
      */
-    func achievements(productId: String, locale: String) async throws  -> [GogAchievement]
+    func achievementShares(productIds: [String], locale: String) async throws  -> [String: Double]
+    
+    /**
+     * The game's achievements in `locale`, such as `fr-FR`, as the game
+     * page reads them: the library's while the game was not played since
+     * they were read, unless `fresh`, else GOG's, which the library then
+     * keeps.
+     */
+    func achievements(productId: String, locale: String, fresh: Bool) async throws  -> [LibraryAchievement]
     
     /**
      * The account's avatar, as its GOG profile shows it.
@@ -2090,20 +2143,45 @@ public static func signIn(authorizationCode: String, library: LibraryCache?)asyn
 
     
     /**
-     * The game's achievements, named in `locale`, such as `fr-FR`.
+     * The share of each of `product_ids`' achievements the account unlocked,
+     * by product, as `achievements` reads them: none for a game without
+     * achievements or that GOG did not answer for. It fails only when no
+     * game could be told.
      */
-open func achievements(productId: String, locale: String)async throws  -> [GogAchievement]  {
+open func achievementShares(productIds: [String], locale: String)async throws  -> [String: Double]  {
     return
         try  await uniffiRustCallAsync(
             rustFutureFunc: {
-                uniffi_obelisk_bridge_fn_method_gogsession_achievements(
-                        self.uniffiCloneHandle(),FfiConverterString.lower(productId),FfiConverterString.lower(locale)
+                uniffi_obelisk_bridge_fn_method_gogsession_achievement_shares(
+                        self.uniffiCloneHandle(),FfiConverterSequenceString.lower(productIds),FfiConverterString.lower(locale)
                 )
             },
             pollFunc: ffi_obelisk_bridge_rust_future_poll_rust_buffer,
             completeFunc: ffi_obelisk_bridge_rust_future_complete_rust_buffer,
             freeFunc: ffi_obelisk_bridge_rust_future_free_rust_buffer,
-            liftFunc: FfiConverterSequenceTypeGogAchievement.lift,
+            liftFunc: FfiConverterDictionaryStringDouble.lift,
+            errorHandler: FfiConverterTypeGogError_lift
+        )
+}
+    
+    /**
+     * The game's achievements in `locale`, such as `fr-FR`, as the game
+     * page reads them: the library's while the game was not played since
+     * they were read, unless `fresh`, else GOG's, which the library then
+     * keeps.
+     */
+open func achievements(productId: String, locale: String, fresh: Bool)async throws  -> [LibraryAchievement]  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_obelisk_bridge_fn_method_gogsession_achievements(
+                        self.uniffiCloneHandle(),FfiConverterString.lower(productId),FfiConverterString.lower(locale),FfiConverterBool.lower(fresh)
+                )
+            },
+            pollFunc: ffi_obelisk_bridge_rust_future_poll_rust_buffer,
+            completeFunc: ffi_obelisk_bridge_rust_future_complete_rust_buffer,
+            freeFunc: ffi_obelisk_bridge_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterSequenceTypeLibraryAchievement.lift,
             errorHandler: FfiConverterTypeGogError_lift
         )
 }
@@ -2503,7 +2581,7 @@ public protocol LibraryCacheProtocol: AnyObject, Sendable {
     
     /**
      * The account's last Steam library, empty when it has none, with each
-     * game's artwork in `language`.
+     * game's artwork in `language` and what the library orders by.
      */
     func steamLibrary(steamId: UInt64, language: String)  -> [CachedSteamGame]
     
@@ -2654,7 +2732,7 @@ open func recordLaunch(launch: GameLaunch)  {try! rustCall() {
     
     /**
      * The account's last Steam library, empty when it has none, with each
-     * game's artwork in `language`.
+     * game's artwork in `language` and what the library orders by.
      */
 open func steamLibrary(steamId: UInt64, language: String) -> [CachedSteamGame]  {
     return try!  FfiConverterSequenceTypeCachedSteamGame.lift(try! rustCall() {
@@ -3636,7 +3714,26 @@ public func FfiConverterTypeSteamLogin_lower(_ value: SteamLogin) -> UInt64 {
 
 public protocol SteamSessionProtocol: AnyObject, Sendable {
     
-    func achievements(appId: UInt32, language: String) async throws  -> [SteamAchievement]
+    /**
+     * The share of each of `app_ids`' achievements the account unlocked, by
+     * app ID, as `achievements` reads them: none for a game without
+     * achievements or that Steam did not answer for. It fails only when no
+     * game could be told.
+     */
+    func achievementShares(appIds: [UInt32], language: String) async throws  -> [UInt32: Double]
+    
+    /**
+     * The game's achievements in `language`, such as the game page's: the
+     * library's while the game was not played since they were read, unless
+     * `fresh`, else Steam's, which the library then keeps.
+     */
+    func achievements(appId: UInt32, language: String, fresh: Bool) async throws  -> [LibraryAchievement]
+    
+    /**
+     * When the account got each game its licenses grant, in seconds since
+     * the Unix epoch, by app ID. It expands every license through PICS.
+     */
+    func acquisitions() async throws  -> [UInt32: UInt64]
     
     func cloudAutocloudMetadata() async throws  -> String
     
@@ -3818,18 +3915,65 @@ public static func connect(credentials: SteamCredentials, library: LibraryCache?
     
 
     
-open func achievements(appId: UInt32, language: String)async throws  -> [SteamAchievement]  {
+    /**
+     * The share of each of `app_ids`' achievements the account unlocked, by
+     * app ID, as `achievements` reads them: none for a game without
+     * achievements or that Steam did not answer for. It fails only when no
+     * game could be told.
+     */
+open func achievementShares(appIds: [UInt32], language: String)async throws  -> [UInt32: Double]  {
     return
         try  await uniffiRustCallAsync(
             rustFutureFunc: {
-                uniffi_obelisk_bridge_fn_method_steamsession_achievements(
-                        self.uniffiCloneHandle(),FfiConverterUInt32.lower(appId),FfiConverterString.lower(language)
+                uniffi_obelisk_bridge_fn_method_steamsession_achievement_shares(
+                        self.uniffiCloneHandle(),FfiConverterSequenceUInt32.lower(appIds),FfiConverterString.lower(language)
                 )
             },
             pollFunc: ffi_obelisk_bridge_rust_future_poll_rust_buffer,
             completeFunc: ffi_obelisk_bridge_rust_future_complete_rust_buffer,
             freeFunc: ffi_obelisk_bridge_rust_future_free_rust_buffer,
-            liftFunc: FfiConverterSequenceTypeSteamAchievement.lift,
+            liftFunc: FfiConverterDictionaryUInt32Double.lift,
+            errorHandler: FfiConverterTypeSteamError_lift
+        )
+}
+    
+    /**
+     * The game's achievements in `language`, such as the game page's: the
+     * library's while the game was not played since they were read, unless
+     * `fresh`, else Steam's, which the library then keeps.
+     */
+open func achievements(appId: UInt32, language: String, fresh: Bool)async throws  -> [LibraryAchievement]  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_obelisk_bridge_fn_method_steamsession_achievements(
+                        self.uniffiCloneHandle(),FfiConverterUInt32.lower(appId),FfiConverterString.lower(language),FfiConverterBool.lower(fresh)
+                )
+            },
+            pollFunc: ffi_obelisk_bridge_rust_future_poll_rust_buffer,
+            completeFunc: ffi_obelisk_bridge_rust_future_complete_rust_buffer,
+            freeFunc: ffi_obelisk_bridge_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterSequenceTypeLibraryAchievement.lift,
+            errorHandler: FfiConverterTypeSteamError_lift
+        )
+}
+    
+    /**
+     * When the account got each game its licenses grant, in seconds since
+     * the Unix epoch, by app ID. It expands every license through PICS.
+     */
+open func acquisitions()async throws  -> [UInt32: UInt64]  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_obelisk_bridge_fn_method_steamsession_acquisitions(
+                        self.uniffiCloneHandle()
+                )
+            },
+            pollFunc: ffi_obelisk_bridge_rust_future_poll_rust_buffer,
+            completeFunc: ffi_obelisk_bridge_rust_future_complete_rust_buffer,
+            freeFunc: ffi_obelisk_bridge_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterDictionaryUInt32UInt64.lift,
             errorHandler: FfiConverterTypeSteamError_lift
         )
 }
@@ -4715,17 +4859,28 @@ public func FfiConverterTypeStorefrontSessions_lower(_ value: StorefrontSessions
 
 
 /**
- * An Epic game of the cache, with its playtime once Epic told it.
+ * An Epic game of the cache, with its playtime and achievements once Epic
+ * told them.
  */
 public struct CachedEpicGame: Equatable, Hashable {
     public var game: EpicGame
     public var playtimeSeconds: UInt64?
+    /**
+     * The share of its achievements unlocked when they were last read;
+     * none for a game without any.
+     */
+    public var achievementShare: Double?
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(game: EpicGame, playtimeSeconds: UInt64?) {
+    public init(game: EpicGame, playtimeSeconds: UInt64?, 
+        /**
+         * The share of its achievements unlocked when they were last read;
+         * none for a game without any.
+         */achievementShare: Double? = nil) {
         self.game = game
         self.playtimeSeconds = playtimeSeconds
+        self.achievementShare = achievementShare
     }
 
     
@@ -4745,13 +4900,15 @@ public struct FfiConverterTypeCachedEpicGame: FfiConverterRustBuffer {
         return
             try CachedEpicGame(
                 game: FfiConverterTypeEpicGame.read(from: &buf), 
-                playtimeSeconds: FfiConverterOptionUInt64.read(from: &buf)
+                playtimeSeconds: FfiConverterOptionUInt64.read(from: &buf), 
+                achievementShare: FfiConverterOptionDouble.read(from: &buf)
         )
     }
 
     public static func write(_ value: CachedEpicGame, into buf: inout [UInt8]) {
         FfiConverterTypeEpicGame.write(value.game, into: &buf)
         FfiConverterOptionUInt64.write(value.playtimeSeconds, into: &buf)
+        FfiConverterOptionDouble.write(value.achievementShare, into: &buf)
     }
 }
 
@@ -4772,17 +4929,28 @@ public func FfiConverterTypeCachedEpicGame_lower(_ value: CachedEpicGame) -> Rus
 
 
 /**
- * A GOG game of the cache, with its playtime once GOG told it.
+ * A GOG game of the cache, with its playtime and achievements once GOG
+ * told them.
  */
 public struct CachedGogGame: Equatable, Hashable {
     public var game: GogGame
     public var playtimeMinutes: UInt64?
+    /**
+     * The share of its achievements unlocked when they were last read;
+     * none for a game without any.
+     */
+    public var achievementShare: Double?
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(game: GogGame, playtimeMinutes: UInt64?) {
+    public init(game: GogGame, playtimeMinutes: UInt64?, 
+        /**
+         * The share of its achievements unlocked when they were last read;
+         * none for a game without any.
+         */achievementShare: Double? = nil) {
         self.game = game
         self.playtimeMinutes = playtimeMinutes
+        self.achievementShare = achievementShare
     }
 
     
@@ -4802,13 +4970,15 @@ public struct FfiConverterTypeCachedGogGame: FfiConverterRustBuffer {
         return
             try CachedGogGame(
                 game: FfiConverterTypeGogGame.read(from: &buf), 
-                playtimeMinutes: FfiConverterOptionUInt64.read(from: &buf)
+                playtimeMinutes: FfiConverterOptionUInt64.read(from: &buf), 
+                achievementShare: FfiConverterOptionDouble.read(from: &buf)
         )
     }
 
     public static func write(_ value: CachedGogGame, into buf: inout [UInt8]) {
         FfiConverterTypeGogGame.write(value.game, into: &buf)
         FfiConverterOptionUInt64.write(value.playtimeMinutes, into: &buf)
+        FfiConverterOptionDouble.write(value.achievementShare, into: &buf)
     }
 }
 
@@ -4829,20 +4999,40 @@ public func FfiConverterTypeCachedGogGame_lower(_ value: CachedGogGame) -> RustB
 
 
 /**
- * A Steam game of the cache, with its platforms and library artwork once
- * Steam told them.
+ * A Steam game of the cache, with its platforms, library artwork and what
+ * the library orders by once Steam told them.
  */
 public struct CachedSteamGame: Equatable, Hashable {
     public var game: SteamGame
     public var platforms: [String]?
     public var artwork: SteamGameArtwork?
+    public var facts: SteamGameFacts?
+    /**
+     * When the game joined the library, in seconds since the Unix epoch.
+     */
+    public var addedAt: UInt64?
+    /**
+     * The share of its achievements unlocked when they were last read;
+     * none for a game without any.
+     */
+    public var achievementShare: Double?
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(game: SteamGame, platforms: [String]?, artwork: SteamGameArtwork? = nil) {
+    public init(game: SteamGame, platforms: [String]?, artwork: SteamGameArtwork? = nil, facts: SteamGameFacts? = nil, 
+        /**
+         * When the game joined the library, in seconds since the Unix epoch.
+         */addedAt: UInt64? = nil, 
+        /**
+         * The share of its achievements unlocked when they were last read;
+         * none for a game without any.
+         */achievementShare: Double? = nil) {
         self.game = game
         self.platforms = platforms
         self.artwork = artwork
+        self.facts = facts
+        self.addedAt = addedAt
+        self.achievementShare = achievementShare
     }
 
     
@@ -4863,7 +5053,10 @@ public struct FfiConverterTypeCachedSteamGame: FfiConverterRustBuffer {
             try CachedSteamGame(
                 game: FfiConverterTypeSteamGame.read(from: &buf), 
                 platforms: FfiConverterOptionSequenceString.read(from: &buf), 
-                artwork: FfiConverterOptionTypeSteamGameArtwork.read(from: &buf)
+                artwork: FfiConverterOptionTypeSteamGameArtwork.read(from: &buf), 
+                facts: FfiConverterOptionTypeSteamGameFacts.read(from: &buf), 
+                addedAt: FfiConverterOptionUInt64.read(from: &buf), 
+                achievementShare: FfiConverterOptionDouble.read(from: &buf)
         )
     }
 
@@ -4871,6 +5064,9 @@ public struct FfiConverterTypeCachedSteamGame: FfiConverterRustBuffer {
         FfiConverterTypeSteamGame.write(value.game, into: &buf)
         FfiConverterOptionSequenceString.write(value.platforms, into: &buf)
         FfiConverterOptionTypeSteamGameArtwork.write(value.artwork, into: &buf)
+        FfiConverterOptionTypeSteamGameFacts.write(value.facts, into: &buf)
+        FfiConverterOptionUInt64.write(value.addedAt, into: &buf)
+        FfiConverterOptionDouble.write(value.achievementShare, into: &buf)
     }
 }
 
@@ -5401,80 +5597,6 @@ public func FfiConverterTypeDownloadQueueState_lower(_ value: DownloadQueueState
 }
 
 
-public struct EpicAchievement: Equatable, Hashable {
-    public var id: String
-    public var name: String
-    public var description: String
-    public var iconUrl: String
-    public var hidden: Bool
-    public var unlocked: Bool
-    public var unlockDate: String?
-
-    // Default memberwise initializers are never public by default, so we
-    // declare one manually.
-    public init(id: String, name: String, description: String, iconUrl: String, hidden: Bool, unlocked: Bool, unlockDate: String?) {
-        self.id = id
-        self.name = name
-        self.description = description
-        self.iconUrl = iconUrl
-        self.hidden = hidden
-        self.unlocked = unlocked
-        self.unlockDate = unlockDate
-    }
-
-    
-
-    
-}
-
-#if compiler(>=6)
-extension EpicAchievement: Sendable {}
-#endif
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public struct FfiConverterTypeEpicAchievement: FfiConverterRustBuffer {
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> EpicAchievement {
-        return
-            try EpicAchievement(
-                id: FfiConverterString.read(from: &buf), 
-                name: FfiConverterString.read(from: &buf), 
-                description: FfiConverterString.read(from: &buf), 
-                iconUrl: FfiConverterString.read(from: &buf), 
-                hidden: FfiConverterBool.read(from: &buf), 
-                unlocked: FfiConverterBool.read(from: &buf), 
-                unlockDate: FfiConverterOptionString.read(from: &buf)
-        )
-    }
-
-    public static func write(_ value: EpicAchievement, into buf: inout [UInt8]) {
-        FfiConverterString.write(value.id, into: &buf)
-        FfiConverterString.write(value.name, into: &buf)
-        FfiConverterString.write(value.description, into: &buf)
-        FfiConverterString.write(value.iconUrl, into: &buf)
-        FfiConverterBool.write(value.hidden, into: &buf)
-        FfiConverterBool.write(value.unlocked, into: &buf)
-        FfiConverterOptionString.write(value.unlockDate, into: &buf)
-    }
-}
-
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeEpicAchievement_lift(_ buf: RustBuffer) throws -> EpicAchievement {
-    return try FfiConverterTypeEpicAchievement.lift(buf)
-}
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeEpicAchievement_lower(_ value: EpicAchievement) -> RustBuffer {
-    return FfiConverterTypeEpicAchievement.lower(value)
-}
-
-
 public struct EpicCredentials: Equatable, Hashable {
     public var accountId: String
     public var displayName: String
@@ -5730,10 +5852,19 @@ public struct EpicGame: Equatable, Hashable {
     public var developer: String
     public var windows: Bool
     public var macos: Bool
+    /**
+     * When the game joined the account's library, in seconds since the
+     * Unix epoch.
+     */
+    public var addedAt: UInt64?
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(appName: String, namespace: String, catalogItemId: String, title: String, description: String, imageUrl: String?, headerImageUrl: String?, developer: String, windows: Bool, macos: Bool) {
+    public init(appName: String, namespace: String, catalogItemId: String, title: String, description: String, imageUrl: String?, headerImageUrl: String?, developer: String, windows: Bool, macos: Bool, 
+        /**
+         * When the game joined the account's library, in seconds since the
+         * Unix epoch.
+         */addedAt: UInt64? = nil) {
         self.appName = appName
         self.namespace = namespace
         self.catalogItemId = catalogItemId
@@ -5744,6 +5875,7 @@ public struct EpicGame: Equatable, Hashable {
         self.developer = developer
         self.windows = windows
         self.macos = macos
+        self.addedAt = addedAt
     }
 
     
@@ -5771,7 +5903,8 @@ public struct FfiConverterTypeEpicGame: FfiConverterRustBuffer {
                 headerImageUrl: FfiConverterOptionString.read(from: &buf), 
                 developer: FfiConverterString.read(from: &buf), 
                 windows: FfiConverterBool.read(from: &buf), 
-                macos: FfiConverterBool.read(from: &buf)
+                macos: FfiConverterBool.read(from: &buf), 
+                addedAt: FfiConverterOptionUInt64.read(from: &buf)
         )
     }
 
@@ -5786,6 +5919,7 @@ public struct FfiConverterTypeEpicGame: FfiConverterRustBuffer {
         FfiConverterString.write(value.developer, into: &buf)
         FfiConverterBool.write(value.windows, into: &buf)
         FfiConverterBool.write(value.macos, into: &buf)
+        FfiConverterOptionUInt64.write(value.addedAt, into: &buf)
     }
 }
 
@@ -6598,86 +6732,6 @@ public func FfiConverterTypeGameTransfer_lower(_ value: GameTransfer) -> RustBuf
 }
 
 
-public struct GogAchievement: Equatable, Hashable {
-    public var id: String
-    public var name: String
-    public var description: String
-    public var iconUrl: String
-    public var hidden: Bool
-    public var unlocked: Bool
-    /**
-     * Seconds since the Unix epoch.
-     */
-    public var unlockTime: UInt64?
-
-    // Default memberwise initializers are never public by default, so we
-    // declare one manually.
-    public init(id: String, name: String, description: String, iconUrl: String, hidden: Bool, unlocked: Bool, 
-        /**
-         * Seconds since the Unix epoch.
-         */unlockTime: UInt64?) {
-        self.id = id
-        self.name = name
-        self.description = description
-        self.iconUrl = iconUrl
-        self.hidden = hidden
-        self.unlocked = unlocked
-        self.unlockTime = unlockTime
-    }
-
-    
-
-    
-}
-
-#if compiler(>=6)
-extension GogAchievement: Sendable {}
-#endif
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public struct FfiConverterTypeGogAchievement: FfiConverterRustBuffer {
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> GogAchievement {
-        return
-            try GogAchievement(
-                id: FfiConverterString.read(from: &buf), 
-                name: FfiConverterString.read(from: &buf), 
-                description: FfiConverterString.read(from: &buf), 
-                iconUrl: FfiConverterString.read(from: &buf), 
-                hidden: FfiConverterBool.read(from: &buf), 
-                unlocked: FfiConverterBool.read(from: &buf), 
-                unlockTime: FfiConverterOptionUInt64.read(from: &buf)
-        )
-    }
-
-    public static func write(_ value: GogAchievement, into buf: inout [UInt8]) {
-        FfiConverterString.write(value.id, into: &buf)
-        FfiConverterString.write(value.name, into: &buf)
-        FfiConverterString.write(value.description, into: &buf)
-        FfiConverterString.write(value.iconUrl, into: &buf)
-        FfiConverterBool.write(value.hidden, into: &buf)
-        FfiConverterBool.write(value.unlocked, into: &buf)
-        FfiConverterOptionUInt64.write(value.unlockTime, into: &buf)
-    }
-}
-
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeGogAchievement_lift(_ buf: RustBuffer) throws -> GogAchievement {
-    return try FfiConverterTypeGogAchievement.lift(buf)
-}
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeGogAchievement_lower(_ value: GogAchievement) -> RustBuffer {
-    return FfiConverterTypeGogAchievement.lower(value)
-}
-
-
 public struct GogCredentials: Equatable, Hashable {
     public var userId: String
     public var username: String
@@ -6768,6 +6822,11 @@ public struct GogGame: Equatable, Hashable {
      * The languages the game speaks, such as `fr-FR`.
      */
     public var languages: [String]
+    /**
+     * When the game joined the account's library, in seconds since the
+     * Unix epoch.
+     */
+    public var addedAt: UInt64?
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
@@ -6789,7 +6848,11 @@ public struct GogGame: Equatable, Hashable {
          */rating: UInt32?, 
         /**
          * The languages the game speaks, such as `fr-FR`.
-         */languages: [String]) {
+         */languages: [String], 
+        /**
+         * When the game joined the account's library, in seconds since the
+         * Unix epoch.
+         */addedAt: UInt64? = nil) {
         self.productId = productId
         self.title = title
         self.imageUrl = imageUrl
@@ -6803,6 +6866,7 @@ public struct GogGame: Equatable, Hashable {
         self.genres = genres
         self.rating = rating
         self.languages = languages
+        self.addedAt = addedAt
     }
 
     
@@ -6833,7 +6897,8 @@ public struct FfiConverterTypeGogGame: FfiConverterRustBuffer {
                 releaseDate: FfiConverterOptionUInt64.read(from: &buf), 
                 genres: FfiConverterSequenceString.read(from: &buf), 
                 rating: FfiConverterOptionUInt32.read(from: &buf), 
-                languages: FfiConverterSequenceString.read(from: &buf)
+                languages: FfiConverterSequenceString.read(from: &buf), 
+                addedAt: FfiConverterOptionUInt64.read(from: &buf)
         )
     }
 
@@ -6851,6 +6916,7 @@ public struct FfiConverterTypeGogGame: FfiConverterRustBuffer {
         FfiConverterSequenceString.write(value.genres, into: &buf)
         FfiConverterOptionUInt32.write(value.rating, into: &buf)
         FfiConverterSequenceString.write(value.languages, into: &buf)
+        FfiConverterOptionUInt64.write(value.addedAt, into: &buf)
     }
 }
 
@@ -7678,6 +7744,91 @@ public func FfiConverterTypeLaunchSettings_lower(_ value: LaunchSettings) -> Rus
 
 
 /**
+ * One achievement of a game, the same for every storefront.
+ */
+public struct LibraryAchievement: Equatable, Hashable {
+    public var id: String
+    public var name: String
+    public var description: String
+    public var iconUrl: String
+    public var hidden: Bool
+    public var unlocked: Bool
+    /**
+     * Seconds since the Unix epoch; nil while locked, or when the
+     * storefront did not tell.
+     */
+    public var unlockedAt: UInt64?
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(id: String, name: String, description: String, iconUrl: String, hidden: Bool, unlocked: Bool, 
+        /**
+         * Seconds since the Unix epoch; nil while locked, or when the
+         * storefront did not tell.
+         */unlockedAt: UInt64?) {
+        self.id = id
+        self.name = name
+        self.description = description
+        self.iconUrl = iconUrl
+        self.hidden = hidden
+        self.unlocked = unlocked
+        self.unlockedAt = unlockedAt
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension LibraryAchievement: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeLibraryAchievement: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> LibraryAchievement {
+        return
+            try LibraryAchievement(
+                id: FfiConverterString.read(from: &buf), 
+                name: FfiConverterString.read(from: &buf), 
+                description: FfiConverterString.read(from: &buf), 
+                iconUrl: FfiConverterString.read(from: &buf), 
+                hidden: FfiConverterBool.read(from: &buf), 
+                unlocked: FfiConverterBool.read(from: &buf), 
+                unlockedAt: FfiConverterOptionUInt64.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: LibraryAchievement, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.id, into: &buf)
+        FfiConverterString.write(value.name, into: &buf)
+        FfiConverterString.write(value.description, into: &buf)
+        FfiConverterString.write(value.iconUrl, into: &buf)
+        FfiConverterBool.write(value.hidden, into: &buf)
+        FfiConverterBool.write(value.unlocked, into: &buf)
+        FfiConverterOptionUInt64.write(value.unlockedAt, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeLibraryAchievement_lift(_ buf: RustBuffer) throws -> LibraryAchievement {
+    return try FfiConverterTypeLibraryAchievement.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeLibraryAchievement_lower(_ value: LibraryAchievement) -> RustBuffer {
+    return FfiConverterTypeLibraryAchievement.lower(value)
+}
+
+
+/**
  * Where Obelisk keeps everything, derived from its library directory, its
  * application bundle and the user's home.
  */
@@ -7950,80 +8101,6 @@ public func FfiConverterTypeRuntimeInstallState_lift(_ buf: RustBuffer) throws -
 #endif
 public func FfiConverterTypeRuntimeInstallState_lower(_ value: RuntimeInstallState) -> RustBuffer {
     return FfiConverterTypeRuntimeInstallState.lower(value)
-}
-
-
-public struct SteamAchievement: Equatable, Hashable {
-    public var id: String
-    public var name: String
-    public var description: String
-    public var iconUrl: String
-    public var hidden: Bool
-    public var unlocked: Bool
-    public var unlockTime: UInt32
-
-    // Default memberwise initializers are never public by default, so we
-    // declare one manually.
-    public init(id: String, name: String, description: String, iconUrl: String, hidden: Bool, unlocked: Bool, unlockTime: UInt32) {
-        self.id = id
-        self.name = name
-        self.description = description
-        self.iconUrl = iconUrl
-        self.hidden = hidden
-        self.unlocked = unlocked
-        self.unlockTime = unlockTime
-    }
-
-    
-
-    
-}
-
-#if compiler(>=6)
-extension SteamAchievement: Sendable {}
-#endif
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public struct FfiConverterTypeSteamAchievement: FfiConverterRustBuffer {
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SteamAchievement {
-        return
-            try SteamAchievement(
-                id: FfiConverterString.read(from: &buf), 
-                name: FfiConverterString.read(from: &buf), 
-                description: FfiConverterString.read(from: &buf), 
-                iconUrl: FfiConverterString.read(from: &buf), 
-                hidden: FfiConverterBool.read(from: &buf), 
-                unlocked: FfiConverterBool.read(from: &buf), 
-                unlockTime: FfiConverterUInt32.read(from: &buf)
-        )
-    }
-
-    public static func write(_ value: SteamAchievement, into buf: inout [UInt8]) {
-        FfiConverterString.write(value.id, into: &buf)
-        FfiConverterString.write(value.name, into: &buf)
-        FfiConverterString.write(value.description, into: &buf)
-        FfiConverterString.write(value.iconUrl, into: &buf)
-        FfiConverterBool.write(value.hidden, into: &buf)
-        FfiConverterBool.write(value.unlocked, into: &buf)
-        FfiConverterUInt32.write(value.unlockTime, into: &buf)
-    }
-}
-
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeSteamAchievement_lift(_ buf: RustBuffer) throws -> SteamAchievement {
-    return try FfiConverterTypeSteamAchievement.lift(buf)
-}
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeSteamAchievement_lower(_ value: SteamAchievement) -> RustBuffer {
-    return FfiConverterTypeSteamAchievement.lower(value)
 }
 
 
@@ -8895,6 +8972,11 @@ public struct SteamGameArtwork: Equatable, Hashable {
      * The library header, or the store's when the game has no library one.
      */
     public var header: String?
+    /**
+     * The app whose artwork stands in for the game's missing images, such
+     * as Rust's for its staging branch.
+     */
+    public var parent: UInt32?
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
@@ -8907,11 +8989,16 @@ public struct SteamGameArtwork: Equatable, Hashable {
          */hero: String?, logo: String?, 
         /**
          * The library header, or the store's when the game has no library one.
-         */header: String?) {
+         */header: String?, 
+        /**
+         * The app whose artwork stands in for the game's missing images, such
+         * as Rust's for its staging branch.
+         */parent: UInt32? = nil) {
         self.cover = cover
         self.hero = hero
         self.logo = logo
         self.header = header
+        self.parent = parent
     }
 
     
@@ -8933,7 +9020,8 @@ public struct FfiConverterTypeSteamGameArtwork: FfiConverterRustBuffer {
                 cover: FfiConverterOptionString.read(from: &buf), 
                 hero: FfiConverterOptionString.read(from: &buf), 
                 logo: FfiConverterOptionString.read(from: &buf), 
-                header: FfiConverterOptionString.read(from: &buf)
+                header: FfiConverterOptionString.read(from: &buf), 
+                parent: FfiConverterOptionUInt32.read(from: &buf)
         )
     }
 
@@ -8942,6 +9030,7 @@ public struct FfiConverterTypeSteamGameArtwork: FfiConverterRustBuffer {
         FfiConverterOptionString.write(value.hero, into: &buf)
         FfiConverterOptionString.write(value.logo, into: &buf)
         FfiConverterOptionString.write(value.header, into: &buf)
+        FfiConverterOptionUInt32.write(value.parent, into: &buf)
     }
 }
 
@@ -9031,6 +9120,98 @@ public func FfiConverterTypeSteamGameDetails_lower(_ value: SteamGameDetails) ->
 }
 
 
+/**
+ * What a game's PICS app info tells that the library orders by. Each is nil
+ * when the game does not publish it.
+ */
+public struct SteamGameFacts: Equatable, Hashable {
+    /**
+     * Seconds since the Unix epoch.
+     */
+    public var releaseDate: UInt64?
+    /**
+     * Out of 100.
+     */
+    public var metacriticScore: UInt32?
+    /**
+     * Steam's verdict on its players' reviews, from 1, overwhelmingly
+     * negative, to 9, overwhelmingly positive.
+     */
+    public var reviewScore: UInt32?
+    /**
+     * The share of positive reviews, out of 100.
+     */
+    public var reviewPercentage: UInt32?
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(
+        /**
+         * Seconds since the Unix epoch.
+         */releaseDate: UInt64?, 
+        /**
+         * Out of 100.
+         */metacriticScore: UInt32?, 
+        /**
+         * Steam's verdict on its players' reviews, from 1, overwhelmingly
+         * negative, to 9, overwhelmingly positive.
+         */reviewScore: UInt32?, 
+        /**
+         * The share of positive reviews, out of 100.
+         */reviewPercentage: UInt32?) {
+        self.releaseDate = releaseDate
+        self.metacriticScore = metacriticScore
+        self.reviewScore = reviewScore
+        self.reviewPercentage = reviewPercentage
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension SteamGameFacts: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeSteamGameFacts: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SteamGameFacts {
+        return
+            try SteamGameFacts(
+                releaseDate: FfiConverterOptionUInt64.read(from: &buf), 
+                metacriticScore: FfiConverterOptionUInt32.read(from: &buf), 
+                reviewScore: FfiConverterOptionUInt32.read(from: &buf), 
+                reviewPercentage: FfiConverterOptionUInt32.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: SteamGameFacts, into buf: inout [UInt8]) {
+        FfiConverterOptionUInt64.write(value.releaseDate, into: &buf)
+        FfiConverterOptionUInt32.write(value.metacriticScore, into: &buf)
+        FfiConverterOptionUInt32.write(value.reviewScore, into: &buf)
+        FfiConverterOptionUInt32.write(value.reviewPercentage, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSteamGameFacts_lift(_ buf: RustBuffer) throws -> SteamGameFacts {
+    return try FfiConverterTypeSteamGameFacts.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSteamGameFacts_lower(_ value: SteamGameFacts) -> RustBuffer {
+    return FfiConverterTypeSteamGameFacts.lower(value)
+}
+
+
 public struct SteamGamePlatforms: Equatable, Hashable {
     public var appId: UInt32
     public var platforms: [String]
@@ -9038,16 +9219,24 @@ public struct SteamGamePlatforms: Equatable, Hashable {
      * Nil when PICS did not return the game.
      */
     public var artwork: SteamGameArtwork?
+    /**
+     * Nil when PICS did not return the game.
+     */
+    public var facts: SteamGameFacts?
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
     public init(appId: UInt32, platforms: [String], 
         /**
          * Nil when PICS did not return the game.
-         */artwork: SteamGameArtwork? = nil) {
+         */artwork: SteamGameArtwork? = nil, 
+        /**
+         * Nil when PICS did not return the game.
+         */facts: SteamGameFacts? = nil) {
         self.appId = appId
         self.platforms = platforms
         self.artwork = artwork
+        self.facts = facts
     }
 
     
@@ -9068,7 +9257,8 @@ public struct FfiConverterTypeSteamGamePlatforms: FfiConverterRustBuffer {
             try SteamGamePlatforms(
                 appId: FfiConverterUInt32.read(from: &buf), 
                 platforms: FfiConverterSequenceString.read(from: &buf), 
-                artwork: FfiConverterOptionTypeSteamGameArtwork.read(from: &buf)
+                artwork: FfiConverterOptionTypeSteamGameArtwork.read(from: &buf), 
+                facts: FfiConverterOptionTypeSteamGameFacts.read(from: &buf)
         )
     }
 
@@ -9076,6 +9266,7 @@ public struct FfiConverterTypeSteamGamePlatforms: FfiConverterRustBuffer {
         FfiConverterUInt32.write(value.appId, into: &buf)
         FfiConverterSequenceString.write(value.platforms, into: &buf)
         FfiConverterOptionTypeSteamGameArtwork.write(value.artwork, into: &buf)
+        FfiConverterOptionTypeSteamGameFacts.write(value.facts, into: &buf)
     }
 }
 
@@ -13694,6 +13885,30 @@ fileprivate struct FfiConverterOptionTypeSteamGameArtwork: FfiConverterRustBuffe
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterOptionTypeSteamGameFacts: FfiConverterRustBuffer {
+    typealias SwiftType = SteamGameFacts?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypeSteamGameFacts.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypeSteamGameFacts.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterOptionTypeSteamInviteRequest: FfiConverterRustBuffer {
     typealias SwiftType = SteamInviteRequest?
 
@@ -14060,31 +14275,6 @@ fileprivate struct FfiConverterSequenceTypeDownloadItem: FfiConverterRustBuffer 
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
-fileprivate struct FfiConverterSequenceTypeEpicAchievement: FfiConverterRustBuffer {
-    typealias SwiftType = [EpicAchievement]
-
-    public static func write(_ value: [EpicAchievement], into buf: inout [UInt8]) {
-        let len = Int32(value.count)
-        writeInt(&buf, len)
-        for item in value {
-            FfiConverterTypeEpicAchievement.write(item, into: &buf)
-        }
-    }
-
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [EpicAchievement] {
-        let len: Int32 = try readInt(&buf)
-        var seq = [EpicAchievement]()
-        seq.reserveCapacity(Int(len))
-        for _ in 0 ..< len {
-            seq.append(try FfiConverterTypeEpicAchievement.read(from: &buf))
-        }
-        return seq
-    }
-}
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
 fileprivate struct FfiConverterSequenceTypeEpicFriend: FfiConverterRustBuffer {
     typealias SwiftType = [EpicFriend]
 
@@ -14235,31 +14425,6 @@ fileprivate struct FfiConverterSequenceTypeGameLaunch: FfiConverterRustBuffer {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
-fileprivate struct FfiConverterSequenceTypeGogAchievement: FfiConverterRustBuffer {
-    typealias SwiftType = [GogAchievement]
-
-    public static func write(_ value: [GogAchievement], into buf: inout [UInt8]) {
-        let len = Int32(value.count)
-        writeInt(&buf, len)
-        for item in value {
-            FfiConverterTypeGogAchievement.write(item, into: &buf)
-        }
-    }
-
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [GogAchievement] {
-        let len: Int32 = try readInt(&buf)
-        var seq = [GogAchievement]()
-        seq.reserveCapacity(Int(len))
-        for _ in 0 ..< len {
-            seq.append(try FfiConverterTypeGogAchievement.read(from: &buf))
-        }
-        return seq
-    }
-}
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
 fileprivate struct FfiConverterSequenceTypeGogGame: FfiConverterRustBuffer {
     typealias SwiftType = [GogGame]
 
@@ -14385,23 +14550,23 @@ fileprivate struct FfiConverterSequenceTypeLaunchGraphicsOffer: FfiConverterRust
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
-fileprivate struct FfiConverterSequenceTypeSteamAchievement: FfiConverterRustBuffer {
-    typealias SwiftType = [SteamAchievement]
+fileprivate struct FfiConverterSequenceTypeLibraryAchievement: FfiConverterRustBuffer {
+    typealias SwiftType = [LibraryAchievement]
 
-    public static func write(_ value: [SteamAchievement], into buf: inout [UInt8]) {
+    public static func write(_ value: [LibraryAchievement], into buf: inout [UInt8]) {
         let len = Int32(value.count)
         writeInt(&buf, len)
         for item in value {
-            FfiConverterTypeSteamAchievement.write(item, into: &buf)
+            FfiConverterTypeLibraryAchievement.write(item, into: &buf)
         }
     }
 
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [SteamAchievement] {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [LibraryAchievement] {
         let len: Int32 = try readInt(&buf)
-        var seq = [SteamAchievement]()
+        var seq = [LibraryAchievement]()
         seq.reserveCapacity(Int(len))
         for _ in 0 ..< len {
-            seq.append(try FfiConverterTypeSteamAchievement.read(from: &buf))
+            seq.append(try FfiConverterTypeLibraryAchievement.read(from: &buf))
         }
         return seq
     }
@@ -14756,6 +14921,84 @@ fileprivate struct FfiConverterSequenceTypeLaunchGraphicsOption: FfiConverterRus
         return seq
     }
 }
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterDictionaryUInt32UInt64: FfiConverterRustBuffer {
+    public static func write(_ value: [UInt32: UInt64], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for (key, value) in value {
+            FfiConverterUInt32.write(key, into: &buf)
+            FfiConverterUInt64.write(value, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [UInt32: UInt64] {
+        let len: Int32 = try readInt(&buf)
+        var dict = [UInt32: UInt64]()
+        dict.reserveCapacity(Int(len))
+        for _ in 0..<len {
+            let key = try FfiConverterUInt32.read(from: &buf)
+            let value = try FfiConverterUInt64.read(from: &buf)
+            dict[key] = value
+        }
+        return dict
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterDictionaryUInt32Double: FfiConverterRustBuffer {
+    public static func write(_ value: [UInt32: Double], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for (key, value) in value {
+            FfiConverterUInt32.write(key, into: &buf)
+            FfiConverterDouble.write(value, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [UInt32: Double] {
+        let len: Int32 = try readInt(&buf)
+        var dict = [UInt32: Double]()
+        dict.reserveCapacity(Int(len))
+        for _ in 0..<len {
+            let key = try FfiConverterUInt32.read(from: &buf)
+            let value = try FfiConverterDouble.read(from: &buf)
+            dict[key] = value
+        }
+        return dict
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterDictionaryStringDouble: FfiConverterRustBuffer {
+    public static func write(_ value: [String: Double], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for (key, value) in value {
+            FfiConverterString.write(key, into: &buf)
+            FfiConverterDouble.write(value, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [String: Double] {
+        let len: Int32 = try readInt(&buf)
+        var dict = [String: Double]()
+        dict.reserveCapacity(Int(len))
+        for _ in 0..<len {
+            let key = try FfiConverterString.read(from: &buf)
+            let value = try FfiConverterDouble.read(from: &buf)
+            dict[key] = value
+        }
+        return dict
+    }
+}
 private let UNIFFI_RUST_FUTURE_POLL_READY: Int8 = 0
 private let UNIFFI_RUST_FUTURE_POLL_WAKE: Int8 = 1
 
@@ -15005,7 +15248,10 @@ private let initializationResult: InitializationResult = {
     if (uniffi_obelisk_bridge_checksum_method_downloads_state() != 47105) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_obelisk_bridge_checksum_method_epicsession_achievements() != 19240) {
+    if (uniffi_obelisk_bridge_checksum_method_epicsession_achievement_shares() != 61673) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_obelisk_bridge_checksum_method_epicsession_achievements() != 26143) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_obelisk_bridge_checksum_method_epicsession_credentials() != 19572) {
@@ -15080,7 +15326,10 @@ private let initializationResult: InitializationResult = {
     if (uniffi_obelisk_bridge_checksum_method_storefrontsessions_stop() != 44469) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_obelisk_bridge_checksum_method_gogsession_achievements() != 38252) {
+    if (uniffi_obelisk_bridge_checksum_method_gogsession_achievement_shares() != 31127) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_obelisk_bridge_checksum_method_gogsession_achievements() != 31708) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_obelisk_bridge_checksum_method_gogsession_avatar_url() != 16894) {
@@ -15179,7 +15428,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_obelisk_bridge_checksum_method_librarycache_record_launch() != 30827) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_obelisk_bridge_checksum_method_librarycache_steam_library() != 3483) {
+    if (uniffi_obelisk_bridge_checksum_method_librarycache_steam_library() != 28886) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_obelisk_bridge_checksum_method_steamlogin_challenge() != 44547) {
@@ -15191,7 +15440,13 @@ private let initializationResult: InitializationResult = {
     if (uniffi_obelisk_bridge_checksum_method_steamlogin_submit_guard() != 49405) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_obelisk_bridge_checksum_method_steamsession_achievements() != 12083) {
+    if (uniffi_obelisk_bridge_checksum_method_steamsession_achievement_shares() != 30805) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_obelisk_bridge_checksum_method_steamsession_achievements() != 23877) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_obelisk_bridge_checksum_method_steamsession_acquisitions() != 3518) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_obelisk_bridge_checksum_method_steamsession_cloud_autocloud_metadata() != 51865) {

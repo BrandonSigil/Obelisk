@@ -45,19 +45,6 @@ final class SteamAchievementsTests: XCTestCase {
         XCTAssertEqual(model.fraction, 0.5)
     }
 
-    func testEpicUnlockDatesAcceptFractionalSecondsAndRejectInvalidDates() {
-        func converted(_ date: String?, unlocked: Bool = true) -> GameAchievement {
-            GameAchievement(EpicAchievement(id: "test", name: "Title", description: "", iconUrl: "",
-                hidden: false, unlocked: unlocked, unlockDate: date))
-        }
-        let expected = Date(timeIntervalSince1970: 1_663_761_600)
-        XCTAssertEqual(converted("2022-09-21T12:00:00Z").unlockDate, expected)
-        XCTAssertEqual(converted("2022-09-21T12:00:00.000Z").unlockDate, expected)
-        XCTAssertNil(converted("not-a-date").unlockDate)
-        XCTAssertNil(converted(nil).unlockDate)
-        XCTAssertNil(converted("2022-09-21T12:00:00Z", unlocked: false).unlockDate)
-    }
-
     @MainActor
     func testRenderAchievementHeaderAndPanel() async throws {
         guard let path = ProcessInfo.processInfo.environment["OBELISK_RENDER_PREVIEWS"] else {

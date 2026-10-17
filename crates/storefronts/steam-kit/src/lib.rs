@@ -14,6 +14,7 @@ pub mod invites;
 mod kv;
 pub mod language;
 pub mod launch;
+pub mod library;
 mod message;
 pub mod news;
 pub mod own_game;

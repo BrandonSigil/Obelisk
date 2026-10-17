@@ -421,7 +421,9 @@ final class SteamPresentationTests: XCTestCase {
         let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
         let cached = SteamGame(appId: 620, name: "Portal 2 (cached)", iconHash: "", lastPlayed: 1_789_000_000, playtimeMinutes: 5)
-        let cache = try LibraryCache.holding(steam: [42: [CachedSteamGame(game: cached, platforms: ["macos"])]], in: root)
+        let cache = try LibraryCache.holding(steam: [42: [CachedSteamGame(
+            game: cached, platforms: ["macos"], addedAt: 1_300_000_000, achievementShare: 0.5
+        )]], in: root)
         let connection = GameSessionGate<FixtureSteamSession>()
         let fixture = FixtureSteamSession(games: fixtureGames, details: FixtureResponses<DetailsRequest, SteamGameDetails>()) { ids in
             ids.map { SteamGamePlatforms(appId: $0, platforms: ["windows"]) }
@@ -434,6 +436,10 @@ final class SteamPresentationTests: XCTestCase {
         XCTAssertFalse(model.isConnected, "The cached library shows before Steam answers")
         XCTAssertEqual(model.games, [cached])
         XCTAssertEqual(model.libraryPlatforms.platforms[620], ["macos"])
+        XCTAssertEqual(model.libraryValue(of: cached, for: .dateAdded), 1_300_000_000)
+        XCTAssertEqual(model.libraryValue(of: cached, for: .achievements), 0.5)
+        model.sort = .achievements
+        XCTAssertNil(model.pendingMetadata, "What the cache knew orders the library before Steam answers")
         await connection.resolve(fixture)
         await start.value
         try await eventually { model.games == fixtureGames && !model.libraryPlatforms.isLoading }

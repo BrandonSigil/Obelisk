@@ -20,7 +20,16 @@ import SwiftUI
     /// The build Obelisk installs or launches first, once the storefront told
     /// the game's platforms.
     func platform(of game: Game) -> GamePlatform?
-    /// Changes whenever a game, or what an order reads of one, may have.
+    /// What the storefront told of the game that `sort` orders it by, the
+    /// greatest first, such as its release date or its critics' score; nil
+    /// when it told nothing. Never asked for the orders every storefront
+    /// shares: by name, playtime, last played and size.
+    func libraryValue(of game: Game, for sort: StorefrontLibrarySort) -> Double?
+    /// Changes whenever what the storefront told of the games apart from
+    /// them that `sort` orders by may have, such as their release dates: only
+    /// that order changes.
+    func valuesRevision(for sort: StorefrontLibrarySort) -> Int
+    /// Changes whenever a game, or what every order reads of one, may have.
     var libraryRevision: Int { get }
     /// Changes whenever what only a filter reads of the games may have, such
     /// as their platforms.

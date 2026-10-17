@@ -129,7 +129,7 @@ impl LibraryCache {
                         storefront: storefront.clone(),
                         account: account.clone(),
                         game: id(entry)?.to_owned(),
-                        at: entry.get(LAUNCH)?.as_str().and_then(parse_iso8601)?,
+                        at: launched_at(entry)?,
                     })
                 }));
             }
@@ -200,6 +200,13 @@ impl AccountLibrary {
             libraries.insert(account.to_owned(), games);
             true
         });
+    }
+
+    /// The account's library, each game as `read` reads it; empty when it has
+    /// none.
+    pub fn read<T>(&self, read: impl FnMut(&Entry) -> Option<T>) -> Vec<T> {
+        let (storefront, account) = &self.key;
+        self.cache.library(storefront, account, read)
     }
 
     /// Changes every game of the account's library, as a request that loaded
@@ -322,6 +329,12 @@ impl Document {
 
 fn id(entry: &Entry) -> Option<&str> {
     entry.get("id")?.as_str()
+}
+
+/// When the account last launched the entry's game from Obelisk, in seconds
+/// since the Unix epoch.
+pub fn launched_at(entry: &Entry) -> Option<u64> {
+    entry.get(LAUNCH)?.as_str().and_then(parse_iso8601)
 }
 
 /// `at` in UTC, as Swift's `ISO8601DateFormatter` writes a date.

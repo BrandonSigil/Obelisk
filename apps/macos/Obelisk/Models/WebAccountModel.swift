@@ -11,6 +11,9 @@ protocol WebGame: Identifiable, Equatable, Sendable where ID == String {
     var preferredPlatform: String { get }
     /// What the storefront can install of the game; nil when it ships no build.
     var offer: GameOffer? { get }
+    /// What the game tells that `sort` orders it by, among its storefront's
+    /// `librarySorts`; nil when it tells nothing.
+    func libraryValue(for sort: StorefrontLibrarySort) -> Double?
 }
 
 /// What lives as long as an account's connection besides its library, such
@@ -51,6 +54,8 @@ protocol WebStorefront: InstallationStorefront, SendableMetatype where GameID ==
 
     /// Names the storefront in receipts files and achievements.
     static var storeID: String { get }
+    /// The orders its library offers, as their menu lists them.
+    static var librarySorts: [StorefrontLibrarySort] { get }
     static var webSignIn: WebSignIn { get }
     /// The storefront's store, opened in Obelisk.
     static var storeURL: URL { get }
@@ -71,12 +76,24 @@ protocol WebStorefront: InstallationStorefront, SendableMetatype where GameID ==
     static func games(of session: Session) async throws -> [Game]
     /// The playtime of each played game of `games`, by its id.
     static func playtimes(of session: Session, games: [Game]) async throws -> [String: Duration]
-    /// The account's Library cache, with each game's playtime when it was known.
-    static func cachedLibrary(in cache: LibraryCache, account: String) -> [(game: Game, playtime: Duration?)]
+    /// The share of each of `games`' achievements the account unlocked, in
+    /// the player's `language`, by game id: the Library cache's for a game
+    /// not played since they were read, else the storefront's, which the
+    /// session then keeps. A game without achievements, or that the
+    /// storefront did not answer for, has none; it throws when no game could
+    /// be told. Asked once the playtimes loaded.
+    static func achievementShares(of games: [Game], session: Session, language: String) async throws -> [String: Double]
+    /// The account's Library cache, with each game's playtime and achievement
+    /// share when they were known.
+    static func cachedLibrary(in cache: LibraryCache, account: String)
+        -> [(game: Game, playtime: Duration?, achievements: Double?)]
     /// `language` is the player's, such as "fr-FR".
     static func details(of game: Game, session: Session, language: String) async throws -> Details
-    /// Each storefront names the player's `language` its own way.
-    static func achievements(of game: Game, session: Session, language: String) async throws -> [GameAchievement]
+    /// The game's achievements in the player's `language`: the Library
+    /// cache's while the game was not played since they were read, unless
+    /// `fresh`, else the storefront's.
+    static func achievements(of game: Game, session: Session, language: String,
+                             fresh: Bool) async throws -> [GameAchievement]
     /// The account's installations in Rust; none for a session that is not Rust's.
     @MainActor static func installations(of session: Session, account: String, language: String,
                                           sessions: any StorefrontSessionsProtocol, receipts: URL,
@@ -165,7 +182,10 @@ final class WebAccountModel<Store: WebStorefront> {
     var filter: StorefrontLibraryFilter = .all
     var availableFilters: [StorefrontLibraryFilter] { [.all, .installed, .played, .macOS] }
     var sort: StorefrontLibrarySort = .name
-    var availableSorts: [StorefrontLibrarySort] { StorefrontLibrarySort.allCases }
+    var availableSorts: [StorefrontLibrarySort] { Store.librarySorts }
+    /// The share of each game's achievements the account unlocked, by game
+    /// id, which loads after the playtimes.
+    let libraryRecords = LibraryRecords<String>()
     var rememberSession: Bool {
         get { rememberedSession.rememberSession }
         set { rememberedSession.rememberSession = newValue }
@@ -267,6 +287,15 @@ final class WebAccountModel<Store: WebStorefront> {
 
     func platform(of game: Game) -> GamePlatform? { .preferred(macos: game.macos, windows: game.windows) }
 
+    func libraryValue(of game: Game, for sort: StorefrontLibrarySort) -> Double? {
+        sort == .achievements ? libraryRecords.value(for: sort, of: game.id) : game.libraryValue(for: sort)
+    }
+
+    /// The other orders read only the games.
+    func valuesRevision(for sort: StorefrontLibrarySort) -> Int {
+        sort == .achievements ? libraryRecords.revision(for: sort) : 0
+    }
+
     // MARK: Account
 
     /// Restores the saved session once. Returns when the restoration and its
@@ -362,6 +391,7 @@ final class WebAccountModel<Store: WebStorefront> {
         playtimeTask = nil
         session = nil
         library = Library()
+        libraryRecords.reset()
         accountName = nil
         avatarURL = nil
         isLoadingPlaytimes = false
@@ -443,6 +473,7 @@ final class WebAccountModel<Store: WebStorefront> {
             let account = Store.accountID(credentials)
             let name = Store.accountName(credentials)
             var accepted = library.cachedAccount == account ? library : Library()
+            if library.cachedAccount != account { libraryRecords.reset() }
             accepted.cachedAccount = nil
             accepted.accountID = account
             if library != accepted { library = accepted }
@@ -485,6 +516,8 @@ final class WebAccountModel<Store: WebStorefront> {
         library.games = cached.map { $0.game }
         library.playtimes = Dictionary(cached.compactMap { entry in entry.playtime.map { (entry.game.id, $0) } },
                                        uniquingKeysWith: max)
+        libraryRecords.show(Dictionary(cached.compactMap { entry in entry.achievements.map { (entry.game.id, $0) } },
+                                       uniquingKeysWith: max), for: .achievements)
     }
 
     /// Hides a cached library whose session did not restore: another account
@@ -492,6 +525,7 @@ final class WebAccountModel<Store: WebStorefront> {
     private func dropCachedLibrary() {
         guard library.cachedAccount != nil else { return }
         library = Library()
+        libraryRecords.reset()
     }
 
     private func reloadGames(_ connected: Store.Session, generation current: Int) async {
@@ -521,7 +555,8 @@ final class WebAccountModel<Store: WebStorefront> {
 
     /// Asked once the games are known, which GOG's per-game requests need.
     /// Playtimes only order and filter the library, so the library never
-    /// waits for them.
+    /// waits for them. The achievements follow: the session reads again
+    /// those of the games played since.
     private func reloadPlaytimes(_ connected: Store.Session, of games: [Game], generation current: Int) {
         playtimeTask = Task {
             do {
@@ -533,6 +568,12 @@ final class WebAccountModel<Store: WebStorefront> {
                 playtimesFailed = true
             }
             isLoadingPlaytimes = false
+            // A refresh cancelled this load: its own reads the new games.
+            guard !Task.isCancelled else { return }
+            let language = language
+            libraryRecords.load(.achievements) {
+                try await Store.achievementShares(of: games, session: connected, language: language)
+            }
         }
     }
 
@@ -541,7 +582,7 @@ final class WebAccountModel<Store: WebStorefront> {
     func open(_ game: Game) {
         closeGame()
         selectedGame = game
-        reloadAchievements()
+        load(achievementsOf: game, into: achievements, fresh: false)
         installations.refreshCloudIndicator()
         guard let session else { return }
         isLoadingGameDetails = true
@@ -561,22 +602,26 @@ final class WebAccountModel<Store: WebStorefront> {
     /// one without opening the game's page.
     func libraryOffer(of game: Game) -> GameOffer? { game.offer }
 
+    /// Reads the game's achievements from the storefront again, as the
+    /// page's retry asks.
     func reloadAchievements() {
         guard let game = selectedGame else { return }
-        load(achievementsOf: game, into: achievements)
+        load(achievementsOf: game, into: achievements, fresh: true)
     }
 
-    /// Loads the achievements of the library's game `id` into `model`, such
-    /// as the overlay's for the running game.
+    /// Reads the achievements of the library's game `id` from the storefront
+    /// into `model`, as the overlay asks for the running game.
     func loadAchievements(of id: Game.ID, into model: GameAchievementsModel) {
         guard let game = games.first(where: { $0.id == id }) else { return }
-        load(achievementsOf: game, into: model)
+        load(achievementsOf: game, into: model, fresh: true)
     }
 
-    private func load(achievementsOf game: Game, into model: GameAchievementsModel) {
+    /// The Library cache's achievements while the game was not played since,
+    /// unless `fresh`.
+    private func load(achievementsOf game: Game, into model: GameAchievementsModel, fresh: Bool) {
         guard let session else { return }
         let language = language
-        model.load { try await Store.achievements(of: game, session: session, language: language) }
+        model.load { try await Store.achievements(of: game, session: session, language: language, fresh: fresh) }
     }
 
     /// Every change of the game on screen, and the sign-out, cancels it in `closeGame`.

@@ -1,9 +1,16 @@
 //! GOG's account seam. Only refresh credentials cross into the macOS Keychain;
 //! the account access token stays inside the Rust session.
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
-use crate::{LibraryCache, library_cache::GogLibrary};
+use crate::{
+    LibraryCache,
+    library_cache::{self, GameAchievements, GogLibrary, LibraryAchievement},
+};
 use gog_kit::{auth, client};
+
+/// Achievement requests a library sends at once: GOG answers one game at a
+/// time.
+const ACHIEVEMENT_READS: usize = 6;
 
 #[derive(Debug, thiserror::Error, uniffi::Error)]
 pub enum GogError {
@@ -108,6 +115,11 @@ pub struct GogGame {
     /// The languages the game speaks, such as `fr-FR`.
     #[serde(default)]
     pub languages: Vec<String>,
+    /// When the game joined the account's library, in seconds since the
+    /// Unix epoch.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[uniffi(default = None)]
+    pub added_at: Option<u64>,
 }
 
 impl From<client::Game> for GogGame {
@@ -127,6 +139,7 @@ impl From<client::Game> for GogGame {
             genres: info.genres,
             rating: info.rating,
             languages: info.languages,
+            added_at: game.added_at,
         }
     }
 }
@@ -138,19 +151,7 @@ pub struct GogPlaytime {
     pub minutes: u64,
 }
 
-#[derive(Clone, Debug, uniffi::Record)]
-pub struct GogAchievement {
-    pub id: String,
-    pub name: String,
-    pub description: String,
-    pub icon_url: String,
-    pub hidden: bool,
-    pub unlocked: bool,
-    /// Seconds since the Unix epoch.
-    pub unlock_time: Option<u64>,
-}
-
-impl From<client::Achievement> for GogAchievement {
+impl From<client::Achievement> for LibraryAchievement {
     fn from(value: client::Achievement) -> Self {
         Self {
             id: value.id,
@@ -159,7 +160,7 @@ impl From<client::Achievement> for GogAchievement {
             icon_url: value.icon_url,
             hidden: value.hidden,
             unlocked: value.unlocked,
-            unlock_time: value.unlock_time,
+            unlocked_at: value.unlock_time,
         }
     }
 }
@@ -201,6 +202,33 @@ impl GogSession {
             persistence: Default::default(),
             library,
         }))
+    }
+
+    /// `product_ids`' achievements in `locale`: the library's for a game not
+    /// played since they were read, unless `fresh`, else GOG's, which answers
+    /// one game at a time, which the library then keeps. A game GOG did not
+    /// answer for is left out; when none could be told, the first failure.
+    async fn read_achievements(
+        &self,
+        product_ids: Vec<String>,
+        locale: &str,
+        fresh: bool,
+    ) -> Result<Vec<GameAchievements>, GogError> {
+        let client = &self.client;
+        library_cache::achievements(
+            self.library.as_ref().map(|library| library.achievements()),
+            product_ids,
+            locale,
+            fresh,
+            ACHIEVEMENT_READS,
+            |product_id| async move {
+                client
+                    .achievements(&product_id, locale)
+                    .await
+                    .map_err(GogError::from)
+            },
+        )
+        .await
     }
 }
 
@@ -256,6 +284,39 @@ impl GogSession {
         })
     }
 
+    /// The game's achievements in `locale`, such as `fr-FR`, as the game
+    /// page reads them: the library's while the game was not played since
+    /// they were read, unless `fresh`, else GOG's, which the library then
+    /// keeps.
+    pub async fn achievements(
+        &self,
+        product_id: String,
+        locale: String,
+        fresh: bool,
+    ) -> Result<Vec<LibraryAchievement>, GogError> {
+        let read = self
+            .read_achievements(vec![product_id], &locale, fresh)
+            .await?;
+        Ok(read
+            .into_iter()
+            .next()
+            .map(|game| game.achievements)
+            .unwrap_or_default())
+    }
+
+    /// The share of each of `product_ids`' achievements the account unlocked,
+    /// by product, as `achievements` reads them: none for a game without
+    /// achievements or that GOG did not answer for. It fails only when no
+    /// game could be told.
+    pub async fn achievement_shares(
+        &self,
+        product_ids: Vec<String>,
+        locale: String,
+    ) -> Result<HashMap<String, f64>, GogError> {
+        let read = self.read_achievements(product_ids, &locale, false).await?;
+        Ok(library_cache::unlocked_shares(read).collect())
+    }
+
     /// How long the account played each of `product_ids`; a game never
     /// played has no entry. GOG answers one game at a time.
     pub async fn playtimes(&self, product_ids: Vec<String>) -> Result<Vec<GogPlaytime>, GogError> {
@@ -269,21 +330,6 @@ impl GogSession {
                 product_id,
                 minutes,
             })
-            .collect())
-    }
-
-    /// The game's achievements, named in `locale`, such as `fr-FR`.
-    pub async fn achievements(
-        &self,
-        product_id: String,
-        locale: String,
-    ) -> Result<Vec<GogAchievement>, GogError> {
-        Ok(self
-            .client
-            .achievements(&product_id, &locale)
-            .await?
-            .into_iter()
-            .map(Into::into)
             .collect())
     }
 

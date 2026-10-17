@@ -81,24 +81,9 @@ struct GameAchievement: Sendable {
 }
 
 extension GameAchievement {
-    init(_ value: SteamAchievement) {
+    init(_ value: LibraryAchievement) {
         self.init(id: value.id, name: value.name, description: value.description, iconUrl: value.iconUrl,
                   hidden: value.hidden, unlocked: value.unlocked,
-                  unlockDate: value.unlocked && value.unlockTime > 0 ? Date(timeIntervalSince1970: TimeInterval(value.unlockTime)) : nil)
-    }
-
-    init(_ value: EpicAchievement) {
-        let date = value.unlockDate.flatMap {
-            (try? Date.ISO8601FormatStyle(includingFractionalSeconds: true).parse($0))
-                ?? (try? Date.ISO8601FormatStyle().parse($0))
-        }
-        self.init(id: value.id, name: value.name, description: value.description, iconUrl: value.iconUrl,
-                  hidden: value.hidden, unlocked: value.unlocked, unlockDate: value.unlocked ? date : nil)
-    }
-
-    init(_ value: GogAchievement) {
-        self.init(id: value.id, name: value.name, description: value.description, iconUrl: value.iconUrl,
-                  hidden: value.hidden, unlocked: value.unlocked,
-                  unlockDate: value.unlockTime.map { Date(timeIntervalSince1970: TimeInterval($0)) })
+                  unlockDate: value.unlockedAt.map { Date(timeIntervalSince1970: TimeInterval($0)) })
     }
 }

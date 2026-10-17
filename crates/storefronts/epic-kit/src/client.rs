@@ -43,6 +43,9 @@ pub struct Game {
     pub developer: String,
     pub windows: bool,
     pub macos: bool,
+    /// When the game joined the account's library, in seconds since the
+    /// Unix epoch.
+    pub added_at: Option<u64>,
     /// Everything Epic returned for the game: `catalogItems` by catalog item
     /// ID, `libraryRecords`, and `assets` by platform.
     pub metadata: serde_json::Value,
@@ -610,6 +613,11 @@ async fn library(api: &Api, access_token: &str) -> Result<Vec<Game>, EpicError> 
                 continue;
             }
         }
+        let metadata = game_metadata(
+            &item,
+            entry.map(|(_, raw)| raw),
+            sources.get(&(item.namespace.clone(), item.app_name.clone())),
+        );
         let game = Game {
             title: details
                 .map(|details| details.title.as_str())
@@ -624,11 +632,8 @@ async fn library(api: &Api, access_token: &str) -> Result<Vec<Game>, EpicError> 
                 .unwrap_or_default(),
             image_url: details.and_then(catalog_image),
             header_image_url: details.and_then(catalog_header_image),
-            metadata: game_metadata(
-                &item,
-                entry.map(|(_, raw)| raw),
-                sources.get(&(item.namespace.clone(), item.app_name.clone())),
-            ),
+            added_at: added_at(&metadata),
+            metadata,
             app_name: item.app_name,
             namespace: item.namespace,
             catalog_item_id: item.catalog_item_id,
@@ -655,6 +660,7 @@ async fn library(api: &Api, access_token: &str) -> Result<Vec<Game>, EpicError> 
             if existing.header_image_url.is_none() {
                 existing.header_image_url = game.header_image_url;
             }
+            existing.added_at = existing.added_at.into_iter().chain(game.added_at).min();
             // Each catalog item of the game, under its own ID.
             if let (Some(all), Some(added)) = (
                 existing.metadata["catalogItems"].as_object_mut(),
@@ -695,6 +701,17 @@ fn game_metadata(
         "libraryRecords": records("library"),
         "assets": { "Windows": records("Windows"), "Mac": records("Mac") },
     })
+}
+
+/// When a game joined the account's library: its oldest library record's
+/// acquisition, in seconds since the Unix epoch.
+fn added_at(metadata: &serde_json::Value) -> Option<u64> {
+    metadata["libraryRecords"]
+        .as_array()?
+        .iter()
+        .filter_map(|record| record["acquisitionDate"].as_str())
+        .filter_map(obelisk_core::date::unix_seconds)
+        .min()
 }
 
 fn catalog_image(item: &CatalogItem) -> Option<String> {

@@ -15,6 +15,9 @@ pub struct LibraryArtwork {
     pub logo: Option<String>,
     /// The library header, or the store's when the game has no library one.
     pub header: Option<String>,
+    /// The app whose artwork stands in for the game's missing images, such
+    /// as Rust's for its staging branch.
+    pub parent: Option<u32>,
 }
 
 /// The artwork `pics`, a game's whole PICS app info, names in `language`, or
@@ -34,6 +37,8 @@ pub fn library_artwork(pics: &Value, language: &str) -> LibraryArtwork {
         hero: image("library_hero"),
         logo: image("library_logo"),
         header: image("library_header").or_else(|| localized(&common["header_image"])),
+        parent: crate::library::positive(&common["parent"])
+            .and_then(|parent| u32::try_from(parent).ok()),
     }
 }
 
@@ -78,6 +83,7 @@ mod tests {
                 hero: Some("d75184/library_hero.jpg".into()),
                 logo: Some("logo.png".into()),
                 header: Some("31bac6/library_header.jpg".into()),
+                parent: None,
             }
         );
         assert_eq!(
@@ -92,6 +98,18 @@ mod tests {
         assert_eq!(
             library_artwork(&pics, "french").header.as_deref(),
             Some("31bac6/header.jpg")
+        );
+    }
+
+    #[test]
+    fn a_staging_branch_names_the_game_it_belongs_to() {
+        let pics = json!({ "common": { "type": "Beta", "parent": "252490" } });
+        assert_eq!(
+            library_artwork(&pics, "english"),
+            LibraryArtwork {
+                parent: Some(252_490),
+                ..LibraryArtwork::default()
+            }
         );
     }
 

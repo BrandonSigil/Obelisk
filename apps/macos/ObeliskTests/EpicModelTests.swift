@@ -61,9 +61,8 @@ final class EpicModelTests: XCTestCase {
 
         model.open(owned)
         try await eventually { model.achievements.items != nil }
-        let namespaces = await session.achievementGames
-        let locales = await session.achievementLocales
-        XCTAssertEqual(namespaces, ["fixture"])
-        XCTAssertEqual(locales, ["fr"])
+        let reads = await session.achievementReads
+        XCTAssertTrue(reads.contains(AchievementRead(ids: ["fixture"], locale: "fr", fresh: false)))
+        XCTAssertTrue(reads.allSatisfy { $0.locale == "fr" })
     }
 }

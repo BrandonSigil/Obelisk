@@ -3,6 +3,19 @@ import Observation
 import XCTest
 @testable import Obelisk
 
+extension LibraryOrdering where Game == SteamGame {
+    /// `games` in `sort` order, as the Steam library ranks them by name,
+    /// playtime or last played.
+    static func order(_ games: [SteamGame], by sort: StorefrontLibrarySort) -> [SteamGame] {
+        let rank: (SteamGame) -> Double? = switch sort {
+        case .lastPlayed: { $0.lastPlayedOnSteam?.timeIntervalSince1970 }
+        case .playtime: { $0.playtime.map { Double($0.components.seconds) } }
+        default: { _ in nil }
+        }
+        return order(games, title: \.name, rank: rank)
+    }
+}
+
 final class SteamIntegrationTests: XCTestCase {
     @MainActor
     func testOwnedLibraryDefaultsToMostRecentlyPlayedWithStableUnplayedOrder() {
@@ -12,11 +25,7 @@ final class SteamIntegrationTests: XCTestCase {
             SteamGame(appId: 4, name: "Zéro", iconHash: "", lastPlayed: 0, playtimeMinutes: 0),
             SteamGame(appId: 3, name: "Alpha", iconHash: "", lastPlayed: 0, playtimeMinutes: 0),
         ]
-        func order(_ sort: StorefrontLibrarySort) -> [UInt32] {
-            LibraryOrdering.order(games, by: sort, title: \.name, playtime: \.playtime,
-                                  lastPlayed: \.lastPlayedOnSteam)
-                .map(\.appId)
-        }
+        func order(_ sort: StorefrontLibrarySort) -> [UInt32] { LibraryOrdering.order(games, by: sort).map(\.appId) }
         XCTAssertEqual(order(.lastPlayed), [2, 1, 3, 4])
         XCTAssertEqual(order(.name), [3, 1, 2, 4])
         XCTAssertEqual(order(.playtime), [1, 2, 3, 4])

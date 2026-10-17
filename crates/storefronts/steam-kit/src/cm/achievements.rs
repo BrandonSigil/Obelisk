@@ -37,6 +37,12 @@ pub(crate) struct GameResponse {
     #[prost(uint32, optional, tag = "4")]
     schema_hash: Option<u32>,
 }
+impl GameResponse {
+    /// Whether the game defines no achievement.
+    pub(crate) fn is_empty(&self) -> bool {
+        self.achievements.is_empty()
+    }
+}
 #[derive(Clone, PartialEq, Message)]
 struct Definition {
     #[prost(string, tag = "1")]
@@ -76,46 +82,74 @@ struct Unlock {
 }
 
 impl SteamConnection {
+    /// The game's achievements; none when Steam has no stats for it, as for
+    /// a game without achievements.
     pub(crate) async fn game_achievements(
         &self,
         app_id: u32,
         language: &str,
-    ) -> Result<GameResponse, CmError> {
-        self.service(
-            "Player.GetGameAchievements#1",
-            &GameRequest {
-                app_id,
-                language: language.into(),
-            },
+    ) -> Result<Option<GameResponse>, CmError> {
+        stats(
+            self.service(
+                "Player.GetGameAchievements#1",
+                &GameRequest {
+                    app_id,
+                    language: language.into(),
+                },
+            )
+            .await,
         )
-        .await
     }
 
-    pub(crate) async fn user_achievements(&self, app_id: u32) -> Result<UserResponse, CmError> {
-        self.service(
-            "Player.GetUserAchievements#1",
-            &UserRequest {
-                steam_id: self.steam_id,
-                app_id,
-            },
+    /// What the account unlocked of the game; none when it has no stats in
+    /// the game yet, as an account that never played it.
+    pub(crate) async fn user_achievements(
+        &self,
+        app_id: u32,
+    ) -> Result<Option<UserResponse>, CmError> {
+        stats(
+            self.service(
+                "Player.GetUserAchievements#1",
+                &UserRequest {
+                    steam_id: self.steam_id,
+                    app_id,
+                },
+            )
+            .await,
         )
-        .await
+    }
+}
+
+/// Steam's answer when there are no stats to tell.
+const NO_MATCH: i32 = 42;
+
+/// `response`, none when Steam answered that it has no stats to tell.
+fn stats<T>(response: Result<T, CmError>) -> Result<Option<T>, CmError> {
+    match response {
+        Err(CmError::Rejected {
+            result: NO_MATCH, ..
+        }) => Ok(None),
+        response => response.map(Some),
     }
 }
 
 fn invalid() -> CmError {
     CmError::Protocol("backend.steam.achievements.invalidResponse".into())
 }
+/// `schema`'s achievements as the account stands with them; none unlocked
+/// without `user`'s stats.
 pub(crate) fn combine(
     app_id: u32,
     schema: GameResponse,
-    user: UserResponse,
+    user: Option<UserResponse>,
 ) -> Result<Vec<Achievement>, CmError> {
-    if schema.schema_hash != user.schema_hash || schema.schema_version != user.schema_version {
+    if user.as_ref().is_some_and(|user| {
+        schema.schema_hash != user.schema_hash || schema.schema_version != user.schema_version
+    }) {
         return Err(invalid());
     }
     let mut states = HashMap::new();
-    for state in user.achievements {
+    for state in user.into_iter().flat_map(|user| user.achievements) {
         let key = state.key.ok_or_else(invalid)?;
         if states.insert(key, state).is_some() {
             return Err(invalid());
@@ -233,12 +267,31 @@ mod tests {
             }],
             ..Default::default()
         };
-        let values = combine(620, schema, user).unwrap();
+        let values = combine(620, schema, Some(user)).unwrap();
         assert_eq!(values.len(), 2);
         assert_eq!(values[0].id, "earned");
         assert_eq!(values[0].unlock_time, 123);
         assert!(values[1].hidden);
         assert!(values[1].name.is_empty() && values[1].description.is_empty());
+    }
+    #[test]
+    fn no_stats_means_no_achievements_or_none_unlocked() {
+        let rejected = |result| {
+            Err::<(), _>(CmError::Rejected {
+                action: "backend.steam.cm.action.contentRequest",
+                result,
+            })
+        };
+        assert!(matches!(stats(rejected(42)), Ok(None)));
+        assert!(stats(rejected(2)).is_err());
+        let schema = GameResponse {
+            achievements: vec![definition("first", 1)],
+            schema_hash: Some(7),
+            schema_version: Some(3),
+        };
+        let values = combine(620, schema, None).unwrap();
+        assert_eq!(values.len(), 1);
+        assert!(!values[0].unlocked);
     }
     #[test]
     fn refuses_mismatched_schemas_duplicate_keys_and_unknown_user_records() {
@@ -249,10 +302,10 @@ mod tests {
                     schema_hash: Some(1),
                     ..Default::default()
                 },
-                UserResponse {
+                Some(UserResponse {
                     schema_hash: Some(2),
                     ..Default::default()
-                }
+                })
             )
             .is_err()
         );
@@ -263,7 +316,7 @@ mod tests {
                     achievements: vec![definition("a", 1), definition("b", 1)],
                     ..Default::default()
                 },
-                UserResponse::default()
+                Some(UserResponse::default())
             )
             .is_err()
         );
@@ -271,13 +324,13 @@ mod tests {
             combine(
                 620,
                 GameResponse::default(),
-                UserResponse {
+                Some(UserResponse {
                     achievements: vec![Unlock {
                         key: Some(1),
                         ..Default::default()
                     }],
                     ..Default::default()
-                }
+                })
             )
             .is_err()
         );

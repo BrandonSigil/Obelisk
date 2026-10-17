@@ -652,15 +652,25 @@ impl SteamConnection {
         check_result(list.result, "backend.steam.cm.action.readLicenses")?;
         // Expired, cancelled, pending, or never activated licenses grant no access.
         const INACTIVE: u32 = 0x04 | 0x08 | 0x10 | 0x20 | 0x400 | 0x800 | 0x40000;
-        let packages: Vec<_> = list
-            .licenses
-            .iter()
-            .filter(|license| license.package_id != 0 && license.flags & INACTIVE == 0)
+        let active = || {
+            list.licenses
+                .iter()
+                .filter(|license| license.package_id != 0 && license.flags & INACTIVE == 0)
+        };
+        let packages: Vec<_> = active()
             .map(|license| proto::ProductId {
                 id: license.package_id,
                 access_token: license.access_token,
             })
             .collect();
+        // A package may come with several licenses: the oldest dates it.
+        let mut created: HashMap<u32, u32> = HashMap::new();
+        for license in active().filter(|license| license.time_created > 0) {
+            let at = created
+                .entry(license.package_id)
+                .or_insert(license.time_created);
+            *at = (*at).min(license.time_created);
+        }
         let requests: Vec<_> = packages
             .chunks(PICS_BATCH)
             .map(|batch| self.products(&[], batch))
@@ -683,7 +693,7 @@ impl SteamConnection {
                 let tree = kv::package(&package.buffer)?;
                 let name = package.id.to_string();
                 let root = tree.get(&name).unwrap_or(&tree);
-                rights.extend_package(root);
+                rights.extend_package(root, created.get(&package.id).copied());
             }
         }
         Ok(rights)

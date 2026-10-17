@@ -1,10 +1,7 @@
 //! Bounded reads and the status mapping every GOG request shares.
 use std::{io::Read, time::Duration};
 
-use obelisk_core::{
-    date,
-    transfer::{BodyError, BodySize, CancelToken, read_body},
-};
+use obelisk_core::transfer::{BodyError, BodySize, CancelToken, read_body};
 use reqwest::{RequestBuilder, Response, StatusCode, Url};
 
 use crate::GogError;
@@ -147,52 +144,6 @@ pub(crate) fn safe_https_url(value: &str) -> Option<String> {
         .map(|_| value)
 }
 
-/// The moment a GOG date names, such as `2014-10-13T00:00:00+0000`, in
-/// seconds since the Unix epoch; a bare date is its midnight in UTC.
-pub(crate) fn unix_seconds(text: &str) -> Option<u64> {
-    let number = |range: std::ops::Range<usize>| -> Option<i64> {
-        let part = text.get(range)?;
-        part.bytes()
-            .all(|byte| byte.is_ascii_digit())
-            .then(|| part.parse().ok())?
-    };
-    if text.get(4..5) != Some("-") || text.get(7..8) != Some("-") {
-        return None;
-    }
-    let (year, month, day) = (number(0..4)?, number(5..7)?, number(8..10)?);
-    if !(1..=12).contains(&month) || !(1..=31).contains(&day) {
-        return None;
-    }
-    let (mut seconds, rest) = match text.get(10..11) {
-        None => (0, ""),
-        Some("T" | " ") if text.get(13..14) == Some(":") && text.get(16..17) == Some(":") => (
-            number(11..13)? * 3600 + number(14..16)? * 60 + number(17..19)?,
-            &text[19..],
-        ),
-        _ => return None,
-    };
-    // A fraction of a second, then the offset from UTC.
-    let rest = rest.trim_start_matches(|c: char| c == '.' || c.is_ascii_digit());
-    match rest {
-        "" | "Z" => {}
-        offset => {
-            let sign = match offset.get(..1)? {
-                "+" => 1,
-                "-" => -1,
-                _ => return None,
-            };
-            let digits = offset[1..].replace(':', "");
-            if digits.len() != 4 || !digits.bytes().all(|byte| byte.is_ascii_digit()) {
-                return None;
-            }
-            let minutes: i64 =
-                digits[..2].parse::<i64>().ok()? * 60 + digits[2..].parse::<i64>().ok()?;
-            seconds -= sign * minutes * 60;
-        }
-    }
-    u64::try_from(date::days_from_civil(year, month, day) * 86_400 + seconds).ok()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -212,37 +163,6 @@ mod tests {
             inflate_json::<serde_json::Value>(&compressed, 3),
             Err(GogError::Protocol)
         ));
-    }
-
-    #[test]
-    fn gog_dates_read_as_unix_seconds() {
-        assert_eq!(
-            unix_seconds("2014-10-13T00:00:00+0000"),
-            Some(1_413_158_400)
-        );
-        assert_eq!(
-            unix_seconds("2011-05-09T23:00:00+0200"),
-            Some(1_304_974_800)
-        );
-        assert_eq!(
-            unix_seconds("2024-11-05T10:31:15+00:00"),
-            Some(1_730_802_675)
-        );
-        assert_eq!(
-            unix_seconds("2020-02-29T12:00:00.250Z"),
-            Some(1_582_977_600)
-        );
-        assert_eq!(unix_seconds("1970-01-01"), Some(0));
-        for text in [
-            "",
-            "2014-13-01",
-            "2014/10/13",
-            "2014-10-13T00:00",
-            "2014-10-13T00:00:00+00",
-            "x",
-        ] {
-            assert_eq!(unix_seconds(text), None, "{text}");
-        }
     }
 
     #[test]

@@ -366,10 +366,10 @@ final class EpicPresentationTests: XCTestCase {
             games: [game], details: EpicGameDetails(installationBytes: 2_000_000_000),
             playtimes: [EpicPlaytime(appName: game.appName, seconds: 5400)],
             achievements: [
-                EpicAchievement(id: "first", name: "First steps", description: "", iconUrl: "",
-                                hidden: false, unlocked: true, unlockDate: nil),
-                EpicAchievement(id: "second", name: "Explorer", description: "", iconUrl: "",
-                                hidden: false, unlocked: false, unlockDate: nil)
+                LibraryAchievement(id: "first", name: "First steps", description: "", iconUrl: "",
+                                   hidden: false, unlocked: true, unlockedAt: nil),
+                LibraryAchievement(id: "second", name: "Explorer", description: "", iconUrl: "",
+                                   hidden: false, unlocked: false, unlockedAt: nil)
             ]
         )
         let detailsModel = EpicModel(keychain: EpicPresentationCredentials(), restore: { _ in detailsSession })
@@ -530,7 +530,7 @@ private actor EpicPresentationSession: EpicSessionProtocol {
 
     private let library: [EpicGame]
     private let details: EpicGameDetails
-    private let achievementItems: [EpicAchievement]
+    private let achievementItems: [LibraryAchievement]
     private let playtimeItems: [EpicPlaytime]
     private var shouldHoldDetails: Bool
     private var detailsContinuation: CheckedContinuation<EpicGameDetails, Never>?
@@ -546,7 +546,7 @@ private actor EpicPresentationSession: EpicSessionProtocol {
         details: EpicGameDetails = EpicGameDetails(installationBytes: nil),
         holdDetails: Bool = false,
         playtimes: [EpicPlaytime] = [],
-        achievements: [EpicAchievement] = []
+        achievements: [LibraryAchievement] = []
     ) {
         library = games
         playtimeItems = playtimes
@@ -555,7 +555,9 @@ private actor EpicPresentationSession: EpicSessionProtocol {
         shouldHoldDetails = holdDetails
         achievementItems = achievements
     }
-    func achievements(namespace: String, locale: String) async throws -> [EpicAchievement] { achievementItems }
+    func achievements(namespace: String, locale: String, fresh: Bool) async throws -> [LibraryAchievement] {
+        achievementItems
+    }
     func credentials() -> EpicCredentials { epicPresentationCredentials }
     func prepare() -> EpicCredentials { epicPresentationCredentials }
     func gameDetails(namespace: String, catalogItemId: String, appName: String, platform: String) async -> EpicGameDetails {

@@ -32,6 +32,19 @@ fn reply(path: &str, status: u16, body: Value) -> Reply {
     }
 }
 
+#[test]
+fn a_game_joins_the_library_with_its_oldest_record() {
+    let metadata = json!({ "libraryRecords": [
+        { "acquisitionDate": "2022-05-20T10:00:00.000Z" },
+        { "acquisitionDate": "2020-05-28T17:33:54.987Z" },
+        { "acquisitionDate": "not a date" },
+        {}
+    ]});
+    assert_eq!(added_at(&metadata), Some(1_590_687_234));
+    assert_eq!(added_at(&json!({ "libraryRecords": [] })), None);
+    assert_eq!(added_at(&json!({})), None);
+}
+
 struct Mock {
     api: Api,
     requests: Arc<StdMutex<Vec<String>>>,

@@ -20,10 +20,7 @@ final class SteamSortingPerformanceTests: XCTestCase {
             for iteration in 0..<5 {
                 for sort in [StorefrontLibrarySort.lastPlayed, .name, .playtime] {
                     let began = ContinuousClock.now
-                    let result = LibraryOrdering.order(
-                        games, by: sort, title: \.name, playtime: \.playtime,
-                        lastPlayed: \.lastPlayedOnSteam
-                    )
+                    let result = LibraryOrdering.order(games, by: sort)
                     let elapsed = milliseconds(since: began)
                     assertOrder(result, count: count, sort: sort)
                     samples.append(SortingSample(phase: "order", games: count, sort: sort.rawValue, iteration: iteration, milliseconds: elapsed))

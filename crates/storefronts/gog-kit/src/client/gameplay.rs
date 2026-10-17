@@ -4,6 +4,7 @@
 use std::{collections::BTreeMap, time::Duration};
 
 use futures_util::{StreamExt, TryStreamExt, stream};
+use obelisk_core::date::unix_seconds;
 use reqwest::StatusCode;
 use serde::Deserialize;
 
@@ -11,7 +12,7 @@ use super::{Client, valid_product_id};
 use crate::{
     GogError,
     auth::Api,
-    http::{bounded_json, check_status, safe_https_url, send_retrying, unix_seconds},
+    http::{bounded_json, check_status, safe_https_url, send_retrying},
     library::endpoint,
 };
 

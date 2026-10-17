@@ -1,9 +1,16 @@
 //! Epic's account seam. Only refresh credentials cross into the macOS Keychain;
 //! the account access token stays inside the Rust session.
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
-use crate::{LibraryCache, library_cache::EpicLibrary};
+use crate::{
+    LibraryCache,
+    library_cache::{self, EpicLibrary, GameAchievements, LibraryAchievement},
+};
 use epic_kit::{auth, client};
+
+/// Sandboxes whose achievements a library reads at once: each takes two
+/// requests.
+const ACHIEVEMENT_READS: usize = 4;
 
 #[derive(Debug, thiserror::Error, uniffi::Error)]
 pub enum EpicError {
@@ -86,6 +93,11 @@ pub struct EpicGame {
     pub developer: String,
     pub windows: bool,
     pub macos: bool,
+    /// When the game joined the account's library, in seconds since the
+    /// Unix epoch.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[uniffi(default = None)]
+    pub added_at: Option<u64>,
 }
 
 impl From<client::Game> for EpicGame {
@@ -101,21 +113,12 @@ impl From<client::Game> for EpicGame {
             developer: game.developer,
             windows: game.windows,
             macos: game.macos,
+            added_at: game.added_at,
         }
     }
 }
 
-#[derive(Clone, Debug, uniffi::Record)]
-pub struct EpicAchievement {
-    pub id: String,
-    pub name: String,
-    pub description: String,
-    pub icon_url: String,
-    pub hidden: bool,
-    pub unlocked: bool,
-    pub unlock_date: Option<String>,
-}
-impl From<client::Achievement> for EpicAchievement {
+impl From<client::Achievement> for LibraryAchievement {
     fn from(value: client::Achievement) -> Self {
         Self {
             id: value.id,
@@ -124,7 +127,11 @@ impl From<client::Achievement> for EpicAchievement {
             icon_url: value.icon_url,
             hidden: value.hidden,
             unlocked: value.unlocked,
-            unlock_date: value.unlock_date,
+            unlocked_at: value
+                .unlock_date
+                .as_deref()
+                .filter(|_| value.unlocked)
+                .and_then(obelisk_core::date::unix_seconds),
         }
     }
 }
@@ -174,24 +181,38 @@ impl EpicSession {
             library,
         }))
     }
+
+    /// `namespaces`' achievements in `locale`: the library's for a game not
+    /// played since they were read, unless `fresh`, else Epic's, a few
+    /// sandboxes at a time, which the library then keeps. A sandbox Epic did
+    /// not answer for is left out; when none could be told, the first
+    /// failure.
+    async fn read_achievements(
+        &self,
+        namespaces: Vec<String>,
+        locale: &str,
+        fresh: bool,
+    ) -> Result<Vec<GameAchievements>, EpicError> {
+        let client = &self.client;
+        library_cache::achievements(
+            self.library.as_ref().map(|library| library.achievements()),
+            namespaces,
+            locale,
+            fresh,
+            ACHIEVEMENT_READS,
+            |namespace| async move {
+                client
+                    .achievements(&namespace, locale)
+                    .await
+                    .map_err(EpicError::from)
+            },
+        )
+        .await
+    }
 }
 
 #[uniffi::export(async_runtime = "tokio")]
 impl EpicSession {
-    pub async fn achievements(
-        &self,
-        namespace: String,
-        locale: String,
-    ) -> Result<Vec<EpicAchievement>, EpicError> {
-        Ok(self
-            .client
-            .achievements(&namespace, &locale)
-            .await?
-            .into_iter()
-            .map(Into::into)
-            .collect())
-    }
-
     /// Keeps every library it loads in `library`.
     #[uniffi::constructor]
     pub async fn sign_in(
@@ -248,6 +269,39 @@ impl EpicSession {
         })
     }
 
+    /// The game's achievements in `locale`, such as the game page's: the
+    /// library's while the game was not played since they were read, unless
+    /// `fresh`, else Epic's, which the library then keeps. Epic tells them by
+    /// sandbox, which several games may share.
+    pub async fn achievements(
+        &self,
+        namespace: String,
+        locale: String,
+        fresh: bool,
+    ) -> Result<Vec<LibraryAchievement>, EpicError> {
+        let read = self
+            .read_achievements(vec![namespace], &locale, fresh)
+            .await?;
+        Ok(read
+            .into_iter()
+            .next()
+            .map(|game| game.achievements)
+            .unwrap_or_default())
+    }
+
+    /// The share of each of `namespaces`' achievements the account unlocked,
+    /// by namespace, as `achievements` reads them: none for a sandbox without
+    /// achievements or that Epic did not answer for. It fails only when no
+    /// sandbox could be told.
+    pub async fn achievement_shares(
+        &self,
+        namespaces: Vec<String>,
+        locale: String,
+    ) -> Result<HashMap<String, f64>, EpicError> {
+        let read = self.read_achievements(namespaces, &locale, false).await?;
+        Ok(library_cache::unlocked_shares(read).collect())
+    }
+
     /// Every game the account played, in one request.
     pub async fn playtimes(&self) -> Result<Vec<EpicPlaytime>, EpicError> {
         let playtimes = self.client.playtimes().await?;
@@ -282,5 +336,37 @@ impl EpicSession {
             .game_details(&namespace, &catalog_item_id, &app_name, &platform)
             .await?
             .into())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_unlock_date_reads_with_or_without_fractions_and_only_once_unlocked() {
+        let achievement = |date: Option<&str>, unlocked| {
+            LibraryAchievement::from(client::Achievement {
+                id: "test".into(),
+                name: "Title".into(),
+                description: String::new(),
+                icon_url: String::new(),
+                hidden: false,
+                unlocked,
+                unlock_date: date.map(String::from),
+            })
+            .unlocked_at
+        };
+        assert_eq!(
+            achievement(Some("2022-09-21T12:00:00Z"), true),
+            Some(1_663_761_600)
+        );
+        assert_eq!(
+            achievement(Some("2022-09-21T12:00:00.000Z"), true),
+            Some(1_663_761_600)
+        );
+        assert_eq!(achievement(Some("not-a-date"), true), None);
+        assert_eq!(achievement(None, true), None);
+        assert_eq!(achievement(Some("2022-09-21T12:00:00Z"), false), None);
     }
 }

@@ -1,10 +1,21 @@
 //! Asynchronous, account-scoped Steam API for Swift. Secrets cross this seam only
 //! for authentication and the macOS Keychain; they are never part of a catalog.
-use crate::{LibraryCache, library_cache::SteamLibrary};
-use game_runtime::{protocol::Credentials, steam::account_session::AccountSession};
-use std::{path::Path, sync::Arc};
-use steam_kit::{artwork, auth, client};
+use crate::{
+    LibraryCache,
+    installations::Named,
+    library_cache::{self, GameAchievements, LibraryAchievement, SteamLibrary},
+};
+use game_runtime::{
+    protocol::Credentials,
+    steam::{self, account_session::AccountSession},
+};
+use std::{collections::HashMap, path::Path, sync::Arc};
+use steam_kit::{artwork, auth, client, library};
 use tokio::sync::Mutex;
+
+/// Games whose achievements a library reads at once: each takes up to two
+/// requests.
+const ACHIEVEMENT_READS: usize = 4;
 
 #[uniffi::export]
 pub fn steam_language(locale: String) -> String {
@@ -176,17 +187,7 @@ impl SteamLogin {
     }
 }
 
-#[derive(Clone, Debug, uniffi::Record)]
-pub struct SteamAchievement {
-    pub id: String,
-    pub name: String,
-    pub description: String,
-    pub icon_url: String,
-    pub hidden: bool,
-    pub unlocked: bool,
-    pub unlock_time: u32,
-}
-impl From<client::Achievement> for SteamAchievement {
+impl From<client::Achievement> for LibraryAchievement {
     fn from(value: client::Achievement) -> Self {
         Self {
             id: value.id,
@@ -195,7 +196,8 @@ impl From<client::Achievement> for SteamAchievement {
             icon_url: value.icon_url,
             hidden: value.hidden,
             unlocked: value.unlocked,
-            unlock_time: value.unlock_time,
+            unlocked_at: (value.unlocked && value.unlock_time > 0)
+                .then_some(u64::from(value.unlock_time)),
         }
     }
 }
@@ -227,6 +229,40 @@ pub struct SteamGamePlatforms {
     /// Nil when PICS did not return the game.
     #[uniffi(default = None)]
     pub artwork: Option<SteamGameArtwork>,
+    /// Nil when PICS did not return the game.
+    #[uniffi(default = None)]
+    pub facts: Option<SteamGameFacts>,
+}
+/// What a game's PICS app info tells that the library orders by. Each is nil
+/// when the game does not publish it.
+#[derive(Clone, Debug, Default, PartialEq, Eq, uniffi::Record)]
+pub struct SteamGameFacts {
+    /// Seconds since the Unix epoch.
+    pub release_date: Option<u64>,
+    /// Out of 100.
+    pub metacritic_score: Option<u32>,
+    /// Steam's verdict on its players' reviews, from 1, overwhelmingly
+    /// negative, to 9, overwhelmingly positive.
+    pub review_score: Option<u32>,
+    /// The share of positive reviews, out of 100.
+    pub review_percentage: Option<u32>,
+}
+impl From<library::LibraryFacts> for SteamGameFacts {
+    fn from(
+        library::LibraryFacts {
+            release_date,
+            metacritic_score,
+            review_score,
+            review_percentage,
+        }: library::LibraryFacts,
+    ) -> Self {
+        Self {
+            release_date,
+            metacritic_score,
+            review_score,
+            review_percentage,
+        }
+    }
 }
 /// A game's library artwork, each image's path under the game's store assets.
 #[derive(Clone, Debug, Default, PartialEq, Eq, uniffi::Record)]
@@ -238,6 +274,10 @@ pub struct SteamGameArtwork {
     pub logo: Option<String>,
     /// The library header, or the store's when the game has no library one.
     pub header: Option<String>,
+    /// The app whose artwork stands in for the game's missing images, such
+    /// as Rust's for its staging branch.
+    #[uniffi(default = None)]
+    pub parent: Option<u32>,
 }
 impl From<artwork::LibraryArtwork> for SteamGameArtwork {
     fn from(
@@ -246,6 +286,7 @@ impl From<artwork::LibraryArtwork> for SteamGameArtwork {
             hero,
             logo,
             header,
+            parent,
         }: artwork::LibraryArtwork,
     ) -> Self {
         Self {
@@ -253,6 +294,7 @@ impl From<artwork::LibraryArtwork> for SteamGameArtwork {
             hero,
             logo,
             header,
+            parent,
         }
     }
 }
@@ -277,6 +319,33 @@ impl SteamSession {
     /// The account's CM connection of the moment.
     pub(crate) fn client(&self) -> Arc<client::Client> {
         self.account.current()
+    }
+
+    /// `app_ids`' achievements in `language`: the library's for a game not
+    /// played since they were read, unless `fresh`, else Steam's, a few
+    /// games at a time, which the library then keeps. A game Steam did not
+    /// answer for is left out; when none could be told, the first failure.
+    async fn read_achievements(
+        &self,
+        app_ids: Vec<u32>,
+        language: &str,
+        fresh: bool,
+    ) -> Result<Vec<GameAchievements>, SteamError> {
+        let client = &self.client();
+        library_cache::achievements(
+            self.library.as_ref().map(SteamLibrary::achievements),
+            app_ids,
+            language,
+            fresh,
+            ACHIEVEMENT_READS,
+            |app_id| async move {
+                client
+                    .achievements(app_id, language)
+                    .await
+                    .map_err(SteamError::from)
+            },
+        )
+        .await
     }
 }
 
@@ -316,17 +385,48 @@ impl SteamSession {
             None => games.into_iter().map(Into::into).collect(),
         })
     }
+    /// The game's achievements in `language`, such as the game page's: the
+    /// library's while the game was not played since they were read, unless
+    /// `fresh`, else Steam's, which the library then keeps.
     pub async fn achievements(
         &self,
         app_id: u32,
         language: String,
-    ) -> Result<Vec<SteamAchievement>, SteamError> {
-        Ok(self
-            .client()
-            .achievements(app_id, &language)
-            .await?
+        fresh: bool,
+    ) -> Result<Vec<LibraryAchievement>, SteamError> {
+        let read = self
+            .read_achievements(vec![app_id], &language, fresh)
+            .await?;
+        Ok(read
             .into_iter()
-            .map(Into::into)
+            .next()
+            .map(|game| game.achievements)
+            .unwrap_or_default())
+    }
+    /// The share of each of `app_ids`' achievements the account unlocked, by
+    /// app ID, as `achievements` reads them: none for a game without
+    /// achievements or that Steam did not answer for. It fails only when no
+    /// game could be told.
+    pub async fn achievement_shares(
+        &self,
+        app_ids: Vec<u32>,
+        language: String,
+    ) -> Result<HashMap<u32, f64>, SteamError> {
+        let read = self.read_achievements(app_ids, &language, false).await?;
+        Ok(library_cache::unlocked_shares(read)
+            .filter_map(|(id, share)| Some((<steam::Steam as Named>::named(&id)?, share)))
+            .collect())
+    }
+    /// When the account got each game its licenses grant, in seconds since
+    /// the Unix epoch, by app ID. It expands every license through PICS.
+    pub async fn acquisitions(&self) -> Result<HashMap<u32, u64>, SteamError> {
+        let acquired = self.client().acquisitions().await?;
+        if let Some(library) = &self.library {
+            library.acquisitions(&acquired);
+        }
+        Ok(acquired
+            .into_iter()
+            .map(|(app_id, at)| (app_id, u64::from(at)))
             .collect())
     }
     /// The session's state after `after_revision`: its friends and how it
@@ -402,6 +502,10 @@ impl SteamSession {
                     .pics
                     .as_ref()
                     .map(|pics| artwork::library_artwork(pics, &language).into()),
+                facts: game
+                    .pics
+                    .as_ref()
+                    .map(|pics| library::library_facts(pics).into()),
             })
             .collect();
         if let Some(library) = &self.library {

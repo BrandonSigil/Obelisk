@@ -31,47 +31,69 @@ enum StorefrontLibraryFilter: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
-/// The orders a storefront library offers, each where its store records what
-/// it needs.
+/// The orders a storefront library offers, as its menu lists them, each where
+/// its store records what it needs.
 enum StorefrontLibrarySort: String, CaseIterable, Identifiable, Sendable {
-    case lastPlayed, name, playtime
+    case name, achievements, playtime, lastPlayed, releaseDate, dateAdded, size, criticScore, playerReviews
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
-        case .lastPlayed: L10n.string("model.library.sort.lastPlayed")
         case .name: L10n.string("model.library.sort.name")
+        case .achievements: L10n.string("model.library.sort.achievements")
         case .playtime: L10n.string("model.library.sort.playtime")
+        case .lastPlayed: L10n.string("model.library.sort.lastPlayed")
+        case .releaseDate: L10n.string("model.library.sort.releaseDate")
+        case .dateAdded: L10n.string("model.library.sort.dateAdded")
+        case .size: L10n.string("model.library.sort.size")
+        case .criticScore: L10n.string("model.library.sort.criticScore")
+        case .playerReviews: L10n.string("model.library.sort.playerReviews")
         }
     }
 
     var menuTitle: String {
         switch self {
-        case .lastPlayed: L10n.string("model.library.sortMenu.lastPlayed")
         case .name: L10n.string("model.library.sortMenu.name")
+        case .achievements: L10n.string("model.library.sortMenu.achievements")
         case .playtime: L10n.string("model.library.sortMenu.playtime")
+        case .lastPlayed: L10n.string("model.library.sortMenu.lastPlayed")
+        case .releaseDate: L10n.string("model.library.sortMenu.releaseDate")
+        case .dateAdded: L10n.string("model.library.sortMenu.dateAdded")
+        case .size: L10n.string("model.library.sortMenu.size")
+        case .criticScore: L10n.string("model.library.sortMenu.criticScore")
+        case .playerReviews: L10n.string("model.library.sortMenu.playerReviews")
         }
     }
 }
 
 /// Orders and narrows a storefront's library, the same way for every
 /// storefront. Ordering every game is the costly part: each order is kept
-/// until the library's revision changes, and a search or a filter only
-/// narrows a kept order.
+/// until the library's revision, or what only that order reads, changes, and
+/// a search or a filter only narrows a kept order.
 @MainActor
 final class LibraryOrdering<Game: Identifiable> where Game.ID: Comparable {
     private struct Criteria: Equatable {
         var query: String
         var sort: StorefrontLibrarySort
         var filter: StorefrontLibraryFilter
-        /// Read only by the installed filter.
-        var installed: Set<Game.ID>
+        /// Each installed game's size, read only by the installed filter and
+        /// the order by size.
+        var installed: [Game.ID: UInt64]
+        /// What the order read apart from the games.
+        var inputs: Inputs
+    }
+
+    /// What an order reads apart from the games: the storefront's values for
+    /// it, and for the order by size, the installed games' sizes.
+    private struct Inputs: Equatable {
+        var values: Int
+        var sizes: [Game.ID: UInt64]
     }
 
     private var revision: Int?
     private var filterRevision: Int?
-    private var orders: [StorefrontLibrarySort: [Game]] = [:]
+    private var orders: [StorefrontLibrarySort: (inputs: Inputs, games: [Game])] = [:]
     private var narrowed: (criteria: Criteria, games: [Game])?
     /// The library's hero, once read: it may have none.
     private var featured: Game??
@@ -84,9 +106,15 @@ final class LibraryOrdering<Game: Identifiable> where Game.ID: Comparable {
         let revision = model.libraryRevision
         let filterRevision = model.filterRevision
         let filter = model.filter
+        let sort = model.sort
+        let receipts = filter == .installed || sort == .size ? model.installations.receipts : []
+        let installed = Dictionary(receipts.map { ($0.gameID, $0.totalBytes) }, uniquingKeysWith: +)
+        // What only one order reads, such as release dates or the sizes an
+        // installation changes, changes only that order.
+        let inputs = Inputs(values: model.valuesRevision(for: sort), sizes: sort == .size ? installed : [:])
         let criteria = Criteria(
-            query: model.searchText.trimmingCharacters(in: .whitespacesAndNewlines), sort: model.sort, filter: filter,
-            installed: filter == .installed ? Set(model.installations.receipts.map(\.gameID)) : []
+            query: model.searchText.trimmingCharacters(in: .whitespacesAndNewlines), sort: sort, filter: filter,
+            installed: installed, inputs: inputs
         )
         keep(revision)
         // What only a filter reads, such as platforms, never changes an order.
@@ -95,15 +123,18 @@ final class LibraryOrdering<Game: Identifiable> where Game.ID: Comparable {
             narrowed = nil
         }
         if let narrowed, narrowed.criteria == criteria { return narrowed.games }
-        let ordered = orders[criteria.sort] ?? Self.order(
-            games, by: criteria.sort, title: model.title(of:), playtime: model.playtime(of:), lastPlayed: model.lastPlayed(of:)
-        )
-        orders[criteria.sort] = ordered
+        let ordered: [Game]
+        if let order = orders[sort], order.inputs == inputs {
+            ordered = order.games
+        } else {
+            ordered = Self.order(games, title: model.title(of:), rank: Self.rank(sort, of: model, sizes: inputs.sizes))
+            orders[sort] = (inputs, ordered)
+        }
         let kept = criteria.query.isEmpty && filter == .all ? ordered : ordered.filter { game in
             guard criteria.query.isEmpty || model.title(of: game).localizedStandardContains(criteria.query) else { return false }
             switch filter {
             case .all: return true
-            case .installed: return criteria.installed.contains(game.id)
+            case .installed: return criteria.installed[game.id] != nil
             case .played: return model.playtime(of: game) != nil || model.lastPlayed(of: game) != nil
             case .macOS: return model.platform(of: game) == .macOS
             }
@@ -119,9 +150,7 @@ final class LibraryOrdering<Game: Identifiable> where Game.ID: Comparable {
         if let featured { return featured }
         let games = model.games
         let sort: StorefrontLibrarySort = games.contains { model.lastPlayed(of: $0) != nil } ? .lastPlayed : .playtime
-        let game = orders[sort].map(\.first) ?? Self.first(
-            games, by: sort, title: model.title(of:), playtime: model.playtime(of:), lastPlayed: model.lastPlayed(of:)
-        )
+        let game = orders[sort].map { $0.games.first } ?? Self.first(games, title: model.title(of:), rank: Self.rank(sort, of: model, sizes: [:]))
         featured = .some(game)
         return game
     }
@@ -135,19 +164,33 @@ final class LibraryOrdering<Game: Identifiable> where Game.ID: Comparable {
         featured = nil
     }
 
-    /// `games` in `sort` order: the most played or the last played first,
+    /// What places each of the model's games in `sort` order, the greatest
+    /// first; a game without one goes after the others. `sizes` are the
+    /// installed games'.
+    private static func rank<Model: LibraryStorefront>(
+        _ sort: StorefrontLibrarySort, of model: Model, sizes: [Game.ID: UInt64]
+    ) -> (Game) -> Double? where Model.Game == Game {
+        switch sort {
+        case .name: return { _ in nil }
+        case .playtime: return { model.playtime(of: $0).map { Double($0.components.seconds) } }
+        case .lastPlayed: return { model.lastPlayed(of: $0)?.timeIntervalSince1970 }
+        case .size: return { sizes[$0.id].map { Double($0) } }
+        case .achievements, .releaseDate, .dateAdded, .criticScore, .playerReviews:
+            return { model.libraryValue(of: $0, for: sort) }
+        }
+    }
+
+    /// `games` by `rank`, the greatest first and a game without one last,
     /// equal ones by name, then by ID.
-    static func order(_ games: [Game], by sort: StorefrontLibrarySort, title: (Game) -> String,
-                      playtime: (Game) -> Duration?, lastPlayed: (Game) -> Date?) -> [Game] {
-        keyed(games, by: sort, title: title, playtime: playtime, lastPlayed: lastPlayed)
+    static func order(_ games: [Game], title: (Game) -> String, rank: (Game) -> Double?) -> [Game] {
+        keyed(games, title: title, rank: rank)
             .sorted(by: precedes)
             .map(\.game)
     }
 
-    /// The first of `games` in `sort` order, without ordering the others.
-    static func first(_ games: [Game], by sort: StorefrontLibrarySort, title: (Game) -> String,
-                      playtime: (Game) -> Duration?, lastPlayed: (Game) -> Date?) -> Game? {
-        keyed(games, by: sort, title: title, playtime: playtime, lastPlayed: lastPlayed)
+    /// The first of `games` by `rank`, without ordering the others.
+    static func first(_ games: [Game], title: (Game) -> String, rank: (Game) -> Double?) -> Game? {
+        keyed(games, title: title, rank: rank)
             .min(by: precedes)?
             .game
     }
@@ -155,22 +198,65 @@ final class LibraryOrdering<Game: Identifiable> where Game.ID: Comparable {
     private typealias Keyed = (game: Game, title: String, rank: Double)
 
     /// Each game's keys, read once rather than at every comparison.
-    private static func keyed(_ games: [Game], by sort: StorefrontLibrarySort, title: (Game) -> String,
-                              playtime: (Game) -> Duration?, lastPlayed: (Game) -> Date?) -> [Keyed] {
-        games.map { game in
-            let rank: Double = switch sort {
-            case .name: 0
-            case .playtime: Double(playtime(game)?.components.seconds ?? 0)
-            case .lastPlayed: lastPlayed(game)?.timeIntervalSince1970 ?? -.infinity
-            }
-            return (game: game, title: title(game), rank: rank)
-        }
+    private static func keyed(_ games: [Game], title: (Game) -> String, rank: (Game) -> Double?) -> [Keyed] {
+        games.map { game in (game: game, title: title(game), rank: rank(game) ?? -.infinity) }
     }
 
     private static func precedes(_ left: Keyed, _ right: Keyed) -> Bool {
         if left.rank != right.rank { return left.rank > right.rank }
         let comparison = left.title.localizedStandardCompare(right.title)
         return comparison == .orderedSame ? left.game.id < right.game.id : comparison == .orderedAscending
+    }
+}
+
+/// What a storefront tells of its games apart from the library, such as
+/// Steam's license dates or each game's achievements: each order's values
+/// load with the library, and what the Library cache or an earlier load knew
+/// shows until then. A game the storefront did not answer for has no value,
+/// as one it has nothing to tell of.
+@MainActor
+@Observable
+final class LibraryRecords<ID: Hashable & Sendable> {
+    /// Each order's values by game.
+    private var values: [StorefrontLibrarySort: [ID: Double]] = [:]
+    /// Each order's revision, which changes whenever its values may have.
+    private var revisions: [StorefrontLibrarySort: Int] = [:]
+
+    @ObservationIgnored private var tasks: [StorefrontLibrarySort: Task<Void, Never>] = [:]
+
+    func value(for sort: StorefrontLibrarySort, of game: ID) -> Double? { values[sort]?[game] }
+
+    func revision(for sort: StorefrontLibrarySort) -> Int { revisions[sort, default: 0] }
+
+    /// Shows what the Library cache knew, until a load replaces it.
+    func show(_ known: [ID: Double], for sort: StorefrontLibrarySort) {
+        set(known, for: sort)
+    }
+
+    /// Loads `sort`'s values through `read`, unless they are loading.
+    func load(_ sort: StorefrontLibrarySort, read: @escaping @Sendable () async throws -> [ID: Double]) {
+        guard tasks[sort] == nil else { return }
+        tasks[sort] = Task { [weak self] in
+            let loaded = try? await read()
+            // UniFFI can return after the account was replaced.
+            guard !Task.isCancelled, let self else { return }
+            self.tasks[sort] = nil
+            // A failed load changes nothing: the library's next load asks again.
+            if let loaded { self.set(loaded, for: sort) }
+        }
+    }
+
+    /// Forgets every value, as another account's library replaces them.
+    func reset() {
+        tasks.values.forEach { $0.cancel() }
+        tasks.removeAll()
+        for sort in values.keys { set([:], for: sort) }
+    }
+
+    private func set(_ loaded: [ID: Double], for sort: StorefrontLibrarySort) {
+        guard loaded != values[sort, default: [:]] else { return }
+        values[sort] = loaded
+        revisions[sort, default: 0] &+= 1
     }
 }
 

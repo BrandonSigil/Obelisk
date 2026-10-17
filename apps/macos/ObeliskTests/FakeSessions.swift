@@ -332,6 +332,17 @@ extension LaunchHistory {
     }
 }
 
+/// Achievements as the Library cache keeps them, read in French: a hundred,
+/// `share` of them unlocked.
+private func keptAchievements(share: Double) -> [String: Any] {
+    let unlocked = Int((share * 100).rounded())
+    let list = (0..<100).map { index -> [String: Any] in
+        ["id": "\(index)", "name": "", "description": "", "iconUrl": "", "hidden": false,
+         "unlocked": index < unlocked, "unlockedAt": NSNull()]
+    }
+    return ["list": list, "locale": "french", "at": 0, "playtime": NSNull()]
+}
+
 extension LibraryCache {
     /// The cache of `directory` once it holds these libraries, in the file as
     /// Obelisk writes it: Steam's by account ID, Epic's by account.
@@ -345,6 +356,8 @@ extension LibraryCache {
                     "playtimeMinutes": cached.game.playtimeMinutes,
                 ]
                 entry["platforms"] = cached.platforms
+                entry["addedAt"] = cached.addedAt
+                entry["achievements"] = cached.achievementShare.map(keptAchievements(share:))
                 return entry
             })
         }
@@ -359,6 +372,7 @@ extension LibraryCache {
                 entry["imageUrl"] = game.imageUrl
                 entry["headerImageUrl"] = game.headerImageUrl
                 entry["playtimeSeconds"] = cached.playtimeSeconds
+                entry["achievements"] = cached.achievementShare.map(keptAchievements(share:))
                 return entry
             }
         }
@@ -372,6 +386,7 @@ extension LibraryCache {
                 entry["imageUrl"] = game.imageUrl
                 entry["headerImageUrl"] = game.headerImageUrl
                 entry["playtimeMinutes"] = cached.playtimeMinutes
+                entry["achievements"] = cached.achievementShare.map(keptAchievements(share:))
                 return entry
             }
         }

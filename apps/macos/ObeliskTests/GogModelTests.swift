@@ -31,6 +31,54 @@ final class GogModelTests: XCTestCase {
         XCTAssertEqual(model.playtime(of: games[1]), .seconds(36_000))
     }
 
+    func testTheLibraryOrdersByWhatGamesdbAndGalaxyTell() async throws {
+        var classic = GogGames.game("1", title: "Classic"), recent = GogGames.game("2", title: "Recent")
+        let unknown = GogGames.game("3", title: "Unknown")
+        classic.releaseDate = 1_000_000_000
+        classic.rating = 90
+        classic.addedAt = 1_700_000_000
+        recent.releaseDate = 1_600_000_000
+        recent.rating = 70
+        recent.addedAt = 1_500_000_000
+        let model = await connectedModel(GogTestSession(credentials: GogGames.credentials("current"),
+                                                        games: [unknown, classic, recent]))
+        defer { model.signOut() }
+
+        XCTAssertEqual(model.availableSorts,
+                       [.name, .achievements, .playtime, .lastPlayed, .releaseDate, .dateAdded, .size, .criticScore])
+        XCTAssertEqual(model.libraryValue(of: classic, for: .releaseDate), 1_000_000_000, "Seconds, not their bits")
+        model.sort = .releaseDate
+        XCTAssertEqual(model.filteredGames.map(\.title), ["Recent", "Classic", "Unknown"])
+        model.sort = .criticScore
+        XCTAssertEqual(model.filteredGames.map(\.title), ["Classic", "Recent", "Unknown"])
+        model.sort = .dateAdded
+        XCTAssertEqual(model.filteredGames.map(\.title), ["Classic", "Recent", "Unknown"])
+    }
+
+    func testTheAchievementsLoadAfterThePlaytimesWithoutTheirOrder() async throws {
+        let games = ["1", "2", "3", "4", "5"].map { GogGames.game($0, title: "Game \($0)") }
+        let session = GogTestSession(credentials: GogGames.credentials("current"), games: games)
+        await session.setAchievements(["1": [true, false, false, false], "2": [true, true], "3": [],
+                                       "4": [false, false]], failing: ["5"])
+        let model = await connectedModel(session)
+        defer { model.signOut() }
+
+        try await eventually { model.libraryRecords.value(for: .achievements, of: "1") != nil }
+        let asked = await session.achievementReads
+        XCTAssertEqual(asked, [AchievementRead(ids: ["1", "2", "3", "4", "5"], locale: "en-US", fresh: false)],
+                       "One read names every game, with no order picked, in the player's language")
+        model.sort = .achievements
+        XCTAssertEqual(model.filteredGames.map(\.productId), ["2", "1", "4", "3", "5"],
+                       "Games without achievements, or whose request failed, follow by name")
+        XCTAssertNil(model.pendingMetadata)
+        XCTAssertNil(model.missingMetadata, "A game whose request failed counts as one without achievements")
+
+        model.sort = .name
+        model.sort = .achievements
+        let again = await session.achievementReads
+        XCTAssertEqual(again.count, 1, "Picking the order asks nothing")
+    }
+
     func testAnAbsurdMinuteCountSaturates() {
         XCTAssertEqual(GogGames.played(minutes: .max), .seconds(Int64.max))
     }
@@ -56,10 +104,23 @@ final class GogModelTests: XCTestCase {
 
         model.open(owned)
         try await eventually { model.achievements.items != nil }
-        let products = await session.achievementGames
-        let locales = await session.achievementLocales
-        XCTAssertEqual(products, ["1"])
-        XCTAssertEqual(locales, ["fr-FR"])
+        let reads = await session.achievementReads
+        XCTAssertTrue(reads.contains(AchievementRead(ids: ["1"], locale: "fr-FR", fresh: false)))
+        XCTAssertTrue(reads.allSatisfy { $0.locale == "fr-FR" })
+    }
+
+    func testThePageReadsTheLibraryCacheAndItsRetryReadsGogAgain() async throws {
+        let owned = GogGames.game("1", title: "Alpha")
+        let session = GogTestSession(credentials: GogGames.credentials("current"), games: [owned])
+        let model = await connectedModel(session)
+        defer { model.signOut() }
+
+        model.open(owned)
+        try await eventually { model.achievements.items?.count == 2 }
+        model.reloadAchievements()
+        try await eventually { await session.achievementReads.last?.fresh == true }
+        let reads = await session.achievementReads
+        XCTAssertTrue(reads.dropLast().allSatisfy { !$0.fresh }, "Opening the page asks the Library cache first")
     }
 
     func testOnlyDecimalProductIDsNameAGogGame() {

@@ -19,6 +19,9 @@ extension EpicGames: WebStorefront {
     typealias Presence = EpicFriends
 
     static let storeID = "epic"
+    /// Epic's library records date each game's addition. Its catalog dates
+    /// only a game's arrival on Epic, not its release.
+    static let librarySorts: [StorefrontLibrarySort] = [.name, .achievements, .playtime, .lastPlayed, .dateAdded, .size]
     static let storeURL = URL(string: "https://store.epicgames.com/")!
     static let webSignIn = WebSignIn.epic
     static func keychain() -> any CredentialStore<EpicCredentials> { EpicKeychain() }
@@ -52,17 +55,31 @@ extension EpicGames: WebStorefront {
         return Dictionary(games.compactMap { game in seconds[game.appName].map { (game.id, Duration.seconds(Int64(clamping: $0))) } },
                           uniquingKeysWith: max)
     }
-    static func cachedLibrary(in cache: LibraryCache, account: String) -> [(game: EpicGame, playtime: Duration?)] {
-        cache.epicLibrary(accountId: account).map { ($0.game, $0.playtimeSeconds.map { .seconds(Int64(clamping: $0)) }) }
+    /// Epic tells achievements by sandbox, which several games may share.
+    static func achievementShares(of games: [EpicGame], session: Session, language: String) async throws -> [String: Double] {
+        let shares = try await session.achievementShares(namespaces: Array(Set(games.map(\.namespace))).sorted(),
+                                                         locale: achievementLocale(language))
+        return Dictionary(games.compactMap { game in shares[game.namespace].map { (game.id, $0) } },
+                          uniquingKeysWith: { first, _ in first })
+    }
+    static func cachedLibrary(in cache: LibraryCache, account: String)
+        -> [(game: EpicGame, playtime: Duration?, achievements: Double?)] {
+        cache.epicLibrary(accountId: account).map {
+            ($0.game, $0.playtimeSeconds.map { .seconds(Int64(clamping: $0)) }, $0.achievementShare)
+        }
     }
     static func details(of game: EpicGame, session: Session, language: String) async throws -> EpicGameDetails {
         try await session.gameDetails(namespace: game.namespace, catalogItemId: game.catalogItemId,
                                       appName: game.appName, platform: game.preferredPlatform)
     }
+    static func achievements(of game: EpicGame, session: Session, language: String,
+                             fresh: Bool) async throws -> [GameAchievement] {
+        try await session.achievements(namespace: game.namespace, locale: achievementLocale(language), fresh: fresh)
+            .map(GameAchievement.init)
+    }
     /// Epic's achievements take a bare language code, such as "fr".
-    static func achievements(of game: EpicGame, session: Session, language: String) async throws -> [GameAchievement] {
-        let locale = Locale(identifier: language).language.languageCode?.identifier ?? "en"
-        return try await session.achievements(namespace: game.namespace, locale: locale).map(GameAchievement.init)
+    private static func achievementLocale(_ language: String) -> String {
+        Locale(identifier: language).language.languageCode?.identifier ?? "en"
     }
     @MainActor static func installations(of session: Session, account: String, language: String,
                                           sessions: any StorefrontSessionsProtocol, receipts: URL,
@@ -107,6 +124,10 @@ extension EpicGame: WebGame {
         guard macos || windows else { return nil }
         return .epic(namespace: namespace, catalogItemId: catalogItemId, appName: appName, title: title,
                      platform: preferredPlatform)
+    }
+
+    func libraryValue(for sort: StorefrontLibrarySort) -> Double? {
+        sort == .dateAdded ? addedAt.map { Double($0) } : nil
     }
 }
 

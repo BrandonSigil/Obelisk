@@ -3,22 +3,29 @@
 //! of an account while its session connects, records launches and forgets an
 //! account that signs out.
 use crate::{
-    EpicGame, GameAccount, GameIdentity, GogGame, SteamGame, SteamGameArtwork,
+    EpicGame, GameAccount, GameIdentity, GogGame, SteamGame, SteamGameArtwork, SteamGameFacts,
     game_session::Bridged, installations::Named,
 };
+use futures_util::{StreamExt, stream};
 use game_runtime::{epic, gog, steam};
 use obelisk_core::library_cache::{self, AccountLibrary, Entry};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, HashMap, HashSet},
+    future::Future,
     marker::PhantomData,
     sync::{Arc, Mutex},
+    time::{SystemTime, UNIX_EPOCH},
 };
 
 const STEAM: &str = "steam";
 const EPIC: &str = "epic";
 const GOG: &str = "gog";
+/// The entry field that keeps a game's achievement progress.
+const ACHIEVEMENTS: &str = "achievements";
+/// The entry field that keeps when a Steam game joined the library.
+const ADDED_AT: &str = "addedAt";
 
 /// The last library of every storefront account, in the library directory.
 #[derive(uniffi::Object)]
@@ -26,28 +33,77 @@ pub struct LibraryCache {
     inner: library_cache::LibraryCache,
 }
 
-/// A Steam game of the cache, with its platforms and library artwork once
-/// Steam told them.
-#[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
+/// One achievement of a game, the same for every storefront.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, uniffi::Record)]
+#[serde(rename_all = "camelCase")]
+pub struct LibraryAchievement {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    pub icon_url: String,
+    pub hidden: bool,
+    pub unlocked: bool,
+    /// Seconds since the Unix epoch; nil while locked, or when the
+    /// storefront did not tell.
+    pub unlocked_at: Option<u64>,
+}
+
+/// A game's achievements, by the id its storefront reads them with: Steam's
+/// app ID, Epic's namespace, GOG's product id.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct GameAchievements {
+    pub(crate) id: String,
+    pub(crate) achievements: Vec<LibraryAchievement>,
+}
+
+/// The share of each of `read`'s games' achievements unlocked, by id; none
+/// for a game without any.
+pub(crate) fn unlocked_shares(read: Vec<GameAchievements>) -> impl Iterator<Item = (String, f64)> {
+    read.into_iter()
+        .filter_map(|game| Some((game.id, unlocked_share(&game.achievements)?)))
+}
+
+/// A Steam game of the cache, with its platforms, library artwork and what
+/// the library orders by once Steam told them.
+#[derive(Clone, Debug, PartialEq, uniffi::Record)]
 pub struct CachedSteamGame {
     pub game: SteamGame,
     pub platforms: Option<Vec<String>>,
     #[uniffi(default = None)]
     pub artwork: Option<SteamGameArtwork>,
+    #[uniffi(default = None)]
+    pub facts: Option<SteamGameFacts>,
+    /// When the game joined the library, in seconds since the Unix epoch.
+    #[uniffi(default = None)]
+    pub added_at: Option<u64>,
+    /// The share of its achievements unlocked when they were last read;
+    /// none for a game without any.
+    #[uniffi(default = None)]
+    pub achievement_share: Option<f64>,
 }
 
-/// An Epic game of the cache, with its playtime once Epic told it.
-#[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
+/// An Epic game of the cache, with its playtime and achievements once Epic
+/// told them.
+#[derive(Clone, Debug, PartialEq, uniffi::Record)]
 pub struct CachedEpicGame {
     pub game: EpicGame,
     pub playtime_seconds: Option<u64>,
+    /// The share of its achievements unlocked when they were last read;
+    /// none for a game without any.
+    #[uniffi(default = None)]
+    pub achievement_share: Option<f64>,
 }
 
-/// A GOG game of the cache, with its playtime once GOG told it.
-#[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
+/// A GOG game of the cache, with its playtime and achievements once GOG
+/// told them.
+#[derive(Clone, Debug, PartialEq, uniffi::Record)]
 pub struct CachedGogGame {
     pub game: GogGame,
     pub playtime_minutes: Option<u64>,
+    /// The share of its achievements unlocked when they were last read;
+    /// none for a game without any.
+    #[uniffi(default = None)]
+    pub achievement_share: Option<f64>,
 }
 
 /// When an account launched a game from Obelisk.
@@ -70,7 +126,7 @@ impl LibraryCache {
     }
 
     /// The account's last Steam library, empty when it has none, with each
-    /// game's artwork in `language`.
+    /// game's artwork in `language` and what the library orders by.
     pub fn steam_library(&self, steam_id: u64, language: String) -> Vec<CachedSteamGame> {
         // Each field on its own: reading the entry flattened would copy its PICS.
         self.inner.library(STEAM, &steam_id.to_string(), |entry| {
@@ -82,6 +138,11 @@ impl LibraryCache {
                 artwork: entry.get("pics").map(|pics| {
                     SteamGameArtwork::from(steam_kit::artwork::library_artwork(pics, &language))
                 }),
+                facts: entry
+                    .get("pics")
+                    .map(|pics| steam_kit::library::library_facts(pics).into()),
+                added_at: entry.get(ADDED_AT).and_then(Value::as_u64),
+                achievement_share: kept(entry).and_then(|kept| unlocked_share(&kept.list)),
             })
         })
     }
@@ -94,6 +155,7 @@ impl LibraryCache {
             Some(CachedEpicGame {
                 game: EpicGame::deserialize(entry).ok()?,
                 playtime_seconds: entry.get("playtimeSeconds").and_then(Value::as_u64),
+                achievement_share: kept(entry).and_then(|kept| unlocked_share(&kept.list)),
             })
         })
     }
@@ -105,6 +167,7 @@ impl LibraryCache {
             Some(CachedGogGame {
                 game: GogGame::deserialize(entry).ok()?,
                 playtime_minutes: entry.get("playtimeMinutes").and_then(Value::as_u64),
+                achievement_share: kept(entry).and_then(|kept| unlocked_share(&kept.list)),
             })
         })
     }
@@ -203,7 +266,8 @@ pub(crate) struct SteamLibrary(AccountLibrary);
 
 impl SteamLibrary {
     /// Keeps the account's games with every field Steam returned. Each keeps
-    /// the platforms and PICS app info an earlier request loaded.
+    /// the platforms, PICS app info, library date and achievement progress
+    /// earlier requests loaded.
     pub(crate) fn games(&self, games: Vec<steam_kit::client::OwnedGame>) -> Vec<SteamGame> {
         let (entries, games) = games
             .into_iter()
@@ -218,8 +282,34 @@ impl SteamLibrary {
                 (entry, game)
             })
             .unzip();
-        self.0.replace(entries, &["platforms", "pics"]);
+        self.0
+            .replace(entries, &["platforms", "pics", ADDED_AT, ACHIEVEMENTS]);
         games
+    }
+
+    /// Keeps when each game joined the library, by app ID, from the account's
+    /// licenses. A game none of them grants has no date.
+    pub(crate) fn acquisitions(&self, acquired: &BTreeMap<u32, u32>) {
+        self.0.update(|entry| {
+            let added_at = entry
+                .get("id")
+                .and_then(Value::as_str)
+                .and_then(<steam::Steam as Named>::named)
+                .and_then(|app_id| acquired.get(&app_id));
+            match added_at {
+                Some(at) => set(entry, ADDED_AT, (*at).into()),
+                None => entry.remove(ADDED_AT).is_some(),
+            }
+        });
+    }
+
+    /// Where the library keeps the games' achievements.
+    pub(crate) fn achievements(&self) -> LibraryAchievements<'_> {
+        LibraryAchievements {
+            account: &self.0,
+            id: "id",
+            playtime: "playtimeMinutes",
+        }
     }
 
     /// Keeps each game's platforms and whole PICS app info.
@@ -250,6 +340,9 @@ pub(crate) trait PlayedGame {
     const PLAYTIME_ID: &'static str;
     /// The entry field that keeps its playtime.
     const PLAYTIME: &'static str;
+    /// The entry field its achievements are read by: several games may
+    /// share an Epic sandbox.
+    const ACHIEVEMENTS_ID: &'static str;
     /// The game's entry, with everything its storefront returned but its
     /// playtime, and the game as the library shows it.
     fn entry(self) -> (Entry, Self::Shown);
@@ -259,6 +352,7 @@ impl PlayedGame for epic_kit::client::Game {
     type Shown = EpicGame;
     const PLAYTIME_ID: &'static str = "appName";
     const PLAYTIME: &'static str = "playtimeSeconds";
+    const ACHIEVEMENTS_ID: &'static str = "namespace";
     fn entry(mut self) -> (Entry, EpicGame) {
         let metadata = std::mem::take(&mut self.metadata);
         let game = EpicGame::from(self);
@@ -278,6 +372,7 @@ impl PlayedGame for gog_kit::client::Game {
     type Shown = GogGame;
     const PLAYTIME_ID: &'static str = "id";
     const PLAYTIME: &'static str = "playtimeMinutes";
+    const ACHIEVEMENTS_ID: &'static str = "id";
     fn entry(mut self) -> (Entry, GogGame) {
         let metadata = std::mem::take(&mut self.metadata);
         let game = GogGame::from(self);
@@ -331,12 +426,21 @@ impl<G: PlayedGame> PlaytimeLibrary<G> {
             })
             .unzip();
         let kept: &[&str] = if playtimes.is_some() {
-            &[]
+            &[ACHIEVEMENTS]
         } else {
-            &[G::PLAYTIME]
+            &[G::PLAYTIME, ACHIEVEMENTS]
         };
         self.account.replace(entries, kept);
         games
+    }
+
+    /// Where the library keeps the games' achievements.
+    pub(crate) fn achievements(&self) -> LibraryAchievements<'_> {
+        LibraryAchievements {
+            account: &self.account,
+            id: G::ACHIEVEMENTS_ID,
+            playtime: G::PLAYTIME,
+        }
     }
 
     /// Keeps every game's playtime. A game missing from `playtimes` was
@@ -354,6 +458,175 @@ impl<G: PlayedGame> PlaytimeLibrary<G> {
             }
         });
     }
+}
+
+/// Where an account's library keeps its games' achievements, each with the
+/// language, moment and playtime of its last read.
+pub(crate) struct LibraryAchievements<'a> {
+    account: &'a AccountLibrary,
+    /// The entry field the storefront reads a game's achievements by.
+    id: &'static str,
+    /// The entry field that keeps the game's playtime.
+    playtime: &'static str,
+}
+
+/// A game's achievements as its entry keeps them: in `locale`, read at
+/// `at`, in seconds since the Unix epoch, when the game's playtime was
+/// `playtime`.
+#[derive(Serialize, Deserialize)]
+struct KeptAchievements {
+    list: Vec<LibraryAchievement>,
+    locale: String,
+    at: u64,
+    playtime: Option<u64>,
+}
+
+impl LibraryAchievements<'_> {
+    /// The lists the library keeps of `ids`, named as their entries' id
+    /// field names them, that are current in `locale`, and the ids to read
+    /// again: those it keeps none of, keeps in another language, or keeps
+    /// from before one of their games was last played, as its playtime
+    /// changed since or Obelisk launched it after.
+    fn current<K: ToString>(&self, ids: Vec<K>, locale: &str) -> (Vec<GameAchievements>, Vec<K>) {
+        let asked: HashSet<String> = ids.iter().map(ToString::to_string).collect();
+        let read = self.account.read(|entry| {
+            let id = entry
+                .get(self.id)?
+                .as_str()
+                .filter(|id| asked.contains(*id))?;
+            let current = kept(entry).filter(|kept| {
+                kept.locale == locale
+                    && kept.playtime == entry.get(self.playtime).and_then(Value::as_u64)
+                    && library_cache::launched_at(entry).is_none_or(|launched| launched <= kept.at)
+            });
+            Some((id.to_owned(), current.map(|kept| kept.list)))
+        });
+        // Games read by one id, such as an Epic sandbox's, are current together.
+        let mut lists: HashMap<String, Option<Vec<LibraryAchievement>>> = HashMap::new();
+        for (id, list) in read {
+            lists
+                .entry(id)
+                .and_modify(|kept| {
+                    if list.is_none() {
+                        *kept = None;
+                    }
+                })
+                .or_insert(list);
+        }
+        let mut current = Vec::new();
+        let mut read_again = Vec::new();
+        for id in ids {
+            let name = id.to_string();
+            match lists.remove(&name).flatten() {
+                Some(achievements) => current.push(GameAchievements {
+                    id: name,
+                    achievements,
+                }),
+                None => read_again.push(id),
+            }
+        }
+        (current, read_again)
+    }
+
+    /// Keeps each list read now in `locale`, with its game's playtime of the
+    /// moment.
+    fn keep(&self, read: &[GameAchievements], locale: &str) {
+        let read: HashMap<&str, &[LibraryAchievement]> = read
+            .iter()
+            .map(|game| (game.id.as_str(), game.achievements.as_slice()))
+            .collect();
+        let at = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(0, |since| since.as_secs());
+        self.account.update(|entry| {
+            let Some(list) = entry
+                .get(self.id)
+                .and_then(Value::as_str)
+                .and_then(|id| read.get(id))
+            else {
+                return false;
+            };
+            let kept = KeptAchievements {
+                list: list.to_vec(),
+                locale: locale.to_owned(),
+                at,
+                playtime: entry.get(self.playtime).and_then(Value::as_u64),
+            };
+            set(
+                entry,
+                ACHIEVEMENTS,
+                serde_json::to_value(kept).unwrap_or_default(),
+            )
+        });
+    }
+}
+
+/// `ids`' achievements in `locale`: the library's while current, unless
+/// `fresh`, else read through `read`, `width` games at a time, which the
+/// library then keeps. `ids` name games as their entries' id field does. A
+/// game `read` failed for is left out; when no game could be told, the
+/// first failure.
+pub(crate) async fn achievements<K, A, E, Fut>(
+    library: Option<LibraryAchievements<'_>>,
+    ids: Vec<K>,
+    locale: &str,
+    fresh: bool,
+    width: usize,
+    read: impl Fn(K) -> Fut,
+) -> Result<Vec<GameAchievements>, E>
+where
+    K: ToString,
+    A: Into<LibraryAchievement>,
+    Fut: Future<Output = Result<Vec<A>, E>>,
+{
+    let (mut current, stale) = match &library {
+        Some(library) if !fresh => library.current(ids, locale),
+        _ => (Vec::new(), ids),
+    };
+    let mut reads = stream::iter(stale)
+        .map(|id| {
+            let name = id.to_string();
+            let reading = read(id);
+            async move { (name, reading.await) }
+        })
+        .buffer_unordered(width);
+    let mut failure = None;
+    let mut read_now = Vec::new();
+    while let Some((id, result)) = reads.next().await {
+        match result {
+            Ok(list) => read_now.push(GameAchievements {
+                id,
+                achievements: list.into_iter().map(Into::into).collect(),
+            }),
+            Err(error) => {
+                failure.get_or_insert(error);
+            }
+        }
+    }
+    if let Some(library) = &library
+        && !read_now.is_empty()
+    {
+        library.keep(&read_now, locale);
+    }
+    current.extend(read_now);
+    match failure {
+        Some(error) if current.is_empty() => Err(error),
+        _ => Ok(current),
+    }
+}
+
+/// The achievements an entry keeps, with when and how they were read.
+fn kept(entry: &Entry) -> Option<KeptAchievements> {
+    KeptAchievements::deserialize(entry.get(ACHIEVEMENTS)?).ok()
+}
+
+/// The share of `achievements` unlocked; none when there are none.
+fn unlocked_share(achievements: &[LibraryAchievement]) -> Option<f64> {
+    let unlocked = achievements
+        .iter()
+        .filter(|achievement| achievement.unlocked)
+        .count();
+    (!achievements.is_empty()).then(|| unlocked as f64 / achievements.len() as f64)
 }
 
 fn entry_of(entry: &impl Serialize) -> Entry {
@@ -374,11 +647,13 @@ fn set(entry: &mut Entry, key: &str, value: Value) -> bool {
 
 /// A game as the cache keeps it: as the library shows it. A Steam game's
 /// entry also keeps its `Player.GetOwnedGames` `record`, its `platforms`,
-/// absent until Steam told them, and its whole PICS app info, `pics`. An Epic
-/// or GOG game's keeps its playtime, absent until the storefront told it or
-/// when the game was never played, and everything else the storefront
-/// returned, `metadata`: Epic's catalog items, library records and assets,
-/// GOG's library record and catalog data.
+/// absent until Steam told them, its whole PICS app info, `pics`, when it
+/// joined the library, `addedAt`, and its `achievements` progress. An Epic or
+/// GOG game's keeps its playtime, absent until the storefront told it or when
+/// the game was never played, its `achievements` progress with when it was
+/// read and the playtime then, and everything else the storefront returned,
+/// `metadata`: Epic's catalog items, library records and assets, GOG's
+/// library record and catalog data.
 #[derive(Serialize)]
 struct CachedEntry<'a, G> {
     id: String,
