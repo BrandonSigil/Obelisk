@@ -16,7 +16,12 @@ final class AppLifecycle: NSObject, NSApplicationDelegate {
     var games: (running: @MainActor () -> Bool, stop: @MainActor () async -> Void) = ({ false }, {})
     /// The library cache, whose last changes are still being written.
     var libraryCache: LibraryCache?
+    /// Games are being stopped before Obelisk ends.
+    private var stopping = false
+    /// Obelisk is ending: its termination is let through.
     private var quitting = false
+    /// Obelisk opens again once it has exited.
+    private var reopens = false
     private var windowClosing: NSObjectProtocol?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -57,6 +62,7 @@ final class AppLifecycle: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         libraryCache?.flush()
+        if reopens { Self.reopenOnceExited() }
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
@@ -80,17 +86,17 @@ final class AppLifecycle: NSObject, NSApplicationDelegate {
     /// Really quits: a running game is stopped first, once the player agrees,
     /// and its Cloud saves settle before Obelisk exits.
     func quit() {
-        quit(running: L10n.string("app.quit.running.message"), stop: L10n.string("app.quit.stop")) {
-            NSApp.terminate(nil)
+        quit(running: L10n.string("app.quit.running.message"), stop: L10n.string("app.quit.stop")) { [self] in
+            terminate()
         }
     }
 
     /// Quits as `quit()` does, then opens Obelisk again once it has exited, so
     /// a new language applies everywhere.
     func restart() {
-        quit(running: L10n.string("app.restart.running.message"), stop: L10n.string("app.restart.stop")) {
-            Self.reopenOnceExited()
-            NSApp.terminate(nil)
+        quit(running: L10n.string("app.restart.running.message"), stop: L10n.string("app.restart.stop")) { [self] in
+            reopens = true
+            terminate()
         }
     }
 
@@ -101,13 +107,24 @@ final class AppLifecycle: NSObject, NSApplicationDelegate {
     }
 
     private func quit(running message: String, stop: String, then exit: @escaping () -> Void) {
-        guard !quitting else { return }
+        guard !stopping else { return }
         if games.running(), !Self.confirmsStoppingGames(running: message, stop: stop) { return }
-        quitting = true
+        stopping = true
         Task {
             await stopGames()
+            stopping = false
+            quitting = true
             exit()
         }
+    }
+
+    /// Ends Obelisk. While a sheet is open AppKit refuses with a beep, without
+    /// asking the delegate: Obelisk stays as it was, so the player can quit
+    /// again once the sheet is closed.
+    private func terminate() {
+        NSApp.terminate(nil)
+        quitting = false
+        reopens = false
     }
 
     /// Asks whether to stop the running game: `message` tells why, `stop`
