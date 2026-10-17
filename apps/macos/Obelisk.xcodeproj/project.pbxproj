@@ -108,6 +108,7 @@
 		C59D09970914A33D91C1ED07 /* GameOverlayTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E7489D1E6FD9B842D02060D5 /* GameOverlayTests.swift */; };
 		C72B0DDDC13B209DCFB4DC95 /* StorefrontLibraryFilterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3C3B2AB2EE55B5D748B66466 /* StorefrontLibraryFilterTests.swift */; };
 		CAD48EA12B965CC997C4CCF6 /* WebSignInView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 12664F6968768470F8218AB1 /* WebSignInView.swift */; };
+		CADC5B4394E0297C83B5AC4B /* DeveloperModals.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0B107D565DA2DAE5CFF946B /* DeveloperModals.swift */; };
 		CAEBC1E8919712B667F89006 /* RosettaModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA8AA40F77D5B08D2F79B1B1 /* RosettaModel.swift */; };
 		D257F5B516A9AF852035E35A /* SteamRosettaTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0A3B427D2628C8CC7A53F9E /* SteamRosettaTests.swift */; };
 		D2893B03213F1CFAF6392429 /* SteamFriendsIntegrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D3FA71F3FFECA784DA34545D /* SteamFriendsIntegrationTests.swift */; };
@@ -295,6 +296,7 @@
 		EE0F686CB722D6757F5466EC /* LaunchHistory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LaunchHistory.swift; sourceTree = "<group>"; };
 		EFAE53AFCA080DC262609117 /* CloudIndicator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudIndicator.swift; sourceTree = "<group>"; };
 		F08BD9F8D603260100C40D78 /* SteamInvitationsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SteamInvitationsTests.swift; sourceTree = "<group>"; };
+		F0B107D565DA2DAE5CFF946B /* DeveloperModals.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeveloperModals.swift; sourceTree = "<group>"; };
 		F17790D9EF310DDE4575244C /* StableScroller.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StableScroller.swift; sourceTree = "<group>"; };
 		F342192BE655D715D208BD7D /* GogModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GogModel.swift; sourceTree = "<group>"; };
 		F40F3B450D775C6607B9463D /* EpicModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EpicModelTests.swift; sourceTree = "<group>"; };
@@ -480,6 +482,7 @@
 		9C64BD6A4F9F42C66B76B04F /* Settings */ = {
 			isa = PBXGroup;
 			children = (
+				F0B107D565DA2DAE5CFF946B /* DeveloperModals.swift */,
 				7F0CE8B761A14CEF0AE08EF9 /* SettingsView.swift */,
 			);
 			path = Settings;
@@ -853,6 +856,7 @@
 				FFA164D07D4F94ADA7C57693 /* CloudIndicator.swift in Sources */,
 				5D721DE96425D4812689BD9E /* CloudModel.swift in Sources */,
 				90FDA129C02A8FA8F7AAE4E0 /* CoverShelf.swift in Sources */,
+				CADC5B4394E0297C83B5AC4B /* DeveloperModals.swift in Sources */,
 				B054D7C98424EC9C22FA2854 /* DownloadsModel.swift in Sources */,
 				BE1E928FF60CCAC9E9A3251D /* DownloadsView.swift in Sources */,
 				AB4A0762F59B39FA0776E9A8 /* EpicAuthorizationCallback.swift in Sources */,

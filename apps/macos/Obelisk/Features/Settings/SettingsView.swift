@@ -77,6 +77,11 @@ struct SettingsView: View {
                             requestFeature
                         }
                     }
+                    #if DEBUG
+                    GamePageSection(title: "Developer") {
+                        DeveloperModalsCard()
+                    }
+                    #endif
                 }
                 .frame(maxWidth: Self.contentWidth, alignment: .leading)
                 .padding(.horizontal, ObeliskStyle.contentPadding)
@@ -928,6 +933,62 @@ private struct SettingsStoreRow: View {
         }
     }
 }
+
+#if DEBUG
+/// Debug builds only: each modal Obelisk presents, opened over made-up data
+/// to check how it looks.
+private struct DeveloperModalsCard: View {
+    @State private var modals = DeveloperModals()
+
+    var body: some View {
+        let all = DeveloperModal.all
+        SettingsCard {
+            ForEach(all) { modal in
+                if modal.id != all.first?.id { SettingsDivider() }
+                SettingsRow(title: modal.title) {
+                    SettingsSymbol(name: modal.symbol, colors: [Color(red: 0.6, green: 0.6, blue: 0.64),
+                                                                Color(red: 0.42, green: 0.42, blue: 0.46)])
+                } detail: {
+                    Text(modal.detail)
+                } accessory: {
+                    open(modal)
+                }
+            }
+        }
+        .developerModals(modals)
+    }
+
+    /// Opens the modal, or a menu of its states when it has several.
+    @ViewBuilder private func open(_ modal: DeveloperModal) -> some View {
+        if modal.variants.count == 1, let variant = modal.variants.first {
+            SettingsGlassButton(title: "Open", identifier: "developer-modal-\(modal.id)") { variant.open(modals) }
+        } else {
+            Menu {
+                ForEach(modal.variants) { variant in
+                    Button(variant.title) { variant.open(modals) }
+                }
+            } label: {
+                HStack(spacing: 6) {
+                    Text(verbatim: "Open")
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 9, weight: .bold))
+                }
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.primary)
+                .padding(.horizontal, 14)
+                .frame(height: 32)
+                .modifier(StorefrontControlGlass())
+                .contentShape(.capsule)
+            }
+            .menuStyle(.button)
+            .obeliskButtonStyle(.plain)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .accessibilityIdentifier("developer-modal-\(modal.id)")
+        }
+    }
+}
+#endif
 
 /// A storefront's logo, white on a dark tile in its colors.
 private struct StoreTile: View {

@@ -102,20 +102,24 @@ final class AppLifecycle: NSObject, NSApplicationDelegate {
 
     private func quit(running message: String, stop: String, then exit: @escaping () -> Void) {
         guard !quitting else { return }
-        if games.running() {
-            NSApp.activate()
-            let alert = NSAlert()
-            alert.messageText = L10n.string("app.quit.running.title")
-            alert.informativeText = message
-            alert.addButton(withTitle: stop)
-            alert.addButton(withTitle: L10n.string("ui.common.cancel"))
-            guard alert.runModal() == .alertFirstButtonReturn else { return }
-        }
+        if games.running(), !Self.confirmsStoppingGames(running: message, stop: stop) { return }
         quitting = true
         Task {
             await stopGames()
             exit()
         }
+    }
+
+    /// Asks whether to stop the running game: `message` tells why, `stop`
+    /// is the button that agrees.
+    static func confirmsStoppingGames(running message: String, stop: String) -> Bool {
+        NSApp.activate()
+        let alert = NSAlert()
+        alert.messageText = L10n.string("app.quit.running.title")
+        alert.informativeText = message
+        alert.addButton(withTitle: stop)
+        alert.addButton(withTitle: L10n.string("ui.common.cancel"))
+        return alert.runModal() == .alertFirstButtonReturn
     }
 
     /// A shell that outlives this Obelisk opens its bundle again once its

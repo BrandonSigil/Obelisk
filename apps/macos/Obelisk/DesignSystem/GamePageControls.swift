@@ -47,7 +47,16 @@ struct GameManagementButton: View {
         .accessibilityLabel(L10n.string("ui.game.manage_named", gameName))
         .accessibilityIdentifier("game-management-menu")
         .help(L10n.string("ui.game.manage"))
-        .alert(L10n.string("ui.game.uninstall_title", gameName), isPresented: $confirmsUninstall) {
+        .uninstallConfirmation(gameName, isPresented: $confirmsUninstall, canUninstall: canUninstall,
+                               uninstall: uninstall)
+    }
+}
+
+extension View {
+    /// Asks before uninstalling `gameName`: its files are deleted.
+    func uninstallConfirmation(_ gameName: String, isPresented: Binding<Bool>, canUninstall: Bool,
+                               uninstall: @escaping () -> Void) -> some View {
+        alert(L10n.string("ui.game.uninstall_title", gameName), isPresented: isPresented) {
             Button(L10n.string("ui.common.cancel"), role: .cancel) {}
             Button(L10n.string("ui.game.uninstall"), role: .destructive, action: uninstall)
                 .disabled(!canUninstall)
