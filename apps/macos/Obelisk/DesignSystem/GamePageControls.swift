@@ -244,37 +244,3 @@ struct GameMetricSymbol: View {
             .frame(width: 26, height: 26)
     }
 }
-
-/// The header of a game's sheet: its title over the game's name, and the
-/// button that closes the sheet.
-struct GameSheetHeader: View {
-    let title: String
-    let systemImage: String
-    let gameName: String
-    let closeIdentifier: String
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 5) {
-                Label(title, systemImage: systemImage)
-                    .font(.title2.weight(.semibold))
-                Text(gameName).font(.subheadline).foregroundStyle(.secondary)
-            }
-            Spacer()
-            Button { dismiss() } label: {
-                Image(systemName: "xmark")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 28, height: 28)
-                    .background(.primary.opacity(0.08), in: Circle())
-                    .contentShape(Circle())
-            }
-            .obeliskButtonStyle(.plain)
-            .keyboardShortcut(.cancelAction)
-            .accessibilityLabel(L10n.string("ui.common.close"))
-            .accessibilityIdentifier(closeIdentifier)
-            .help(L10n.string("ui.common.close"))
-        }
-    }
-}

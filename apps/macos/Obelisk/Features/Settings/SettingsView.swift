@@ -22,17 +22,17 @@ struct SettingsView: View {
                 SettingsHero(height: Self.heroHeight)
                 VStack(alignment: .leading, spacing: 34) {
                     GamePageSection(title: L10n.string("ui.settings.appearance")) {
-                        SettingsCard {
+                        ObeliskCard {
                             AppearancePicker(selection: $model.appearance)
                                 .padding(18)
                         }
                     }
                     GamePageSection(title: L10n.string("ui.settings.language")) {
-                        SettingsCard {
+                        ObeliskCard {
                             LanguagePicker(selection: $model.language)
                                 .padding(18)
                             if model.languageNeedsRestart {
-                                SettingsDivider()
+                                ObeliskCardDivider()
                                 languageRestart
                                     .transition(.opacity)
                             }
@@ -40,23 +40,23 @@ struct SettingsView: View {
                         .animation(.easeInOut(duration: 0.2), value: model.languageNeedsRestart)
                     }
                     GamePageSection(title: L10n.string("ui.settings.games")) {
-                        SettingsCard {
+                        ObeliskCard {
                             automaticUpdates
-                            SettingsDivider()
+                            ObeliskCardDivider()
                             overlay
-                            SettingsDivider()
+                            ObeliskCardDivider()
                             sharePerformance
                         }
                     }
                     GamePageSection(title: L10n.string("ui.settings.storage")) {
-                        SettingsCard {
+                        ObeliskCard {
                             libraryFolder
                         }
                     }
                     GamePageSection(title: L10n.string("ui.settings.stores")) {
-                        SettingsCard {
+                        ObeliskCard {
                             ForEach(LibrarySection.storefronts) { section in
-                                if section != LibrarySection.storefronts.first { SettingsDivider() }
+                                if section != LibrarySection.storefronts.first { ObeliskCardDivider() }
                                 SettingsStoreRow(section: section, status: status(of: section)) {
                                     model.selection = section
                                 }
@@ -64,16 +64,16 @@ struct SettingsView: View {
                         }
                     }
                     GamePageSection(title: L10n.string("ui.settings.updates")) {
-                        SettingsCard {
+                        ObeliskCard {
                             installUpdates
-                            SettingsDivider()
+                            ObeliskCardDivider()
                             version
                         }
                     }
                     GamePageSection(title: L10n.string("ui.settings.help")) {
-                        SettingsCard {
+                        ObeliskCard {
                             reportBug
-                            SettingsDivider()
+                            ObeliskCardDivider()
                             requestFeature
                         }
                     }
@@ -106,20 +106,20 @@ struct SettingsView: View {
     /// Asks for the restart a newly chosen language waits for.
     private var languageRestart: some View {
         let language = model.language.resolved(system: AppLanguage.systemLanguages)
-        return SettingsRow(title: L10n.string("ui.settings.language_restart_title")) {
-            SettingsSymbol(name: "arrow.clockwise", colors: [ObeliskStyle.accent, Color(red: 0.45, green: 0.2, blue: 0.85)])
+        return ObeliskRow(title: L10n.string("ui.settings.language_restart_title")) {
+            SymbolTile(name: "arrow.clockwise", colors: TileColors.violet)
         } detail: {
             Text(L10n.string("ui.settings.language_restart", AppIdentity.name,
                              L10n.locale.localizedString(forLanguageCode: language) ?? AppLanguage.name(of: language)))
         } accessory: {
-            SettingsAccentButton(title: L10n.string("ui.settings.restart"), identifier: "settings-restart",
+            AccentCapsuleButton(title: L10n.string("ui.settings.restart"), identifier: "settings-restart",
                                  action: { model.restart() })
         }
     }
 
     private var automaticUpdates: some View {
-        SettingsRow(title: L10n.string("ui.settings.update_automatically")) {
-            SettingsSymbol(name: "arrow.down", colors: ObeliskStyle.installGradient)
+        ObeliskRow(title: L10n.string("ui.settings.update_automatically")) {
+            SymbolTile(name: "arrow.down", colors: ObeliskStyle.installGradient)
         } detail: {
             Text(L10n.string("ui.settings.update_automatically_description"))
         } accessory: {
@@ -132,8 +132,8 @@ struct SettingsView: View {
     }
 
     private var sharePerformance: some View {
-        SettingsRow(title: L10n.string("ui.settings.share_performance")) {
-            SettingsSymbol(name: "chart.bar.fill", colors: [ObeliskStyle.accent, Color(red: 0.45, green: 0.2, blue: 0.85)])
+        ObeliskRow(title: L10n.string("ui.settings.share_performance")) {
+            SymbolTile(name: "chart.bar.fill", colors: TileColors.violet)
         } detail: {
             Text(L10n.string("ui.settings.share_performance_description"))
         } accessory: {
@@ -146,8 +146,8 @@ struct SettingsView: View {
     }
 
     private var overlay: some View {
-        SettingsRow(title: L10n.string("ui.settings.overlay")) {
-            SettingsSymbol(name: "rectangle.on.rectangle", colors: [ObeliskStyle.accent, Color(red: 0.45, green: 0.2, blue: 0.85)])
+        ObeliskRow(title: L10n.string("ui.settings.overlay")) {
+            SymbolTile(name: "rectangle.on.rectangle", colors: TileColors.violet)
         } detail: {
             Text(L10n.string("ui.settings.overlay_description", AppIdentity.name))
         } accessory: {
@@ -161,8 +161,8 @@ struct SettingsView: View {
     }
 
     private var installUpdates: some View {
-        SettingsRow(title: L10n.string("ui.settings.install_updates", AppIdentity.name)) {
-            SettingsSymbol(name: "arrow.triangle.2.circlepath", colors: [ObeliskStyle.accent, Color(red: 0.45, green: 0.2, blue: 0.85)])
+        ObeliskRow(title: L10n.string("ui.settings.install_updates", AppIdentity.name)) {
+            SymbolTile(name: "arrow.triangle.2.circlepath", colors: TileColors.violet)
         } detail: {
             Text(L10n.string("ui.settings.install_updates_description", AppIdentity.name))
         } accessory: {
@@ -176,24 +176,24 @@ struct SettingsView: View {
     }
 
     private var version: some View {
-        SettingsRow(title: L10n.string("ui.settings.version", AppIdentity.version)) {
-            SettingsSymbol(name: "info", colors: [Color(red: 0.6, green: 0.6, blue: 0.64), Color(red: 0.42, green: 0.42, blue: 0.46)])
+        ObeliskRow(title: L10n.string("ui.settings.version", AppIdentity.version)) {
+            SymbolTile(name: "info", colors: TileColors.grey)
         } detail: {
             Text(L10n.string("ui.settings.version_description", AppIdentity.name))
         } accessory: {
-            SettingsGlassButton(title: L10n.string("ui.settings.check_updates"), systemImage: "arrow.clockwise",
+            GlassCapsuleButton(title: L10n.string("ui.settings.check_updates"), systemImage: "arrow.clockwise",
                                 identifier: "settings-check-updates", action: model.updates.check)
                 .disabled(!model.updates.canCheck)
         }
     }
 
     private var reportBug: some View {
-        SettingsRow(title: L10n.string("ui.settings.report_bug")) {
-            SettingsSymbol(name: "ladybug.fill", colors: [Color(red: 0.98, green: 0.45, blue: 0.42), Color(red: 0.86, green: 0.22, blue: 0.3)])
+        ObeliskRow(title: L10n.string("ui.settings.report_bug")) {
+            SymbolTile(name: "ladybug.fill", colors: TileColors.red)
         } detail: {
             Text(L10n.string("ui.settings.report_bug_description", AppIdentity.name))
         } accessory: {
-            SettingsGlassButton(title: L10n.string("ui.settings.report"), systemImage: "paperplane",
+            GlassCapsuleButton(title: L10n.string("ui.settings.report"), systemImage: "paperplane",
                                 identifier: "settings-report-bug") {
                 model.reportBug(.app)
             }
@@ -201,12 +201,12 @@ struct SettingsView: View {
     }
 
     private var requestFeature: some View {
-        SettingsRow(title: L10n.string("ui.settings.request_feature")) {
-            SettingsSymbol(name: "lightbulb.fill", colors: [Color(red: 1, green: 0.8, blue: 0.3), Color(red: 0.95, green: 0.6, blue: 0.1)])
+        ObeliskRow(title: L10n.string("ui.settings.request_feature")) {
+            SymbolTile(name: "lightbulb.fill", colors: TileColors.gold)
         } detail: {
             Text(L10n.string("ui.settings.request_feature_description", AppIdentity.name))
         } accessory: {
-            SettingsGlassButton(title: L10n.string("ui.settings.suggest"), systemImage: "arrow.up.right",
+            GlassCapsuleButton(title: L10n.string("ui.settings.suggest"), systemImage: "arrow.up.right",
                                 identifier: "settings-request-feature") {
                 NSWorkspace.shared.open(GitHubIssues.feature(obeliskVersion: AppIdentity.version))
             }
@@ -214,8 +214,8 @@ struct SettingsView: View {
     }
 
     private var libraryFolder: some View {
-        SettingsRow(title: L10n.string("ui.settings.library_folder")) {
-            SettingsSymbol(name: "folder.fill", colors: [Color(red: 0.38, green: 0.68, blue: 0.98), Color(red: 0.2, green: 0.5, blue: 0.93)])
+        ObeliskRow(title: L10n.string("ui.settings.library_folder")) {
+            SymbolTile(name: "folder.fill", colors: TileColors.blue)
         } detail: {
             VStack(alignment: .leading, spacing: 4) {
                 Text(L10n.string("ui.settings.library_folder_description", AppIdentity.name))
@@ -228,7 +228,7 @@ struct SettingsView: View {
                     .help(model.libraryDirectory)
             }
         } accessory: {
-            SettingsGlassButton(title: L10n.string("ui.settings.show_in_finder"), systemImage: "folder",
+            GlassCapsuleButton(title: L10n.string("ui.settings.show_in_finder"), systemImage: "folder",
                                 identifier: "settings-show-library-folder") {
                 NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: model.libraryDirectory)
             }
@@ -479,126 +479,6 @@ private struct SettingsHeroPrism {
 
     private static func on(_ from: CGPoint, _ to: CGPoint, _ fraction: CGFloat) -> CGPoint {
         CGPoint(x: from.x + (to.x - from.x) * fraction, y: from.y + (to.y - from.y) * fraction)
-    }
-}
-
-/// A card of settings rows, as a game page's card, its rows divided.
-private struct SettingsCard<Content: View>: View {
-    @ViewBuilder let content: Content
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) { content }
-            .modifier(GamePageCard(padding: 0))
-    }
-}
-
-/// The line between two rows, from their text's leading edge.
-private struct SettingsDivider: View {
-    var body: some View {
-        Divider().padding(.leading, 64)
-    }
-}
-
-/// A setting: its symbol, its title over what it does, then its control.
-private struct SettingsRow<Icon: View, Detail: View, Accessory: View>: View {
-    let title: String
-    @ViewBuilder let icon: Icon
-    @ViewBuilder let detail: Detail
-    @ViewBuilder let accessory: Accessory
-
-    var body: some View {
-        HStack(alignment: .center, spacing: 14) {
-            icon
-            VStack(alignment: .leading, spacing: 3) {
-                Text(title)
-                    .font(.system(size: 13, weight: .semibold))
-                detail
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            accessory
-                .padding(.leading, 10)
-        }
-        .padding(.horizontal, 18)
-        .padding(.vertical, 14)
-    }
-}
-
-/// A setting's symbol, white on a tile of its colors, as System Settings
-/// shows its panes.
-private struct SettingsSymbol: View {
-    let name: String
-    let colors: [Color]
-
-    var body: some View {
-        let shape = RoundedRectangle(cornerRadius: 9, style: .continuous)
-        Image(systemName: name)
-            .font(.system(size: 14, weight: .semibold))
-            .foregroundStyle(.white)
-            .frame(width: 32, height: 32)
-            .background(LinearGradient(colors: colors, startPoint: .top, endPoint: .bottom), in: shape)
-            .overlay { shape.strokeBorder(.white.opacity(0.16), lineWidth: 0.5) }
-            .accessibilityHidden(true)
-    }
-}
-
-/// A row's action, on a glass capsule as the libraries' controls.
-private struct SettingsGlassButton: View {
-    let title: String
-    var systemImage: String?
-    var accessibilityLabel: String?
-    let identifier: String
-    let action: () -> Void
-    @Environment(\.isEnabled) private var isEnabled
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 6) {
-                if let systemImage {
-                    Image(systemName: systemImage)
-                        .font(.system(size: 11, weight: .semibold))
-                }
-                Text(title)
-            }
-            .font(.system(size: 12, weight: .semibold))
-            .foregroundStyle(isEnabled ? .primary : .tertiary)
-            .lineLimit(1)
-            .padding(.horizontal, 14)
-            .frame(height: 32)
-            .modifier(StorefrontControlGlass())
-            .contentShape(.capsule)
-        }
-        .obeliskButtonStyle(.plain)
-        .fixedSize()
-        .accessibilityLabel(accessibilityLabel ?? title)
-        .accessibilityIdentifier(identifier)
-    }
-}
-
-/// A row's main action, on a capsule of the accent color.
-private struct SettingsAccentButton: View {
-    let title: String
-    var accessibilityLabel: String?
-    let identifier: String
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            Text(title)
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(.white)
-                .lineLimit(1)
-                .padding(.horizontal, 14)
-                .frame(height: 32)
-                .background(ObeliskStyle.accent, in: .capsule)
-                .contentShape(.capsule)
-        }
-        .obeliskButtonStyle(.plain)
-        .fixedSize()
-        .accessibilityLabel(accessibilityLabel ?? title)
-        .accessibilityIdentifier(identifier)
     }
 }
 
@@ -879,7 +759,7 @@ private struct SettingsStoreRow: View {
     private var name: String { section.storeName ?? section.title }
 
     var body: some View {
-        SettingsRow(title: name) {
+        ObeliskRow(title: name) {
             StoreTile(section: section)
         } detail: {
             detail
@@ -921,13 +801,13 @@ private struct SettingsStoreRow: View {
     @ViewBuilder private var accessory: some View {
         switch status {
         case .signedIn:
-            SettingsGlassButton(title: L10n.string("ui.settings.open"),
+            GlassCapsuleButton(title: L10n.string("ui.settings.open"),
                                 accessibilityLabel: L10n.string("ui.settings.open_store", name),
                                 identifier: "settings-open-\(section.rawValue)", action: open)
         case .restoring:
             EmptyView()
         case .signedOut:
-            SettingsAccentButton(title: L10n.string("ui.account.sign_in"),
+            AccentCapsuleButton(title: L10n.string("ui.account.sign_in"),
                                  accessibilityLabel: L10n.string("ui.home.sign_in_store", name),
                                  identifier: "settings-sign-in-\(section.rawValue)", action: open)
         }
@@ -942,12 +822,11 @@ private struct DeveloperModalsCard: View {
 
     var body: some View {
         let all = DeveloperModal.all
-        SettingsCard {
+        ObeliskCard {
             ForEach(all) { modal in
-                if modal.id != all.first?.id { SettingsDivider() }
-                SettingsRow(title: modal.title) {
-                    SettingsSymbol(name: modal.symbol, colors: [Color(red: 0.6, green: 0.6, blue: 0.64),
-                                                                Color(red: 0.42, green: 0.42, blue: 0.46)])
+                if modal.id != all.first?.id { ObeliskCardDivider() }
+                ObeliskRow(title: modal.title) {
+                    SymbolTile(name: modal.symbol, colors: TileColors.grey)
                 } detail: {
                     Text(modal.detail)
                 } accessory: {
@@ -961,7 +840,9 @@ private struct DeveloperModalsCard: View {
     /// Opens the modal, or a menu of its states when it has several.
     @ViewBuilder private func open(_ modal: DeveloperModal) -> some View {
         if modal.variants.count == 1, let variant = modal.variants.first {
-            SettingsGlassButton(title: "Open", identifier: "developer-modal-\(modal.id)") { variant.open(modals) }
+            GlassCapsuleButton(title: L10n.string("ui.settings.open"), identifier: "developer-modal-\(modal.id)") {
+                variant.open(modals)
+            }
         } else {
             Menu {
                 ForEach(modal.variants) { variant in
@@ -969,7 +850,7 @@ private struct DeveloperModalsCard: View {
                 }
             } label: {
                 HStack(spacing: 6) {
-                    Text(verbatim: "Open")
+                    Text(L10n.string("ui.settings.open"))
                     Image(systemName: "chevron.down")
                         .font(.system(size: 9, weight: .bold))
                 }
@@ -989,33 +870,3 @@ private struct DeveloperModalsCard: View {
     }
 }
 #endif
-
-/// A storefront's logo, white on a dark tile in its colors.
-private struct StoreTile: View {
-    let section: LibrarySection
-
-    var body: some View {
-        let shape = RoundedRectangle(cornerRadius: 9, style: .continuous)
-        ZStack {
-            if let logo = section.logoAssetName {
-                Image(logo)
-                    .renderingMode(.template)
-                    .resizable()
-                    .scaledToFit()
-                    .frame(width: 18, height: 18)
-            }
-        }
-        .foregroundStyle(.white)
-        .frame(width: 32, height: 32)
-        .background {
-            shape.fill(Color(white: 0.14))
-                .overlay {
-                    LinearGradient(colors: [section.tint.opacity(0.5), .clear], startPoint: .topLeading,
-                                   endPoint: .bottomTrailing)
-                        .clipShape(shape)
-                }
-        }
-        .overlay { shape.strokeBorder(.white.opacity(0.14), lineWidth: 0.5) }
-        .accessibilityHidden(true)
-    }
-}

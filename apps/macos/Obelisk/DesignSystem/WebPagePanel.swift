@@ -24,6 +24,8 @@ struct WebPagePanel: View {
     var identifier = "web-page"
     /// Whether the panel draws its own glass; a sheet draws its own instead.
     var isPanel = true
+    /// The storefront whose page it is, its tile before the title.
+    var store: LibrarySection?
     @State private var browser: WebPageBrowser?
 
     var body: some View {
@@ -35,6 +37,7 @@ struct WebPagePanel: View {
                         if browser?.canGoBack == true { browser?.webView.goBack() } else { close() }
                     }
                 }
+                if let store { StoreTile(section: store, size: 36) }
                 VStack(alignment: .leading, spacing: 2) {
                     Text(browser?.title ?? placeholderTitle ?? "")
                         .font(.system(size: 13, weight: .semibold))

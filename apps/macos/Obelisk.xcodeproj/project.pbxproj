@@ -31,6 +31,7 @@
 		36F0A07D909FF709C62C5973 /* LibraryHero.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0FDED2B2372EFFDD897E0FC3 /* LibraryHero.swift */; };
 		37DFA75619548460A3E61675 /* GogModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = F342192BE655D715D208BD7D /* GogModel.swift */; };
 		395761DBFFB6CA6EA7FBB1A3 /* EpicWebAuthenticationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4136776D42036B28DFCDB629 /* EpicWebAuthenticationTests.swift */; };
+		39B1B4E5087FA23CC466DEA6 /* ObeliskSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5271F60D2C7C0F3C9E5EF44 /* ObeliskSheet.swift */; };
 		3F971538A6735278BE14C140 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = 6C77784ECCBFA4DCCEE08CD7 /* Sparkle */; };
 		3F9F56DF1A6FA13F5D13CB19 /* GamePageControls.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A93224C60170D9DC5BE88E6 /* GamePageControls.swift */; };
 		3FE5A9D391FD4E244143AA5D /* GameOverlayToast.swift in Sources */ = {isa = PBXBuildFile; fileRef = E009587C3E3ED73645B48BDA /* GameOverlayToast.swift */; };
@@ -52,6 +53,7 @@
 		5E02A862E8D008C61BC981AC /* GameAchievementsModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8A3FCBBC5DDDA185687F82E /* GameAchievementsModel.swift */; };
 		5F2E8F2E2B818270111A0714 /* EpicIntegrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B0FDD9052AEAC88BF8E1B11 /* EpicIntegrationTests.swift */; };
 		5FEBA7416C0F269E7A89EF1B /* LaunchSettingsModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5482B5E7377BEB2C02345FF6 /* LaunchSettingsModelTests.swift */; };
+		5FFAFD709594994546AAFA97 /* ObeliskCards.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2208172344FAB91466C172E /* ObeliskCards.swift */; };
 		602460D0381A3B4EDF7683D0 /* ObeliskStyle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7EF6516996EFE0D729DCF40E /* ObeliskStyle.swift */; };
 		64321D66A64C67E9EB3F525E /* AppLifecycle.swift in Sources */ = {isa = PBXBuildFile; fileRef = E942798E9AD37FBE90168834 /* AppLifecycle.swift */; };
 		66A1C24EA014CCFE9F04FD53 /* GameManagementButtonTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3870CA70FD0707AC6D50A68 /* GameManagementButtonTests.swift */; };
@@ -279,6 +281,7 @@
 		CD235A942C8DFCAA1ED0EBE4 /* ObeliskApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ObeliskApp.swift; sourceTree = "<group>"; };
 		D2EC897F76968FDA3509B281 /* EpicCloudTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EpicCloudTests.swift; sourceTree = "<group>"; };
 		D3FA71F3FFECA784DA34545D /* SteamFriendsIntegrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SteamFriendsIntegrationTests.swift; sourceTree = "<group>"; };
+		D5271F60D2C7C0F3C9E5EF44 /* ObeliskSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ObeliskSheet.swift; sourceTree = "<group>"; };
 		D612A23EC652408A1618071A /* StorefrontLibraryComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StorefrontLibraryComponents.swift; sourceTree = "<group>"; };
 		D7FDA889A991EC0F287B957D /* Signing.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Signing.xcconfig; sourceTree = "<group>"; };
 		D8A3FCBBC5DDDA185687F82E /* GameAchievementsModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GameAchievementsModel.swift; sourceTree = "<group>"; };
@@ -286,6 +289,7 @@
 		DE55B619F17FA3BB9C6E2104 /* SteamSortingPerformanceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SteamSortingPerformanceTests.swift; sourceTree = "<group>"; };
 		E009587C3E3ED73645B48BDA /* GameOverlayToast.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GameOverlayToast.swift; sourceTree = "<group>"; };
 		E0CA12D60747EAF533BE9243 /* HomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeView.swift; sourceTree = "<group>"; };
+		E2208172344FAB91466C172E /* ObeliskCards.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ObeliskCards.swift; sourceTree = "<group>"; };
 		E37B4DC0A9E74F20DE737F04 /* RosettaSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RosettaSheet.swift; sourceTree = "<group>"; };
 		E4C60D88956954A74B9CC854 /* SteamGameDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SteamGameDetailView.swift; sourceTree = "<group>"; };
 		E7229FB302CBB2B422DED279 /* SteamAchievementsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SteamAchievementsTests.swift; sourceTree = "<group>"; };
@@ -620,6 +624,8 @@
 				326E2EE0F9EE977FFCC00FFE /* LibraryGlassControls.swift */,
 				0FDED2B2372EFFDD897E0FC3 /* LibraryHero.swift */,
 				65D7B961D611935E491DAAB4 /* LibraryTile.swift */,
+				E2208172344FAB91466C172E /* ObeliskCards.swift */,
+				D5271F60D2C7C0F3C9E5EF44 /* ObeliskSheet.swift */,
 				7EF6516996EFE0D729DCF40E /* ObeliskStyle.swift */,
 				72D237960BFC8153E4DEA065 /* SignInControls.swift */,
 				51DD68C9B33BB10A1D2F2FDB /* StorefrontCards.swift */,
@@ -903,6 +909,8 @@
 				2D9F4C074E2AD68BB3D5FE19 /* LibraryTile.swift in Sources */,
 				E8B9DF1A5C3098A3F2C6719C /* ObeliskApp.swift in Sources */,
 				4F2E7ADCF151628CAC75717D /* ObeliskBridge.swift in Sources */,
+				5FFAFD709594994546AAFA97 /* ObeliskCards.swift in Sources */,
+				39B1B4E5087FA23CC466DEA6 /* ObeliskSheet.swift in Sources */,
 				602460D0381A3B4EDF7683D0 /* ObeliskStyle.swift in Sources */,
 				E416B019B13CD50583F8A869 /* OverlaySteamPages.swift in Sources */,
 				01C8D856E96DD6CD8CD5F3DE /* PerformanceEstimates.swift in Sources */,

@@ -174,7 +174,8 @@ struct StorefrontStoreModal: View {
     var body: some View {
         let title = L10n.string("ui.store.openStore", store.storeTitle)
         WebPagePanel(start: store.start, close: close, showsCloseButton: true, placeholderTitle: title,
-                     identifier: "\(store.storeID)-store", isPanel: false)
+                     identifier: "\(store.storeID)-store", isPanel: false,
+                     store: LibrarySection(rawValue: store.storeID))
             .presentationSizing(.fitted)
             .accessibilityLabel(title)
     }

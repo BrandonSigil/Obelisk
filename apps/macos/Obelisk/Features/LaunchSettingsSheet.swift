@@ -81,17 +81,20 @@ struct LaunchSettingsSheet: View {
     /// The arguments as the player types them, kept once the field is done.
     @State private var arguments = ""
     @FocusState private var editsArguments: Bool
+    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            GameSheetHeader(title: L10n.string("ui.launch_settings.title"), systemImage: "slider.horizontal.3",
-                            gameName: gameName, closeIdentifier: "launch-settings-close")
+            SheetHeader(title: L10n.string("ui.launch_settings.title"), subtitle: gameName,
+                        symbol: "slider.horizontal.3", colors: TileColors.violet, close: { dismiss() },
+                        closeIdentifier: "launch-settings-close")
                 .padding(.horizontal, 24)
                 .padding(.top, 24)
-                .padding(.bottom, 8)
+                .padding(.bottom, 18)
             content
         }
-        .frame(width: 540, height: 680)
+        .frame(width: 560, height: 680)
+        .tint(ObeliskStyle.accent)
         .task {
             await model.appear()
             arguments = model.settings?.choices.arguments ?? ""
@@ -114,109 +117,179 @@ struct LaunchSettingsSheet: View {
         } else if let settings = model.settings {
             form(settings)
         } else if let error = model.error {
-            Text(error)
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            SheetFailure(message: error)
         }
     }
 
     private func form(_ settings: LaunchSettings) -> some View {
-        Form {
-            Section {
-                // A whole command line: a bordered field across the row,
-                // under its label, rather than the form's trailing value.
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(L10n.string("ui.launch_settings.arguments"))
-                    TextField(L10n.string("ui.launch_settings.arguments"), text: $arguments,
-                              prompt: Text(L10n.string("ui.launch_settings.arguments_placeholder")))
-                        .textFieldStyle(.roundedBorder)
-                        .labelsHidden()
-                        .focused($editsArguments)
-                        .onSubmit { model.setArguments(arguments) }
-                        .accessibilityIdentifier("launch-settings-arguments")
-                }
-                caption(L10n.string("ui.launch_settings.arguments_detail"))
-            }
-            Section {
-                Picker(L10n.string("ui.launch_settings.engine"), selection: Binding(
-                    get: { settings.engine },
-                    set: { engine in model.choose { $0.engine = engine } }
-                )) {
-                    ForEach(settings.engines, id: \.engine) { offer in
-                        Text(marked(Self.name(of: offer.engine), isDefault: offer.engine == settings.defaultEngine))
-                            .tag(offer.engine)
+        VStack(spacing: 0) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 22) {
+                    ObeliskCard { argumentsRow }
+                    ObeliskCard { engineRow(settings) }
+                    SheetSection(title: L10n.string("ui.launch_settings.cpu")) {
+                        ObeliskCard { translatorRow }
                     }
-                }
-                .pickerStyle(.menu)
-                .accessibilityIdentifier("launch-settings-engine")
-                caption(Self.detail(of: settings.engine))
-            }
-            Section(L10n.string("ui.launch_settings.cpu")) {
-                if let offer = model.engineOffer {
-                    LabeledContent(L10n.string("ui.launch_settings.translator"), value: Self.name(of: offer.translator))
-                }
-            }
-            Section(L10n.string("ui.launch_settings.graphics")) {
-                if let engine = model.engineOffer {
-                    Picker(L10n.string("ui.launch_settings.backend"), selection: Binding(
-                        get: { settings.graphics },
-                        set: { graphics in model.choose { $0.graphics = graphics } }
-                    )) {
-                        ForEach(engine.graphics, id: \.graphics) { offer in
-                            Text(marked(Self.name(of: offer.graphics),
-                                        isDefault: offer.graphics == engine.defaultGraphics))
-                                .tag(offer.graphics)
+                    SheetSection(title: L10n.string("ui.launch_settings.graphics")) {
+                        ObeliskCard {
+                            graphicsRow(settings)
+                            if model.graphicsOffer?.options.contains(.rayTracing) == true {
+                                ObeliskCardDivider()
+                                rayTracingRow(settings)
+                            }
+                            ObeliskCardDivider()
+                            performanceHudRow(settings)
                         }
                     }
-                    .pickerStyle(.menu)
-                    .accessibilityIdentifier("launch-settings-graphics")
-                    caption(Self.detail(of: settings.graphics))
                 }
-                if model.graphicsOffer?.options.contains(.rayTracing) == true {
-                    Toggle(isOn: Binding(get: { settings.rayTracing },
-                                         set: { rayTracing in model.choose { $0.rayTracing = rayTracing } })) {
-                        Text(L10n.string("ui.launch_settings.ray_tracing"))
-                        Text(L10n.string("ui.launch_settings.ray_tracing_detail"))
-                    }
-                    .toggleStyle(.switch)
-                    .accessibilityIdentifier("launch-settings-ray-tracing")
-                }
-                Toggle(isOn: Binding(get: { settings.performanceHud },
-                                     set: { shown in model.choose { $0.performanceHud = shown } })) {
-                    Text(L10n.string("ui.launch_settings.performance_hud"))
-                    Text(L10n.string("ui.launch_settings.performance_hud_detail"))
-                }
-                .toggleStyle(.switch)
-                .accessibilityIdentifier("launch-settings-performance-hud")
+                .padding(.horizontal, 24)
+                .padding(.bottom, 22)
             }
-            Section {
-                HStack {
-                    Text(L10n.string("ui.launch_settings.next_launch"))
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    Button(L10n.string("ui.launch_settings.reset"), action: model.reset)
-                        .disabled(!model.isCustomized)
-                        .accessibilityIdentifier("launch-settings-reset")
-                }
-                if let error = model.error {
-                    Label(error, systemImage: "exclamationmark.triangle.fill")
-                        .foregroundStyle(.orange)
+            .scrollBounceBehavior(.basedOnSize)
+            Divider()
+            footer
+        }
+    }
+
+    /// A whole command line: a field across the card, under its row.
+    private var argumentsRow: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ObeliskRow(title: L10n.string("ui.launch_settings.arguments")) {
+                SymbolTile(name: "terminal.fill", colors: TileColors.graphite)
+            } detail: {
+                Text(L10n.string("ui.launch_settings.arguments_detail"))
+            } accessory: {
+                EmptyView()
+            }
+            TextField(L10n.string("ui.launch_settings.arguments"), text: $arguments,
+                      prompt: Text(L10n.string("ui.launch_settings.arguments_placeholder")))
+                .textFieldStyle(.plain)
+                .font(.system(size: 13, design: .monospaced))
+                .labelsHidden()
+                .focused($editsArguments)
+                .onSubmit { model.setArguments(arguments) }
+                .padding(.horizontal, 12)
+                .frame(height: 36)
+                .modifier(SignInWell(isFocused: editsArguments))
+                .accessibilityIdentifier("launch-settings-arguments")
+                .padding(.leading, 64)
+                .padding(.trailing, 18)
+                .padding(.bottom, 16)
+        }
+    }
+
+    private func engineRow(_ settings: LaunchSettings) -> some View {
+        ObeliskRow(title: L10n.string("ui.launch_settings.engine")) {
+            SymbolTile(name: "gearshape.2.fill", colors: TileColors.violet)
+        } detail: {
+            Text(Self.detail(of: settings.engine))
+        } accessory: {
+            GlassMenuPicker(title: L10n.string("ui.launch_settings.engine"),
+                            value: marked(Self.name(of: settings.engine),
+                                          isDefault: settings.engine == settings.defaultEngine),
+                            selection: Binding(get: { settings.engine },
+                                               set: { engine in model.choose { $0.engine = engine } }),
+                            identifier: "launch-settings-engine") {
+                ForEach(settings.engines, id: \.engine) { offer in
+                    Text(marked(Self.name(of: offer.engine), isDefault: offer.engine == settings.defaultEngine))
+                        .tag(offer.engine)
                 }
             }
         }
-        .formStyle(.grouped)
+    }
+
+    @ViewBuilder
+    private var translatorRow: some View {
+        if let offer = model.engineOffer {
+            ObeliskRow(title: L10n.string("ui.launch_settings.translator")) {
+                SymbolTile(name: "cpu", colors: TileColors.blue)
+            } accessory: {
+                Text(Self.name(of: offer.translator))
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func graphicsRow(_ settings: LaunchSettings) -> some View {
+        if let engine = model.engineOffer {
+            ObeliskRow(title: L10n.string("ui.launch_settings.backend")) {
+                SymbolTile(name: "square.3.layers.3d", colors: TileColors.green)
+            } detail: {
+                Text(Self.detail(of: settings.graphics))
+            } accessory: {
+                GlassMenuPicker(title: L10n.string("ui.launch_settings.backend"),
+                                value: marked(Self.name(of: settings.graphics),
+                                              isDefault: settings.graphics == engine.defaultGraphics),
+                                selection: Binding(get: { settings.graphics },
+                                                   set: { graphics in model.choose { $0.graphics = graphics } }),
+                                identifier: "launch-settings-graphics") {
+                    ForEach(engine.graphics, id: \.graphics) { offer in
+                        Text(marked(Self.name(of: offer.graphics), isDefault: offer.graphics == engine.defaultGraphics))
+                            .tag(offer.graphics)
+                    }
+                }
+            }
+        }
+    }
+
+    private func rayTracingRow(_ settings: LaunchSettings) -> some View {
+        ObeliskRow(title: L10n.string("ui.launch_settings.ray_tracing")) {
+            SymbolTile(name: "sparkles", colors: TileColors.gold)
+        } detail: {
+            Text(L10n.string("ui.launch_settings.ray_tracing_detail"))
+        } accessory: {
+            Toggle(L10n.string("ui.launch_settings.ray_tracing"),
+                   isOn: Binding(get: { settings.rayTracing },
+                                 set: { rayTracing in model.choose { $0.rayTracing = rayTracing } }))
+                .toggleStyle(.switch)
+                .labelsHidden()
+                .pointerCursor()
+                .accessibilityIdentifier("launch-settings-ray-tracing")
+        }
+    }
+
+    private func performanceHudRow(_ settings: LaunchSettings) -> some View {
+        ObeliskRow(title: L10n.string("ui.launch_settings.performance_hud")) {
+            SymbolTile(name: "gauge.with.needle.fill", colors: TileColors.violet)
+        } detail: {
+            Text(L10n.string("ui.launch_settings.performance_hud_detail"))
+        } accessory: {
+            Toggle(L10n.string("ui.launch_settings.performance_hud"),
+                   isOn: Binding(get: { settings.performanceHud },
+                                 set: { shown in model.choose { $0.performanceHud = shown } }))
+                .toggleStyle(.switch)
+                .labelsHidden()
+                .pointerCursor()
+                .accessibilityIdentifier("launch-settings-performance-hud")
+        }
+    }
+
+    /// When the choices apply, how to forget them, and why the last could not
+    /// be kept.
+    private var footer: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if let error = model.error {
+                SheetNotice(kind: .warning, text: error)
+            }
+            HStack(spacing: 12) {
+                Text(L10n.string("ui.launch_settings.next_launch"))
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                GlassCapsuleButton(title: L10n.string("ui.launch_settings.reset"), systemImage: "arrow.counterclockwise",
+                                   identifier: "launch-settings-reset", action: model.reset)
+                    .disabled(!model.isCustomized)
+            }
+        }
+        .padding(.horizontal, 24)
+        .padding(.vertical, 16)
     }
 
     private func marked(_ name: String, isDefault: Bool) -> String {
         isDefault ? L10n.string("ui.launch_settings.default", name) : name
-    }
-
-    private func caption(_ text: String) -> some View {
-        Text(text)
-            .font(.callout)
-            .foregroundStyle(.secondary)
-            .fixedSize(horizontal: false, vertical: true)
     }
 
     static func name(of engine: LaunchEngine) -> String {

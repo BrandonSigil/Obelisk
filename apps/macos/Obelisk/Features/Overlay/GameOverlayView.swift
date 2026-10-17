@@ -237,7 +237,7 @@ private struct OverlayAchievementsPage: View {
                 if let fraction = model.fraction {
                     HStack(spacing: 12) {
                         Text(model.countText).monospacedDigit()
-                        ProgressView(value: fraction).frame(width: 160)
+                        AchievementProgressBar(fraction: fraction).frame(width: 160)
                     }
                     .accessibilityElement(children: .combine)
                 }

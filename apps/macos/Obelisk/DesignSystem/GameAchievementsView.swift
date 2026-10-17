@@ -36,34 +36,62 @@ struct GameAchievementsView: View {
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
+        VStack(alignment: .leading, spacing: 0) {
             VStack(alignment: .leading, spacing: 18) {
-                header
-                if let items = model.items, !items.isEmpty {
-                    HStack(spacing: 12) {
-                        Text(model.countText).monospacedDigit()
-                        ProgressView(value: model.fraction ?? 0)
+                SheetHeader(title: L10n.string("ui.game.achievements.title"), subtitle: gameName, symbol: "trophy.fill",
+                            colors: TileColors.gold, close: { dismiss() },
+                            closeIdentifier: "\(model.storeID)-achievements-close")
+                if let fraction = model.fraction {
+                    HStack(spacing: 14) {
+                        Text(model.countText)
+                            .font(.system(size: 20, weight: .bold))
+                            .monospacedDigit()
+                        AchievementProgressBar(fraction: fraction)
+                        Text(fraction, format: .percent.precision(.fractionLength(0)).locale(L10n.locale))
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                            .monospacedDigit()
                     }
+                    .padding(.horizontal, 18)
+                    .padding(.vertical, 14)
+                    .modifier(GamePageCard(padding: 0))
                     .accessibilityElement(children: .combine)
                 }
-                Divider()
             }
             .padding(.horizontal, 24)
             .padding(.top, 24)
+            .padding(.bottom, 18)
             GameAchievementsList(model: model, retry: retry)
         }
-        .frame(width: 560, height: 540)
+        .frame(width: 580, height: 600)
+        .tint(ObeliskStyle.accent)
         .background { AchievementSheetDismissal { dismiss() } }
     }
+}
 
-    private var header: some View {
-        GameSheetHeader(title: L10n.string("ui.game.achievements.title"), systemImage: "trophy",
-                        gameName: gameName, closeIdentifier: "\(model.storeID)-achievements-close")
+/// How much of a game's achievements the player unlocked, on a capsule in the
+/// accent color.
+struct AchievementProgressBar: View {
+    let fraction: Double
+
+    var body: some View {
+        GeometryReader { geometry in
+            Capsule()
+                .fill(.primary.opacity(0.08))
+                .overlay(alignment: .leading) {
+                    Capsule()
+                        .fill(LinearGradient(colors: TileColors.violet, startPoint: .leading, endPoint: .trailing))
+                        .frame(width: max(geometry.size.height, geometry.size.width * min(max(fraction, 0), 1)))
+                        .opacity(fraction > 0 ? 1 : 0)
+                }
+        }
+        .frame(height: 8)
+        .accessibilityHidden(true)
     }
 }
 
 /// A game's achievements, their load or its failure: in the game's sheet and
-/// in the overlay.
+/// in the overlay, as rows of a card.
 struct GameAchievementsList: View {
     let model: GameAchievementsModel
     let retry: () -> Void
@@ -74,19 +102,19 @@ struct GameAchievementsList: View {
             ProgressView(L10n.string("ui.game.achievements.loading"))
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if let error = model.error {
-            VStack(spacing: 12) {
-                Text(error).foregroundStyle(.secondary)
-                Button(L10n.string("ui.common.retry"), action: retry)
+            SheetFailure(message: error) {
+                GlassCapsuleButton(title: L10n.string("ui.common.retry"), systemImage: "arrow.clockwise",
+                                   identifier: "\(model.storeID)-achievements-retry", action: retry)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if let items = model.items, !items.isEmpty {
             ScrollView {
                 LazyVStack(spacing: 0) {
-                    ForEach(items, id: \.id) { item in
+                    ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
+                        if index > 0 { Divider().padding(.leading, 76) }
                         row(item)
-                        Divider()
                     }
                 }
+                .modifier(GamePageCard(padding: 0))
                 .padding(.horizontal, 24)
                 .padding(.bottom, 24)
             }
@@ -97,40 +125,51 @@ struct GameAchievementsList: View {
     }
 
     private func row(_ item: GameAchievement) -> some View {
-        HStack(alignment: .top, spacing: 14) {
-            CachedArtwork(url: URL(string: item.iconUrl), maxPixelSize: Int((48 * displayScale).rounded(.up))) { image in
+        HStack(alignment: .center, spacing: 14) {
+            CachedArtwork(url: URL(string: item.iconUrl), maxPixelSize: Int((44 * displayScale).rounded(.up))) { image in
                 image.resizable().scaledToFit()
             } placeholder: {
-                Image(systemName: item.hidden ? "lock" : "trophy")
-                    .font(.title2).foregroundStyle(.secondary)
+                Image(systemName: item.hidden ? "lock.fill" : "trophy.fill")
+                    .font(.system(size: 17))
+                    .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(.primary.opacity(0.05))
+                    .background(.primary.opacity(0.06))
             }
-            .frame(width: 48, height: 48)
+            .frame(width: 44, height: 44)
             .saturation(item.unlocked ? 1 : 0)
-            .clipShape(RoundedRectangle(cornerRadius: 7))
+            .opacity(item.unlocked ? 1 : 0.6)
+            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
             .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 5) {
+            VStack(alignment: .leading, spacing: 3) {
                 Text(item.hidden ? L10n.string("ui.game.achievements.hidden") : item.name)
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(item.unlocked ? .primary : .secondary)
                 if !item.description.isEmpty {
                     Text(item.description).font(.system(size: 12)).foregroundStyle(.secondary)
                 }
                 if let date = item.unlockDate {
                     Text(date, format: .dateTime.day().month(.abbreviated).year().locale(L10n.locale))
-                        .font(.system(size: 11)).foregroundStyle(.secondary)
+                        .font(.system(size: 11)).foregroundStyle(.tertiary)
                 } else if !item.unlocked {
                     Text(L10n.string("ui.game.achievements.locked"))
-                        .font(.system(size: 11)).foregroundStyle(.secondary)
+                        .font(.system(size: 11)).foregroundStyle(.tertiary)
                 }
             }
-            Spacer(minLength: 0)
+            .frame(maxWidth: .infinity, alignment: .leading)
             if item.unlocked {
-                Image(systemName: "checkmark.circle.fill").foregroundStyle(.tint)
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 17))
+                    .foregroundStyle(.tint)
                     .accessibilityLabel(L10n.string("ui.game.achievements.unlocked"))
+            } else {
+                Image(systemName: "lock.fill")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.tertiary)
+                    .accessibilityHidden(true)
             }
         }
-        .padding(.vertical, 13)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
         .accessibilityElement(children: .combine)
     }
 }

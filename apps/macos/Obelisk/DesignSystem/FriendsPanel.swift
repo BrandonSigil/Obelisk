@@ -95,10 +95,12 @@ private struct FriendsList: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                     if state.connection == .authenticationRequired {
                         Button(L10n.string("ui.friends.signIn"), action: signIn)
+                            .buttonStyle(GlassCapsuleStyle())
                             .pointerCursor()
                             .focused($focusedControl, equals: .reconnect)
                     } else {
                         Button(L10n.string("ui.friends.retry"), action: retry)
+                            .buttonStyle(GlassCapsuleStyle())
                             .pointerCursor()
                             .focused($focusedControl, equals: .reconnect)
                     }
@@ -197,19 +199,23 @@ private struct FriendsList: View {
     }
 
     private var header: some View {
-        HStack(spacing: 12) {
-            Image(state.store.logoAssetName).resizable().scaledToFit()
-                .frame(width: 32, height: 32).accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 3) {
+        HStack(spacing: 14) {
+            if let section = LibrarySection(rawValue: state.store.id) {
+                StoreTile(section: section, size: 44)
+            } else {
+                Image(state.store.logoAssetName).resizable().scaledToFit()
+                    .frame(width: 32, height: 32).accessibilityHidden(true)
+            }
+            VStack(alignment: .leading, spacing: 4) {
                 if let picker {
-                    Text(picker.pickerTitle).font(.system(size: 20, weight: .semibold)).lineLimit(2)
+                    Text(picker.pickerTitle).font(.system(size: 20, weight: .bold)).tracking(-0.2).lineLimit(2)
                         .accessibilityIdentifier("friends-invite-picker-title")
                     Text(L10n.string("ui.chat.invitePicker.subtitle"))
-                        .font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(2)
+                        .font(.system(size: 13)).foregroundStyle(.secondary).lineLimit(2)
                 } else {
-                    Text(state.title).font(.system(size: 20, weight: .semibold))
+                    Text(state.title).font(.system(size: 20, weight: .bold)).tracking(-0.2)
                     Text(state.headerSummary)
-                        .font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(2)
+                        .font(.system(size: 13)).foregroundStyle(.secondary).lineLimit(2)
                 }
             }
             Spacer(minLength: 12)
@@ -239,9 +245,8 @@ private struct FriendsList: View {
             }
         }
         .font(.system(size: 13))
-        .padding(.horizontal, 12).frame(height: 36)
-        .background(.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 9))
-        .overlay { RoundedRectangle(cornerRadius: 9).strokeBorder(.primary.opacity(0.08), lineWidth: 1) }
+        .padding(.horizontal, 12).frame(height: 38)
+        .modifier(SignInWell(isFocused: focusedControl == .search))
     }
 
     @ViewBuilder
@@ -326,10 +331,8 @@ struct FriendsPanelCloseButton: View {
 
     var body: some View {
         Button(action: action) {
-            Image(systemName: "xmark").font(.system(size: 12, weight: .semibold))
-                .frame(width: 30, height: 30)
-                .background(.primary.opacity(0.07), in: Circle())
-                .contentShape(Circle())
+            StorefrontGlassIcon(systemName: "xmark", size: 13)
+                .foregroundStyle(.primary)
         }
         .obeliskButtonStyle(.plain)
         .accessibilityLabel(L10n.string("ui.friends.close"))
