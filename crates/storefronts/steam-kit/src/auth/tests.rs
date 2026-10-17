@@ -333,6 +333,18 @@ async fn credentials_encrypt_password_then_handle_guard_retry_and_completion() {
     assert_eq!(guard.steam_id, TEST_STEAM_ID);
 }
 
+#[test]
+fn password_keeps_what_steam_client_sends() {
+    assert_eq!(steam_password(" test password "), " test password ");
+    assert_eq!(steam_password(&"a".repeat(300)), "a".repeat(64));
+    assert_eq!(steam_password("pàsswörd🔑"), "psswrd");
+    assert_eq!(
+        steam_password(&format!("é{}", "b".repeat(70))),
+        "b".repeat(64)
+    );
+    assert_eq!(steam_password("éè"), "");
+}
+
 #[tokio::test]
 async fn http_missing_result_and_oversized_response_are_rejected() {
     let (client, server) = test_server(vec![

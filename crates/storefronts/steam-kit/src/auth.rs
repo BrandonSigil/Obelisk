@@ -279,11 +279,8 @@ impl AuthClient {
         password: &str,
     ) -> Result<AuthSession, AuthError> {
         let account_name = account_name.trim();
-        if account_name.is_empty()
-            || account_name.len() > 256
-            || password.is_empty()
-            || password.len() > 256
-        {
+        let password = steam_password(password);
+        if account_name.is_empty() || account_name.len() > 256 || password.is_empty() {
             return Err(AuthError::InvalidCredentialsInput);
         }
         let key: wire::PasswordKeyResponse = self
@@ -296,7 +293,7 @@ impl AuthClient {
                 false,
             )
             .await?;
-        let encrypted_password = encrypt_password(password, &key)?;
+        let encrypted_password = encrypt_password(&password, &key)?;
         let response: wire::BeginCredentialsResponse = self
             .call(
                 Method::POST,
@@ -443,6 +440,12 @@ fn device_details() -> wire::DeviceDetails {
         platform: 1,   // SteamClient: produces a token usable for CM logon.
         os_type: -102, // MacOSUnknown: avoids claiming an obsolete macOS version.
     }
+}
+
+/// The password as Steam's own client sends it: its ASCII characters, cut to
+/// 64. A longer password only ever worked there by its first 64.
+fn steam_password(password: &str) -> String {
+    password.chars().filter(char::is_ascii).take(64).collect()
 }
 
 fn encrypt_password(

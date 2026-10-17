@@ -37,10 +37,6 @@ struct SteamLoginView: View {
         }
     }
 
-    /// Steam silently cuts longer passwords, so one past this length may only
-    /// sign in by its first characters.
-    private static let passwordLengthSteamKeeps = 64
-
     private var isWaiting: Bool { model.isRestoring || model.isConnecting }
     private var isGuardStep: Bool { model.isCredentialChallenge && !model.isSubmittingCredentials }
 
@@ -64,13 +60,6 @@ struct SteamLoginView: View {
                 contentType: .password,
                 onSubmit: signIn
             )
-            if password.count > Self.passwordLengthSteamKeeps {
-                Label(L10n.string("ui.steam.password_too_long", Int64(Self.passwordLengthSteamKeeps)), systemImage: "exclamationmark.triangle.fill")
-                    .font(.system(size: 12))
-                    .foregroundStyle(.orange)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal, 2)
-            }
             SignInRememberToggle(isOn: $model.rememberSession)
                 .padding(.horizontal, 2)
             Button(action: signIn) {

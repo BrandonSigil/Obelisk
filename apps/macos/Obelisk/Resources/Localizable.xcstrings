@@ -8145,23 +8145,6 @@
         }
       }
     },
-    "ui.steam.password_too_long": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "This password is over %1$lld characters. If Steam rejects it, try only its first %1$lld characters."
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Ce mot de passe dépasse %1$lld caractères. Si Steam le refuse, essayez seulement ses %1$lld premiers caractères."
-          }
-        }
-      }
-    },
     "ui.steam.qr_accessibility": {
       "extractionState": "manual",
       "localizations": {
