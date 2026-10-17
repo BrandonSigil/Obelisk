@@ -5845,13 +5845,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Checking macOS compatibility…"
+            "value": "Looking for native macOS versions…"
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Vérification de la compatibilité macOS…"
+            "value": "Recherche des versions macOS natives…"
           }
         }
       }
@@ -5862,13 +5862,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Compatible with macOS"
+            "value": "Native macOS"
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Compatible macOS"
+            "value": "macOS natif"
           }
         }
       }
@@ -5879,13 +5879,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "macOS compatibility could not be checked for some games."
+            "value": "Some games could not be checked for a native macOS version."
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "La compatibilité macOS de certains jeux n’a pas pu être vérifiée."
+            "value": "Impossible de vérifier si certains jeux ont une version macOS native."
           }
         }
       }
