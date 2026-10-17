@@ -123,6 +123,11 @@ final class SteamAchievementsTests: XCTestCase {
         try await render(GameAchievementsView(model: model, gameName: "Thronefall", retry: {})
             .environment(\.colorScheme, .dark).tint(ObeliskStyle.accent)
             .background(ObeliskPalette(colorScheme: .dark).background), to: output.appending(path: "achievements-panel.png"))
+        model.load { [] }
+        try await eventually { !model.isLoading }
+        try await render(GameAchievementsView(model: model, gameName: "Thronefall", retry: {})
+            .environment(\.colorScheme, .dark).tint(ObeliskStyle.accent)
+            .background(ObeliskPalette(colorScheme: .dark).background), to: output.appending(path: "achievements-panel-empty.png"))
     }
 
     private static func achievement(_ id: String, unlocked: Bool) -> GameAchievement {

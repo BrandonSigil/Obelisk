@@ -92,6 +92,7 @@ struct GameAchievementsList: View {
             }
         } else {
             ContentUnavailableView(L10n.string("ui.game.achievements.empty"), systemImage: "trophy")
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
 
