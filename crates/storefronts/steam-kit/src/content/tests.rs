@@ -1175,7 +1175,16 @@ async fn missing_or_corrupt_files_report_downloads_only_when_fetching_game_chunk
                 .filter(|event| event.phase == DownloadPhase::Preparing)
                 .all(|event| event.content_bytes == 0)
         );
-        assert_eq!(events.last().unwrap().phase, DownloadPhase::Verifying);
+        let downloading = events
+            .iter()
+            .position(|event| event.phase == DownloadPhase::Downloading)
+            .unwrap();
+        assert!(
+            events[downloading..]
+                .iter()
+                .all(|event| event.phase == DownloadPhase::Downloading),
+            "a published file must not show the download as verifying again"
+        );
         assert_eq!(events.last().unwrap().content_bytes, chunk_bytes);
         assert!(
             events

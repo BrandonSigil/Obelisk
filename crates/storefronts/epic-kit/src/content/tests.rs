@@ -723,6 +723,40 @@ async fn shared_chunks_are_requested_once_and_kept_until_last_file() {
 }
 
 #[tokio::test]
+async fn assembling_a_file_never_shows_the_download_as_verifying_again() {
+    let (mut manifest, responses, _) = fixture();
+    let mut second = manifest.files[0].clone();
+    second.filename = "second.txt".into();
+    second.parts.truncate(1);
+    second.hash = Sha1::digest(b"hello").into();
+    manifest.files.push(second);
+    let server = Server::new(responses, false);
+    let temporary = tempfile::tempdir().unwrap();
+    let snapshots = Arc::new(Mutex::new(Vec::new()));
+    let captured = Arc::clone(&snapshots);
+    ContentClient::new(Client::new())
+        .download(
+            Arc::new(manifest),
+            std::slice::from_ref(&server.base),
+            temporary.path(),
+            &CancelToken::new(),
+            move |snapshot| captured.lock().unwrap().push(snapshot.phase),
+        )
+        .await
+        .unwrap();
+    let phases = snapshots.lock().unwrap();
+    let downloading = phases
+        .iter()
+        .position(|phase| *phase == DownloadPhase::Downloading)
+        .unwrap();
+    assert!(
+        phases[downloading..]
+            .iter()
+            .all(|phase| *phase == DownloadPhase::Downloading)
+    );
+}
+
+#[tokio::test]
 async fn repairs_corrupt_files_using_another_mirror_without_manifest_credentials() {
     for corrupt_response in [false, true] {
         let (manifest, responses, expected) = fixture();

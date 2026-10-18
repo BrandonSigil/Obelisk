@@ -242,6 +242,35 @@ async fn a_transfer_installs_every_file_then_reuses_what_is_on_disk() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn assembling_a_file_never_shows_the_download_as_verifying_again() {
+    let fixture = fixture();
+    let folder = tempfile::tempdir().unwrap();
+    let phases = Arc::new(StdMutex::new(Vec::new()));
+    let captured = Arc::clone(&phases);
+    download(
+        crate::http::client().unwrap(),
+        fixture.links(),
+        fixture.installed.clone(),
+        "build".into(),
+        &folder.path().join("gog-1207658924-windows"),
+        &CancelToken::new(),
+        move |snapshot| captured.lock().unwrap().push(snapshot.phase),
+    )
+    .await
+    .unwrap();
+    let phases = phases.lock().unwrap();
+    let downloading = phases
+        .iter()
+        .position(|phase| *phase == DownloadPhase::Downloading)
+        .unwrap();
+    assert!(
+        phases[downloading..]
+            .iter()
+            .all(|phase| *phase == DownloadPhase::Downloading)
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn a_corrupt_chunk_fails_the_transfer() {
     let fixture = fixture();
     let (bytes, _) = &fixture.chunks["a"];

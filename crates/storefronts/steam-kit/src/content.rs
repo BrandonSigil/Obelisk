@@ -905,11 +905,10 @@ impl DiskInstall {
         } = prepared;
         self.cancel.check()?;
         // Only a file this pass actually repairs is reported: verification
-        // finished earlier, and traversing a valid file is one chmod.
-        self.reporter.update(|status| {
-            status.phase = DownloadPhase::Verifying;
-            status.current_file.clone_from(&file.name);
-        });
+        // finished earlier, and traversing a valid file is one chmod. The
+        // phase stays the network side's: chunks still arrive for other files.
+        self.reporter
+            .update(|status| status.current_file.clone_from(&file.name));
         partial.sync_all()?;
         drop(partial);
         if hashed != present.len() || hasher.finalize()[..] != file.sha {

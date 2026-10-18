@@ -332,10 +332,10 @@ impl DiskInstall {
                 apply_permissions(&target, is_executable(file, &target)?)?;
                 continue;
             }
-            self.reporter.update(|status| {
-                status.phase = DownloadPhase::Verifying;
-                status.current_file.clone_from(&file.filename);
-            });
+            // The phase stays the network side's: chunks still arrive for
+            // the files after this one.
+            self.reporter
+                .update(|status| status.current_file.clone_from(&file.filename));
             let plan = self.prefetch.files.pop_front().ok_or(EpicError::Protocol)?;
             if plan.index != index {
                 return Err(EpicError::Protocol);
