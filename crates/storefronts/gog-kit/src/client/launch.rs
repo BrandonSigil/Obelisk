@@ -14,7 +14,7 @@ use serde::Deserialize;
 use super::{Installation, MACOS, WINDOWS, valid_product_id};
 use crate::{GogError, manifest::SUPPORT_DIRECTORY};
 
-const MAX_INFO_BYTES: usize = 1024 * 1024;
+pub(super) const MAX_INFO_BYTES: usize = 1024 * 1024;
 
 /// The game an installation starts, from its receipt and its own files alone.
 /// Nothing is fetched.
@@ -108,17 +108,37 @@ pub fn installed_launch(
     })
 }
 
+/// Where a build keeps the file that names its play tasks, from the folder
+/// its files are in: that folder, or its bundle's resources.
+pub(super) fn info_files(product_id: &str) -> [String; 2] {
+    let name = format!("goggame-{product_id}.info");
+    [name.clone(), format!("Contents/Resources/{name}")]
+}
+
 /// The task Galaxy plays: the primary one, else the first game.
 fn play_task(root: &Path, product_id: &str) -> Result<PlayTask, GogError> {
-    let name = format!("goggame-{product_id}.info");
-    let bytes = [
-        root.join(&name),
-        root.join("Contents/Resources").join(&name),
-    ]
-    .iter()
-    .find_map(|path| read_file_bounded(path, MAX_INFO_BYTES).ok().flatten())
-    .ok_or_else(|| launch_error("noPlayTask"))?;
-    let info: GameInfo = serde_json::from_slice(&bytes).map_err(|_| launch_error("noPlayTask"))?;
+    let bytes = info_files(product_id)
+        .iter()
+        .find_map(|path| {
+            read_file_bounded(&root.join(path), MAX_INFO_BYTES)
+                .ok()
+                .flatten()
+        })
+        .ok_or_else(|| launch_error("noPlayTask"))?;
+    primary_task(&bytes)
+}
+
+/// The program the task Galaxy plays starts, from the folder the build's
+/// files are in, as its `goggame-*.info` file's `bytes` name it.
+pub(super) fn played_program(bytes: &[u8]) -> Option<String> {
+    primary_task(bytes)
+        .ok()
+        .map(|task| task.path.replace('\\', "/"))
+}
+
+/// The primary task of an info file, else its first game.
+fn primary_task(bytes: &[u8]) -> Result<PlayTask, GogError> {
+    let info: GameInfo = serde_json::from_slice(bytes).map_err(|_| launch_error("noPlayTask"))?;
     let mut tasks: Vec<PlayTask> = info
         .play_tasks
         .into_iter()

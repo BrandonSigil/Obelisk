@@ -1,5 +1,6 @@
-//! Current platform manifests for installation estimates and verified downloads.
-use obelisk_core::install::unhex;
+//! Current platform manifests for installation estimates and verified
+//! downloads, and the build a download without a platform installs.
+use obelisk_core::{install::unhex, mac_build, transfer::CancelToken};
 use reqwest::Url;
 use serde::Deserialize;
 use sha1::{Digest, Sha1};
@@ -14,6 +15,7 @@ use crate::{
     EpicError,
     auth::{self, Api, credential_free},
     client::validate_identity,
+    content::ContentClient,
     content_manifest::Manifest,
     manifest,
 };
@@ -21,15 +23,25 @@ use crate::{
 pub(crate) mod diagnostic;
 pub(crate) mod manifest_cache;
 
-/// Installation sizes by game identity and live asset hash, which names one
-/// immutable build: reopening a game's page skips its manifest.
-#[derive(Default)]
-pub(crate) struct InstallationSizes(Mutex<HashMap<SizeKey, u64>>);
+/// What a build's manifest told, by game identity and live asset hash, which
+/// names one immutable build: reopening a game's page skips its manifest.
+pub(crate) struct ByBuild<T>(Mutex<HashMap<BuildKey, T>>);
 
-type SizeKey = ([String; 4], String);
+/// Installation sizes.
+pub(crate) type InstallationSizes = ByBuild<u64>;
+/// Whether each Mac build's game runs natively on Apple silicon.
+pub(crate) type NativeBuilds = ByBuild<bool>;
 
-impl InstallationSizes {
-    fn get(&self, key: &SizeKey) -> Option<u64> {
+type BuildKey = ([String; 4], String);
+
+impl<T> Default for ByBuild<T> {
+    fn default() -> Self {
+        Self(Mutex::new(HashMap::new()))
+    }
+}
+
+impl<T: Copy> ByBuild<T> {
+    fn get(&self, key: &BuildKey) -> Option<T> {
         self.0
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
@@ -37,12 +49,20 @@ impl InstallationSizes {
             .copied()
     }
 
-    fn insert(&self, key: SizeKey, size: u64) {
+    fn insert(&self, key: BuildKey, value: T) {
         self.0
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
-            .insert(key, size);
+            .insert(key, value);
     }
+}
+
+/// The key of `asset`'s build of the game, when Epic names its hash.
+fn build_key(identity: [&str; 4], asset: &Asset) -> Option<BuildKey> {
+    asset
+        .hash
+        .clone()
+        .map(|hash| (identity.map(str::to_owned), hash))
 }
 
 pub(crate) async fn installation_size(
@@ -66,12 +86,7 @@ pub(crate) async fn installation_size(
     )
     .await;
     let asset = reported(&mut trace, asset)?;
-    let key = asset.hash.clone().map(|hash| {
-        (
-            [namespace, catalog_item_id, app_name, platform].map(str::to_owned),
-            hash,
-        )
-    });
+    let key = build_key([namespace, catalog_item_id, app_name, platform], &asset);
     if let Some(size) = key.as_ref().and_then(|key| sizes.get(key)) {
         return Ok(size);
     }
@@ -201,6 +216,114 @@ fn reported<T>(
     result
 }
 
+/// The build a download without a platform installs: the Mac build when its
+/// game runs natively on Apple silicon, else the Windows build. A Mac build
+/// is read once: its manifest, then the first bytes of its program.
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn platform(
+    api: &Api,
+    access_token: &str,
+    namespace: &str,
+    catalog_item_id: &str,
+    app_name: &str,
+    natives: &NativeBuilds,
+    cancel: &CancelToken,
+) -> Result<&'static str, EpicError> {
+    let mut mac_trace = trace(namespace, catalog_item_id, app_name, "Mac");
+    let mut windows_trace = trace(namespace, catalog_item_id, app_name, "Windows");
+    let (mac, windows) = tokio::join!(
+        live_build(
+            api,
+            access_token,
+            namespace,
+            catalog_item_id,
+            app_name,
+            "Mac",
+            &mut mac_trace
+        ),
+        live_build(
+            api,
+            access_token,
+            namespace,
+            catalog_item_id,
+            app_name,
+            "Windows",
+            &mut windows_trace,
+        ),
+    );
+    let (mac, windows) = (
+        reported(&mut mac_trace, mac)?,
+        reported(&mut windows_trace, windows)?,
+    );
+    if let Some(asset) = &mac {
+        let identity = [namespace, catalog_item_id, app_name, "Mac"];
+        let native = runs_natively(api, asset, identity, natives, cancel, &mut mac_trace).await;
+        if reported(&mut mac_trace, native)? {
+            return Ok("Mac");
+        }
+    }
+    match (mac, windows) {
+        (_, Some(_)) => Ok("Windows"),
+        (Some(_), None) => Err(EpicError::Service {
+            message: "backend.install.macBuildNotNative".into(),
+        }),
+        (None, None) => Err(EpicError::Protocol),
+    }
+}
+
+/// Whether the game of the Mac build `asset` describes runs natively on
+/// Apple silicon. A build Obelisk cannot install does not.
+async fn runs_natively(
+    api: &Api,
+    asset: &Asset,
+    identity: [&str; 4],
+    natives: &NativeBuilds,
+    cancel: &CancelToken,
+    trace: &mut diagnostic::Trace,
+) -> Result<bool, EpicError> {
+    let key = build_key(identity, asset);
+    if let Some(native) = key.as_ref().and_then(|key| natives.get(key)) {
+        return Ok(native);
+    }
+    let [namespace, catalog_item_id, app_name, platform] = identity;
+    let FetchedManifest {
+        bytes, base_urls, ..
+    } = asset_manifest(
+        api,
+        asset,
+        namespace,
+        catalog_item_id,
+        app_name,
+        platform,
+        None,
+        trace,
+    )
+    .await?;
+    let manifest = tokio::task::spawn_blocking(move || manifest_cache::validate(&bytes))
+        .await
+        .map_err(|_| EpicError::Protocol)?;
+    let native = match manifest {
+        Ok(manifest) => {
+            let mut listing = mac_build::Listing::default();
+            for (index, file) in manifest.files.iter().enumerate() {
+                listing.file(&file.filename, index, file.size());
+            }
+            let content = ContentClient::new(api.http.clone());
+            let (content, manifest, base_urls) = (&content, &manifest, &base_urls);
+            let read = move |index: usize, bytes: u64| {
+                content.read(manifest, base_urls, &manifest.files[index], bytes, cancel)
+            };
+            mac_build::runs_natively(&listing, &manifest.launch_executable, &[], read).await?
+        }
+        Err(EpicError::UnsupportedContent) => false,
+        Err(error) => return Err(error),
+    };
+    if let Some(key) = key {
+        natives.insert(key, native);
+    }
+    Ok(native)
+}
+
 /// The game's live build as the launcher service describes it.
 async fn live_asset(
     api: &Api,
@@ -211,6 +334,29 @@ async fn live_asset(
     platform: &str,
     trace: &mut diagnostic::Trace,
 ) -> Result<Asset, EpicError> {
+    live_build(
+        api,
+        access_token,
+        namespace,
+        catalog_item_id,
+        app_name,
+        platform,
+        trace,
+    )
+    .await?
+    .ok_or(EpicError::Protocol)
+}
+
+/// The game's live build for `platform`; none when Epic has no such build.
+async fn live_build(
+    api: &Api,
+    access_token: &str,
+    namespace: &str,
+    catalog_item_id: &str,
+    app_name: &str,
+    platform: &str,
+    trace: &mut diagnostic::Trace,
+) -> Result<Option<Asset>, EpicError> {
     trace.step = "identity";
     validate_identity(namespace, catalog_item_id, app_name, platform)?;
     let mut url = Url::parse(&api.launcher).map_err(|_| EpicError::Protocol)?;
@@ -235,7 +381,12 @@ async fn live_asset(
             "Live",
         ]);
     trace.step = "assets request";
-    let response: serde_json::Value = api.get(url, access_token).await?;
+    let Some(response) = api
+        .get_optional::<serde_json::Value>(url, access_token)
+        .await?
+    else {
+        return Ok(None);
+    };
     if cfg!(debug_assertions) {
         trace.assets = Some(diagnostic::redact(&response));
     }
@@ -243,15 +394,17 @@ async fn live_asset(
     let response: AssetResponse =
         serde_json::from_value(response).map_err(|_| EpicError::Protocol)?;
     trace.step = "asset count";
-    let Ok([asset]) = <[Asset; 1]>::try_from(response.elements) else {
-        return Err(EpicError::Protocol);
+    let asset = match <[Asset; 1]>::try_from(response.elements) {
+        Ok([asset]) => asset,
+        Err(elements) if elements.is_empty() => return Ok(None),
+        Err(_) => return Err(EpicError::Protocol),
     };
     trace.asset_hash = asset.hash.clone();
     trace.step = "manifest count";
     if asset.manifests.is_empty() || asset.manifests.len() > 8 {
         return Err(EpicError::Protocol);
     }
-    Ok(asset)
+    Ok(Some(asset))
 }
 
 #[allow(clippy::too_many_arguments)]

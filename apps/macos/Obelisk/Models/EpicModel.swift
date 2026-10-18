@@ -67,7 +67,7 @@ extension EpicGames: WebStorefront {
     }
     static func details(of game: EpicGame, session: Session, language: String) async throws -> EpicGameDetails {
         try await session.gameDetails(namespace: game.namespace, catalogItemId: game.catalogItemId,
-                                      appName: game.appName, platform: game.preferredPlatform)
+                                      appName: game.appName)
     }
     static func achievements(of game: EpicGame, session: Session, language: String,
                              fresh: Bool) async throws -> [GameAchievement] {
@@ -111,16 +111,19 @@ extension EpicGames: WebStorefront {
     static var cloudTitle: String { L10n.string("ui.epic.cloud.title") }
 }
 
+extension EpicGameDetails: WebGameDetails {}
+
 extension EpicGame: WebGame {
     var preferredPlatform: String { macos ? EpicGames.nativePlatform : "Windows" }
     var libraryID: String { epicLibraryID(namespace: namespace, appName: appName) }
     public var id: String { libraryID }
 
-    /// What Epic can install of the game: its native build first.
+    /// What Epic can install of the game. Epic picks the build as the
+    /// Transfer starts.
     var offer: GameOffer? {
         guard macos || windows else { return nil }
         return .epic(namespace: namespace, catalogItemId: catalogItemId, appName: appName, title: title,
-                     platform: preferredPlatform)
+                     platform: nil)
     }
 
     func libraryValue(for sort: StorefrontLibrarySort) -> Double? {

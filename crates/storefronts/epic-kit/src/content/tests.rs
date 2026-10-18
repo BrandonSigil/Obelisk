@@ -307,6 +307,27 @@ async fn installs_verified_parts_and_reuses_complete_files_without_network() {
 }
 
 #[tokio::test]
+async fn a_file_s_first_bytes_are_read_from_the_chunks_that_hold_them() {
+    let (manifest, responses, expected) = fixture();
+    let server = Server::new(responses, false);
+    let client = ContentClient::new(Client::new());
+    let base = std::slice::from_ref(&server.base);
+    let file = &manifest.files[0];
+    let cancel = CancelToken::new();
+    let head = client
+        .read(&manifest, base, file, 3, &cancel)
+        .await
+        .unwrap();
+    assert_eq!(head, b"hel");
+    assert_eq!(server.paths().len(), 1);
+    let whole = client
+        .read(&manifest, base, file, 100, &cancel)
+        .await
+        .unwrap();
+    assert_eq!(whole, expected);
+}
+
+#[tokio::test]
 async fn cancellation_keeps_existing_file_and_verified_chunks_for_resume() {
     let (manifest, responses, expected) = fixture();
     let server = Server::new(responses, false);

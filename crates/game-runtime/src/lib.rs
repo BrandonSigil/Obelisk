@@ -123,7 +123,9 @@ pub enum Error {
     Timeout,
     #[error("backend.steam.runtime.storageFailed")]
     Storage,
-    #[error("backend.steam.runtime.incompatibleArchitecture")]
+    /// A Mac build without an arm64 slice, installed before Obelisk
+    /// installed such a game's Windows build instead.
+    #[error("backend.runtime.macBuildNotNative")]
     IncompatibleArchitecture,
     #[error("backend.runtime.rosettaUnavailable")]
     RosettaUnavailable,

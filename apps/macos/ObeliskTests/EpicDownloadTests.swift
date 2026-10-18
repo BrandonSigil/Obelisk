@@ -7,12 +7,12 @@ import XCTest
 /// uninstalls and the credentials each account call saves.
 @MainActor
 final class EpicDownloadTests: XCTestCase {
-    func testDownloadPrefersMacAndShowsTheTransferUntilItsReceipt() async throws {
+    func testDownloadShowsTheTransferUntilItsReceipt() async throws {
         let fixture = try await fixture(game: game("native", macos: true))
 
         fixture.model.installations.selectedAction?.perform()
 
-        XCTAssertEqual(fixture.backend.actions, [.install(fixture.offer("Mac"))])
+        XCTAssertEqual(fixture.backend.actions, [.install(fixture.offer)])
         fixture.backend.publish {
             $0.downloading = true
             $0.gate = .action(fixture.game.libraryID)
@@ -45,7 +45,7 @@ final class EpicDownloadTests: XCTestCase {
         XCTAssertEqual(fixture.model.installations.selectedAction?.isAvailable, true)
         fixture.model.installations.selectedAction?.perform()
         guard case let .install(offer) = fixture.backend.actions.first else { return XCTFail("No Transfer") }
-        XCTAssertEqual(offer.platform, "Windows")
+        XCTAssertNil(offer.platform, "Epic picks the build as the Transfer starts")
 
         var unsupported = game("unsupported")
         unsupported.windows = false
@@ -67,7 +67,7 @@ final class EpicDownloadTests: XCTestCase {
         XCTAssertEqual(fixture.model.errorMessage, L10n.string("model.epic.network"))
         XCTAssertEqual(fixture.model.installations.selectedAction?.title, L10n.string("model.game.resume"))
         fixture.model.installations.selectedAction?.perform()
-        XCTAssertEqual(fixture.backend.actions, [.install(fixture.offer("Windows"))], "Rust resumes the Transfer")
+        XCTAssertEqual(fixture.backend.actions, [.install(fixture.offer)], "Rust resumes the Transfer")
         XCTAssertNil(fixture.model.errorMessage, "An action clears the last failure")
     }
 
@@ -212,13 +212,13 @@ final class EpicDownloadTests: XCTestCase {
         XCTAssertFalse(fixture.model.installations.canUninstallSelectedGame)
     }
 
-    func testLibraryDownloadsTheNativeBuildWithoutOpeningTheGame() async throws {
+    func testLibraryDownloadsWithoutOpeningTheGame() async throws {
         let fixture = try await fixture(game: game("native", macos: true))
         fixture.model.closeGame()
 
         libraryAction(fixture.game, of: fixture.model).perform()
 
-        XCTAssertEqual(fixture.backend.actions, [.install(fixture.offer("Mac"))])
+        XCTAssertEqual(fixture.backend.actions, [.install(fixture.offer)])
         XCTAssertNil(fixture.model.selectedGame)
     }
 
@@ -284,10 +284,11 @@ private struct EpicDownloadFixture {
     let sessions: EpicGameSessions
     let game: EpicGame
 
-    /// What Epic offers to install of the game on screen, for `platform`.
-    func offer(_ platform: String) -> GameOffer {
+    /// What Epic offers to install of the game on screen; Epic picks its
+    /// build as the Transfer starts.
+    var offer: GameOffer {
         GameOffer.epic(namespace: game.namespace, catalogItemId: game.catalogItemId, appName: game.appName,
-                  title: game.title, platform: platform)
+                  title: game.title, platform: nil)
     }
 
     func receipt(_ app: String, platform: String) -> InstallationReceipt<String> {

@@ -58,6 +58,7 @@ Windows games play too. Obelisk sets everything up for you: no bottles to create
 - **One library.** Every store in one place, with search across all of them, your recently played games and what is installed on this Mac.
 - **No other launcher needed.** Steam, the Epic Games Launcher and GOG Galaxy do not need to be installed. Obelisk downloads, updates and launches games itself.
 - **Windows games without setup.** Windows versions run through Voile, Obelisk's Windows runtime, which Obelisk installs and keeps up to date on its own.
+- **The version that runs best.** Obelisk installs a game's Mac version only when it runs natively on Apple silicon. Otherwise, such as for an old Intel or 32-bit Mac version, it installs the Windows version.
 - **Know how a game runs before you play.** A game's page shows the frame rate other players measured on a Mac with your chip.
 - **Your saves follow you.** Steam and Epic Cloud saves sync before you play and after you quit.
 - **Your friends are here.** See who is online and what they play, chat with Steam friends, and invite them or join their games.

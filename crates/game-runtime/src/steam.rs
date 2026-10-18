@@ -244,8 +244,9 @@ pub struct Product {
 
 impl crate::installations::Storefront for Steam {
     type Product = Product;
-    /// None while Steam picks the build the account can install, the native
-    /// one first.
+    /// None while Steam picks the build the account can install: the Mac
+    /// build when its game runs natively on Apple silicon, else the Windows
+    /// build.
     type Platform = Option<String>;
     type Join = Join;
     const RECEIPTS_UNAVAILABLE: &'static str = "model.steam.receiptsUnavailable";

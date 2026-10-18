@@ -37,6 +37,8 @@ pub enum Error {
     Failed,
     #[error("backend.epic.cloud.unsupported")]
     Unsupported,
+    #[error("backend.runtime.macBuildNotNative")]
+    NotNative,
     /// The other storefront's copy of this game uses the same save paths.
     #[error("backend.cloud.sharedSavesInUse")]
     SharedSaves,
@@ -264,7 +266,9 @@ impl crate::sessions::Storefront for Epic {
 
 impl crate::installations::Storefront for Epic {
     type Product = Product;
-    type Platform = String;
+    /// None while Epic picks the build: the Mac build when its game runs
+    /// natively on Apple silicon, else the Windows build.
+    type Platform = Option<String>;
     /// Nothing joins a game through this storefront.
     type Join = std::convert::Infallible;
     const RECEIPTS_UNAVAILABLE: &'static str = "model.epic.receiptsUnavailable";

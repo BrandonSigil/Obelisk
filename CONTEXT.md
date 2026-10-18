@@ -11,7 +11,7 @@ One account-scoped attempt to install, verify or repair a game's files. Its life
 A record identifying a game installation whose required files were successfully installed. Partial download data is not an installation receipt.
 
 **Offer**:
-What a storefront says Obelisk can install of one game: its build for one platform, with Steam's language, before any folder is chosen. A Steam offer may leave the platform to Steam, which picks the build the account's licenses grant, the native one first, as the Transfer starts. A new installation starts from an offer; an installed game launches, updates and uninstalls from its Installation receipt alone.
+What a storefront says Obelisk can install of one game: its build for one platform, with Steam's language, before any folder is chosen. A new installation's offer leaves the platform to the storefront, which picks the build as the Transfer starts: the Mac build when its game runs natively on Apple silicon, as its program's first bytes tell, else the Windows build. A Mac build without an arm64 slice, Intel or 32-bit, is never installed, nor launched. A new installation starts from an offer; an installed game launches, updates and uninstalls from its Installation receipt alone.
 _Avoid_: download request, install target
 
 **Account session**:

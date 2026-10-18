@@ -7,13 +7,21 @@ protocol WebGame: Identifiable, Equatable, Sendable where ID == String {
     var title: String { get }
     var macos: Bool { get }
     var windows: Bool { get }
-    /// How the storefront names the build Obelisk installs first: the native one.
+    /// How the storefront names the build the game shows before its page
+    /// tells the one a download installs: the Mac build when there is one.
     var preferredPlatform: String { get }
     /// What the storefront can install of the game; nil when it ships no build.
     var offer: GameOffer? { get }
     /// What the game tells that `sort` orders it by; nil when it tells
     /// nothing.
     func libraryValue(for sort: StorefrontLibrarySort) -> Double?
+}
+
+/// What a game's page reads besides its library entry, starting with the
+/// build a download installs.
+protocol WebGameDetails: Equatable, Sendable {
+    /// How the storefront names that build; nil when it could not tell.
+    var platform: String? { get }
 }
 
 /// What lives as long as an account's connection besides its library, such
@@ -49,7 +57,7 @@ protocol WebStorefront: InstallationStorefront, SendableMetatype where GameID ==
     associatedtype Credentials: Sendable
     associatedtype Game: WebGame
     /// What the game page reads besides the library entry.
-    associatedtype Details: Equatable & Sendable
+    associatedtype Details: WebGameDetails
     associatedtype Presence: AccountPresence = NoPresence<Session> where Presence.Session == Session
 
     /// Names the storefront in receipts files and achievements.
@@ -643,7 +651,8 @@ final class WebAccountModel<Store: WebStorefront> {
     /// The game on screen, for its installation actions.
     private var installationSelection: InstallationSelection<Store>? {
         guard let game = selectedGame else { return nil }
-        return InstallationSelection(game: game.id, platform: game.preferredPlatform, offer: game.offer)
+        let platform = selectedGameDetails?.platform ?? game.preferredPlatform
+        return InstallationSelection(game: game.id, platform: platform, offer: game.offer)
     }
 
     /// The account's part of the installation actions.

@@ -161,7 +161,7 @@ fn an_update_goes_over_its_installation_in_the_folder_it_sits_in() {
                 app_name: "game".into(),
             },
             name: "Fixture".into(),
-            platform: "Windows".into(),
+            platform: Some("Windows".into()),
             directory: PREVIOUS.into(),
         },
     );
@@ -172,7 +172,7 @@ fn an_update_goes_over_its_installation_in_the_folder_it_sits_in() {
                 product_id: "1207658924".into(),
             },
             name: "The Witcher".into(),
-            platform: "windows".into(),
+            platform: Some("windows".into()),
             directory: PREVIOUS.into(),
         },
     );
@@ -203,7 +203,7 @@ fn a_transfer_lands_on_its_games_installation_of_its_platform_or_any_while_the_s
     let chosen = Offer::<Gog> {
         product: mac.product.clone(),
         name: "The Witcher".into(),
-        platform: "macos".into(),
+        platform: Some("macos".into()),
     }
     .transfer("/library/Games/GOG".into());
     assert!(chosen.lands_on(&mac) && !chosen.lands_on(&windows));

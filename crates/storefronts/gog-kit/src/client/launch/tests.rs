@@ -95,6 +95,26 @@ fn a_windows_build_plays_its_primary_task() {
 }
 
 #[test]
+fn the_played_program_is_read_from_an_info_file_before_installing() {
+    assert_eq!(
+        info_files("1207658924"),
+        [
+            "goggame-1207658924.info",
+            "Contents/Resources/goggame-1207658924.info"
+        ]
+    );
+    let tasks = info(json!([
+        {"category": "tool", "path": "Tools\\editor", "type": "FileTask"},
+        {"category": "game", "path": "Contents\\MacOS\\Game", "type": "FileTask"},
+    ]));
+    assert_eq!(
+        played_program(&tasks).as_deref(),
+        Some("Contents/MacOS/Game")
+    );
+    assert_eq!(played_program(b"not json"), None);
+}
+
+#[test]
 fn a_mac_build_reads_its_bundles_resources() {
     let folder = tempfile::tempdir().unwrap();
     let root = folder.path().join("gog-1207658924-macos");

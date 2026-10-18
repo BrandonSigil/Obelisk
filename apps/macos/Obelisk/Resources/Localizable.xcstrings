@@ -9494,19 +9494,36 @@
         }
       }
     },
-    "backend.steam.runtime.incompatibleArchitecture": {
+    "backend.runtime.macBuildNotNative": {
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "This game and its Steam library do not support a compatible architecture on your Mac."
+            "value": "This Mac build does not run natively on Apple silicon. Uninstall the game, then install it again: Obelisk will install its Windows build if the store has one."
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Ce jeu et sa bibliothèque Steam ne prennent pas en charge une architecture compatible sur votre Mac."
+            "value": "Cette version Mac ne fonctionne pas nativement sur Apple silicon. Désinstallez le jeu, puis installez-le de nouveau : Obelisk installera sa version Windows si la boutique en propose une."
+          }
+        }
+      }
+    },
+    "backend.install.macBuildNotNative": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This game’s Mac build does not run natively on Apple silicon, and the store has no Windows build of it."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "La version Mac de ce jeu ne fonctionne pas nativement sur Apple silicon, et la boutique n’en propose aucune version Windows."
           }
         }
       }

@@ -57,7 +57,7 @@ fn parse(bytes: &[u8]) -> Result<u8, Error> {
 }
 
 #[test]
-fn selects_shared_slice_and_preserves_native_universal_launches() {
+fn selects_the_shared_arm64_slice_only() {
     let root = tempfile::tempdir().unwrap();
     let game = root.path().join("game");
     let sdk = root.path().join("sdk");
@@ -67,10 +67,11 @@ fn selects_shared_slice_and_preserves_native_universal_launches() {
             thin(ARM64, true),
             Some(Architecture::Arm64),
         ),
+        // An Intel game never runs natively, whatever its library holds.
         (
             thin(INTEL, true),
             universal(&[INTEL, ARM64], false, false),
-            Some(Architecture::Intel),
+            None,
         ),
         (
             universal(&[INTEL, ARM64], false, false),
@@ -80,7 +81,7 @@ fn selects_shared_slice_and_preserves_native_universal_launches() {
         (
             universal(&[INTEL, ARM64], true, true),
             thin(INTEL, true),
-            Some(Architecture::Intel),
+            None,
         ),
         (thin(ARM64, true), thin(INTEL, true), None),
         (thin(7, true), thin(7, true), None),
@@ -92,12 +93,11 @@ fn selects_shared_slice_and_preserves_native_universal_launches() {
 }
 
 #[test]
-fn standalone_executable_prefers_arm64_without_an_sdk_dependency() {
+fn standalone_executable_runs_its_arm64_slice_without_an_sdk_dependency() {
     let root = tempfile::tempdir().unwrap();
     let game = root.path().join("game");
     for (bytes, expected) in [
         (thin(ARM64, true), Architecture::Arm64),
-        (thin(INTEL, true), Architecture::Intel),
         (
             universal(&[INTEL, ARM64], false, false),
             Architecture::Arm64,
@@ -107,11 +107,13 @@ fn standalone_executable_prefers_arm64_without_an_sdk_dependency() {
         std::fs::write(&game, bytes).unwrap();
         assert_eq!(Architecture::preferred(&game).unwrap(), expected);
     }
-    std::fs::write(&game, b"\xcf\xfa\xed\xfe").unwrap();
-    assert!(matches!(
-        Architecture::preferred(&game),
-        Err(Error::IncompatibleArchitecture)
-    ));
+    for bytes in [thin(INTEL, true), b"\xcf\xfa\xed\xfe".to_vec()] {
+        std::fs::write(&game, bytes).unwrap();
+        assert!(matches!(
+            Architecture::preferred(&game),
+            Err(Error::IncompatibleArchitecture)
+        ));
+    }
 }
 
 #[test]

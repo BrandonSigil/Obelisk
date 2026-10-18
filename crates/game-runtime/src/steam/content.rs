@@ -18,8 +18,9 @@ use steam_kit::cloud::{CloudListing, CloudMetadata};
 /// What an account's installations ask of Steam's network. Every call may
 /// wait on it.
 pub trait Network: Send + Sync + 'static {
-    /// The build a Transfer without a platform installs: the one the
-    /// account's licenses grant, the native one first.
+    /// The build a Transfer without a platform installs, of those the
+    /// account's licenses grant: the Mac build when its game runs natively
+    /// on Apple silicon, else the Windows build.
     fn platform<'a>(
         &'a self,
         app_id: u32,

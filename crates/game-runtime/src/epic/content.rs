@@ -24,7 +24,10 @@ pub trait Network: Send + Sync + 'static {
     fn account_id(&self) -> BoxFuture<'_, Result<String, Failure>>;
     /// A short-lived code the game signs in with.
     fn exchange_code(&self) -> BoxFuture<'_, Result<String, Failure>>;
-    /// Runs `transfer` into the folder it names.
+    /// The build a Transfer without a platform installs: the Mac build when
+    /// its game runs natively on Apple silicon, else the Windows build.
+    fn platform<'a>(&'a self, product: &'a Product) -> BoxFuture<'a, Result<String, Failure>>;
+    /// Runs `transfer` into the folder its begin settled the platform of.
     fn download<'a>(
         &'a self,
         transfer: &'a Transfer<Epic>,
@@ -63,6 +66,19 @@ impl Network for EpicClient {
     fn exchange_code(&self) -> BoxFuture<'_, Result<String, Failure>> {
         Box::pin(async move { EpicClient::exchange_code(self).await.map_err(failed) })
     }
+    fn platform<'a>(&'a self, product: &'a Product) -> BoxFuture<'a, Result<String, Failure>> {
+        Box::pin(async move {
+            EpicClient::platform(
+                self,
+                &product.namespace,
+                &product.catalog_item_id,
+                &product.app_name,
+            )
+            .await
+            .map(str::to_owned)
+            .map_err(failed)
+        })
+    }
     fn download<'a>(
         &'a self,
         transfer: &'a Transfer<Epic>,
@@ -73,7 +89,8 @@ impl Network for EpicClient {
                 &transfer.product.namespace,
                 &transfer.product.catalog_item_id,
                 &transfer.product.app_name,
-                &transfer.platform,
+                // Epic refuses an empty platform; the Transfer's begin set it.
+                transfer.platform.as_deref().unwrap_or_default(),
                 &transfer.directory,
             )
             .await
@@ -211,7 +228,15 @@ impl<N: Network> installations::Content<Epic> for Content<N> {
     fn begin<'a>(&'a self, transfer: &'a Transfer<Epic>) -> BoxFuture<'a, Result<String, Failure>> {
         Box::pin(async move {
             self.prepare().await?;
-            Ok(transfer.platform.clone())
+            match &transfer.platform {
+                Some(platform) => Ok(platform.clone()),
+                None => {
+                    let platform = self.network.platform(&transfer.product).await;
+                    // The call may have renewed the account's credentials.
+                    self.credentials.save_later();
+                    platform
+                }
+            }
         })
     }
     fn download<'a>(

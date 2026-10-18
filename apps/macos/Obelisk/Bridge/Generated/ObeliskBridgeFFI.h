@@ -402,7 +402,7 @@ uint64_t uniffi_obelisk_bridge_fn_method_epicsession_disconnect(uint64_t ptr
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_OBELISK_BRIDGE_FN_METHOD_EPICSESSION_GAME_DETAILS
 #define UNIFFI_FFIDEF_UNIFFI_OBELISK_BRIDGE_FN_METHOD_EPICSESSION_GAME_DETAILS
-uint64_t uniffi_obelisk_bridge_fn_method_epicsession_game_details(uint64_t ptr, RustBuffer namespace, RustBuffer catalog_item_id, RustBuffer app_name, RustBuffer platform
+uint64_t uniffi_obelisk_bridge_fn_method_epicsession_game_details(uint64_t ptr, RustBuffer namespace, RustBuffer catalog_item_id, RustBuffer app_name
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_OBELISK_BRIDGE_FN_METHOD_EPICSESSION_GAMES
@@ -572,7 +572,7 @@ uint64_t uniffi_obelisk_bridge_fn_method_gogsession_disconnect(uint64_t ptr
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_OBELISK_BRIDGE_FN_METHOD_GOGSESSION_GAME_DETAILS
 #define UNIFFI_FFIDEF_UNIFFI_OBELISK_BRIDGE_FN_METHOD_GOGSESSION_GAME_DETAILS
-uint64_t uniffi_obelisk_bridge_fn_method_gogsession_game_details(uint64_t ptr, RustBuffer product_id, RustBuffer platform, RustBuffer language
+uint64_t uniffi_obelisk_bridge_fn_method_gogsession_game_details(uint64_t ptr, RustBuffer product_id, RustBuffer language
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_OBELISK_BRIDGE_FN_METHOD_GOGSESSION_GAMES

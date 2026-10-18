@@ -80,21 +80,7 @@ impl ContentClient {
     ) -> Result<DownloadSummary, EpicError> {
         cancel.check()?;
         validate_manifest(&manifest)?;
-        if base_urls.is_empty() || base_urls.len() > 8 {
-            return Err(EpicError::Protocol);
-        }
-        for base_url in base_urls {
-            let secure = base_url.scheme() == "https";
-            #[cfg(test)]
-            let secure = secure
-                || base_url.scheme() == "http"
-                    && base_url
-                        .host_str()
-                        .is_some_and(|host| matches!(host, "127.0.0.1" | "localhost" | "[::1]"));
-            if !secure || !credential_free(base_url) {
-                return Err(EpicError::Protocol);
-            }
-        }
+        check_base_urls(base_urls)?;
         let reporter = Reporter::new(
             DownloadProgress {
                 phase: DownloadPhase::Verifying,
@@ -117,6 +103,42 @@ impl ContentClient {
         })
         .await?;
         Ok(reporter.summary(reused_bytes))
+    }
+
+    /// The first `bytes` of the manifest's `file`, from the chunks that hold
+    /// them, without installing it.
+    pub(crate) async fn read(
+        &self,
+        manifest: &Manifest,
+        base_urls: &[Url],
+        file: &ManifestFile,
+        bytes: u64,
+        cancel: &CancelToken,
+    ) -> Result<Vec<u8>, EpicError> {
+        check_base_urls(base_urls)?;
+        let reporter = Reporter::new(DownloadProgress::default(), |_| {});
+        let mut output = Vec::new();
+        for part in &file.parts {
+            if output.len() as u64 >= bytes {
+                break;
+            }
+            let chunk = manifest
+                .chunks
+                .get(&part.guid)
+                .ok_or(EpicError::Protocol)?
+                .clone();
+            let window = self
+                .fetch_chunk(manifest.feature_level, base_urls, chunk, cancel, &reporter)
+                .await?;
+            let start = part.offset as usize;
+            output.extend_from_slice(
+                window
+                    .get(start..start + part.size as usize)
+                    .ok_or(EpicError::Protocol)?,
+            );
+        }
+        output.truncate(usize::try_from(bytes).unwrap_or(usize::MAX));
+        Ok(output)
     }
 
     async fn fetch_chunk(
@@ -599,6 +621,26 @@ pub(crate) fn validate_manifest(manifest: &Manifest) -> Result<(), EpicError> {
             if paths.contains(&parent.to_string_lossy().to_lowercase()) {
                 return Err(EpicError::Protocol);
             }
+        }
+    }
+    Ok(())
+}
+
+/// Chunks come from at most eight HTTPS delivery URLs, without credentials.
+fn check_base_urls(base_urls: &[Url]) -> Result<(), EpicError> {
+    if base_urls.is_empty() || base_urls.len() > 8 {
+        return Err(EpicError::Protocol);
+    }
+    for base_url in base_urls {
+        let secure = base_url.scheme() == "https";
+        #[cfg(test)]
+        let secure = secure
+            || base_url.scheme() == "http"
+                && base_url
+                    .host_str()
+                    .is_some_and(|host| matches!(host, "127.0.0.1" | "localhost" | "[::1]"));
+        if !secure || !credential_free(base_url) {
+            return Err(EpicError::Protocol);
         }
     }
     Ok(())

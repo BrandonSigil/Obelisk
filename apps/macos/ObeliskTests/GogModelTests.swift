@@ -7,12 +7,12 @@ import XCTest
 /// lifecycle, library and game page GOG shares with Epic.
 @MainActor
 final class GogModelTests: XCTestCase {
-    func testTheLibraryInstallsTheNativeBuildFirst() {
+    func testTheLibraryLeavesTheBuildToGog() {
         var both = GogGames.game("1", title: "Both")
         both.macos = true
-        XCTAssertEqual(both.offer, .gog(productId: "1", title: "Both", platform: "macos"))
+        XCTAssertEqual(both.offer, .gog(productId: "1", title: "Both", platform: nil))
         let windows = GogGames.game("2", title: "Windows")
-        XCTAssertEqual(windows.offer, .gog(productId: "2", title: "Windows", platform: "windows"))
+        XCTAssertEqual(windows.offer, .gog(productId: "2", title: "Windows", platform: nil))
         var neither = windows
         neither.windows = false
         XCTAssertNil(neither.offer)
@@ -83,7 +83,7 @@ final class GogModelTests: XCTestCase {
         model.open(owned)
         try await eventually { !model.isLoadingGameDetails }
         let requests = await session.detailsCalls
-        XCTAssertEqual(requests, [GogDetailsRequest(productId: "1", platform: GogGames.nativePlatform, language: "fr-FR")])
+        XCTAssertEqual(requests, [GogDetailsRequest(productId: "1", language: "fr-FR")])
     }
 
     func testAchievementsAskGogForTheProductAndFullTag() async throws {

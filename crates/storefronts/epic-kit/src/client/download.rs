@@ -80,6 +80,7 @@ impl Client {
     }
 
     pub fn cancel_download(&self) {
+        self.picking.cancel();
         self.downloads.cancel();
     }
 

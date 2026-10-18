@@ -6,7 +6,7 @@ import XCTest
 /// lifecycle, library and game page Epic shares with GOG.
 @MainActor
 final class EpicModelTests: XCTestCase {
-    func testOpeningAMacGameRequestsItsMacDetails() async throws {
+    func testOpeningAGameAsksEpicForItsDetails() async throws {
         var owned = EpicGames.game("one", title: "One")
         owned.macos = true
         let session = EpicTestSession(credentials: EpicGames.credentials("current"), games: [owned])
@@ -16,25 +16,7 @@ final class EpicModelTests: XCTestCase {
         model.open(owned)
         try await eventually { !model.isLoadingGameDetails }
         let requests = await session.detailsCalls
-        XCTAssertEqual(requests, [EpicDetailsRequest(namespace: "fixture", catalogItemId: "one", appName: "one", platform: "Mac")])
-    }
-
-    func testDetailsUseWindowsForWindowsAndUnspecifiedPlatformGames() async throws {
-        let windowsGame = EpicGames.game("windows", title: "Windows")
-        var unspecifiedGame = EpicGames.game("unspecified", title: "Unspecified")
-        unspecifiedGame.windows = false
-        let session = EpicTestSession(credentials: EpicGames.credentials("current"), games: [windowsGame, unspecifiedGame])
-        let model = await connectedModel(session)
-        defer { model.signOut() }
-
-        for owned in [windowsGame, unspecifiedGame] {
-            model.open(owned)
-            try await eventually { !model.isLoadingGameDetails }
-        }
-
-        let requests = await session.detailsCalls
-        XCTAssertEqual(requests.map(\.platform), ["Windows", "Windows"])
-        XCTAssertEqual(requests.map(\.appName), ["windows", "unspecified"])
+        XCTAssertEqual(requests, [EpicDetailsRequest(namespace: "fixture", catalogItemId: "one", appName: "one")])
     }
 
     func testPlaytimesMapAppNamesToEveryLibraryEntry() async throws {

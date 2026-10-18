@@ -136,9 +136,12 @@ impl From<client::Achievement> for LibraryAchievement {
     }
 }
 
-/// What a game's page adds to its library entry.
+/// What a game's page adds to its library entry: the build a download
+/// installs, and its size.
 #[derive(Clone, Debug, uniffi::Record)]
 pub struct EpicGameDetails {
+    /// `Mac` or `Windows`; unknown when Epic could not tell.
+    pub platform: Option<String>,
     /// Unknown when Epic serves no manifest of the build.
     pub installation_bytes: Option<u64>,
 }
@@ -146,6 +149,7 @@ pub struct EpicGameDetails {
 impl From<client::GameDetails> for EpicGameDetails {
     fn from(details: client::GameDetails) -> Self {
         Self {
+            platform: details.platform,
             installation_bytes: details.installation_bytes,
         }
     }
@@ -329,11 +333,10 @@ impl EpicSession {
         namespace: String,
         catalog_item_id: String,
         app_name: String,
-        platform: String,
     ) -> Result<EpicGameDetails, EpicError> {
         Ok(self
             .client
-            .game_details(&namespace, &catalog_item_id, &app_name, &platform)
+            .game_details(&namespace, &catalog_item_id, &app_name)
             .await?
             .into())
     }

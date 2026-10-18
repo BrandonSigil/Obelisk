@@ -26,6 +26,8 @@ pub enum Error {
     Storage,
     #[error("backend.gog.unsupported")]
     Unsupported,
+    #[error("backend.runtime.macBuildNotNative")]
+    NotNative,
     #[error("backend.runtime.rosettaUnavailable")]
     RosettaUnavailable,
     #[error("backend.runtime.wineUnavailable")]
@@ -177,7 +179,9 @@ pub struct Product {
 
 impl crate::installations::Storefront for Gog {
     type Product = Product;
-    type Platform = String;
+    /// None while GOG picks the build: the Mac build when its game runs
+    /// natively on Apple silicon, else the Windows build.
+    type Platform = Option<String>;
     /// Nothing joins a game through this storefront.
     type Join = std::convert::Infallible;
     const RECEIPTS_UNAVAILABLE: &'static str = "model.gog.receiptsUnavailable";

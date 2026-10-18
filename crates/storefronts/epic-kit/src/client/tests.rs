@@ -355,26 +355,97 @@ fn empty_assets() -> Vec<Reply> {
 
 const PLAYTIME_PATH: &str = "/library/api/public/playtime/account/account-a/all";
 const MANIFEST_PATH: &str = "/launcher/api/public/assets/v2/platform/Mac/namespace/space/catalogItem/base/app/game/label/Live";
+const WINDOWS_MANIFEST_PATH: &str = "/launcher/api/public/assets/v2/platform/Windows/namespace/space/catalogItem/base/app/game/label/Live";
+
+fn live_asset(manifest: &str) -> Value {
+    json!({"elements":[{"manifests":[{"uri":format!("FIXTURE_BASE/{manifest}"),"queryParams":[]}]}]})
+}
 
 #[tokio::test]
-async fn game_details_read_only_the_build_size_whose_manifest_may_be_unavailable() {
-    let mock = Mock::new(vec![reply(MANIFEST_PATH, 404, json!({}))]);
+async fn game_details_name_the_build_a_download_installs_whose_manifest_may_be_unavailable() {
+    // Epic has no Mac build, and the Windows build's manifest is gone.
+    let mock = Mock::new(vec![
+        reply(MANIFEST_PATH, 404, json!({})),
+        reply(WINDOWS_MANIFEST_PATH, 200, live_asset("windows.manifest")),
+        reply(WINDOWS_MANIFEST_PATH, 200, live_asset("windows.manifest")),
+        reply("/windows.manifest", 404, json!({})),
+    ]);
     let details = mock
         .client(false)
-        .game_details("space", "base", "game", "Mac")
+        .game_details("space", "base", "game")
         .await
         .unwrap();
+    assert_eq!(details.platform.as_deref(), Some("Windows"));
     assert_eq!(details.installation_bytes, None);
     assert_eq!(
         mock.requests().len(),
-        1,
+        4,
         "the library already read every playtime"
     );
     assert!(
         mock.requests()
             .iter()
+            .filter(|request| request.contains("/launcher/"))
             .all(|request| request.contains("Bearer access-old"))
     );
+    // Without any build, nothing is installable.
+    let mock = Mock::new(vec![
+        reply(MANIFEST_PATH, 200, json!({"elements":[]})),
+        reply(WINDOWS_MANIFEST_PATH, 404, json!({})),
+    ]);
+    let details = mock
+        .client(false)
+        .game_details("space", "base", "game")
+        .await
+        .unwrap();
+    assert_eq!(details.platform, None);
+    assert_eq!(details.installation_bytes, None);
+}
+
+/// A Mac build whose launch executable its manifest does not hold.
+fn mac_build_without_program() -> Vec<Reply> {
+    use sha1::{Digest, Sha1};
+    let empty_hash: String = Sha1::digest([])
+        .iter()
+        .map(|byte| format!("{byte:03}"))
+        .collect();
+    vec![
+        reply(MANIFEST_PATH, 200, live_asset("mac.manifest")),
+        reply(
+            "/mac.manifest",
+            200,
+            json!({
+                "AppNameString": "game", "BuildVersionString": "1.0", "LaunchExeString":"Game.app",
+                "FileManifestList":[{"Filename":"Game.app/Contents/empty", "FileHash":empty_hash, "FileChunkParts":[]}],
+                "ChunkFilesizeList":{}, "ChunkHashList":{}, "ChunkShaList":{}, "DataGroupList":{}
+            }),
+        ),
+    ]
+}
+
+#[tokio::test]
+async fn a_mac_build_that_does_not_run_natively_leaves_the_download_to_the_windows_build() {
+    let mut replies = mac_build_without_program();
+    replies.push(reply(
+        WINDOWS_MANIFEST_PATH,
+        200,
+        live_asset("windows.manifest"),
+    ));
+    let mock = Mock::new(replies);
+    let client = mock.client(false);
+    assert_eq!(
+        client.platform("space", "base", "game").await.unwrap(),
+        "Windows"
+    );
+    // Without a Windows build, the game cannot be installed.
+    let mut replies = mac_build_without_program();
+    replies.push(reply(WINDOWS_MANIFEST_PATH, 404, json!({})));
+    let mock = Mock::new(replies);
+    let client = mock.client(false);
+    assert!(matches!(
+        client.platform("space", "base", "game").await,
+        Err(EpicError::Service { message }) if message == "backend.install.macBuildNotNative"
+    ));
 }
 
 #[tokio::test]
@@ -408,13 +479,20 @@ async fn game_details_retry_auth_once_and_keep_rotated_credentials() {
         rejected.bearer = Some("access-old");
         let mut retried = reply(MANIFEST_PATH, status, json!({}));
         retried.bearer = Some("access-new");
+        // Epic is asked for both builds at once.
+        let mut windows = reply(WINDOWS_MANIFEST_PATH, 404, json!({}));
+        windows.bearer = Some("access-old");
+        let mut windows_retried = reply(WINDOWS_MANIFEST_PATH, 404, json!({}));
+        windows_retried.bearer = Some("access-new");
         let mock = Mock::new(vec![
             reply("/account/api/oauth/token", 200, token("account-a")),
             rejected,
             retried,
+            windows,
+            windows_retried,
         ]);
         let client = mock.client(false);
-        let result = client.game_details("space", "base", "game", "Mac").await;
+        let result = client.game_details("space", "base", "game").await;
         if status == 404 {
             assert_eq!(result.unwrap().installation_bytes, None);
         } else {
@@ -440,6 +518,7 @@ async fn disconnect_discards_in_flight_game_details() {
     slow.delay_ms = 200;
     let mock = Mock::new(vec![
         slow,
+        reply(WINDOWS_MANIFEST_PATH, 404, json!({})),
         reply(
             "/account/api/oauth/sessions/kill/access-old",
             204,
@@ -448,8 +527,7 @@ async fn disconnect_discards_in_flight_game_details() {
     ]);
     let client = Arc::new(mock.client(false));
     let reader = client.clone();
-    let reading =
-        tokio::spawn(async move { reader.game_details("space", "base", "game", "Mac").await });
+    let reading = tokio::spawn(async move { reader.game_details("space", "base", "game").await });
     tokio::time::timeout(Duration::from_secs(2), async {
         while mock.requests().is_empty() {
             tokio::time::sleep(Duration::from_millis(1)).await;

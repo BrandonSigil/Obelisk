@@ -131,6 +131,32 @@ impl Drop for BlockingWorker {
     }
 }
 
+/// Lets a cancellation reach a download still picking its build, before its
+/// Transfer exists.
+#[derive(Default)]
+pub struct Picking(Mutex<Option<CancelToken>>);
+
+impl Picking {
+    /// Runs `work` with the token `cancel` cancels while it runs.
+    pub async fn run<T>(&self, work: impl AsyncFnOnce(&CancelToken) -> T) -> T {
+        let token = CancelToken::new();
+        *self.lock() = Some(token.clone());
+        let output = work(&token).await;
+        self.lock().take();
+        output
+    }
+
+    pub fn cancel(&self) {
+        if let Some(token) = self.lock().as_ref() {
+            token.cancel();
+        }
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, Option<CancelToken>> {
+        self.0.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+}
+
 /// Returned by [`CancelToken::cancel_on_drop`].
 pub struct CancelOnDrop(Option<CancelToken>);
 

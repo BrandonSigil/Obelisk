@@ -26,6 +26,7 @@ use obelisk_core::{
         self, InstallError, PARTIAL_DIRECTORY, apply_permissions, checked_file_path,
         ensure_directory, reject_link_or_special_file, safe_relative_path,
     },
+    mac_build::Listing,
     transfer::{
         self, BodyError, BodySize, Cancelled, Chunks, Delivery, DownloadPhase, DownloadProgress,
         DownloadSummary, Interrupted, Pipeline, Reporter,
@@ -81,6 +82,27 @@ pub struct DepotDownload<'a> {
     pub destination: PathBuf,
     /// Already validated snapshot of the current manifest, if available locally.
     pub cached_manifest: Option<CachedManifest>,
+}
+
+/// Where a depot's files come from, to read a few of them before it is
+/// installed. No Debug implementation: depot keys are credentials.
+pub struct DepotSource<'a> {
+    pub depot_id: u32,
+    pub manifest_id: u64,
+    pub request_code: u64,
+    pub depot_key: [u8; 32],
+    pub servers: &'a [ContentServer],
+    pub authorization: Option<&'a dyn CdnAuthorization>,
+}
+
+/// A depot's files as its checked manifest lists them, whose bytes come from
+/// its servers without being installed.
+pub struct DepotFiles<'a> {
+    content: &'a ContentClient,
+    mirrors: Mirrors<'a>,
+    depot_id: u32,
+    depot_key: [u8; 32],
+    manifest: Manifest,
 }
 
 /// Grants the CDN authorization a server may require before serving a depot.
@@ -183,6 +205,40 @@ impl ContentClient {
         .map_err(|_| invalid("backend.steam.content.manifestReadInterrupted"))?
     }
 
+    /// Fetches and checks a depot's manifest, to read some of its files.
+    pub async fn depot_files<'a>(
+        &'a self,
+        source: DepotSource<'a>,
+        cancel: &CancelToken,
+    ) -> Result<DepotFiles<'a>, ContentError> {
+        let mirrors = Mirrors::new(source.servers, source.authorization)?;
+        let path = manifest_path(source.depot_id, source.manifest_id, source.request_code);
+        let (zipped, _) = mirrors
+            .fetch(&path, None, 0, cancel, |url| {
+                self.fetch(url, MAX_MANIFEST_BYTES, cancel, |_| {})
+            })
+            .await?;
+        let key = source.depot_key;
+        let manifest = cancel
+            .spawn_blocking(move || {
+                let manifest = parse_manifest(&unpack_zip(&zipped, MAX_MANIFEST_BYTES)?, &key)?;
+                validate_manifest_files(&manifest.files)?;
+                Ok::<_, ContentError>(manifest)
+            })
+            .await
+            .map_err(|_| invalid("backend.steam.content.manifestParseInterrupted"))??;
+        if manifest.depot_id != source.depot_id || manifest.manifest_id != source.manifest_id {
+            return Err(invalid("backend.steam.content.manifestDepotMismatch"));
+        }
+        Ok(DepotFiles {
+            content: self,
+            mirrors,
+            depot_id: source.depot_id,
+            depot_key: key,
+            manifest,
+        })
+    }
+
     /// Opt-in protocol smoke test: validates the smallest real file (up to 8 MiB)
     /// without installing a depot or writing any game files.
     #[cfg(test)]
@@ -276,14 +332,7 @@ impl ContentClient {
         let (manifest, archive) = if let Some(cached) = cached {
             (cached.manifest, None)
         } else {
-            let manifest_path = if plan.request_code == 0 {
-                format!("depot/{}/manifest/{}/5", plan.depot_id, plan.manifest_id)
-            } else {
-                format!(
-                    "depot/{}/manifest/{}/5/{}",
-                    plan.depot_id, plan.manifest_id, plan.request_code
-                )
-            };
+            let manifest_path = manifest_path(plan.depot_id, plan.manifest_id, plan.request_code);
             let reporter = &reporter;
             // Every chunk waits on the manifest: it is raced like the oldest chunk.
             let ticket = mirrors.ticket();
@@ -448,6 +497,79 @@ impl ContentClient {
         .await?;
         let size = bytes.len() as u64;
         Ok((bytes, size))
+    }
+}
+
+impl DepotFiles<'_> {
+    /// Adds the depot's files and links to `listing`, each file named by
+    /// `depot` and its place in the manifest. Steam keeps a link's target
+    /// from the link's own folder.
+    pub fn list(&self, listing: &mut Listing<(usize, usize)>, depot: usize) {
+        for (index, file) in self.manifest.files.iter().enumerate() {
+            if file.is_link() {
+                let folder = file.name.rsplit_once('/').map_or("", |(folder, _)| folder);
+                listing.link(&file.name, &format!("{folder}/{}", file.link_target));
+            } else if !file.is_directory() {
+                listing.file(&file.name, (depot, index), file.size);
+            }
+        }
+    }
+
+    /// The first `bytes` of the manifest's file `index`, from the chunks that
+    /// hold them.
+    pub async fn read(
+        &self,
+        index: usize,
+        bytes: u64,
+        cancel: &CancelToken,
+    ) -> Result<Vec<u8>, ContentError> {
+        let file = self
+            .manifest
+            .files
+            .get(index)
+            .ok_or_else(|| invalid("backend.steam.content.noSampleFile"))?;
+        let mut output = Vec::new();
+        for chunk in &file.chunks {
+            if output.len() as u64 >= bytes {
+                break;
+            }
+            let path = format!("depot/{}/chunk/{}", self.depot_id, hex(&chunk.sha));
+            let key = self.depot_key;
+            let (plaintext, _) = self
+                .mirrors
+                .fetch(
+                    &path,
+                    None,
+                    u64::from(chunk.compressed_size),
+                    cancel,
+                    |url| async move {
+                        let (mut encrypted, received) = self
+                            .content
+                            .fetch(url, MAX_CHUNK_BYTES, cancel, |_| {})
+                            .await?;
+                        let expected = chunk.clone();
+                        let decoded = cancel
+                            .spawn_blocking(move || decode_chunk(&mut encrypted, &expected, &key))
+                            .await
+                            .map_err(|_| {
+                                invalid("backend.steam.content.chunkDecryptionInterrupted")
+                            })??;
+                        Ok((decoded, received))
+                    },
+                )
+                .await?;
+            output.extend(plaintext);
+        }
+        output.truncate(usize::try_from(bytes).unwrap_or(usize::MAX));
+        Ok(output)
+    }
+}
+
+/// The CDN path of a depot's manifest; a request code of 0 is left out.
+fn manifest_path(depot_id: u32, manifest_id: u64, request_code: u64) -> String {
+    match request_code {
+        0 => format!("depot/{depot_id}/manifest/{manifest_id}/5"),
+        code => format!("depot/{depot_id}/manifest/{manifest_id}/5/{code}"),
     }
 }
 

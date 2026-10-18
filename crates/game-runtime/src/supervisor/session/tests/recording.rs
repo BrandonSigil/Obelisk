@@ -217,6 +217,7 @@ impl<const BEGIN: bool> Launch for Recorder<BEGIN> {
 
 mod lifecycle_of_the_core {
     super::super::lifecycle_suite!(super::Recording);
+    super::super::rosetta_suite!(super::Recording);
 }
 
 #[test]

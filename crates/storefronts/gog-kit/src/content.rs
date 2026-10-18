@@ -209,6 +209,31 @@ pub(crate) async fn download(
     Ok(reporter.summary(reused_bytes))
 }
 
+/// The first `bytes` of an installation's file, from the chunks that hold
+/// them, without installing it.
+pub(crate) async fn read(
+    http: &reqwest::Client,
+    links: &SecureLinks,
+    installed: &InstalledFile,
+    bytes: u64,
+    cancel: &CancelToken,
+) -> Result<Vec<u8>, GogError> {
+    let reporter = Reporter::new(DownloadProgress::default(), |_| {});
+    let mut output = Vec::new();
+    for chunk in &installed.file.chunks {
+        if output.len() as u64 >= bytes {
+            break;
+        }
+        let request = Request {
+            source: installed.source.clone(),
+            chunk: chunk.clone(),
+        };
+        output.extend(fetch_chunk(http, links, request, cancel, &reporter).await?);
+    }
+    output.truncate(usize::try_from(bytes).unwrap_or(usize::MAX));
+    Ok(output)
+}
+
 async fn fetch_chunk(
     http: &reqwest::Client,
     links: &SecureLinks,

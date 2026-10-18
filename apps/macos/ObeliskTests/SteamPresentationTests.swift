@@ -298,7 +298,7 @@ final class SteamPresentationTests: XCTestCase {
     }
 
     @MainActor
-    func testAutomaticDownloadUsesSystemLanguagePrefersMacAndCapturesSelectedGame() async throws {
+    func testAutomaticDownloadUsesSystemLanguageShowsTheNativeBuildAndCapturesSelectedGame() async throws {
         let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
         let details = FixtureResponses<DetailsRequest, SteamGameDetails>()
@@ -326,7 +326,7 @@ final class SteamPresentationTests: XCTestCase {
 
         model.installations.selectedAction?.perform()
 
-        XCTAssertEqual(backend.actions, [.install(GameOffer.steam(appId: 620, name: "Portal 2", platform: "macos", language: "tchinese"))])
+        XCTAssertEqual(backend.actions, [.install(GameOffer.steam(appId: 620, name: "Portal 2", platform: nil, language: "tchinese"))])
         XCTAssertEqual(model.installations.transfer?.state, .preparing, "Progress shows before its first snapshot")
         XCTAssertEqual(model.installations.activeTransferGame, 620)
         model.closeGame()

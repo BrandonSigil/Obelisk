@@ -107,11 +107,7 @@ impl Services for FakeEpic {
         fs::create_dir_all(&config.install).unwrap();
         let executable = config.install.join("game");
         if !script.missing {
-            fs::write(
-                &executable,
-                thin(if script.intel { INTEL } else { ARM64 }, true),
-            )
-            .unwrap();
+            fs::write(&executable, thin(ARM64, true)).unwrap();
         }
         Ok(LaunchPlan {
             app_name: config.app_name.clone(),
@@ -254,24 +250,31 @@ fn an_epic_target_checks_the_full_macho_before_repairing_its_permission() {
     fs::set_permissions(&executable, fs::Permissions::from_mode(0o600)).unwrap();
     assert!(matches!(
         native_target(&plan, &config, &HashMap::new()),
-        Err(Error::Unsupported)
+        Err(Error::NotNative)
     ));
     assert_eq!(
         fs::metadata(&executable).unwrap().permissions().mode() & 0o100,
         0
     );
-    for (cpu, expected) in [(INTEL, Architecture::Intel), (ARM64, Architecture::Arm64)] {
-        fs::write(&executable, thin(cpu, true)).unwrap();
-        let (target, architecture, ownership) =
-            native_target(&plan, &config, &HashMap::new()).unwrap();
-        assert_eq!(architecture, expected);
-        assert_eq!(target.executable, executable.canonicalize().unwrap());
-        assert!(ownership.is_none());
-        assert_ne!(
-            fs::metadata(&executable).unwrap().permissions().mode() & 0o100,
-            0
-        );
-    }
+    // An Intel build never runs natively.
+    fs::write(&executable, thin(INTEL, true)).unwrap();
+    assert!(matches!(
+        native_target(&plan, &config, &HashMap::new()),
+        Err(Error::NotNative)
+    ));
+    assert_eq!(
+        fs::metadata(&executable).unwrap().permissions().mode() & 0o100,
+        0
+    );
+    fs::write(&executable, thin(ARM64, true)).unwrap();
+    let (target, architecture, ownership) = native_target(&plan, &config, &HashMap::new()).unwrap();
+    assert_eq!(architecture, Architecture::Arm64);
+    assert_eq!(target.executable, executable.canonicalize().unwrap());
+    assert!(ownership.is_none());
+    assert_ne!(
+        fs::metadata(&executable).unwrap().permissions().mode() & 0o100,
+        0
+    );
     // Nothing outside the installation is ever a target.
     let outside = launch_plan(&directory, &directory);
     fs::write(directory.join("game"), thin(ARM64, true)).unwrap();

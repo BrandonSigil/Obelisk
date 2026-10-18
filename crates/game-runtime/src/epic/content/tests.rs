@@ -66,6 +66,12 @@ impl Network for Fake {
             Ok("fixture-code".into())
         })
     }
+    fn platform<'a>(&'a self, _: &'a Product) -> BoxFuture<'a, Result<String, Failure>> {
+        Box::pin(async move {
+            self.call("platform");
+            Ok("Windows".into())
+        })
+    }
     fn download<'a>(
         &'a self,
         transfer: &'a Transfer<Epic>,
@@ -82,7 +88,7 @@ impl Network for Fake {
                     .join("epic-hash-Mac")
                     .to_string_lossy()
                     .into_owned(),
-                platform: transfer.platform.clone(),
+                platform: transfer.platform.clone().unwrap_or_default(),
                 total_bytes: 100,
                 build_version: "1".into(),
                 launch_executable: "Game.app".into(),
@@ -187,7 +193,7 @@ impl Fixture {
         Transfer {
             product: product(),
             name: "Fixture".into(),
-            platform: platform.into(),
+            platform: Some(platform.into()),
             directory: self.locations.library.join("Games/Epic"),
         }
     }
@@ -243,6 +249,34 @@ async fn every_account_call_renews_and_saves_the_credentials_first() {
     assert!(fixture.content.update_available(&receipt).await.unwrap());
     eventually(|| fixture.fake.calls().len() == 10).await;
     assert_eq!(fixture.fake.calls()[8..], ["update", "saved"]);
+}
+
+#[tokio::test]
+async fn a_transfer_without_a_platform_installs_the_build_epic_picks() {
+    let fixture = Fixture::new();
+    let transfer = Transfer {
+        platform: None,
+        ..fixture.transfer("Mac")
+    };
+
+    assert_eq!(fixture.content.begin(&transfer).await.unwrap(), "Windows");
+    // Picking the build may renew the credentials: they are saved after it.
+    eventually(|| fixture.fake.calls().len() == 4).await;
+    assert_eq!(
+        fixture.fake.calls(),
+        ["prepare", "saved", "platform", "saved"]
+    );
+    // A Transfer that names its build installs that one.
+    let fixture = Fixture::new();
+    assert_eq!(
+        fixture
+            .content
+            .begin(&fixture.transfer("Mac"))
+            .await
+            .unwrap(),
+        "Mac"
+    );
+    assert!(!fixture.fake.calls().contains(&"platform".to_string()));
 }
 
 #[tokio::test]

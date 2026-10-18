@@ -18,6 +18,14 @@ pub trait Network: Send + Sync + 'static {
     fn prepare(&self) -> BoxFuture<'_, Result<(), Failure>>;
     /// The account the session is signed in to now.
     fn account_id(&self) -> BoxFuture<'_, Result<String, Failure>>;
+    /// The build a Transfer without a platform installs, with the depots of
+    /// `language`: the Mac build when its game runs natively on Apple
+    /// silicon, else the Windows build.
+    fn platform<'a>(
+        &'a self,
+        product: &'a Product,
+        language: &'a str,
+    ) -> BoxFuture<'a, Result<String, Failure>>;
     /// Runs `transfer` into the folder it names, with the depots of `language`.
     fn download<'a>(
         &'a self,
@@ -45,6 +53,18 @@ impl Network for GogClient {
                 .map_err(failed)
         })
     }
+    fn platform<'a>(
+        &'a self,
+        product: &'a Product,
+        language: &'a str,
+    ) -> BoxFuture<'a, Result<String, Failure>> {
+        Box::pin(async move {
+            GogClient::platform(self, &product.product_id, language)
+                .await
+                .map(str::to_owned)
+                .map_err(failed)
+        })
+    }
     fn download<'a>(
         &'a self,
         transfer: &'a Transfer<Gog>,
@@ -54,7 +74,8 @@ impl Network for GogClient {
             GogClient::download(
                 self,
                 &transfer.product.product_id,
-                &transfer.platform,
+                // GOG refuses an empty platform; the Transfer's begin set it.
+                transfer.platform.as_deref().unwrap_or_default(),
                 language,
                 &transfer.directory,
             )
@@ -132,7 +153,17 @@ impl<N: Network> installations::Content<Gog> for Content<N> {
         Box::pin(async move {
             // As every GOG account call: renewed and saved credentials first.
             self.credentials.prepare(self.network.prepare()).await?;
-            Ok(transfer.platform.clone())
+            match &transfer.platform {
+                Some(platform) => Ok(platform.clone()),
+                None => {
+                    let platform = self
+                        .network
+                        .platform(&transfer.product, &self.language)
+                        .await;
+                    self.credentials.save_later();
+                    platform
+                }
+            }
         })
     }
     fn download<'a>(

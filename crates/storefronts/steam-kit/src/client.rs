@@ -10,9 +10,10 @@ use std::{
 use futures_util::{StreamExt, TryStreamExt, future::BoxFuture};
 use obelisk_core::{
     installation::{self, Destination, InstallFailure, InstalledFiles, TransferError},
+    mac_build,
     transfer::{
-        self, BodyError, BodySize, Cancelled, DownloadProgress, TransferBusy, TransferContext,
-        Transfers,
+        self, BodyError, BodySize, Cancelled, DownloadProgress, Picking, TransferBusy,
+        TransferContext, Transfers,
     },
 };
 use serde::{Deserialize, Serialize};
@@ -26,7 +27,7 @@ use crate::{
     },
     content::{
         CancelToken, CdnAuthorization, ContentClient, ContentError, DepotDownload,
-        DepotInstallation,
+        DepotInstallation, DepotSource,
     },
     invites::{InviteSource, ReceivedInvites},
     own_game::{GameInvite, OwnGame, OwnGameSource},
@@ -117,6 +118,9 @@ pub struct GameDetails {
     pub app_id: u32,
     pub name: String,
     pub windows: bool,
+    /// Whether Obelisk installs the Mac build: the account can install it,
+    /// and its game runs natively on Apple silicon or the game has no Windows
+    /// build. It stays the Mac build when that cannot be told.
     pub macos: bool,
     pub windows_bytes: u64,
     pub macos_bytes: u64,
@@ -149,6 +153,9 @@ const COMMON_REDISTRIBUTABLES: u32 = 228_980;
 /// on Wine Mono instead. The others, such as Visual C++, install in the prefix
 /// as Steam installs them under Proton.
 const SKIPPED_REDISTRIBUTABLES: std::ops::RangeInclusive<u32> = 229_000..=229_012;
+
+/// One Mac build of an app: the app, and the manifest of each of its depots.
+type MacBuild = (u32, Vec<(u32, u64)>);
 
 struct PreparedDepot {
     depot_id: u32,
@@ -191,10 +198,10 @@ pub struct Client {
     /// App and depot IDs expanded through PICS licenses, filled on first content query.
     catalog: AsyncMutex<Option<Arc<ContentLicenses>>>,
     app_infos: Mutex<HashMap<u32, (Instant, Arc<AppInfo>)>>,
+    /// Whether each Mac build's game runs natively on Apple silicon.
+    native_builds: Mutex<HashMap<MacBuild, bool>>,
     downloads: Transfers<TransferProgress>,
-    /// Lets a cancellation reach a download still picking its build, before
-    /// its Transfer exists.
-    picking: Mutex<Option<CancelToken>>,
+    picking: Picking,
     /// The session's own token, to ask Steam for web access tokens.
     refresh_token: String,
 }
@@ -245,8 +252,9 @@ impl Client {
             cm,
             catalog: AsyncMutex::new(None),
             app_infos: Mutex::new(HashMap::new()),
+            native_builds: Mutex::new(HashMap::new()),
             downloads: Transfers::default(),
-            picking: Mutex::new(None),
+            picking: Picking::default(),
             refresh_token,
         }
     }
@@ -590,25 +598,26 @@ impl Client {
         let app = self.app_info(app_id).await?;
         let windows = select_depots(&app, &owned, "windows", language);
         let macos = select_depots(&app, &owned, "macos", language);
+        // Only a game with both builds needs its Mac build's files read: a
+        // Mac-only one's download says why it cannot be installed.
+        let native = macos.is_empty()
+            || windows.is_empty()
+            || self
+                .runs_natively(&app, &owned, language, &CancelToken::new())
+                .await
+                .unwrap_or(true);
         Ok(GameDetails {
             app_id,
             name: app.name.clone(),
             windows: !windows.is_empty(),
-            macos: !macos.is_empty(),
+            macos: !macos.is_empty() && native,
             windows_bytes: windows.iter().filter_map(|d| d.size_bytes).sum(),
             macos_bytes: macos.iter().filter_map(|d| d.size_bytes).sum(),
         })
     }
 
     pub fn cancel_download(&self) {
-        if let Some(picking) = self
-            .picking
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .as_ref()
-        {
-            picking.cancel();
-        }
+        self.picking.cancel();
         self.downloads.cancel();
     }
 
@@ -645,23 +654,28 @@ impl Client {
         crate::launch::plan(&app, platform, directory).map_err(Into::into)
     }
 
-    /// The build `download` installs when it is given no platform: the one
-    /// the account's licenses grant, the native one first. It asks Steam for
-    /// the licenses, before any of the game's files; `cancel_download` stops
-    /// it.
+    /// The build `download` installs when it is given no platform: of those
+    /// the account's licenses grant, the Mac build when its game runs
+    /// natively on Apple silicon, else the Windows build. It asks Steam for
+    /// the licenses, then reads a few of the Mac build's files;
+    /// `cancel_download` stops it.
     pub async fn platform(&self, app_id: u32, language: &str) -> Result<&'static str, ClientError> {
         if !crate::language::is_supported(language) {
             return Err(ClientError::Failure(
                 "backend.steam.client.unsupportedPlatformOrLanguage".into(),
             ));
         }
-        self.with_picking(async |picking| picking.race(self.pick_platform(app_id, language)).await)
+        self.picking
+            .run(async |picking| {
+                picking
+                    .race(self.pick_platform(app_id, language, picking))
+                    .await
+            })
             .await?
     }
 
     /// Installs the game's build for `platform` under `parent`. Without a
-    /// platform, it installs the build the account's licenses grant, the
-    /// native one first.
+    /// platform, it installs the build `platform` picks.
     pub async fn download(
         &self,
         app_id: u32,
@@ -669,23 +683,12 @@ impl Client {
         language: &str,
         parent: &Path,
     ) -> Result<Installation, ClientError> {
-        self.with_picking(async |picking| {
-            self.install_build(app_id, platform, language, parent, picking)
-                .await
-        })
-        .await
-    }
-
-    /// Runs `work` with the token `cancel_download` cancels while it runs.
-    async fn with_picking<T>(&self, work: impl AsyncFnOnce(&CancelToken) -> T) -> T {
-        let picking = CancelToken::new();
-        *self.picking.lock().unwrap_or_else(PoisonError::into_inner) = Some(picking.clone());
-        let output = work(&picking).await;
         self.picking
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .take();
-        output
+            .run(async |picking| {
+                self.install_build(app_id, platform, language, parent, picking)
+                    .await
+            })
+            .await
     }
 
     /// `download`, which `picking` cancels until its Transfer starts.
@@ -704,7 +707,11 @@ impl Client {
         }
         let platform = match platform {
             Some(platform) => platform,
-            None => picking.race(self.pick_platform(app_id, language)).await??,
+            None => {
+                picking
+                    .race(self.pick_platform(app_id, language, picking))
+                    .await??
+            }
         };
         if !matches!(platform, "windows" | "macos") {
             return Err(unsupported());
@@ -740,15 +747,132 @@ impl Client {
         .await
     }
 
-    /// The build the account owns, the native one first.
+    /// The build `platform` names.
     async fn pick_platform(
         &self,
         app_id: u32,
         language: &str,
+        cancel: &CancelToken,
     ) -> Result<&'static str, ClientError> {
         let (owned, app) = self.owned_app(app_id).await?;
-        installable_platform(&app, &owned, language)
-            .ok_or_else(|| ClientError::Failure("backend.steam.client.noCompatibleDepot".into()))
+        let (macos, windows) = installable_builds(&app, &owned, language);
+        if macos && self.runs_natively(&app, &owned, language, cancel).await? {
+            return Ok("macos");
+        }
+        match (macos, windows) {
+            (_, true) => Ok("windows"),
+            (true, false) => Err(ClientError::Failure(
+                "backend.install.macBuildNotNative".into(),
+            )),
+            (false, false) => Err(ClientError::Failure(
+                "backend.steam.client.noCompatibleDepot".into(),
+            )),
+        }
+    }
+
+    /// Whether the game of the Mac build the account can install runs
+    /// natively on Apple silicon, as a launch would start it: its program and
+    /// its Steam API library hold arm64 slices. It reads their first bytes
+    /// from the build's depots, once per build.
+    async fn runs_natively(
+        &self,
+        app: &AppInfo,
+        owned: &ContentLicenses,
+        language: &str,
+        cancel: &CancelToken,
+    ) -> Result<bool, ClientError> {
+        let Some(executable) =
+            crate::launch::configuration(app, "macos").map(|config| config.executable.clone())
+        else {
+            return Ok(false);
+        };
+        let selected = select_depots(app, owned, "macos", language);
+        let sources = self
+            .cached_app_infos(&shared_sources(app, &selected))
+            .await?;
+        let mut manifests = Vec::new();
+        for depot in &selected {
+            if let Some(manifest_id) = public_manifest(app, depot, &sources)? {
+                manifests.push((depot.depot_id, manifest_id));
+            }
+        }
+        let build = (app.app_id, manifests);
+        if let Some(native) = self.lock_native_builds().get(&build) {
+            return Ok(*native);
+        }
+        let servers = self.content_servers(app.app_id).await?;
+        let mut depots = Vec::new();
+        for depot in &selected {
+            if let Some(prepared) = self.prepare_depot(app, depot, &sources, cancel).await? {
+                let request_code = self
+                    .cm
+                    .manifest_request_code(
+                        prepared.depot_id,
+                        prepared.authorizing_app,
+                        prepared.manifest_id,
+                    )
+                    .await?;
+                depots.push((prepared, request_code));
+            }
+        }
+        let authorizations: Vec<_> = depots
+            .iter()
+            .map(|(depot, _)| DepotAuthorization {
+                cm: &self.cm,
+                app_id: depot.authorizing_app,
+                depot_id: depot.depot_id,
+            })
+            .collect();
+        let content = ContentClient::new(self.http.clone());
+        let mut files = Vec::new();
+        let mut listing = mac_build::Listing::default();
+        for ((depot, request_code), authorization) in depots.iter().zip(&authorizations) {
+            let source = DepotSource {
+                depot_id: depot.depot_id,
+                manifest_id: depot.manifest_id,
+                request_code: *request_code,
+                depot_key: depot.key,
+                servers: &servers,
+                authorization: Some(authorization),
+            };
+            let depot_files = content.depot_files(source, cancel).await?;
+            depot_files.list(&mut listing, files.len());
+            files.push(depot_files);
+        }
+        let files = &files;
+        let read =
+            move |(depot, file): (usize, usize), bytes: u64| files[depot].read(file, bytes, cancel);
+        let native =
+            mac_build::runs_natively(&listing, &executable, &["libsteam_api.dylib"], read).await?;
+        self.lock_native_builds().insert(build, native);
+        Ok(native)
+    }
+
+    fn lock_native_builds(&self) -> std::sync::MutexGuard<'_, HashMap<MacBuild, bool>> {
+        self.native_builds
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// The validated HTTPS CDN and SteamCache hosts allowed to serve the app.
+    /// Every one is kept: Steam's first servers are often its busiest, and a
+    /// depot spreads over the fastest ones it measures.
+    async fn content_servers(&self, app_id: u32) -> Result<Vec<ContentServer>, ClientError> {
+        let servers: Vec<ContentServer> = self
+            .cm
+            .content_servers()
+            .await?
+            .into_iter()
+            .filter(|server| {
+                server.allowed_app_ids.is_empty() || server.allowed_app_ids.contains(&app_id)
+            })
+            .collect();
+        if servers.is_empty() {
+            return Err(ClientError::Failure(
+                "backend.steam.client.noContentServer".into(),
+            ));
+        }
+        Ok(servers)
     }
 
     /// Whether Steam offers a newer build than the one installed in
@@ -881,26 +1005,7 @@ impl Client {
                 "backend.steam.client.noCompatibleDepot".into(),
             ));
         }
-        // The CM layer already keeps only validated HTTPS CDN/SteamCache hosts.
-        // Every one is kept: Steam's first servers are often its busiest, and a
-        // depot spreads over the fastest ones it measures.
-        let servers = async {
-            let servers: Vec<ContentServer> = self
-                .cm
-                .content_servers()
-                .await?
-                .into_iter()
-                .filter(|server| {
-                    server.allowed_app_ids.is_empty() || server.allowed_app_ids.contains(&app_id)
-                })
-                .collect();
-            if servers.is_empty() {
-                return Err(ClientError::Failure(
-                    "backend.steam.client.noContentServer".into(),
-                ));
-            }
-            Ok(servers)
-        };
+        let servers = self.content_servers(app_id);
         let depots = async {
             cancel.check()?;
             let sources = self
@@ -1086,15 +1191,10 @@ fn public_manifest(
     }
 }
 
-/// The build the account's licenses grant, the native one first.
-fn installable_platform(
-    app: &AppInfo,
-    owned: &ContentLicenses,
-    language: &str,
-) -> Option<&'static str> {
-    ["macos", "windows"]
-        .into_iter()
-        .find(|platform| !select_depots(app, owned, platform, language).is_empty())
+/// Whether the account's licenses grant the Mac build and the Windows build.
+fn installable_builds(app: &AppInfo, owned: &ContentLicenses, language: &str) -> (bool, bool) {
+    let installable = |platform| !select_depots(app, owned, platform, language).is_empty();
+    (installable("macos"), installable("windows"))
 }
 
 fn select_depots<'a>(
@@ -1292,7 +1392,7 @@ mod tests {
     }
 
     #[test]
-    fn without_a_platform_the_native_build_the_account_owns_comes_first() {
+    fn the_installable_builds_are_those_the_account_owns() {
         let app = AppInfo {
             os_list: vec!["windows".into(), "macos".into()],
             ..app(vec![
@@ -1301,16 +1401,16 @@ mod tests {
             ])
         };
         assert_eq!(
-            installable_platform(&app, &licenses([1], [2, 3]), "english"),
-            Some("macos")
+            installable_builds(&app, &licenses([1], [2, 3]), "english"),
+            (true, true)
         );
         assert_eq!(
-            installable_platform(&app, &licenses([1], [2]), "english"),
-            Some("windows")
+            installable_builds(&app, &licenses([1], [2]), "english"),
+            (false, true)
         );
         assert_eq!(
-            installable_platform(&app, &licenses([1], []), "english"),
-            None
+            installable_builds(&app, &licenses([1], []), "english"),
+            (false, false)
         );
     }
 

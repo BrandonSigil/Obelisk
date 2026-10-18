@@ -29,22 +29,9 @@ pub fn plan(app: &AppInfo, platform: &str, directory: &Path) -> Result<LaunchPla
         ));
     }
     let root = LaunchDirectory::new(directory).map_err(shared_error)?;
-    let config = app
-        .launch_configs
-        .iter()
-        .filter(|config| supports_platform(&config.os_list, platform))
-        .filter_map(|config| launch_rank(config).map(|rank| (config, rank)))
-        .min_by_key(|(config, rank)| {
-            (
-                *rank,
-                config.os_list.is_empty(),
-                config.os_arch.as_deref() == Some("32"),
-            )
-        })
-        .map(|(config, _)| config)
-        .ok_or(LaunchError(
-            "backend.steam.launch.noCompatibleConfiguration".into(),
-        ))?;
+    let config = configuration(app, platform).ok_or(LaunchError(
+        "backend.steam.launch.noCompatibleConfiguration".into(),
+    ))?;
     let target = root
         .resolve(
             platform,
@@ -58,6 +45,22 @@ pub fn plan(app: &AppInfo, platform: &str, directory: &Path) -> Result<LaunchPla
         platform: platform.into(),
         target,
     })
+}
+
+/// The publisher's launch option a build for `platform` starts with.
+pub(crate) fn configuration<'a>(app: &'a AppInfo, platform: &str) -> Option<&'a LaunchConfig> {
+    app.launch_configs
+        .iter()
+        .filter(|config| supports_platform(&config.os_list, platform))
+        .filter_map(|config| launch_rank(config).map(|rank| (config, rank)))
+        .min_by_key(|(config, rank)| {
+            (
+                *rank,
+                config.os_list.is_empty(),
+                config.os_arch.as_deref() == Some("32"),
+            )
+        })
+        .map(|(config, _)| config)
 }
 
 fn shared_error(error: obelisk_core::launch::LaunchError) -> LaunchError {

@@ -490,6 +490,15 @@ macro_rules! lifecycle_suite {
         fn finalization_keeps_the_reservation_until_cloud_settles() {
             lifecycle::finalization_keeps_the_reservation_until_cloud_settles::<$harness>()
         }
+    };
+}
+pub(crate) use lifecycle_suite;
+
+/// Instantiates the scenarios of a game that runs under Rosetta, for a
+/// harness that can start one: a Windows game on Rosetta's Wine. A Mac game
+/// runs only natively.
+macro_rules! rosetta_suite {
+    ($harness:ty) => {
         #[cfg(target_arch = "aarch64")]
         #[test]
         fn rosetta_resumes_only_its_decision_after_installation() {
@@ -507,7 +516,7 @@ macro_rules! lifecycle_suite {
         }
     };
 }
-pub(crate) use lifecycle_suite;
+pub(crate) use rosetta_suite;
 
 pub(crate) fn a_launch_prepares_in_order_then_runs_its_game_and_settles_cloud<H: Harness>() {
     let run = launch::<H>(script(QUICK));

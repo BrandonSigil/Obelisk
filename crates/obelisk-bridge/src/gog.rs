@@ -165,9 +165,12 @@ impl From<client::Achievement> for LibraryAchievement {
     }
 }
 
-/// What a game's page adds to its library entry.
+/// What a game's page adds to its library entry: the build a download
+/// installs, and its size.
 #[derive(Clone, Debug, uniffi::Record)]
 pub struct GogGameDetails {
+    /// `macos` or `windows`; unknown when GOG could not tell.
+    pub platform: Option<String>,
     /// Unknown when GOG serves no build for the platform.
     pub installation_bytes: Option<u64>,
 }
@@ -175,6 +178,7 @@ pub struct GogGameDetails {
 impl From<client::GameDetails> for GogGameDetails {
     fn from(details: client::GameDetails) -> Self {
         Self {
+            platform: details.platform,
             installation_bytes: details.installation_bytes,
         }
     }
@@ -341,12 +345,11 @@ impl GogSession {
     pub async fn game_details(
         &self,
         product_id: String,
-        platform: String,
         language: String,
     ) -> Result<GogGameDetails, GogError> {
         Ok(self
             .client
-            .game_details(&product_id, &platform, &language)
+            .game_details(&product_id, &language)
             .await?
             .into())
     }

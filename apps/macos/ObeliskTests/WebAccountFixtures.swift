@@ -79,7 +79,7 @@ extension EpicGames: WebStoreFixture {
                  headerImageUrl: nil, developer: "", windows: true, macos: false)
     }
     static func playtime(_ key: String, minutes: UInt64) -> EpicPlaytime { EpicPlaytime(appName: key, seconds: minutes * 60) }
-    static func details(bytes: UInt64?) -> EpicGameDetails { EpicGameDetails(installationBytes: bytes) }
+    static func details(bytes: UInt64?) -> EpicGameDetails { EpicGameDetails(platform: nil, installationBytes: bytes) }
     static func cache(_ entries: [(game: EpicGame, minutes: UInt64?)], account: String, in directory: URL) throws -> LibraryCache {
         let games = entries.map { CachedEpicGame(game: $0.game, playtimeSeconds: $0.minutes.map { $0 * 60 }) }
         return try LibraryCache.holding(epic: [account: games], in: directory)
@@ -108,7 +108,7 @@ extension GogGames: WebStoreFixture {
                 summary: "", developers: [], publishers: [], releaseDate: nil, genres: [], rating: nil, languages: [])
     }
     static func playtime(_ key: String, minutes: UInt64) -> GogPlaytime { GogPlaytime(productId: key, minutes: minutes) }
-    static func details(bytes: UInt64?) -> GogGameDetails { GogGameDetails(installationBytes: bytes) }
+    static func details(bytes: UInt64?) -> GogGameDetails { GogGameDetails(platform: nil, installationBytes: bytes) }
     static func cache(_ entries: [(game: GogGame, minutes: UInt64?)], account: String, in directory: URL) throws -> LibraryCache {
         let games = entries.map { CachedGogGame(game: $0.game, playtimeMinutes: $0.minutes) }
         return try LibraryCache.holding(gog: [account: games], in: directory)
@@ -125,12 +125,10 @@ struct EpicDetailsRequest: Equatable, Sendable {
     let namespace: String
     let catalogItemId: String
     let appName: String
-    let platform: String
 }
 
 struct GogDetailsRequest: Equatable, Sendable {
     let productId: String
-    let platform: String
     let language: String
 }
 
@@ -334,9 +332,8 @@ struct AchievementRead: Equatable, Sendable {
 }
 
 extension WebTestSession: EpicSessionProtocol where Store == EpicGames {
-    func gameDetails(namespace: String, catalogItemId: String, appName: String, platform: String) async throws -> EpicGameDetails {
-        try await answerDetails(EpicDetailsRequest(namespace: namespace, catalogItemId: catalogItemId, appName: appName,
-                                                   platform: platform))
+    func gameDetails(namespace: String, catalogItemId: String, appName: String) async throws -> EpicGameDetails {
+        try await answerDetails(EpicDetailsRequest(namespace: namespace, catalogItemId: catalogItemId, appName: appName))
     }
     func playtimes() async throws -> [EpicPlaytime] { try await answerPlaytimes() }
     func achievements(namespace: String, locale: String, fresh: Bool) async throws -> [LibraryAchievement] {
@@ -356,8 +353,8 @@ extension WebTestSession: EpicSessionProtocol where Store == EpicGames {
 }
 
 extension WebTestSession: GogSessionProtocol where Store == GogGames {
-    func gameDetails(productId: String, platform: String, language: String) async throws -> GogGameDetails {
-        try await answerDetails(GogDetailsRequest(productId: productId, platform: platform, language: language))
+    func gameDetails(productId: String, language: String) async throws -> GogGameDetails {
+        try await answerDetails(GogDetailsRequest(productId: productId, language: language))
     }
     func playtimes(productIds: [String]) async throws -> [GogPlaytime] {
         playtimeRequests.append(productIds)

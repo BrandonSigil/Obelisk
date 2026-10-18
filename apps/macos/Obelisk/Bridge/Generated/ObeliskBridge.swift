@@ -1574,7 +1574,7 @@ public protocol EpicSessionProtocol: AnyObject, Sendable {
     
     func disconnect() async throws 
     
-    func gameDetails(namespace: String, catalogItemId: String, appName: String, platform: String) async throws  -> EpicGameDetails
+    func gameDetails(namespace: String, catalogItemId: String, appName: String) async throws  -> EpicGameDetails
     
     func games() async throws  -> [EpicGame]
     
@@ -1774,12 +1774,12 @@ open func disconnect()async throws   {
         )
 }
     
-open func gameDetails(namespace: String, catalogItemId: String, appName: String, platform: String)async throws  -> EpicGameDetails  {
+open func gameDetails(namespace: String, catalogItemId: String, appName: String)async throws  -> EpicGameDetails  {
     return
         try  await uniffiRustCallAsync(
             rustFutureFunc: {
                 uniffi_obelisk_bridge_fn_method_epicsession_game_details(
-                        self.uniffiCloneHandle(),FfiConverterString.lower(namespace),FfiConverterString.lower(catalogItemId),FfiConverterString.lower(appName),FfiConverterString.lower(platform)
+                        self.uniffiCloneHandle(),FfiConverterString.lower(namespace),FfiConverterString.lower(catalogItemId),FfiConverterString.lower(appName)
                 )
             },
             pollFunc: ffi_obelisk_bridge_rust_future_poll_rust_buffer,
@@ -2031,7 +2031,7 @@ public protocol GogSessionProtocol: AnyObject, Sendable {
     /**
      * `language` names the depots, such as `fr-FR`.
      */
-    func gameDetails(productId: String, platform: String, language: String) async throws  -> GogGameDetails
+    func gameDetails(productId: String, language: String) async throws  -> GogGameDetails
     
     func games() async throws  -> [GogGame]
     
@@ -2233,12 +2233,12 @@ open func disconnect()async throws   {
     /**
      * `language` names the depots, such as `fr-FR`.
      */
-open func gameDetails(productId: String, platform: String, language: String)async throws  -> GogGameDetails  {
+open func gameDetails(productId: String, language: String)async throws  -> GogGameDetails  {
     return
         try  await uniffiRustCallAsync(
             rustFutureFunc: {
                 uniffi_obelisk_bridge_fn_method_gogsession_game_details(
-                        self.uniffiCloneHandle(),FfiConverterString.lower(productId),FfiConverterString.lower(platform),FfiConverterString.lower(language)
+                        self.uniffiCloneHandle(),FfiConverterString.lower(productId),FfiConverterString.lower(language)
                 )
             },
             pollFunc: ffi_obelisk_bridge_rust_future_poll_rust_buffer,
@@ -5936,9 +5936,14 @@ public func FfiConverterTypeEpicGame_lower(_ value: EpicGame) -> RustBuffer {
 
 
 /**
- * What a game's page adds to its library entry.
+ * What a game's page adds to its library entry: the build a download
+ * installs, and its size.
  */
 public struct EpicGameDetails: Equatable, Hashable {
+    /**
+     * `Mac` or `Windows`; unknown when Epic could not tell.
+     */
+    public var platform: String?
     /**
      * Unknown when Epic serves no manifest of the build.
      */
@@ -5948,8 +5953,12 @@ public struct EpicGameDetails: Equatable, Hashable {
     // declare one manually.
     public init(
         /**
+         * `Mac` or `Windows`; unknown when Epic could not tell.
+         */platform: String?, 
+        /**
          * Unknown when Epic serves no manifest of the build.
          */installationBytes: UInt64?) {
+        self.platform = platform
         self.installationBytes = installationBytes
     }
 
@@ -5969,11 +5978,13 @@ public struct FfiConverterTypeEpicGameDetails: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> EpicGameDetails {
         return
             try EpicGameDetails(
+                platform: FfiConverterOptionString.read(from: &buf), 
                 installationBytes: FfiConverterOptionUInt64.read(from: &buf)
         )
     }
 
     public static func write(_ value: EpicGameDetails, into buf: inout [UInt8]) {
+        FfiConverterOptionString.write(value.platform, into: &buf)
         FfiConverterOptionUInt64.write(value.installationBytes, into: &buf)
     }
 }
@@ -6933,9 +6944,14 @@ public func FfiConverterTypeGogGame_lower(_ value: GogGame) -> RustBuffer {
 
 
 /**
- * What a game's page adds to its library entry.
+ * What a game's page adds to its library entry: the build a download
+ * installs, and its size.
  */
 public struct GogGameDetails: Equatable, Hashable {
+    /**
+     * `macos` or `windows`; unknown when GOG could not tell.
+     */
+    public var platform: String?
     /**
      * Unknown when GOG serves no build for the platform.
      */
@@ -6945,8 +6961,12 @@ public struct GogGameDetails: Equatable, Hashable {
     // declare one manually.
     public init(
         /**
+         * `macos` or `windows`; unknown when GOG could not tell.
+         */platform: String?, 
+        /**
          * Unknown when GOG serves no build for the platform.
          */installationBytes: UInt64?) {
+        self.platform = platform
         self.installationBytes = installationBytes
     }
 
@@ -6966,11 +6986,13 @@ public struct FfiConverterTypeGogGameDetails: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> GogGameDetails {
         return
             try GogGameDetails(
+                platform: FfiConverterOptionString.read(from: &buf), 
                 installationBytes: FfiConverterOptionUInt64.read(from: &buf)
         )
     }
 
     public static func write(_ value: GogGameDetails, into buf: inout [UInt8]) {
+        FfiConverterOptionString.write(value.platform, into: &buf)
         FfiConverterOptionUInt64.write(value.installationBytes, into: &buf)
     }
 }
@@ -11211,20 +11233,23 @@ public enum GameOffer: Equatable, Hashable {
     
     /**
      * Its build for `platform`, with the depots of `language`. Without a
-     * platform, Steam picks the build the account can install, the native
-     * one first, as the Transfer starts.
+     * platform, Steam picks the build the account can install as the
+     * Transfer starts: the Mac build when its game runs natively on Apple
+     * silicon, else the Windows build.
      */
     case steam(appId: UInt32, name: String, platform: String?, language: String
     )
     /**
-     * Its build for `platform`.
+     * Its build for `platform`, `Mac` or `Windows`; without one, Epic picks
+     * it as Steam does.
      */
-    case epic(namespace: String, catalogItemId: String, appName: String, title: String, platform: String
+    case epic(namespace: String, catalogItemId: String, appName: String, title: String, platform: String?
     )
     /**
-     * Its build for `platform`, `macos` or `windows`.
+     * Its build for `platform`, `macos` or `windows`; without one, GOG
+     * picks it as Steam does.
      */
-    case gog(productId: String, title: String, platform: String
+    case gog(productId: String, title: String, platform: String?
     )
 
 
@@ -11250,10 +11275,10 @@ public struct FfiConverterTypeGameOffer: FfiConverterRustBuffer {
         case 1: return .steam(appId: try FfiConverterUInt32.read(from: &buf), name: try FfiConverterString.read(from: &buf), platform: try FfiConverterOptionString.read(from: &buf), language: try FfiConverterString.read(from: &buf)
         )
         
-        case 2: return .epic(namespace: try FfiConverterString.read(from: &buf), catalogItemId: try FfiConverterString.read(from: &buf), appName: try FfiConverterString.read(from: &buf), title: try FfiConverterString.read(from: &buf), platform: try FfiConverterString.read(from: &buf)
+        case 2: return .epic(namespace: try FfiConverterString.read(from: &buf), catalogItemId: try FfiConverterString.read(from: &buf), appName: try FfiConverterString.read(from: &buf), title: try FfiConverterString.read(from: &buf), platform: try FfiConverterOptionString.read(from: &buf)
         )
         
-        case 3: return .gog(productId: try FfiConverterString.read(from: &buf), title: try FfiConverterString.read(from: &buf), platform: try FfiConverterString.read(from: &buf)
+        case 3: return .gog(productId: try FfiConverterString.read(from: &buf), title: try FfiConverterString.read(from: &buf), platform: try FfiConverterOptionString.read(from: &buf)
         )
         
         default: throw UniffiInternalError.unexpectedEnumCase
@@ -11278,14 +11303,14 @@ public struct FfiConverterTypeGameOffer: FfiConverterRustBuffer {
             FfiConverterString.write(catalogItemId, into: &buf)
             FfiConverterString.write(appName, into: &buf)
             FfiConverterString.write(title, into: &buf)
-            FfiConverterString.write(platform, into: &buf)
+            FfiConverterOptionString.write(platform, into: &buf)
             
         
         case let .gog(productId,title,platform):
             writeInt(&buf, Int32(3))
             FfiConverterString.write(productId, into: &buf)
             FfiConverterString.write(title, into: &buf)
-            FfiConverterString.write(platform, into: &buf)
+            FfiConverterOptionString.write(platform, into: &buf)
             
         }
     }
@@ -15130,7 +15155,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_obelisk_bridge_checksum_method_epicsession_disconnect() != 24075) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_obelisk_bridge_checksum_method_epicsession_game_details() != 26774) {
+    if (uniffi_obelisk_bridge_checksum_method_epicsession_game_details() != 36459) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_obelisk_bridge_checksum_method_epicsession_games() != 26754) {
@@ -15211,7 +15236,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_obelisk_bridge_checksum_method_gogsession_disconnect() != 50347) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_obelisk_bridge_checksum_method_gogsession_game_details() != 64607) {
+    if (uniffi_obelisk_bridge_checksum_method_gogsession_game_details() != 16534) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_obelisk_bridge_checksum_method_gogsession_games() != 62040) {

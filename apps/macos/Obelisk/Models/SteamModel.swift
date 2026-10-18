@@ -1075,12 +1075,14 @@ extension SteamGame: Identifiable {
 }
 
 extension SteamGameDetails {
-    /// Obelisk installs the native build when Steam ships one, otherwise Windows.
+    /// The build a download installs: the Mac build when its game runs
+    /// natively on Apple silicon, else the Windows build.
     var preferredPlatform: String { macos ? SteamGames.nativePlatform : "windows" }
 
-    /// What Steam can install of `game` for the account: its native build first.
+    /// What Steam can install of `game` for the account. Steam picks the
+    /// build again as the Transfer starts.
     func offer(for game: SteamGame, language: String) -> GameOffer? {
         guard macos || windows else { return nil }
-        return .steam(appId: game.appId, name: game.name, platform: preferredPlatform, language: language)
+        return .steam(appId: game.appId, name: game.name, platform: nil, language: language)
     }
 }

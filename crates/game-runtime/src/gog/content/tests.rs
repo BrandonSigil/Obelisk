@@ -54,6 +54,16 @@ impl Network for Fake {
             }
         })
     }
+    fn platform<'a>(
+        &'a self,
+        _: &'a Product,
+        language: &'a str,
+    ) -> BoxFuture<'a, Result<String, Failure>> {
+        Box::pin(async move {
+            self.call(&format!("platform {language}"));
+            Ok("windows".into())
+        })
+    }
     fn download<'a>(
         &'a self,
         transfer: &'a Transfer<Gog>,
@@ -62,15 +72,16 @@ impl Network for Fake {
         Box::pin(async move {
             self.call(&format!("download {language}"));
             let product_id = &transfer.product.product_id;
+            let platform = transfer.platform.clone().unwrap_or_default();
             Ok(gog_kit::client::Installation {
                 product_id: product_id.clone(),
                 user_id: ACCOUNT.into(),
                 directory: transfer
                     .directory
-                    .join(format!("gog-{product_id}-{}", transfer.platform))
+                    .join(format!("gog-{product_id}-{platform}"))
                     .to_string_lossy()
                     .into_owned(),
-                platform: transfer.platform.clone(),
+                platform,
                 total_bytes: 100,
                 build_id: "1".into(),
                 version_name: "1.0".into(),
@@ -132,7 +143,7 @@ impl Fixture {
         Transfer {
             product: witcher(),
             name: "The Witcher".into(),
-            platform: platform.into(),
+            platform: Some(platform.into()),
             directory: self.locations.library.join("Games/GOG"),
         }
     }
@@ -180,6 +191,22 @@ async fn a_transfer_saves_renewed_credentials_first_and_installs_the_language() 
     );
     let calls = fixture.fake.calls();
     assert_eq!(&calls[..3], ["prepare", "saved", "download fr-FR"]);
+}
+
+#[tokio::test]
+async fn a_transfer_without_a_platform_installs_the_build_gog_picks_in_its_language() {
+    let fixture = Fixture::new();
+    let transfer = Transfer {
+        platform: None,
+        ..fixture.transfer("macos")
+    };
+    assert_eq!(fixture.content.begin(&transfer).await.unwrap(), "windows");
+    // Picking the build may renew the credentials: they are saved after it.
+    eventually(|| fixture.fake.calls().len() == 4).await;
+    assert_eq!(
+        fixture.fake.calls(),
+        ["prepare", "saved", "platform fr-FR", "saved"]
+    );
 }
 
 #[tokio::test]
@@ -341,7 +368,7 @@ async fn an_installed_build_updates_in_place_and_another_platform_installs_besid
     installations.install(Offer {
         product: witcher(),
         name: "The Witcher".into(),
-        platform: "macos".into(),
+        platform: Some("macos".into()),
     });
     eventually(idle).await;
     let state = installations.state();

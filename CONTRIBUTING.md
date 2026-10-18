@@ -18,7 +18,7 @@ This guide covers building Obelisk from source, testing it and finding your way 
 
 - A Mac with Apple silicon and macOS 26 or later. Builds target the Mac's own architecture.
 - Xcode with its command-line tools.
-- Stable Rust with Cargo, through [rustup](https://rustup.rs), with both Mac targets: `rustup target add aarch64-apple-darwin x86_64-apple-darwin`. Part of the Steam host is built for Intel, for games that run under Rosetta.
+- Stable Rust with Cargo, through [rustup](https://rustup.rs), with both Mac targets: `rustup target add aarch64-apple-darwin x86_64-apple-darwin`. Part of the Steam host is built for Intel, for the Windows games Wine runs under Rosetta.
 - An Apple Development signing identity, with its private key in your Keychain. The build, test and DMG scripts refuse ad hoc signatures.
 
 Obelisk does not use the App Sandbox, so that it can open games and manage Wine processes. It ships no driver, privileged entitlement or system helper.

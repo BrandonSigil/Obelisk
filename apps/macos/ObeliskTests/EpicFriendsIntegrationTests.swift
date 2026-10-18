@@ -416,5 +416,5 @@ final class EpicFriendsTestSession: EpicSessionProtocol, @unchecked Sendable {
         }
     }
     func disconnect() async throws { shutdownObservers(); lock.withLock { disconnectCount += 1 } }
-    func gameDetails(namespace: String, catalogItemId: String, appName: String, platform: String) async throws -> EpicGameDetails { throw EpicError.InvalidResponse }
+    func gameDetails(namespace: String, catalogItemId: String, appName: String) async throws -> EpicGameDetails { throw EpicError.InvalidResponse }
 }

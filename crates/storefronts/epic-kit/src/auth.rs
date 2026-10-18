@@ -279,6 +279,26 @@ impl Api {
         bounded_json(response, 8 * 1024 * 1024).await
     }
 
+    /// `get`, where a resource Epic does not have answers `None`.
+    pub async fn get_optional<T: serde::de::DeserializeOwned>(
+        &self,
+        url: Url,
+        access_token: &str,
+    ) -> Result<Option<T>, EpicError> {
+        let response = self
+            .http
+            .get(url)
+            .bearer_auth(access_token)
+            .send()
+            .await
+            .map_err(|_| EpicError::Network)?;
+        if response.status() == StatusCode::NOT_FOUND {
+            return Ok(None);
+        }
+        check_status(response.status())?;
+        bounded_json(response, 8 * 1024 * 1024).await.map(Some)
+    }
+
     /// Same bounds and status mapping as `get`, for endpoints that take a JSON
     /// body and identify the launcher component making the request.
     pub async fn post_json<T: serde::de::DeserializeOwned>(

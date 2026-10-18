@@ -3,8 +3,8 @@
 //! native host's interruption and the helper choice are the adapter's own.
 use super::*;
 use crate::supervisor::session::tests::{
-    Harness, Script, fixture_directory, hold, inspect, lifecycle_suite, record, target,
-    write_helper,
+    Harness, Script, fixture_directory, hold, inspect, lifecycle_suite, record, rosetta_suite,
+    target, write_helper,
 };
 use crate::supervisor::{client::SessionAlive, session::Operation};
 use std::fs;
@@ -211,6 +211,7 @@ impl LaunchCloud<Error> for FakeCloud {
 
 mod lifecycle {
     super::lifecycle_suite!(super::SteamHarness);
+    super::rosetta_suite!(super::SteamHarness);
 }
 
 use crate::supervisor::{

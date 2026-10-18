@@ -174,6 +174,20 @@ impl Fixture {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_file_s_first_bytes_are_read_from_the_chunks_that_hold_them() {
+    let fixture = fixture();
+    let http = crate::http::client().unwrap();
+    let links = fixture.links();
+    let file = &fixture.installed.files[0];
+    let cancel = CancelToken::new();
+    let head = read(&http, &links, file, 5, &cancel).await.unwrap();
+    assert_eq!(head, b"first");
+    assert_eq!(fixture.cdn.requests(), [fixture.chunks["a"].1.clone()]);
+    let whole = read(&http, &links, file, 100, &cancel).await.unwrap();
+    assert_eq!(whole, b"first part second");
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn a_transfer_installs_every_file_then_reuses_what_is_on_disk() {
     let fixture = fixture();
     let folder = tempfile::tempdir().unwrap();

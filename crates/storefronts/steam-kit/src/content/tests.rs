@@ -733,6 +733,57 @@ fn routes(item: ManifestFile, pieces: &[&[u8]]) -> HashMap<String, Vec<u8>> {
 }
 
 #[tokio::test]
+async fn a_depot_s_files_are_listed_and_read_from_their_first_chunks_only() {
+    let mut program = vec![0xcf, 0xfa, 0xed, 0xfe, 0x0c, 0x00, 0x00, 0x01];
+    // More than the head a check reads, which the first chunk holds.
+    program.resize(5000, 0);
+    let pieces: &[&[u8]] = &[&program, b"the rest of the program"];
+    let files = vec![
+        folder("Game.app"),
+        file("Game.app/Contents/MacOS/Game", pieces),
+        link("Game.app/Contents/MacOS/Launcher", "Game"),
+    ];
+    let mut routes = HashMap::from([(
+        "/depot/42/manifest/99/5/123".to_string(),
+        zip(&manifest(files, false)),
+    )]);
+    for bytes in pieces {
+        routes.insert(
+            format!("/depot/42/chunk/{}", hex(&Sha1::digest(bytes))),
+            encrypt(&zip(bytes)),
+        );
+    }
+    let fixture = CdnFixture::new(routes);
+    let client = fixture.client();
+    let plan = plan(Path::new("/nonexistent"));
+    let cancel = CancelToken::new();
+    let source = DepotSource {
+        depot_id: plan.depot_id,
+        manifest_id: plan.manifest_id,
+        request_code: plan.request_code,
+        depot_key: plan.depot_key,
+        servers: &plan.servers,
+        authorization: None,
+    };
+    let depot = client.depot_files(source, &cancel).await.unwrap();
+    let mut listing = Listing::default();
+    depot.list(&mut listing, 0);
+    let read = |(_, file): (usize, usize), bytes: u64| depot.read(file, bytes, &cancel);
+    let native = obelisk_core::mac_build::runs_natively(
+        &listing,
+        "Game.app/Contents/MacOS/Launcher",
+        &[],
+        read,
+    )
+    .await
+    .unwrap();
+    assert!(native);
+    assert_eq!(fixture.chunk_requests(), 1);
+    let whole = depot.read(1, 10_000, &cancel).await.unwrap();
+    assert_eq!(whole, pieces.concat());
+}
+
+#[tokio::test]
 async fn an_installed_depot_names_the_install_scripts_its_manifest_flags() {
     let directory = tempfile::tempdir().unwrap();
     let pieces: &[&[u8]] = &[b"\"installscript\" { }"];

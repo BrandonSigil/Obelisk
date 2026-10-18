@@ -1,23 +1,28 @@
 //! GOG's side of an installation Transfer: obelisk-core runs the order around
 //! it, this module picks the build, its depots and redistributables, and runs
 //! the content engine.
-use std::{collections::HashSet, path::Path, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    path::Path,
+    sync::{Arc, Mutex, PoisonError},
+};
 
 use futures_util::{FutureExt, StreamExt, TryStreamExt, stream};
 use md5::Digest as _;
 use obelisk_core::{
     install::hex,
     installation::{self, Destination, InstallFailure, InstalledFiles, TransferError},
-    transfer::{TransferBusy, TransferContext, Transfers},
+    mac_build,
+    transfer::{CancelToken, TransferBusy, TransferContext, Transfers},
 };
 use serde::{Deserialize, Serialize};
 
-use super::{Client, content_platform, valid_product_id};
+use super::{Client, MACOS, WINDOWS, content_platform, launch, valid_product_id};
 use crate::{
     GogError,
     auth::Api,
     content::{self, Endpoint, SecureLinks},
-    http::{bounded_bytes, inflate_json, send},
+    http::{bounded_bytes, check_status, inflate_json, send},
     library::endpoint,
     manifest::{
         self, Build, BuildManifest, Builds, DEPENDENCIES, DependencyDepot, DependencyRepository,
@@ -70,6 +75,28 @@ pub struct Dependency {
 }
 
 pub(super) type Downloads = Transfers<TransferProgress>;
+
+/// Whether each Mac build's game runs natively on Apple silicon, by product,
+/// build and language.
+#[derive(Default)]
+pub(super) struct NativeBuilds(Mutex<HashMap<(String, String, String), bool>>);
+
+impl NativeBuilds {
+    fn get(&self, build: &(String, String, String)) -> Option<bool> {
+        self.0
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(build)
+            .copied()
+    }
+
+    fn insert(&self, build: (String, String, String), native: bool) {
+        self.0
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(build, native);
+    }
+}
 
 impl From<TransferBusy> for GogError {
     fn from(_: TransferBusy) -> Self {
@@ -136,8 +163,31 @@ async fn listed_build(api: &Api, product_id: &str, platform: &str) -> Result<Bui
         &["products", product_id, "os", platform, "builds"],
     )?;
     url.query_pairs_mut().append_pair("generation", "2");
-    let builds: Builds = api.get_public(url).await?;
+    let response = api
+        .http
+        .get(url)
+        .send()
+        .await
+        .map_err(|_| GogError::Network)?;
+    if response.status() == reqwest::StatusCode::NOT_FOUND {
+        return Err(GogError::NoBuild);
+    }
+    check_status(response.status())?;
+    let builds: Builds = crate::http::bounded_json(response, 16 * 1024 * 1024).await?;
     builds.current().ok_or(GogError::NoBuild)
+}
+
+/// `listed_build`, none when GOG has no such build.
+async fn present_build(
+    api: &Api,
+    product_id: &str,
+    platform: &str,
+) -> Result<Option<Build>, GogError> {
+    match listed_build(api, product_id, platform).await {
+        Ok(build) => Ok(Some(build)),
+        Err(GogError::NoBuild) => Ok(None),
+        Err(error) => Err(error),
+    }
 }
 
 /// A content-system document, without any account credential, inflated and
@@ -272,7 +322,145 @@ impl Client {
     }
 
     pub fn cancel_download(&self) {
+        self.picking.cancel();
         self.downloads.cancel();
+    }
+
+    /// The build a download of the game installs, with the depots of
+    /// `language`: the Mac build when its game runs natively on Apple
+    /// silicon, else the Windows build. `cancel_download` stops it.
+    pub async fn platform(
+        &self,
+        product_id: &str,
+        language: &str,
+    ) -> Result<&'static str, GogError> {
+        self.picking
+            .run(async |picking| {
+                picking
+                    .race(self.pick_platform(product_id, language, picking))
+                    .await?
+            })
+            .await
+    }
+
+    pub(super) async fn pick_platform(
+        &self,
+        product_id: &str,
+        language: &str,
+        cancel: &CancelToken,
+    ) -> Result<&'static str, GogError> {
+        if !valid_product_id(product_id) || language.is_empty() || language.len() > 32 {
+            return Err(GogError::Protocol);
+        }
+        let api = &self.tokens.api;
+        let (mac, windows) = tokio::try_join!(
+            present_build(api, product_id, "osx"),
+            present_build(api, product_id, "windows"),
+        )?;
+        if let Some(build) = &mac
+            && self
+                .runs_natively(product_id, build, language, cancel)
+                .await?
+        {
+            return Ok(MACOS);
+        }
+        match (mac, windows) {
+            (_, Some(_)) => Ok(WINDOWS),
+            (Some(_), None) => Err(GogError::Service {
+                message: "backend.install.macBuildNotNative".into(),
+            }),
+            (None, None) => Err(GogError::NoBuild),
+        }
+    }
+
+    /// Whether the game of the Mac build `build` runs natively on Apple
+    /// silicon: the program its primary play task names holds an arm64
+    /// slice. It reads the build's manifests, then the first bytes of a few
+    /// of its files. A build Obelisk cannot install does not.
+    async fn runs_natively(
+        &self,
+        product_id: &str,
+        build: &Build,
+        language: &str,
+        cancel: &CancelToken,
+    ) -> Result<bool, GogError> {
+        let key = (
+            product_id.to_owned(),
+            build.build_id.clone(),
+            language.to_owned(),
+        );
+        if !build.build_id.is_empty()
+            && let Some(native) = self.native_builds.get(&key)
+        {
+            return Ok(native);
+        }
+        let api = &self.tokens.api;
+        let manifest: BuildManifest = document(api, content::checked_url(&build.link)?).await?;
+        if manifest.base_product_id != product_id {
+            return Err(GogError::Protocol);
+        }
+        let owned = self
+            .with_access_token(|token| async move { owned(api, &token).await })
+            .await?;
+        let (_, depots) = owned_depots(&manifest, &owned, language)?;
+        let content_root = manifest.content_root()?;
+        let mut installed = Installed::default();
+        let depots = depots
+            .iter()
+            .map(|depot| (depot.manifest.as_str(), depot.product_id.as_str()));
+        add_depots(api, &mut installed, &content_root, "meta", depots).await?;
+        let native = match installed.validate() {
+            Ok(()) => {
+                self.plays_natively(product_id, &installed, &content_root, cancel)
+                    .await?
+            }
+            Err(_) => false,
+        };
+        if !build.build_id.is_empty() {
+            self.native_builds.insert(key, native);
+        }
+        Ok(native)
+    }
+
+    /// Whether the program the primary play task of `installed` starts holds
+    /// an arm64 slice.
+    async fn plays_natively(
+        &self,
+        product_id: &str,
+        installed: &Installed,
+        content_root: &str,
+        cancel: &CancelToken,
+    ) -> Result<bool, GogError> {
+        let from_root = |path: &str| match content_root {
+            "" => path.to_owned(),
+            root => format!("{root}/{path}"),
+        };
+        let mut listing = mac_build::Listing::default();
+        for (index, file) in installed.files.iter().enumerate() {
+            listing.file(&file.path, index, file.file.size());
+        }
+        for link in &installed.links {
+            listing.link(&link.path, &link.target);
+        }
+        let links = SecureLinks::new(self.secure_links());
+        let http = &self.tokens.api.http;
+        let links = &links;
+        let read = move |index: usize, bytes: u64| {
+            content::read(http, links, &installed.files[index], bytes, cancel)
+        };
+        let mut program = None;
+        for info in launch::info_files(product_id) {
+            if let Some((file, size)) = listing.find(&from_root(&info))
+                && size <= launch::MAX_INFO_BYTES as u64
+            {
+                program = launch::played_program(&read(file, size).await?);
+                break;
+            }
+        }
+        let Some(program) = program else {
+            return Ok(false);
+        };
+        mac_build::runs_natively(&listing, &from_root(&program), &[], read).await
     }
 
     /// The size of the build an installation in `language` holds.

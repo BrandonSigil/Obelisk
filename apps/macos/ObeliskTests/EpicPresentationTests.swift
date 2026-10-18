@@ -94,7 +94,7 @@ final class EpicPresentationTests: XCTestCase {
 
     @MainActor
     func testMountedDetailRendersItsPlaytimeAndArrivingSize() async throws {
-        let details = EpicGameDetails(installationBytes: 2_000_000_000)
+        let details = EpicGameDetails(platform: "Windows", installationBytes: 2_000_000_000)
         let session = EpicPresentationSession(
             games: epicPresentationLibrary, details: details, holdDetails: true,
             playtimes: [EpicPlaytime(appName: epicPresentationLibrary[0].appName, seconds: 5400)]
@@ -363,7 +363,7 @@ final class EpicPresentationTests: XCTestCase {
             imageUrl: nil, headerImageUrl: nil, developer: "Fixture studio", windows: true, macos: true
         )
         let detailsSession = EpicPresentationSession(
-            games: [game], details: EpicGameDetails(installationBytes: 2_000_000_000),
+            games: [game], details: EpicGameDetails(platform: "Windows", installationBytes: 2_000_000_000),
             playtimes: [EpicPlaytime(appName: game.appName, seconds: 5400)],
             achievements: [
                 LibraryAchievement(id: "first", name: "First steps", description: "", iconUrl: "",
@@ -543,7 +543,7 @@ private actor EpicPresentationSession: EpicSessionProtocol {
     init(
         games: [EpicGame],
         holdGames: Bool = false,
-        details: EpicGameDetails = EpicGameDetails(installationBytes: nil),
+        details: EpicGameDetails = EpicGameDetails(platform: nil, installationBytes: nil),
         holdDetails: Bool = false,
         playtimes: [EpicPlaytime] = [],
         achievements: [LibraryAchievement] = []
@@ -560,7 +560,7 @@ private actor EpicPresentationSession: EpicSessionProtocol {
     }
     func credentials() -> EpicCredentials { epicPresentationCredentials }
     func prepare() -> EpicCredentials { epicPresentationCredentials }
-    func gameDetails(namespace: String, catalogItemId: String, appName: String, platform: String) async -> EpicGameDetails {
+    func gameDetails(namespace: String, catalogItemId: String, appName: String) async -> EpicGameDetails {
         if shouldHoldDetails {
             shouldHoldDetails = false
             waitingForDetails = true

@@ -39,27 +39,30 @@ pub struct Installation {
 #[derive(Clone, Debug, PartialEq, Eq, uniffi::Enum)]
 pub enum GameOffer {
     /// Its build for `platform`, with the depots of `language`. Without a
-    /// platform, Steam picks the build the account can install, the native
-    /// one first, as the Transfer starts.
+    /// platform, Steam picks the build the account can install as the
+    /// Transfer starts: the Mac build when its game runs natively on Apple
+    /// silicon, else the Windows build.
     Steam {
         app_id: u32,
         name: String,
         platform: Option<String>,
         language: String,
     },
-    /// Its build for `platform`.
+    /// Its build for `platform`, `Mac` or `Windows`; without one, Epic picks
+    /// it as Steam does.
     Epic {
         namespace: String,
         catalog_item_id: String,
         app_name: String,
         title: String,
-        platform: String,
+        platform: Option<String>,
     },
-    /// Its build for `platform`, `macos` or `windows`.
+    /// Its build for `platform`, `macos` or `windows`; without one, GOG
+    /// picks it as Steam does.
     Gog {
         product_id: String,
         title: String,
-        platform: String,
+        platform: Option<String>,
     },
 }
 

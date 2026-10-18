@@ -2,7 +2,10 @@
 //! release the session lock so disconnect can invalidate them promptly.
 use std::{future::Future, sync::Arc, time::Instant};
 
-use obelisk_core::watch::Revisions;
+use obelisk_core::{
+    transfer::{CancelToken, Picking},
+    watch::Revisions,
+};
 use tokio::sync::Mutex;
 
 use crate::{
@@ -40,6 +43,10 @@ pub struct Client {
     downloads: download::Downloads,
     tokens: TokenSource,
     avatar_url: Option<String>,
+    /// Whether each Mac build's game runs natively on Apple silicon, by
+    /// product, build and language.
+    native_builds: download::NativeBuilds,
+    picking: Picking,
 }
 
 impl Client {
@@ -71,6 +78,8 @@ impl Client {
                 credential_events: Revisions::new(),
             },
             avatar_url: profile.avatar_url,
+            native_builds: Default::default(),
+            picking: Picking::default(),
         })
     }
 
@@ -105,22 +114,27 @@ impl Client {
         .await
     }
 
-    /// What a game's page adds to its library entry, for its `platform` build
-    /// with the depots of `language`, such as `fr-FR`.
+    /// What a game's page adds to its library entry: the build a download
+    /// installs with the depots of `language`, such as `fr-FR`, as
+    /// `platform` picks it, and its size.
     pub async fn game_details(
         &self,
         product_id: &str,
-        platform: &str,
         language: &str,
     ) -> Result<GameDetails, GogError> {
-        if !valid_product_id(product_id) {
-            return Err(GogError::Protocol);
-        }
-        let platform = content_platform(platform)?;
+        let platform = match self
+            .pick_platform(product_id, language, &CancelToken::new())
+            .await
+        {
+            Ok(platform) => platform,
+            Err(GogError::Unauthorized) => return Err(GogError::Unauthorized),
+            Err(_) => return Ok(GameDetails::default()),
+        };
+        let content_platform = content_platform(platform)?;
         let size = self
             .with_access_token(|token| async move {
                 let size = self
-                    .installation_size(&token, product_id, platform, language)
+                    .installation_size(&token, product_id, content_platform, language)
                     .await;
                 // Re-raise so the funnel refreshes the token once.
                 match size {
@@ -130,6 +144,7 @@ impl Client {
             })
             .await?;
         Ok(GameDetails {
+            platform: Some(platform.into()),
             installation_bytes: size,
         })
     }

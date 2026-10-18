@@ -8,7 +8,10 @@ use std::{
 };
 
 use futures_util::{StreamExt, TryStreamExt, stream};
-use obelisk_core::watch::Revisions;
+use obelisk_core::{
+    transfer::{CancelToken, Picking},
+    watch::Revisions,
+};
 use reqwest::Url;
 use serde::Deserialize;
 use tokio::sync::Mutex;
@@ -51,9 +54,13 @@ pub struct Game {
     pub metadata: serde_json::Value,
 }
 
-/// What a game's page adds to its library entry: the size of its build.
+/// What a game's page adds to its library entry: the build a download
+/// installs, and its size.
 #[derive(Clone, Debug, Default)]
 pub struct GameDetails {
+    /// `Mac` or `Windows`, as `Client::platform` picks it; unknown when Epic
+    /// could not tell.
+    pub platform: Option<String>,
     /// Unknown when Epic serves no manifest of the build.
     pub installation_bytes: Option<u64>,
 }
@@ -65,6 +72,8 @@ pub struct Client {
     credential_events: Revisions,
     social: crate::social::SocialService,
     installation_sizes: crate::details::InstallationSizes,
+    native_builds: crate::details::NativeBuilds,
+    picking: Picking,
 }
 
 impl Client {
@@ -154,14 +163,22 @@ impl Client {
             .await
     }
 
+    /// The build `download` installs when the game names no platform, as
+    /// `platform` picks it, and its size.
     pub async fn game_details(
         &self,
         namespace: &str,
         catalog_item_id: &str,
         app_name: &str,
-        platform: &str,
     ) -> Result<GameDetails, EpicError> {
-        validate_identity(namespace, catalog_item_id, app_name, platform)?;
+        let platform = match self
+            .pick_platform(namespace, catalog_item_id, app_name, &CancelToken::new())
+            .await
+        {
+            Ok(platform) => platform,
+            Err(EpicError::Unauthorized) => return Err(EpicError::Unauthorized),
+            Err(_) => return Ok(GameDetails::default()),
+        };
         let size = self
             .with_access_token(|token| async move {
                 let size = crate::details::installation_size(
@@ -183,8 +200,50 @@ impl Client {
             })
             .await?;
         Ok(GameDetails {
+            platform: Some(platform.into()),
             installation_bytes: size,
         })
+    }
+
+    /// The build a download of the game installs: the Mac build when its
+    /// game runs natively on Apple silicon, else the Windows build.
+    /// `cancel_download` stops it.
+    pub async fn platform(
+        &self,
+        namespace: &str,
+        catalog_item_id: &str,
+        app_name: &str,
+    ) -> Result<&'static str, EpicError> {
+        self.picking
+            .run(async |picking| {
+                picking
+                    .race(self.pick_platform(namespace, catalog_item_id, app_name, picking))
+                    .await?
+            })
+            .await
+    }
+
+    async fn pick_platform(
+        &self,
+        namespace: &str,
+        catalog_item_id: &str,
+        app_name: &str,
+        cancel: &CancelToken,
+    ) -> Result<&'static str, EpicError> {
+        validate_identity(namespace, catalog_item_id, app_name, "Mac")?;
+        self.with_access_token(|token| async move {
+            crate::details::platform(
+                &self.api,
+                &token,
+                namespace,
+                catalog_item_id,
+                app_name,
+                &self.native_builds,
+                cancel,
+            )
+            .await
+        })
+        .await
     }
 
     /// Every game's playtime in seconds, by app name, in one request. A game
@@ -207,6 +266,8 @@ impl Client {
             credential_events: Revisions::new(),
             social,
             installation_sizes: Default::default(),
+            native_builds: Default::default(),
+            picking: Picking::default(),
         }
     }
 
