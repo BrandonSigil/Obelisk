@@ -167,7 +167,6 @@ private struct GameActionButtonStyle: ButtonStyle {
 private struct GameButtonProgress: View {
     let fraction: Double?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var moving = false
 
     var body: some View {
         GeometryReader { geometry in
@@ -177,12 +176,17 @@ private struct GameButtonProgress: View {
                     Capsule().fill(.white)
                         .frame(width: geometry.size.width * fraction)
                 } else {
+                    // Keyframes move the offset alone. A repeating animation
+                    // started on appear also repeated the page's layout changes
+                    // of that moment, and the bar swung outside the button.
                     Capsule().fill(.white)
                         .frame(width: geometry.size.width * 0.3)
-                        .offset(x: moving && !reduceMotion ? geometry.size.width * 0.7 : 0)
-                        .animation(reduceMotion ? nil : .easeInOut(duration: 0.9).repeatForever(autoreverses: true), value: moving)
-                        .onAppear { moving = true }
-                        .onDisappear { moving = false }
+                        .keyframeAnimator(initialValue: 0.0, repeating: !reduceMotion) { bar, travel in
+                            bar.offset(x: geometry.size.width * 0.7 * travel)
+                        } keyframes: { _ in
+                            LinearKeyframe(1, duration: 0.9, timingCurve: .easeInOut)
+                            LinearKeyframe(0, duration: 0.9, timingCurve: .easeInOut)
+                        }
                 }
             }
         }
