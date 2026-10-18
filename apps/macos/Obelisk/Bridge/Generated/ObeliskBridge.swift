@@ -5936,8 +5936,8 @@ public func FfiConverterTypeEpicGame_lower(_ value: EpicGame) -> RustBuffer {
 
 
 /**
- * What a game's page adds to its library entry: the build a download
- * installs, and its size.
+ * What a game's page adds to its library entry: the build it shows before
+ * any download, and its size.
  */
 public struct EpicGameDetails: Equatable, Hashable {
     /**
@@ -6944,8 +6944,8 @@ public func FfiConverterTypeGogGame_lower(_ value: GogGame) -> RustBuffer {
 
 
 /**
- * What a game's page adds to its library entry: the build a download
- * installs, and its size.
+ * What a game's page adds to its library entry: the build it shows before
+ * any download, and its size.
  */
 public struct GogGameDetails: Equatable, Hashable {
     /**

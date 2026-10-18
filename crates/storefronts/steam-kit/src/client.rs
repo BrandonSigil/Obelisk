@@ -26,8 +26,8 @@ use crate::{
         SteamConnection, supports_platform,
     },
     content::{
-        CancelToken, CdnAuthorization, ContentClient, ContentError, DepotDownload,
-        DepotInstallation, DepotSource,
+        CachedManifest, CancelToken, CdnAuthorization, ContentClient, ContentError, DepotDownload,
+        DepotFiles, DepotInstallation, DepotSource,
     },
     invites::{InviteSource, ReceivedInvites},
     own_game::{GameInvite, OwnGame, OwnGameSource},
@@ -118,9 +118,9 @@ pub struct GameDetails {
     pub app_id: u32,
     pub name: String,
     pub windows: bool,
-    /// Whether Obelisk installs the Mac build: the account can install it,
-    /// and its game runs natively on Apple silicon or the game has no Windows
-    /// build. It stays the Mac build when that cannot be told.
+    /// Whether the game's page shows the Mac build: the account can install
+    /// it, and no download found that its game does not run natively while
+    /// the game has a Windows build.
     pub macos: bool,
     pub windows_bytes: u64,
     pub macos_bytes: u64,
@@ -200,6 +200,9 @@ pub struct Client {
     app_infos: Mutex<HashMap<u32, (Instant, Arc<AppInfo>)>>,
     /// Whether each Mac build's game runs natively on Apple silicon.
     native_builds: Mutex<HashMap<MacBuild, bool>>,
+    /// The depot manifests the last build picked read, by depot and
+    /// manifest, which its installation starts from.
+    picked_manifests: Mutex<HashMap<(u32, u64), CachedManifest>>,
     downloads: Transfers<TransferProgress>,
     picking: Picking,
     /// The session's own token, to ask Steam for web access tokens.
@@ -253,6 +256,7 @@ impl Client {
             catalog: AsyncMutex::new(None),
             app_infos: Mutex::new(HashMap::new()),
             native_builds: Mutex::new(HashMap::new()),
+            picked_manifests: Mutex::new(HashMap::new()),
             downloads: Transfers::default(),
             picking: Picking::default(),
             refresh_token,
@@ -598,13 +602,15 @@ impl Client {
         let app = self.app_info(app_id).await?;
         let windows = select_depots(&app, &owned, "windows", language);
         let macos = select_depots(&app, &owned, "macos", language);
-        // Only a game with both builds needs its Mac build's files read: a
-        // Mac-only one's download says why it cannot be installed.
+        // Only a download reads the Mac build's files: the page shows the Mac
+        // build until one found that its game does not run natively.
         let native = macos.is_empty()
             || windows.is_empty()
             || self
-                .runs_natively(&app, &owned, language, &CancelToken::new())
+                .mac_build(&app, &owned, language)
                 .await
+                .ok()
+                .and_then(|build| self.lock_native_builds().get(&build).copied())
                 .unwrap_or(true);
         Ok(GameDetails {
             app_id,
@@ -619,6 +625,7 @@ impl Client {
     pub fn cancel_download(&self) {
         self.picking.cancel();
         self.downloads.cancel();
+        self.lock_picked_manifests().clear();
     }
 
     /// Resolve only a completed installation belonging to this account. PICS is
@@ -770,10 +777,31 @@ impl Client {
         }
     }
 
+    /// The Mac build the account can install: its depots' public manifests.
+    async fn mac_build(
+        &self,
+        app: &AppInfo,
+        owned: &ContentLicenses,
+        language: &str,
+    ) -> Result<MacBuild, ClientError> {
+        let selected = select_depots(app, owned, "macos", language);
+        let sources = self
+            .cached_app_infos(&shared_sources(app, &selected))
+            .await?;
+        let mut manifests = Vec::new();
+        for depot in &selected {
+            if let Some(manifest_id) = public_manifest(app, depot, &sources)? {
+                manifests.push((depot.depot_id, manifest_id));
+            }
+        }
+        Ok((app.app_id, manifests))
+    }
+
     /// Whether the game of the Mac build the account can install runs
     /// natively on Apple silicon, as a launch would start it: its program and
     /// its Steam API library hold arm64 slices. It reads their first bytes
-    /// from the build's depots, once per build.
+    /// from the build's depots, once per build, and keeps the manifests of a
+    /// native build for its installation.
     async fn runs_natively(
         &self,
         app: &AppInfo,
@@ -786,20 +814,14 @@ impl Client {
         else {
             return Ok(false);
         };
+        let build = self.mac_build(app, owned, language).await?;
+        if let Some(native) = self.lock_native_builds().get(&build) {
+            return Ok(*native);
+        }
         let selected = select_depots(app, owned, "macos", language);
         let sources = self
             .cached_app_infos(&shared_sources(app, &selected))
             .await?;
-        let mut manifests = Vec::new();
-        for depot in &selected {
-            if let Some(manifest_id) = public_manifest(app, depot, &sources)? {
-                manifests.push((depot.depot_id, manifest_id));
-            }
-        }
-        let build = (app.app_id, manifests);
-        if let Some(native) = self.lock_native_builds().get(&build) {
-            return Ok(*native);
-        }
         let servers = self.content_servers(app.app_id).await?;
         let mut depots = Vec::new();
         for depot in &selected {
@@ -839,17 +861,31 @@ impl Client {
             depot_files.list(&mut listing, files.len());
             files.push(depot_files);
         }
-        let files = &files;
-        let read =
-            move |(depot, file): (usize, usize), bytes: u64| files[depot].read(file, bytes, cancel);
+        let read = |(depot, file): (usize, usize), bytes: u64| {
+            let files: &Vec<_> = &files;
+            files[depot].read(file, bytes, cancel)
+        };
         let native =
             mac_build::runs_natively(&listing, &executable, &["libsteam_api.dylib"], read).await?;
         self.lock_native_builds().insert(build, native);
+        let mut picked = self.lock_picked_manifests();
+        picked.clear();
+        if native {
+            picked.extend(files.into_iter().map(DepotFiles::into_manifest));
+        }
         Ok(native)
     }
 
     fn lock_native_builds(&self) -> std::sync::MutexGuard<'_, HashMap<MacBuild, bool>> {
         self.native_builds
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+    }
+
+    fn lock_picked_manifests(
+        &self,
+    ) -> std::sync::MutexGuard<'_, HashMap<(u32, u64), CachedManifest>> {
+        self.picked_manifests
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
     }
@@ -1082,9 +1118,16 @@ impl Client {
         let cancel = transfer.cancel_token();
         // The current manifest ID and depot key came from authorized Steam
         // metadata above. Keep one validated snapshot across all CDN requests.
-        let cached_manifest = content
+        let cached_manifest = match content
             .cached_manifest(destination, depot.depot_id, depot.manifest_id, &depot.key)
-            .await?;
+            .await?
+        {
+            Some(cached) => Some(cached),
+            // The manifest the build's pick read, as the CDN served it.
+            None => self
+                .lock_picked_manifests()
+                .remove(&(depot.depot_id, depot.manifest_id)),
+        };
         cancel.check()?;
         // No request code is needed for an already validated cached archive. A
         // miss always gets a fresh code just before the CDN.

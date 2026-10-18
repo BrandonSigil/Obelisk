@@ -1075,8 +1075,8 @@ extension SteamGame: Identifiable {
 }
 
 extension SteamGameDetails {
-    /// The build a download installs: the Mac build when its game runs
-    /// natively on Apple silicon, else the Windows build.
+    /// The build the page shows: the Mac build, unless a download found that
+    /// its game does not run natively. The download picks its own.
     var preferredPlatform: String { macos ? SteamGames.nativePlatform : "windows" }
 
     /// What Steam can install of `game` for the account. Steam picks the

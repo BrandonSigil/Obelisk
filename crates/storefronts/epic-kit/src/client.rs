@@ -54,12 +54,12 @@ pub struct Game {
     pub metadata: serde_json::Value,
 }
 
-/// What a game's page adds to its library entry: the build a download
-/// installs, and its size.
+/// What a game's page adds to its library entry: the build it shows before
+/// any download, and its size.
 #[derive(Clone, Debug, Default)]
 pub struct GameDetails {
-    /// `Mac` or `Windows`, as `Client::platform` picks it; unknown when Epic
-    /// could not tell.
+    /// `Mac` or `Windows`: the Mac build, unless a download found that its
+    /// game does not run natively. Unknown when Epic could not tell.
     pub platform: Option<String>,
     /// Unknown when Epic serves no manifest of the build.
     pub installation_bytes: Option<u64>,
@@ -73,6 +73,8 @@ pub struct Client {
     social: crate::social::SocialService,
     installation_sizes: crate::details::InstallationSizes,
     native_builds: crate::details::NativeBuilds,
+    /// What the last build picked read of its manifest, for its download.
+    picked_manifest: crate::details::PickedManifest,
     picking: Picking,
 }
 
@@ -163,45 +165,42 @@ impl Client {
             .await
     }
 
-    /// The build `download` installs when the game names no platform, as
-    /// `platform` picks it, and its size.
+    /// The build the game's page shows before any download, and its size:
+    /// the Mac build, unless a download found that its game does not run
+    /// natively. Only `platform` reads the build's files.
     pub async fn game_details(
         &self,
         namespace: &str,
         catalog_item_id: &str,
         app_name: &str,
     ) -> Result<GameDetails, EpicError> {
-        let platform = match self
-            .pick_platform(namespace, catalog_item_id, app_name, &CancelToken::new())
-            .await
-        {
-            Ok(platform) => platform,
-            Err(EpicError::Unauthorized) => return Err(EpicError::Unauthorized),
-            Err(_) => return Ok(GameDetails::default()),
-        };
-        let size = self
+        validate_identity(namespace, catalog_item_id, app_name, "Mac")?;
+        let shown = self
             .with_access_token(|token| async move {
-                let size = crate::details::installation_size(
+                let shown = crate::details::shown_build(
                     &self.api,
                     &token,
                     namespace,
                     catalog_item_id,
                     app_name,
-                    platform,
+                    &self.native_builds,
                     &self.installation_sizes,
                 )
                 .await;
                 // Re-raise so the funnel refreshes the token once; the funnel
                 // also rejects the result if the session went away meanwhile.
-                match size {
+                match shown {
                     Err(EpicError::Unauthorized) => Err(EpicError::Unauthorized),
-                    size => Ok(size.ok()),
+                    shown => Ok(shown.ok()),
                 }
             })
             .await?;
-        Ok(GameDetails {
-            platform: Some(platform.into()),
-            installation_bytes: size,
+        Ok(match shown {
+            Some((platform, size)) => GameDetails {
+                platform: Some(platform.into()),
+                installation_bytes: size,
+            },
+            None => GameDetails::default(),
         })
     }
 
@@ -239,6 +238,7 @@ impl Client {
                 catalog_item_id,
                 app_name,
                 &self.native_builds,
+                &self.picked_manifest,
                 cancel,
             )
             .await
@@ -267,6 +267,7 @@ impl Client {
             social,
             installation_sizes: Default::default(),
             native_builds: Default::default(),
+            picked_manifest: Default::default(),
             picking: Picking::default(),
         }
     }

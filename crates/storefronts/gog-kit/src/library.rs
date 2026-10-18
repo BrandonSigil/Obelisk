@@ -93,12 +93,12 @@ impl GameInfo {
     }
 }
 
-/// What a game's page adds to its library entry: the build a download
-/// installs, and its size.
+/// What a game's page adds to its library entry: the build it shows before
+/// any download, and its size.
 #[derive(Clone, Debug, Default)]
 pub struct GameDetails {
-    /// `macos` or `windows`, as `Client::platform` picks it; unknown when GOG
-    /// could not tell.
+    /// `macos` or `windows`: the Mac build, unless a download found that its
+    /// game does not run natively. Unknown when GOG could not tell.
     pub platform: Option<String>,
     /// Unknown when GOG serves no build Obelisk installs.
     pub installation_bytes: Option<u64>,

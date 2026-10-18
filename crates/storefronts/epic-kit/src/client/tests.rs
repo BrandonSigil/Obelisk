@@ -367,7 +367,6 @@ async fn game_details_name_the_build_a_download_installs_whose_manifest_may_be_u
     let mock = Mock::new(vec![
         reply(MANIFEST_PATH, 404, json!({})),
         reply(WINDOWS_MANIFEST_PATH, 200, live_asset("windows.manifest")),
-        reply(WINDOWS_MANIFEST_PATH, 200, live_asset("windows.manifest")),
         reply("/windows.manifest", 404, json!({})),
     ]);
     let details = mock
@@ -379,7 +378,7 @@ async fn game_details_name_the_build_a_download_installs_whose_manifest_may_be_u
     assert_eq!(details.installation_bytes, None);
     assert_eq!(
         mock.requests().len(),
-        4,
+        3,
         "the library already read every playtime"
     );
     assert!(
@@ -421,6 +420,45 @@ fn mac_build_without_program() -> Vec<Reply> {
             }),
         ),
     ]
+}
+
+#[tokio::test]
+async fn a_game_s_page_shows_its_mac_build_until_a_download_found_it_is_not_native() {
+    use sha1::{Digest, Sha1};
+    // A Mac build without its program, whose manifest the asset's hash names.
+    let manifest = mac_build_without_program().remove(1).body;
+    let hash: String = Sha1::digest(manifest.as_bytes())
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    let mut asset = live_asset("mac.manifest");
+    asset["elements"][0]["hash"] = json!(hash);
+    let mut found = reply("/mac.manifest", 200, Value::Null);
+    found.body = manifest;
+    let mock = Mock::new(vec![
+        // The page: both builds, then the Mac build's size, unknown here.
+        reply(MANIFEST_PATH, 200, asset.clone()),
+        reply(WINDOWS_MANIFEST_PATH, 200, live_asset("windows.manifest")),
+        reply("/mac.manifest", 404, json!({})),
+        // The download's pick reads the Mac build's manifest.
+        reply(MANIFEST_PATH, 200, asset.clone()),
+        reply(WINDOWS_MANIFEST_PATH, 200, live_asset("windows.manifest")),
+        found,
+        // The page again.
+        reply(MANIFEST_PATH, 200, asset),
+        reply(WINDOWS_MANIFEST_PATH, 200, live_asset("windows.manifest")),
+        reply("/windows.manifest", 404, json!({})),
+    ]);
+    let client = mock.client(false);
+    let shown = client.game_details("space", "base", "game").await.unwrap();
+    assert_eq!(shown.platform.as_deref(), Some("Mac"));
+    assert_eq!(
+        client.platform("space", "base", "game").await.unwrap(),
+        "Windows"
+    );
+    let shown = client.game_details("space", "base", "game").await.unwrap();
+    assert_eq!(shown.platform.as_deref(), Some("Windows"));
+    assert_eq!(mock.requests().len(), 9);
 }
 
 #[tokio::test]

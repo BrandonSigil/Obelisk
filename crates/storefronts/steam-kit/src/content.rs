@@ -102,7 +102,8 @@ pub struct DepotFiles<'a> {
     mirrors: Mirrors<'a>,
     depot_id: u32,
     depot_key: [u8; 32],
-    manifest: Manifest,
+    manifest: Arc<Manifest>,
+    archive: Vec<u8>,
 }
 
 /// Grants the CDN authorization a server may require before serving a depot.
@@ -219,11 +220,11 @@ impl ContentClient {
             })
             .await?;
         let key = source.depot_key;
-        let manifest = cancel
+        let (manifest, archive) = cancel
             .spawn_blocking(move || {
                 let manifest = parse_manifest(&unpack_zip(&zipped, MAX_MANIFEST_BYTES)?, &key)?;
                 validate_manifest_files(&manifest.files)?;
-                Ok::<_, ContentError>(manifest)
+                Ok::<_, ContentError>((manifest, zipped))
             })
             .await
             .map_err(|_| invalid("backend.steam.content.manifestParseInterrupted"))??;
@@ -235,7 +236,8 @@ impl ContentClient {
             mirrors,
             depot_id: source.depot_id,
             depot_key: key,
-            manifest,
+            manifest: Arc::new(manifest),
+            archive,
         })
     }
 
@@ -330,7 +332,7 @@ impl ContentClient {
         // A cached manifest was validated when it was loaded; only a fresh
         // download must be checked in full before any installation file exists.
         let (manifest, archive) = if let Some(cached) = cached {
-            (cached.manifest, None)
+            (cached.manifest, cached.archive)
         } else {
             let manifest_path = manifest_path(plan.depot_id, plan.manifest_id, plan.request_code);
             let reporter = &reporter;
@@ -501,6 +503,17 @@ impl ContentClient {
 }
 
 impl DepotFiles<'_> {
+    /// The checked manifest, for the installation of the depot to start from
+    /// instead of fetching it again.
+    pub fn into_manifest(self) -> ((u32, u64), CachedManifest) {
+        let identity = (self.depot_id, self.manifest.manifest_id);
+        let manifest = CachedManifest {
+            manifest: self.manifest,
+            archive: Some(self.archive),
+        };
+        (identity, manifest)
+    }
+
     /// Adds the depot's files and links to `listing`, each file named by
     /// `depot` and its place in the manifest. Steam keeps a link's target
     /// from the link's own folder.

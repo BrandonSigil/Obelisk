@@ -784,6 +784,54 @@ async fn a_depot_s_files_are_listed_and_read_from_their_first_chunks_only() {
 }
 
 #[tokio::test]
+async fn a_manifest_read_before_its_installation_is_installed_from_and_cached() {
+    let directory = tempfile::tempdir().unwrap();
+    let pieces: &[&[u8]] = &[b"game"];
+    let fixture = CdnFixture::new(routes(file("Game.app/Contents/MacOS/Game", pieces), pieces));
+    let client = fixture.client();
+    let mut plan = plan(directory.path());
+    let source = DepotSource {
+        depot_id: plan.depot_id,
+        manifest_id: plan.manifest_id,
+        request_code: plan.request_code,
+        depot_key: plan.depot_key,
+        servers: &plan.servers,
+        authorization: None,
+    };
+    let (identity, manifest) = client
+        .depot_files(source, &CancelToken::new())
+        .await
+        .unwrap()
+        .into_manifest();
+    assert_eq!(identity, (42, 99));
+    plan.cached_manifest = Some(manifest);
+    client
+        .download_depot(&plan, &CancelToken::new(), |_| {})
+        .await
+        .unwrap();
+    let manifests = fixture
+        .requests
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|path| path.contains("/manifest/"))
+        .count();
+    assert_eq!(manifests, 1, "the installation fetches no manifest again");
+    assert_eq!(
+        fs::read(directory.path().join("Game.app/Contents/MacOS/Game")).unwrap(),
+        b"game"
+    );
+    // Its archive is cached as a downloaded manifest's is.
+    assert!(
+        client
+            .cached_manifest(directory.path(), 42, 99, &KEY)
+            .await
+            .unwrap()
+            .is_some()
+    );
+}
+
+#[tokio::test]
 async fn an_installed_depot_names_the_install_scripts_its_manifest_flags() {
     let directory = tempfile::tempdir().unwrap();
     let pieces: &[&[u8]] = &[b"\"installscript\" { }"];

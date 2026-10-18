@@ -82,6 +82,7 @@ impl Client {
     pub fn cancel_download(&self) {
         self.picking.cancel();
         self.downloads.cancel();
+        self.picked_manifest.clear();
     }
 
     /// Whether Epic's live build of the game differs from the one installed
@@ -263,6 +264,7 @@ impl Client {
                     app_name,
                     platform,
                     Some(cache_directory),
+                    &self.picked_manifest,
                 )
                 .await
             })

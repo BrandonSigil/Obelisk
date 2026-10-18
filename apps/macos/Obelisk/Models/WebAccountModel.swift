@@ -7,8 +7,8 @@ protocol WebGame: Identifiable, Equatable, Sendable where ID == String {
     var title: String { get }
     var macos: Bool { get }
     var windows: Bool { get }
-    /// How the storefront names the build the game shows before its page
-    /// tells the one a download installs: the Mac build when there is one.
+    /// How the storefront names the build the game shows before its page's
+    /// details load: the Mac build when there is one.
     var preferredPlatform: String { get }
     /// What the storefront can install of the game; nil when it ships no build.
     var offer: GameOffer? { get }
@@ -18,7 +18,7 @@ protocol WebGame: Identifiable, Equatable, Sendable where ID == String {
 }
 
 /// What a game's page reads besides its library entry, starting with the
-/// build a download installs.
+/// build it shows before any download.
 protocol WebGameDetails: Equatable, Sendable {
     /// How the storefront names that build; nil when it could not tell.
     var platform: String? { get }

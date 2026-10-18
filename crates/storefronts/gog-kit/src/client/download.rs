@@ -81,6 +81,13 @@ pub(super) type Downloads = Transfers<TransferProgress>;
 #[derive(Default)]
 pub(super) struct NativeBuilds(Mutex<HashMap<(String, String, String), bool>>);
 
+/// A build of a product, in a language: what a Mac build's facts are kept by.
+type BuildKey = (String, String, String);
+
+/// The depot items of the Mac build the last pick found native, which the
+/// download of that build starts from.
+pub(super) type PickedBuild = obelisk_core::transfer::PickedBuild<BuildKey, Installed>;
+
 impl NativeBuilds {
     fn get(&self, build: &(String, String, String)) -> Option<bool> {
         self.0
@@ -147,12 +154,23 @@ async fn current_build(
     platform: &str,
 ) -> Result<(BuildManifest, String), GogError> {
     let build = listed_build(api, product_id, platform).await?;
-    let link = content::checked_url(&build.link)?;
-    let manifest: BuildManifest = document(api, link).await?;
+    Ok((
+        build_manifest(api, product_id, &build).await?,
+        build.version_name,
+    ))
+}
+
+/// The manifest of `product_id`'s listed `build`.
+async fn build_manifest(
+    api: &Api,
+    product_id: &str,
+    build: &Build,
+) -> Result<BuildManifest, GogError> {
+    let manifest: BuildManifest = document(api, content::checked_url(&build.link)?).await?;
     if manifest.base_product_id != product_id {
         return Err(GogError::Protocol);
     }
-    Ok((manifest, build.version_name))
+    Ok(manifest)
 }
 
 /// The build Obelisk installs of `product_id` for `platform`, as GOG lists
@@ -324,6 +342,7 @@ impl Client {
     pub fn cancel_download(&self) {
         self.picking.cancel();
         self.downloads.cancel();
+        self.picked_build.clear();
     }
 
     /// The build a download of the game installs, with the depots of
@@ -343,7 +362,7 @@ impl Client {
             .await
     }
 
-    pub(super) async fn pick_platform(
+    async fn pick_platform(
         &self,
         product_id: &str,
         language: &str,
@@ -373,10 +392,51 @@ impl Client {
         }
     }
 
+    /// The build the game's page shows before any download, and its size
+    /// with the depots of `language`: the Mac build, unless a download found
+    /// that its game does not run natively and GOG has a Windows build of
+    /// it. None of the build's files is read.
+    pub(super) async fn shown_build(
+        &self,
+        access_token: &str,
+        product_id: &str,
+        language: &str,
+    ) -> Result<(&'static str, Option<u64>), GogError> {
+        let api = &self.tokens.api;
+        let (mac, windows) = tokio::try_join!(
+            present_build(api, product_id, "osx"),
+            present_build(api, product_id, "windows"),
+        )?;
+        let not_native = mac.as_ref().is_some_and(|build| {
+            !build.build_id.is_empty()
+                && self.native_builds.get(&(
+                    product_id.to_owned(),
+                    build.build_id.clone(),
+                    language.to_owned(),
+                )) == Some(false)
+        });
+        let (platform, build) = match (mac, windows) {
+            (Some(_), Some(windows)) if not_native => (WINDOWS, windows),
+            (Some(mac), _) => (MACOS, mac),
+            (None, Some(windows)) => (WINDOWS, windows),
+            (None, None) => return Err(GogError::NoBuild),
+        };
+        let size = match self
+            .build_size(access_token, product_id, &build, language)
+            .await
+        {
+            Ok(size) => Some(size),
+            Err(GogError::Unauthorized) => return Err(GogError::Unauthorized),
+            Err(_) => None,
+        };
+        Ok((platform, size))
+    }
+
     /// Whether the game of the Mac build `build` runs natively on Apple
     /// silicon: the program its primary play task names holds an arm64
     /// slice. It reads the build's manifests, then the first bytes of a few
-    /// of its files. A build Obelisk cannot install does not.
+    /// of its files. A build Obelisk cannot install does not. The depot
+    /// items of a native build are kept for its download.
     async fn runs_natively(
         &self,
         product_id: &str,
@@ -395,10 +455,7 @@ impl Client {
             return Ok(native);
         }
         let api = &self.tokens.api;
-        let manifest: BuildManifest = document(api, content::checked_url(&build.link)?).await?;
-        if manifest.base_product_id != product_id {
-            return Err(GogError::Protocol);
-        }
+        let manifest = build_manifest(api, product_id, build).await?;
         let owned = self
             .with_access_token(|token| async move { owned(api, &token).await })
             .await?;
@@ -416,8 +473,13 @@ impl Client {
             }
             Err(_) => false,
         };
-        if !build.build_id.is_empty() {
-            self.native_builds.insert(key, native);
+        if build.build_id.is_empty() {
+            return Ok(native);
+        }
+        self.native_builds.insert(key.clone(), native);
+        match native {
+            true => self.picked_build.put(key, installed),
+            false => self.picked_build.clear(),
         }
         Ok(native)
     }
@@ -463,17 +525,17 @@ impl Client {
         mac_build::runs_natively(&listing, &from_root(&program), &[], read).await
     }
 
-    /// The size of the build an installation in `language` holds.
-    pub(super) async fn installation_size(
+    /// The size of the listed `build` an installation in `language` holds.
+    async fn build_size(
         &self,
         access_token: &str,
         product_id: &str,
-        platform: &str,
+        build: &Build,
         language: &str,
     ) -> Result<u64, GogError> {
         let api = &self.tokens.api;
-        let ((manifest, _), owned) = tokio::try_join!(
-            current_build(api, product_id, platform),
+        let (manifest, owned) = tokio::try_join!(
+            build_manifest(api, product_id, build),
             owned(api, access_token),
         )?;
         let (_, depots) = owned_depots(&manifest, &owned, language)?;
@@ -567,11 +629,25 @@ impl Client {
         )?;
         let (products, depots) = owned_depots(&manifest, &owned, language)?;
         let content_root = manifest.content_root()?;
-        let mut installed = Installed::default();
-        let depots = depots
-            .iter()
-            .map(|depot| (depot.manifest.as_str(), depot.product_id.as_str()));
-        add_depots(api, &mut installed, &content_root, "meta", depots).await?;
+        // The depot items the build's pick read, when it is that build.
+        let picked = (!manifest.build_id.is_empty()).then(|| {
+            self.picked_build.take(&(
+                product_id.to_owned(),
+                manifest.build_id.clone(),
+                language.to_owned(),
+            ))
+        });
+        let mut installed = match picked.flatten() {
+            Some(installed) => installed,
+            None => {
+                let mut installed = Installed::default();
+                let depots = depots
+                    .iter()
+                    .map(|depot| (depot.manifest.as_str(), depot.product_id.as_str()));
+                add_depots(api, &mut installed, &content_root, "meta", depots).await?;
+                installed
+            }
+        };
         let dependencies = if platform == "windows" && !manifest.dependencies.is_empty() {
             self.add_dependencies(&manifest, &content_root, &mut installed)
                 .await?

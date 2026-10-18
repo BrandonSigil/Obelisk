@@ -20,6 +20,9 @@ use super::{
 #[derive(Clone)]
 pub struct CachedManifest {
     pub(super) manifest: Arc<Manifest>,
+    /// The CDN's archive of a manifest fetched before the installation,
+    /// which the installation keeps in its cache; none for one read from it.
+    pub(super) archive: Option<Vec<u8>>,
 }
 
 pub(super) fn load(
@@ -44,6 +47,7 @@ pub(super) fn load(
         validate_manifest_files(&manifest.files)?;
         Ok(CachedManifest {
             manifest: Arc::new(manifest),
+            archive: None,
         })
     })();
     match validated {

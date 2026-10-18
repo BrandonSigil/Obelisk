@@ -136,8 +136,8 @@ impl From<client::Achievement> for LibraryAchievement {
     }
 }
 
-/// What a game's page adds to its library entry: the build a download
-/// installs, and its size.
+/// What a game's page adds to its library entry: the build it shows before
+/// any download, and its size.
 #[derive(Clone, Debug, uniffi::Record)]
 pub struct EpicGameDetails {
     /// `Mac` or `Windows`; unknown when Epic could not tell.

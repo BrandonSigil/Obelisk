@@ -2,10 +2,7 @@
 //! release the session lock so disconnect can invalidate them promptly.
 use std::{future::Future, sync::Arc, time::Instant};
 
-use obelisk_core::{
-    transfer::{CancelToken, Picking},
-    watch::Revisions,
-};
+use obelisk_core::{transfer::Picking, watch::Revisions};
 use tokio::sync::Mutex;
 
 use crate::{
@@ -46,6 +43,8 @@ pub struct Client {
     /// Whether each Mac build's game runs natively on Apple silicon, by
     /// product, build and language.
     native_builds: download::NativeBuilds,
+    /// What the last build picked read of its depots, for its download.
+    picked_build: download::PickedBuild,
     picking: Picking,
 }
 
@@ -79,6 +78,7 @@ impl Client {
             },
             avatar_url: profile.avatar_url,
             native_builds: Default::default(),
+            picked_build: Default::default(),
             picking: Picking::default(),
         })
     }
@@ -114,38 +114,33 @@ impl Client {
         .await
     }
 
-    /// What a game's page adds to its library entry: the build a download
-    /// installs with the depots of `language`, such as `fr-FR`, as
-    /// `platform` picks it, and its size.
+    /// What a game's page adds to its library entry, with the depots of
+    /// `language`, such as `fr-FR`: the build it shows before any download,
+    /// the Mac build unless a download found that its game does not run
+    /// natively, and its size. Only `platform` reads the build's files.
     pub async fn game_details(
         &self,
         product_id: &str,
         language: &str,
     ) -> Result<GameDetails, GogError> {
-        let platform = match self
-            .pick_platform(product_id, language, &CancelToken::new())
-            .await
-        {
-            Ok(platform) => platform,
-            Err(GogError::Unauthorized) => return Err(GogError::Unauthorized),
-            Err(_) => return Ok(GameDetails::default()),
-        };
-        let content_platform = content_platform(platform)?;
-        let size = self
+        if !valid_product_id(product_id) {
+            return Err(GogError::Protocol);
+        }
+        let shown = self
             .with_access_token(|token| async move {
-                let size = self
-                    .installation_size(&token, product_id, content_platform, language)
-                    .await;
                 // Re-raise so the funnel refreshes the token once.
-                match size {
+                match self.shown_build(&token, product_id, language).await {
                     Err(GogError::Unauthorized) => Err(GogError::Unauthorized),
-                    size => Ok(size.ok()),
+                    shown => Ok(shown.ok()),
                 }
             })
             .await?;
-        Ok(GameDetails {
-            platform: Some(platform.into()),
-            installation_bytes: size,
+        Ok(match shown {
+            Some((platform, size)) => GameDetails {
+                platform: Some(platform.into()),
+                installation_bytes: size,
+            },
+            None => GameDetails::default(),
         })
     }
 
