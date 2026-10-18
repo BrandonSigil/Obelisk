@@ -82,7 +82,7 @@ final class SteamModel {
     @ObservationIgnored private let makeInstallations: MakeInstallations
     let cloud: SteamCloudModel
     let rosetta: SteamRosettaModel
-    let libraryPlatforms = SteamLibraryPlatforms()
+    let libraryArtwork = SteamLibraryArtwork()
     /// When the account got each game and its achievements' progress, by app
     /// ID, which load after the library.
     let libraryRecords = LibraryRecords<UInt32>()
@@ -249,11 +249,6 @@ final class SteamModel {
         return [game.lastPlayedOnSteam, launched].compactMap { $0 }.max()
     }
 
-    /// Nil until Steam told the game's platforms.
-    func platform(of game: SteamGame) -> GamePlatform? {
-        libraryPlatforms.platforms[game.appId].flatMap(GamePlatform.preferred(platforms:))
-    }
-
     /// Nil until Steam told it: the library date and achievements load
     /// after the library.
     func libraryValue(of game: SteamGame, for sort: StorefrontLibrarySort) -> Double? {
@@ -266,17 +261,10 @@ final class SteamModel {
 
     var libraryRevision: Int { libraryChanges &+ gameSessions.history.revision }
 
-    var filterRevision: Int { libraryPlatforms.revision }
-
-    var pendingMetadata: String? {
-        filter == .macOS && libraryPlatforms.isLoading ? L10n.string("ui.filter.loading_platforms") : nil
-    }
-
-    /// A game Steam did not tell an order's value of goes after the others,
-    /// as one without it: only the macOS filter tells of a failure.
-    var missingMetadata: String? {
-        filter == .macOS && libraryPlatforms.hasFailures ? L10n.string("ui.filter.platforms_unavailable") : nil
-    }
+    /// Steam's orders show what loaded so far: a game whose value Steam did
+    /// not tell goes after the others, as one without it.
+    var pendingMetadata: String? { nil }
+    var missingMetadata: String? { nil }
 
     /// Loads what Steam tells apart from the library, once it loaded through
     /// a connection: when the account got each game, from its licenses, and
@@ -336,7 +324,7 @@ final class SteamModel {
             Dictionary(cached.compactMap { entry in value(entry).map { (entry.game.appId, $0) } },
                        uniquingKeysWith: { first, _ in first })
         }
-        libraryPlatforms.show(platforms: byApp(\.platforms), artwork: byApp(\.artwork))
+        libraryArtwork.show(byApp(\.artwork))
         libraryRecords.show(byApp { $0.addedAt.map { Double($0) } }, for: .dateAdded)
         libraryRecords.show(byApp(\.achievementShare), for: .achievements)
     }
@@ -347,7 +335,7 @@ final class SteamModel {
         guard cachedAccount != nil else { return }
         cachedAccount = nil
         games = []
-        libraryPlatforms.reset()
+        libraryArtwork.reset()
         libraryRecords.reset()
     }
 
@@ -483,9 +471,9 @@ final class SteamModel {
             session?.shutdown()
             // The cached library's platforms show until the reload replaces them.
             if cachedAccount == credentials.steamId {
-                libraryPlatforms.cancel()
+                libraryArtwork.cancel()
             } else {
-                libraryPlatforms.reset()
+                libraryArtwork.reset()
                 libraryRecords.reset()
             }
             cachedAccount = nil
@@ -606,7 +594,7 @@ final class SteamModel {
     private func reloadGames(_ session: any SteamSessionProtocol, generation current: Int) async {
         let transport = self.transport
         guard current == generation && transport != nil && !Task.isCancelled else { return }
-        libraryPlatforms.cancel()
+        libraryArtwork.cancel()
         isLoadingGames = true
         do {
             let loaded = try await session.games()
@@ -616,7 +604,7 @@ final class SteamModel {
                 selectedGame = updated
             }
             isLoadingGames = false
-            libraryPlatforms.load(appIds: loaded.map(\.appId), language: language, session: session)
+            libraryArtwork.load(appIds: loaded.map(\.appId), language: language, session: session)
             loadLibraryRecords()
         } catch {
             guard current == generation && self.transport == transport else { return }
@@ -795,7 +783,7 @@ final class SteamModel {
             guard snapshot.transport != transport else { return }
             let reconnected = snapshot.transport
             transport = reconnected
-            libraryPlatforms.cancel()
+            libraryArtwork.cancel()
             chat.connect(session, account: account)
             invitations.connect(session, account: account)
             Task { [weak self] in
@@ -807,7 +795,7 @@ final class SteamModel {
         case .disconnected, .unreachable, .authenticationRequired, .stopped:
             guard transport != nil else { return }
             transport = nil
-            libraryPlatforms.cancel()
+            libraryArtwork.cancel()
             chat.suspend()
             invitations.suspend()
         }
@@ -866,7 +854,7 @@ final class SteamModel {
             gameSessions.history.forget(account: account, in: SteamGames.self)
         }
         cachedAccount = nil
-        libraryPlatforms.reset()
+        libraryArtwork.reset()
         libraryRecords.reset()
         rosetta.connect(accountId: nil)
         installations.signedOut()

@@ -5907,57 +5907,6 @@
         }
       }
     },
-    "ui.filter.loading_platforms": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Looking for native macOS versions…"
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Recherche des versions macOS natives…"
-          }
-        }
-      }
-    },
-    "ui.filter.macos": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Native macOS"
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "macOS natif"
-          }
-        }
-      }
-    },
-    "ui.filter.platforms_unavailable": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Some games could not be checked for a native macOS version."
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Impossible de vérifier si certains jeux ont une version macOS native."
-          }
-        }
-      }
-    },
     "ui.filter.played": {
       "extractionState": "manual",
       "localizations": {

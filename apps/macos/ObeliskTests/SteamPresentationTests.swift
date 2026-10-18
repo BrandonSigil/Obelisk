@@ -145,7 +145,7 @@ final class SteamPresentationTests: XCTestCase {
     }
 
     @MainActor
-    func testLibraryLoadsAllPlatformsInBackgroundBeforeAnyGameIsOpened() async throws {
+    func testLibraryLoadsAllArtworkInBackgroundBeforeAnyGameIsOpened() async throws {
         let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
         let details = FixtureResponses<DetailsRequest, SteamGameDetails>()
@@ -159,9 +159,8 @@ final class SteamPresentationTests: XCTestCase {
         let appIDs = fixtureGames.map(\.appId).sorted()
         try await eventually { await platforms.wasRequested(appIDs) }
         XCTAssertEqual(model.filteredGames.map(\.appId), fixtureGames.map(\.appId))
-        XCTAssertFalse(model.isLoadingGames, "Platform metadata must not block the library")
-        XCTAssertTrue(model.libraryPlatforms.isLoading)
-        XCTAssertTrue(model.libraryPlatforms.platforms.isEmpty)
+        XCTAssertFalse(model.isLoadingGames, "App info must not block the library")
+        XCTAssertTrue(model.libraryArtwork.games.isEmpty)
         XCTAssertNil(model.selectedGame)
         XCTAssertNil(model.details)
         for appID in appIDs {
@@ -169,14 +168,14 @@ final class SteamPresentationTests: XCTestCase {
             XCTAssertEqual(requests, 0, "Library metadata must not open game details")
         }
 
+        let portal = SteamGameArtwork(cover: "620/library_600x900.jpg", hero: nil, logo: nil, header: nil)
         await platforms.release(appIDs, value: [
-            SteamGamePlatforms(appId: 620, platforms: ["macos", "windows"]),
+            SteamGamePlatforms(appId: 620, platforms: ["macos", "windows"], artwork: portal),
             SteamGamePlatforms(appId: 570, platforms: ["windows"]),
             SteamGamePlatforms(appId: 440, platforms: ["linux"])
         ])
-        try await eventually { !model.libraryPlatforms.isLoading }
-        XCTAssertEqual(model.libraryPlatforms.platforms, [620: ["macos", "windows"], 570: ["windows"], 440: ["linux"]])
-        XCTAssertFalse(model.libraryPlatforms.hasFailures)
+        try await eventually { !model.libraryArtwork.games.isEmpty }
+        XCTAssertEqual(model.libraryArtwork.games, [620: portal])
         let requests = await platforms.numberOfRequests(appIDs)
         XCTAssertEqual(requests, 1)
     }
@@ -421,12 +420,13 @@ final class SteamPresentationTests: XCTestCase {
         let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
         let cached = SteamGame(appId: 620, name: "Portal 2 (cached)", iconHash: "", lastPlayed: 1_789_000_000, playtimeMinutes: 5)
+        let freshArtwork = SteamGameArtwork(cover: "fresh/library_600x900.jpg", hero: nil, logo: nil, header: nil)
         let cache = try LibraryCache.holding(steam: [42: [CachedSteamGame(
             game: cached, platforms: ["macos"], addedAt: 1_300_000_000, achievementShare: 0.5
         )]], in: root)
         let connection = GameSessionGate<FixtureSteamSession>()
         let fixture = FixtureSteamSession(games: fixtureGames, details: FixtureResponses<DetailsRequest, SteamGameDetails>()) { ids in
-            ids.map { SteamGamePlatforms(appId: $0, platforms: ["windows"]) }
+            ids.map { SteamGamePlatforms(appId: $0, platforms: ["windows"], artwork: freshArtwork) }
         }
         let model = SteamModel(directory: root, keychain: FixtureCredentialStore(), connect: { _ in try await connection.wait() },
                                news: { _ in [] }, localeIdentifier: "fr-FR", libraryCache: cache)
@@ -435,16 +435,14 @@ final class SteamPresentationTests: XCTestCase {
         try await eventually { model.showsLibrary }
         XCTAssertFalse(model.isConnected, "The cached library shows before Steam answers")
         XCTAssertEqual(model.games, [cached])
-        XCTAssertEqual(model.libraryPlatforms.platforms[620], ["macos"])
         XCTAssertEqual(model.libraryValue(of: cached, for: .dateAdded), 1_300_000_000)
         XCTAssertEqual(model.libraryValue(of: cached, for: .achievements), 0.5)
         model.sort = .achievements
         XCTAssertNil(model.pendingMetadata, "What the cache knew orders the library before Steam answers")
         await connection.resolve(fixture)
         await start.value
-        try await eventually { model.games == fixtureGames && !model.libraryPlatforms.isLoading }
+        try await eventually { model.games == fixtureGames && model.libraryArtwork.games[620] == freshArtwork }
         XCTAssertTrue(model.showsLibrary)
-        XCTAssertEqual(model.libraryPlatforms.platforms[620], ["windows"])
 
         model.signOut()
         XCTAssertTrue(cache.steamLibrary(steamId: 42, language: "english").isEmpty, "Signing out forgets the account's library")

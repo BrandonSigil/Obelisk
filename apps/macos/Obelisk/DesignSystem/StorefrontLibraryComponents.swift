@@ -17,7 +17,7 @@ enum ImageDecoding {
 }
 
 enum StorefrontLibraryFilter: String, CaseIterable, Identifiable, Sendable {
-    case all, installed, played, macOS
+    case all, installed, played
 
     var id: String { rawValue }
 
@@ -26,7 +26,6 @@ enum StorefrontLibraryFilter: String, CaseIterable, Identifiable, Sendable {
         case .all: L10n.string("ui.filter.all")
         case .installed: L10n.string("ui.filter.installed")
         case .played: L10n.string("ui.filter.played")
-        case .macOS: L10n.string("ui.filter.macos")
         }
     }
 }
@@ -85,7 +84,6 @@ final class LibraryOrdering<Game: Identifiable> where Game.ID: Comparable {
     }
 
     private var revision: Int?
-    private var filterRevision: Int?
     private var orders: [StorefrontLibrarySort: (inputs: Inputs, games: [Game])] = [:]
     private var narrowed: (criteria: Criteria, games: [Game])?
     /// The library's hero, once read: it may have none.
@@ -97,7 +95,6 @@ final class LibraryOrdering<Game: Identifiable> where Game.ID: Comparable {
         // updating after a search, a filter, an installation or new metadata.
         let games = model.games
         let revision = model.libraryRevision
-        let filterRevision = model.filterRevision
         let filter = model.filter
         let sort = model.sort
         let receipts = filter == .installed || sort == .size ? model.installations.receipts : []
@@ -110,11 +107,6 @@ final class LibraryOrdering<Game: Identifiable> where Game.ID: Comparable {
             installed: installed, inputs: inputs
         )
         keep(revision)
-        // What only a filter reads, such as platforms, never changes an order.
-        if filterRevision != self.filterRevision {
-            self.filterRevision = filterRevision
-            narrowed = nil
-        }
         if let narrowed, narrowed.criteria == criteria { return narrowed.games }
         let ordered: [Game]
         if let order = orders[sort], order.inputs == inputs {
@@ -129,7 +121,6 @@ final class LibraryOrdering<Game: Identifiable> where Game.ID: Comparable {
             case .all: return true
             case .installed: return criteria.installed[game.id] != nil
             case .played: return model.playtime(of: game) != nil || model.lastPlayed(of: game) != nil
-            case .macOS: return model.platform(of: game) == .macOS
             }
         }
         narrowed = (criteria, kept)

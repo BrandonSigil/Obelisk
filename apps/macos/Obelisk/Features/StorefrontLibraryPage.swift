@@ -17,10 +17,6 @@ import SwiftUI
     /// When the account last played the game: on the storefront, or later
     /// from Obelisk.
     func lastPlayed(of game: Game) -> Date?
-    /// The game's Mac build when the storefront ships one, else its Windows
-    /// build, once the storefront told the game's platforms: what the Native
-    /// macOS filter reads. A download picks the build it installs.
-    func platform(of game: Game) -> GamePlatform?
     /// What the storefront told of the game that `sort` orders it by, the
     /// greatest first, such as its release date or its critics' score; nil
     /// when it told nothing. Never asked for the orders every storefront
@@ -32,9 +28,6 @@ import SwiftUI
     func valuesRevision(for sort: StorefrontLibrarySort) -> Int
     /// Changes whenever a game, or what every order reads of one, may have.
     var libraryRevision: Int { get }
-    /// Changes whenever what only a filter reads of the games may have, such
-    /// as their platforms.
-    var filterRevision: Int { get }
     /// Keeps the library's orders between two reads.
     var libraryOrdering: LibraryOrdering<Game> { get }
     var searchText: String { get set }
@@ -67,7 +60,6 @@ import SwiftUI
 extension LibraryStorefront {
     func syncCloud() { installations.syncCloud() }
     var unreadCount: Int { 0 }
-    var filterRevision: Int { 0 }
 
     /// The games the search and the filter keep, in the library's order.
     var filteredGames: [Game] { libraryOrdering.games(of: self) }

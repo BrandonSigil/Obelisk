@@ -17,7 +17,7 @@ final class StorefrontLibraryFilterTests: XCTestCase {
         await model.start()
         defer { model.signOut() }
 
-        XCTAssertEqual(model.availableFilters, [.all, .installed, .played, .macOS])
+        XCTAssertEqual(model.availableFilters, [.all, .installed, .played])
         XCTAssertEqual(model.filteredGames.map(\.appId), [4, 1, 2, 3])
         model.searchText = "  portal  "
         model.filter = .played
@@ -35,44 +35,6 @@ final class StorefrontLibraryFilterTests: XCTestCase {
         model.filter = .all
         model.searchText = "Portal Never"
         XCTAssertEqual(model.filteredGames.map(\.appId), [3])
-    }
-
-    func testSteamMacOSFilterObservesLatePlatformBatchesAfterCachedReads() async throws {
-        let root = try temporaryDirectory()
-        let responses = FilterPlatformResponses()
-        let games = (1...51).map { steamGame(UInt32($0), name: "Game \($0)") }
-        let model = steamModel(root: root, games: games, platforms: { try await responses.request($0) })
-        await model.start()
-        defer { model.signOut() }
-        try await eventually { await responses.requestCount == 1 }
-        model.filter = .macOS
-        model.sort = .name
-
-        XCTAssertTrue(model.filteredGames.isEmpty)
-        let firstChange = expectation(description: "Cached macOS results observe the first platform batch")
-        withObservationTracking {
-            XCTAssertTrue(model.filteredGames.isEmpty)
-        } onChange: {
-            firstChange.fulfill()
-        }
-        await responses.complete(0, macOSAppIDs: [1])
-        try await eventually { await responses.requestCount == 2 }
-        await fulfillment(of: [firstChange], timeout: 1)
-        XCTAssertTrue(model.libraryPlatforms.isLoading)
-        XCTAssertEqual(model.filteredGames.map(\.appId), [1])
-
-        let secondChange = expectation(description: "Cached macOS results observe the next platform batch")
-        withObservationTracking {
-            XCTAssertEqual(model.filteredGames.map(\.appId), [1])
-        } onChange: {
-            secondChange.fulfill()
-        }
-        await responses.complete(1, macOSAppIDs: [51])
-        try await eventually { !model.libraryPlatforms.isLoading }
-        await fulfillment(of: [secondChange], timeout: 1)
-        XCTAssertEqual(model.filteredGames.map(\.appId), [1, 51])
-        model.searchText = "Game 51"
-        XCTAssertEqual(model.filteredGames.map(\.appId), [51])
     }
 
     func testSteamLoadsDatesAndAchievementsWithTheLibrary() async throws {
@@ -157,15 +119,13 @@ final class StorefrontLibraryFilterTests: XCTestCase {
         await model.start()
         defer { model.signOut() }
 
-        XCTAssertEqual(model.availableFilters, [.all, .installed, .played, .macOS], "Epic's playtimes tell which games were played")
+        XCTAssertEqual(model.availableFilters, [.all, .installed, .played], "Epic's playtimes tell which games were played")
         XCTAssertEqual(model.filteredGames.count, 5)
         model.searchText = "  etoiles  "
         XCTAssertEqual(model.filteredGames.map(\.libraryID), [otherNamespace, installedMac, availableMac, installedWindows].map(\.libraryID))
 
         model.filter = .installed
         XCTAssertEqual(model.filteredGames.map(\.libraryID), [installedMac, installedWindows].map(\.libraryID))
-        model.filter = .macOS
-        XCTAssertEqual(model.filteredGames.map(\.libraryID), [installedMac, availableMac, installedWindows].map(\.libraryID))
         model.searchText = "Unknown"
         XCTAssertTrue(model.filteredGames.isEmpty)
         model.filter = .all
@@ -173,9 +133,11 @@ final class StorefrontLibraryFilterTests: XCTestCase {
     }
 
     func testEpicSignOutResetsFilterAndCachedLibrary() async throws {
-        let model = epicModel(root: try temporaryDirectory(), games: [epicGame("native", title: "Native", macOS: true)])
+        let root = try temporaryDirectory()
+        let native = epicGame("native", title: "Native", macOS: true)
+        let model = epicModel(root: root, games: [native], receipts: epicReceipts([(native, "macos")], root: root))
         await model.start()
-        model.filter = .macOS
+        model.filter = .installed
         XCTAssertEqual(model.filteredGames.map(\.appName), ["native"])
 
         model.signOut()
@@ -198,9 +160,8 @@ final class StorefrontLibraryFilterTests: XCTestCase {
     }
 
     private func steamModel(root: URL, games: [SteamGame], receipts: [InstallationReceipt<UInt32>] = [],
-                            platforms: @escaping @Sendable ([UInt32]) async throws -> [SteamGamePlatforms] = { _ in [] },
                             records: FilterRecordRequests = FilterRecordRequests()) -> SteamModel {
-        let session = FilterSteamSession(games: games, platforms: platforms, records: records)
+        let session = FilterSteamSession(games: games, platforms: { _ in [] }, records: records)
         return SteamModel(directory: root, keychain: FilterSteamCredentials(), connect: { _ in session }, news: { _ in [] },
                           beginLogin: { _ in throw FilterFixtureFailure.unexpectedOperation },
                           gameSessions: SteamGameSessions(),
@@ -297,24 +258,3 @@ private actor FilterRecordRequests {
     }
 }
 
-private actor FilterPlatformResponses {
-    private var requests: [[UInt32]] = []
-    private var pending: [Int: CheckedContinuation<[SteamGamePlatforms], any Error>] = [:]
-    var requestCount: Int { requests.count }
-
-    func request(_ appIDs: [UInt32]) async throws -> [SteamGamePlatforms] {
-        let index = requests.count
-        requests.append(appIDs)
-        return try await withCheckedThrowingContinuation { pending[index] = $0 }
-    }
-
-    func complete(_ index: Int, macOSAppIDs: Set<UInt32>) {
-        guard let continuation = pending.removeValue(forKey: index) else {
-            XCTFail("No pending platform batch \(index)")
-            return
-        }
-        continuation.resume(returning: requests[index].map {
-            SteamGamePlatforms(appId: $0, platforms: macOSAppIDs.contains($0) ? ["macos", "windows"] : ["windows"])
-        })
-    }
-}

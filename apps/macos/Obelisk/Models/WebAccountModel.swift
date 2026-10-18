@@ -186,7 +186,7 @@ final class WebAccountModel<Store: WebStorefront> {
     }
     var searchText = ""
     var filter: StorefrontLibraryFilter = .all
-    var availableFilters: [StorefrontLibraryFilter] { [.all, .installed, .played, .macOS] }
+    var availableFilters: [StorefrontLibraryFilter] { StorefrontLibraryFilter.allCases }
     var sort: StorefrontLibrarySort = .name
     var availableSorts: [StorefrontLibrarySort] { StorefrontLibrarySort.allCases }
     /// The share of each game's achievements the account unlocked, by game
@@ -290,8 +290,6 @@ final class WebAccountModel<Store: WebStorefront> {
             gameSessions.history.lastLaunch(of: game.id, account: $0, in: Store.self)
         }
     }
-
-    func platform(of game: Game) -> GamePlatform? { .preferred(macos: game.macos, windows: game.windows) }
 
     func libraryValue(of game: Game, for sort: StorefrontLibrarySort) -> Double? {
         sort == .achievements ? libraryRecords.value(for: sort, of: game.id) : game.libraryValue(for: sort)
