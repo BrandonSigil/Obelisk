@@ -387,23 +387,6 @@ pub(crate) trait Transport {
     ) -> Result<R, CloudError>;
     async fn block(&mut self, block: &wire::UploadBlock, bytes: &[u8]) -> Result<(), CloudError>;
     async fn listing(&mut self, app_id: u32) -> Result<CloudListing, CloudError>;
-    async fn download(&mut self, app_id: u32, file: &CloudFile) -> Result<Vec<u8>, CloudError>;
-    async fn download_files(
-        &mut self,
-        app_id: u32,
-        files: &[CloudFile],
-        authorized: &impl Fn() -> bool,
-        mut receive: impl FnMut(&CloudFile, Vec<u8>) -> Result<(), CloudError>,
-    ) -> Result<(), CloudError> {
-        for file in files {
-            check(authorized)?;
-            let bytes = self.download(app_id, file).await?;
-            check(authorized)?;
-            file.verify(&bytes)?;
-            receive(file, bytes)?;
-        }
-        Ok(())
-    }
 }
 
 /// Every step re-checks authorization: a revoked session must not advance a
@@ -416,22 +399,13 @@ fn check(authorize: &impl Fn() -> bool) -> Result<(), CloudError> {
     }
 }
 
+/// Runs the batch, then confirms it with one complete listing: every file
+/// must carry the identity the batch gave it. Like Steam's own client, no
+/// remote byte is read back.
 pub(crate) async fn execute(
     transport: &mut impl Transport,
     job: &mut UploadTransaction,
     authorize: &impl Fn() -> bool,
-) -> Result<CloudListing, CloudError> {
-    execute_verified(transport, job, authorize, |_, _| Ok(())).await
-}
-
-/// Stage readback bytes in the caller's archive while verifying the upload.
-/// A callback is provisional: only a successful result confirms the complete
-/// stable listing. Failed/interrupted callbacks never mark the job verified.
-pub(crate) async fn execute_verified(
-    transport: &mut impl Transport,
-    job: &mut UploadTransaction,
-    authorize: &impl Fn() -> bool,
-    receive: impl FnMut(&CloudFile, Vec<u8>) -> Result<(), CloudError>,
 ) -> Result<CloudListing, CloudError> {
     if job.poisoned {
         return Err(CloudError::Storage);
@@ -529,16 +503,6 @@ pub(crate) async fn execute_verified(
             })
         })
     {
-        return Err(CloudError::Changed);
-    }
-    // Read back bytes, not only the server's advertised SHA-1. All names are
-    // checked, including unchanged and deleted files, before confirmation.
-    let files: Vec<_> = persisted.into_values().cloned().collect();
-    transport
-        .download_files(app, &files, authorize, receive)
-        .await?;
-    check(authorize)?;
-    if transport.listing(app).await? != actual {
         return Err(CloudError::Changed);
     }
     check(authorize)?;

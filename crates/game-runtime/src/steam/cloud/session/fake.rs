@@ -204,10 +204,9 @@ impl CloudConnection for FakeConnection {
     ) -> Result<(), CloudError> {
         Ok(())
     }
-    async fn upload_verified(
+    async fn upload(
         &mut self,
         transaction: &mut UploadTransaction,
-        mut receive: impl FnMut(&CloudFile, Vec<u8>) -> Result<(), CloudError>,
     ) -> Result<CloudListing, CloudError> {
         let mut state = self.state.lock().unwrap();
         for (index, file) in transaction.uploads().iter().enumerate() {
@@ -221,10 +220,6 @@ impl CloudConnection for FakeConnection {
         }
         state.change_number += 1;
         state.uploads += 1;
-        let listing = state.listing();
-        for file in &listing.files {
-            receive(file, state.files[&file.name].0.clone())?;
-        }
-        Ok(listing)
+        Ok(state.listing())
     }
 }

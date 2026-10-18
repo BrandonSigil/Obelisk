@@ -236,8 +236,4 @@ impl<F: Fn() -> bool> Transport for InterruptedTransport<'_, F> {
     async fn listing(&mut self, app: u32) -> Result<CloudListing, CloudError> {
         self.inner.listing(app).await
     }
-
-    async fn download(&mut self, app: u32, file: &CloudFile) -> Result<Vec<u8>, CloudError> {
-        self.inner.download(app, file).await
-    }
 }

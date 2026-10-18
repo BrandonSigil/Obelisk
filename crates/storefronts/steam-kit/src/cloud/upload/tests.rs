@@ -71,9 +71,7 @@ fn fixture() -> (tempfile::TempDir, UploadTransaction, Fake) {
             commit: true,
             blocks: VecDeque::new(),
             pending: None,
-            corrupt_download: false,
-            readback_changed: false,
-            change_after_download: false,
+            concurrent_edit: false,
             pause_block: false,
             move_journal: None,
             abort_receipt: Some(false),
@@ -114,9 +112,8 @@ struct Fake {
     commit: bool,
     blocks: VecDeque<Vec<u8>>,
     pending: Option<wire::BeginUploadRequest>,
-    corrupt_download: bool,
-    readback_changed: bool,
-    change_after_download: bool,
+    /// Someone else's file appears once the batch completed.
+    concurrent_edit: bool,
     pause_block: bool,
     move_journal: Option<(PathBuf, PathBuf)>,
     abort_receipt: Option<bool>,
@@ -257,124 +254,13 @@ impl Transport for Fake {
     }
     async fn listing(&mut self, _: u32) -> Result<CloudListing, CloudError> {
         self.calls.push("listing".into());
-        if self.readback_changed && self.remote.change_number == 3 {
+        if self.concurrent_edit && self.remote.change_number == 3 {
             self.remote
                 .files
                 .push(file("concurrent", b"someone else's edit"));
-            self.readback_changed = false;
+            self.concurrent_edit = false;
         }
         Ok(self.remote.clone())
-    }
-    async fn download(&mut self, _: u32, file: &CloudFile) -> Result<Vec<u8>, CloudError> {
-        self.calls.push("download".into());
-        if self.change_after_download {
-            self.remote.change_number += 1;
-            self.change_after_download = false;
-        }
-        if self.corrupt_download {
-            Ok(b"corrupt".to_vec())
-        } else {
-            Ok(self.bodies[&file.name].clone())
-        }
-    }
-}
-
-#[tokio::test]
-async fn upload_readback_can_confirm_the_vault_without_downloading_twice() {
-    let (root, mut job, mut server) = fixture();
-    let scope = cloud_vault::Scope {
-        steam_id: job.steam_id(),
-        app_id: 42,
-        cloud_app_id: 42,
-    };
-    let mut vault = cloud_vault::Vault::open(&root.path().join("vault"), scope).unwrap();
-    vault.set_preferences(cloud_vault::Preferences {
-        account_enabled: Some(true),
-        game_enabled: Some(true),
-    });
-    let before = cloud_vault::RemoteView {
-        revision: "2".into(),
-        files: cloud_vault::Manifest(
-            server
-                .bodies
-                .iter()
-                .map(|(name, bytes)| (name.clone(), vault.stage(bytes, 7).unwrap()))
-                .collect(),
-        ),
-    };
-    vault.confirm_equal(&before.files, &before).unwrap();
-    let desired = cloud_vault::Manifest(BTreeMap::from([
-        ("keep".into(), vault.stage(b"same", 7).unwrap()),
-        ("new".into(), vault.stage(b"new-data", 7).unwrap()),
-    ]));
-    let auth = vault.authorize(scope.steam_id).unwrap();
-    let id = vault
-        .queue_upload(&desired, &before, "fixture", auth)
-        .unwrap();
-    let permit = vault.begin_upload(&id, auth, &before).unwrap();
-    let mut readback = cloud_vault::Manifest::default();
-    let listing = execute_verified(&mut server, &mut job, &|| true, |file, bytes| {
-        assert!(
-            readback
-                .0
-                .insert(
-                    file.name.clone(),
-                    vault.stage(&bytes, file.platforms).unwrap()
-                )
-                .is_none()
-        );
-        Ok(())
-    })
-    .await
-    .unwrap();
-    let readback = cloud_vault::RemoteView {
-        revision: listing.change_number.to_string(),
-        files: readback,
-    };
-    vault.complete_upload(&permit, true, &readback).unwrap();
-    assert_eq!(vault.baseline(), Some(&readback));
-    assert!(vault.pending().is_none());
-    assert_eq!(readback.files, desired);
-    assert_eq!(
-        server
-            .calls
-            .iter()
-            .filter(|call| *call == "download")
-            .count(),
-        2
-    );
-}
-
-#[tokio::test]
-async fn provisional_readback_never_confirms_corruption_storage_failure_or_remote_change() {
-    for fault in 0..3 {
-        let (_root, mut job, mut server) = fixture();
-        server.corrupt_download = fault == 0;
-        server.change_after_download = fault == 2;
-        let mut received = 0;
-        let result = execute_verified(&mut server, &mut job, &|| true, |_, _| {
-            received += 1;
-            if fault == 1 {
-                Err(CloudError::Storage)
-            } else {
-                Ok(())
-            }
-        })
-        .await;
-        assert!(matches!(
-            (fault, result),
-            (0, Err(CloudError::Integrity))
-                | (1, Err(CloudError::Storage))
-                | (2, Err(CloudError::Changed))
-        ));
-        assert_eq!(job.phase(), &UploadPhase::Acknowledged);
-        assert_eq!(received, [0, 1, 2][fault]);
-        let directory = job.directory().to_owned();
-        drop(job);
-        assert_eq!(
-            UploadTransaction::open(&directory).unwrap().phase(),
-            &UploadPhase::Acknowledged
-        );
     }
 }
 
@@ -484,7 +370,7 @@ async fn lost_or_malformed_abort_receipt_never_allows_replay_or_settlement() {
 }
 
 #[tokio::test]
-async fn multipart_upload_requires_file_and_batch_acknowledgement_and_verified_readback() {
+async fn multipart_upload_requires_file_and_batch_acknowledgement_and_a_matching_listing() {
     let (_root, mut job, mut server) = fixture();
     let actual = execute(&mut server, &mut job, &|| true).await.unwrap();
     assert_eq!(actual.change_number, 3);
@@ -504,9 +390,6 @@ async fn multipart_upload_requires_file_and_batch_acknowledgement_and_verified_r
             "Cloud.ClientDeleteFile#1",
             "Cloud.CompleteAppUploadBatchBlocking#1",
             "complete-result-1",
-            "listing",
-            "download",
-            "download",
             "listing"
         ]
     );
@@ -515,12 +398,7 @@ async fn multipart_upload_requires_file_and_batch_acknowledgement_and_verified_r
     let mut reopened = UploadTransaction::open(&directory).unwrap();
     server.calls.clear();
     execute(&mut server, &mut reopened, &|| true).await.unwrap();
-    assert!(
-        server
-            .calls
-            .iter()
-            .all(|name| name == "listing" || name == "download")
-    );
+    assert_eq!(server.calls, ["listing"]);
     let journal = fs::read_to_string(directory.join("state.json")).unwrap();
     assert!(!journal.contains("never-log") && !journal.contains("https:"));
 }
@@ -752,7 +630,8 @@ async fn stopped_http_body_before_commit_can_close_but_revocation_or_lost_ack_ca
 }
 
 #[tokio::test]
-async fn stale_remote_view_or_revocation_prevents_mutation_and_readback_cannot_hide_divergence() {
+async fn stale_remote_view_or_revocation_prevents_mutation_and_a_concurrent_edit_is_never_confirmed()
+ {
     let (_root, mut job, mut server) = fixture();
     assert!(matches!(
         execute(&mut server, &mut job, &|| false).await,
@@ -766,13 +645,13 @@ async fn stale_remote_view_or_revocation_prevents_mutation_and_readback_cannot_h
     ));
     assert_eq!(server.calls, ["listing"]);
     assert_eq!(job.phase(), &UploadPhase::Prepared);
-    for corrupt in [false, true] {
-        let (_root, mut job, mut server) = fixture();
-        server.corrupt_download = corrupt;
-        server.readback_changed = !corrupt;
-        assert!(execute(&mut server, &mut job, &|| true).await.is_err());
-        assert_eq!(job.phase(), &UploadPhase::Acknowledged);
-    }
+    let (_root, mut job, mut server) = fixture();
+    server.concurrent_edit = true;
+    assert!(matches!(
+        execute(&mut server, &mut job, &|| true).await,
+        Err(CloudError::Changed)
+    ));
+    assert_eq!(job.phase(), &UploadPhase::Acknowledged);
 }
 
 #[tokio::test]

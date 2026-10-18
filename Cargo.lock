@@ -2047,7 +2047,6 @@ dependencies = [
  "base64 0.23.1",
  "bytes",
  "cbc",
- "cloud-vault",
  "crc32fast",
  "flate2",
  "futures-util",

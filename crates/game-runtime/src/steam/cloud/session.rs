@@ -339,22 +339,18 @@ impl<R: CloudRemote> Storefront for Adapter<R> {
                 remote,
                 "steam-cm-autocloud",
                 record,
-                async |vault| {
+                async |_| {
+                    let listing = cm.upload(&mut transaction).await?;
+                    // Every remote file carries the identity the batch gave it,
+                    // so the managed ones are the local versions just sent or
+                    // kept. Like Steam's client, nothing is downloaded again.
                     let mut files = Manifest::default();
-                    let listing = cm
-                        .upload_verified(&mut transaction, |file, bytes| {
-                            if paths.existing_file(file)?.is_some() {
-                                let version = vault
-                                    .stage(&bytes, file.platforms)
-                                    .map_err(|_| steam_kit::cloud::CloudError::Storage)?;
-                                files.0.insert(file.name.clone(), version);
-                            }
-                            Ok(())
-                        })
-                        .await?;
-                    // The adapter read every surviving remote file and checked
-                    // the complete listing again. Only that successful receipt
-                    // publishes staged bytes.
+                    for file in listing.files.iter().filter(|f| f.persist_state == 0) {
+                        if paths.existing_file(file)?.is_some() {
+                            let version = local.0.get(&file.name).ok_or(Failure::Changed)?;
+                            files.0.insert(file.name.clone(), version.clone());
+                        }
+                    }
                     let verified = RemoteView {
                         revision: listing.change_number.to_string(),
                         files,

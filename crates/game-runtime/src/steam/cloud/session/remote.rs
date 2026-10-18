@@ -24,12 +24,11 @@ pub(crate) trait CloudConnection: RemoteSource {
         &mut self,
         transaction: &mut UploadTransaction,
     ) -> Result<(), CloudError>;
-    /// Commits the transaction, then hands back every surviving remote file
-    /// for staging and returns the complete listing read afterwards.
-    async fn upload_verified(
+    /// Commits the transaction and returns the complete listing that
+    /// confirmed it.
+    async fn upload(
         &mut self,
         transaction: &mut UploadTransaction,
-        receive: impl FnMut(&CloudFile, Vec<u8>) -> Result<(), CloudError>,
     ) -> Result<CloudListing, CloudError>;
 }
 
@@ -133,14 +132,13 @@ impl CloudConnection for CmConnection {
             .cloud_settle_upload(&self.http, transaction, || control.check().is_ok())
             .await
     }
-    async fn upload_verified(
+    async fn upload(
         &mut self,
         transaction: &mut UploadTransaction,
-        receive: impl FnMut(&CloudFile, Vec<u8>) -> Result<(), CloudError>,
     ) -> Result<CloudListing, CloudError> {
         let control = &self.control;
         self.cm
-            .cloud_upload_verified(&self.http, transaction, || control.check().is_ok(), receive)
+            .cloud_upload(&self.http, transaction, || control.check().is_ok())
             .await
     }
 }

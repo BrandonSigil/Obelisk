@@ -41,6 +41,7 @@ impl SteamConnection {
     /// Low-level, journaled transport. The caller must hold the coordinator's
     /// upload permit and exclude a native synchronizer for this account/store.
     /// The guard is rechecked before every request; UI closure is not revocation.
+    /// Returns the complete listing that confirmed the batch.
     pub async fn cloud_upload(
         &self,
         http: &reqwest::Client,
@@ -51,24 +52,6 @@ impl SteamConnection {
         deadline(
             UPLOAD_DEADLINE,
             upload::execute(&mut transport, transaction, &authorized),
-        )
-        .await
-    }
-
-    /// Like cloud_upload, handing verified readback bytes to the caller so it
-    /// can stage them without downloading the same remote files a second time.
-    /// Bytes remain provisional until this returns a complete stable listing.
-    pub async fn cloud_upload_verified(
-        &self,
-        http: &reqwest::Client,
-        transaction: &mut UploadTransaction,
-        authorized: impl Fn() -> bool,
-        receive: impl FnMut(&CloudFile, Vec<u8>) -> Result<(), CloudError>,
-    ) -> Result<CloudListing, CloudError> {
-        let mut transport = self.upload_transport(http, transaction, &authorized)?;
-        deadline(
-            UPLOAD_DEADLINE,
-            upload::execute_verified(&mut transport, transaction, &authorized, receive),
         )
         .await
     }
@@ -224,23 +207,6 @@ struct UploadTransport<'a, F> {
 }
 
 impl<F: Fn() -> bool> crate::cloud::upload::Transport for UploadTransport<'_, F> {
-    async fn download_files(
-        &mut self,
-        app: u32,
-        files: &[CloudFile],
-        authorized: &impl Fn() -> bool,
-        receive: impl FnMut(&CloudFile, Vec<u8>) -> Result<(), CloudError>,
-    ) -> Result<(), CloudError> {
-        self.connection
-            .cloud_download_files(
-                self.http,
-                app,
-                files,
-                || (self.authorized)() && authorized(),
-                receive,
-            )
-            .await
-    }
     async fn commit(
         &mut self,
         request: &wire::CommitUploadRequest,
@@ -295,25 +261,6 @@ impl<F: Fn() -> bool> crate::cloud::upload::Transport for UploadTransport<'_, F>
             return Err(CloudError::Revoked);
         }
         self.connection.cloud_listing(app).await
-    }
-    async fn download(&mut self, app: u32, file: &CloudFile) -> Result<Vec<u8>, CloudError> {
-        if !(self.authorized)() {
-            return Err(CloudError::Revoked);
-        }
-        let response: wire::DownloadResponse = self
-            .connection
-            .service(
-                "Cloud.ClientFileDownload#1",
-                &wire::DownloadRequest {
-                    app_id: app,
-                    name: file.name.clone(),
-                },
-            )
-            .await?;
-        if !(self.authorized)() {
-            return Err(CloudError::Revoked);
-        }
-        crate::cloud::download(self.http, app, file, response).await
     }
 }
 

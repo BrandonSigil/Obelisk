@@ -29,7 +29,6 @@ tempfile.workspace = true
 zip = { version = "=8.2.0", default-features = false, features = ["deflate-flate2"] }
 
 [dev-dependencies]
-cloud-vault = { workspace = true, features = ["testing"] }
 obelisk-core = { workspace = true, features = ["testing"] }
 
 [lints]
