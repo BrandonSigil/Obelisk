@@ -1,6 +1,9 @@
 use super::*;
 use sha1::{Digest, Sha1};
-use std::cell::Cell;
+use std::{
+    cell::Cell,
+    sync::atomic::{AtomicUsize, Ordering},
+};
 
 fn files(count: usize) -> Vec<CloudFile> {
     (0..count)
@@ -23,7 +26,7 @@ struct Plans<'a> {
 }
 impl DownloadPlans for Plans<'_> {
     type Plan = ();
-    fn prepare(&mut self, _: CloudFile) -> impl Future<Output = Result<(), CloudError>> + Send {
+    fn prepare(&self, _: CloudFile) -> impl Future<Output = Result<(), CloudError>> + Send {
         if let Some(count) = self.prepared {
             count.set(count.get() + 1);
         }
@@ -55,8 +58,8 @@ async fn overlaps_http_reads_with_bounded_concurrency_and_delivers_each_file_onc
     let prepared = Cell::new(0);
     let mut received = std::collections::BTreeSet::new();
     download_files(
-        &files(11),
-        &mut Plans {
+        &files(MAX_DOWNLOADS * 2 + 3),
+        &Plans {
             prepared: Some(&prepared),
             ..Default::default()
         },
@@ -74,8 +77,8 @@ async fn overlaps_http_reads_with_bounded_concurrency_and_delivers_each_file_onc
     )
     .await
     .unwrap();
-    assert_eq!(prepared.get(), 11);
-    assert_eq!(received.len(), 11);
+    assert_eq!(prepared.get(), MAX_DOWNLOADS * 2 + 3);
+    assert_eq!(received.len(), MAX_DOWNLOADS * 2 + 3);
     assert_eq!(peak.get(), MAX_DOWNLOADS);
     assert_eq!(active.get(), 0);
 }
@@ -86,7 +89,7 @@ async fn large_files_are_not_started_together_and_dropping_cancels_every_reader(
     let peak = Cell::new(0);
     let prepared = Cell::new(0);
     for large in [false, true] {
-        let mut files = files(8);
+        let mut files = files(MAX_DOWNLOADS + 4);
         if large {
             for file in &mut files {
                 file.size = BATCH_BYTES as u32 + 1;
@@ -94,13 +97,13 @@ async fn large_files_are_not_started_together_and_dropping_cancels_every_reader(
         }
         peak.set(0);
         prepared.set(0);
-        let mut plans = Plans {
+        let plans = Plans {
             prepared: Some(&prepared),
             ..Default::default()
         };
         let operation = download_files(
             &files,
-            &mut plans,
+            &plans,
             |_, ()| async {
                 let _active = Active::new(&active, &peak);
                 std::future::pending::<()>().await;
@@ -127,7 +130,7 @@ async fn revocation_corruption_and_receiver_failure_stop_the_batch() {
     let requests = Cell::new(0);
     let result = download_files(
         &files(8),
-        &mut Plans {
+        &Plans {
             revoke: Some(&authorized),
             ..Default::default()
         },
@@ -144,7 +147,7 @@ async fn revocation_corruption_and_receiver_failure_stop_the_batch() {
 
     let result = download_files(
         &files(8),
-        &mut Plans::default(),
+        &Plans::default(),
         |_, ()| async { Ok(b"bad!".to_vec()) },
         &|| true,
         |_, _| panic!("unverified bytes"),
@@ -154,8 +157,8 @@ async fn revocation_corruption_and_receiver_failure_stop_the_batch() {
 
     requests.set(0);
     let result = download_files(
-        &files(8),
-        &mut Plans {
+        &files(MAX_DOWNLOADS * 2),
+        &Plans {
             prepared: Some(&requests),
             ..Default::default()
         },
@@ -165,5 +168,75 @@ async fn revocation_corruption_and_receiver_failure_stop_the_batch() {
     )
     .await;
     assert!(matches!(result, Err(CloudError::Storage)));
-    assert_eq!(requests.get(), MAX_DOWNLOADS);
+    // Nothing past the first window is requested once the receiver failed.
+    assert!(requests.get() <= MAX_DOWNLOADS);
+}
+
+struct SlowPlans<'a> {
+    active: &'a AtomicUsize,
+    peak: &'a AtomicUsize,
+}
+impl DownloadPlans for SlowPlans<'_> {
+    type Plan = ();
+    async fn prepare(&self, _: CloudFile) -> Result<(), CloudError> {
+        let now = self.active.fetch_add(1, Ordering::SeqCst) + 1;
+        self.peak.fetch_max(now, Ordering::SeqCst);
+        tokio::task::yield_now().await;
+        self.active.fetch_sub(1, Ordering::SeqCst);
+        Ok(())
+    }
+}
+
+#[tokio::test]
+async fn cm_requests_overlap_instead_of_waiting_for_each_other() {
+    let active = AtomicUsize::new(0);
+    let peak = AtomicUsize::new(0);
+    let mut received = 0;
+    download_files(
+        &files(MAX_DOWNLOADS * 2),
+        &SlowPlans {
+            active: &active,
+            peak: &peak,
+        },
+        |_, ()| async { Ok(b"save".to_vec()) },
+        &|| true,
+        |_, _| {
+            received += 1;
+            Ok(())
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(received, MAX_DOWNLOADS * 2);
+    assert_eq!(peak.load(Ordering::SeqCst), MAX_DOWNLOADS);
+}
+
+#[tokio::test]
+async fn a_slow_file_does_not_hold_back_the_files_after_it() {
+    let started = Cell::new(0);
+    let files = files(MAX_DOWNLOADS * 2);
+    let plans = Plans::default();
+    let operation = download_files(
+        &files,
+        &plans,
+        |file, ()| {
+            started.set(started.get() + 1);
+            let started = &started;
+            async move {
+                // The first file ends only once files past the first window
+                // have started.
+                while file.name == "0" && started.get() <= MAX_DOWNLOADS {
+                    tokio::task::yield_now().await;
+                }
+                Ok(b"save".to_vec())
+            }
+        },
+        &|| true,
+        |_, _| Ok(()),
+    );
+    tokio::time::timeout(std::time::Duration::from_secs(1), operation)
+        .await
+        .expect("the window refills while a file is slow")
+        .unwrap();
+    assert_eq!(started.get(), MAX_DOWNLOADS * 2);
 }

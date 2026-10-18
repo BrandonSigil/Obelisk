@@ -164,8 +164,8 @@ impl SteamConnection {
         crate::cloud::download(http, app_id, file, response).await
     }
 
-    /// Bounded concurrent HTTP reads on this account's CM session.
-    /// The caller owns the listing checks before and after the complete set.
+    /// Bounded concurrent reads, CM requests included, on this account's CM
+    /// session. The caller owns the listing checks before and after the set.
     pub async fn cloud_download_files(
         &self,
         http: &reqwest::Client,
@@ -177,7 +177,7 @@ impl SteamConnection {
         self.ensure_logged_on()?;
         crate::cloud::downloads::download_files(
             files,
-            &mut DownloadPlans {
+            &DownloadPlans {
                 connection: self,
                 app_id,
             },
@@ -200,7 +200,7 @@ struct DownloadPlans<'a> {
 impl crate::cloud::downloads::DownloadPlans for DownloadPlans<'_> {
     type Plan = wire::DownloadResponse;
 
-    async fn prepare(&mut self, file: CloudFile) -> Result<Self::Plan, CloudError> {
+    async fn prepare(&self, file: CloudFile) -> Result<Self::Plan, CloudError> {
         if file.persist_state != 0 {
             return Err(CloudError::Invalid("persist state"));
         }
