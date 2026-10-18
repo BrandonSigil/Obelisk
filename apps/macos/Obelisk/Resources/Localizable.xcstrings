@@ -4591,40 +4591,6 @@
         }
       }
     },
-    "model.platform.macos": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "macOS"
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "macOS"
-          }
-        }
-      }
-    },
-    "model.platform.windows": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Windows"
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Windows"
-          }
-        }
-      }
-    },
     "model.section.epic.subtitle": {
       "extractionState": "manual",
       "localizations": {

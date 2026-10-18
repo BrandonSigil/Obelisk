@@ -7,7 +7,6 @@ struct LibraryCoverCard<Artwork: View>: View {
     let title: String
     let accessibilityLabel: String
     var help: String?
-    var platform: GamePlatform?
     /// The storefront the game belongs to, where a page mixes several.
     var store: LibrarySection?
     /// What the game's button shows and does. Its button reads the Transfer's
@@ -38,7 +37,6 @@ struct LibraryCoverCard<Artwork: View>: View {
         .obeliskButtonStyle(.plain)
         .help(help ?? title)
         .accessibilityLabel(accessibilityLabel)
-        .accessibilityValue(platform?.title ?? "")
         // The bar only shows under the pointer; its action stays reachable.
         .accessibilityActions {
             if action.isAvailable, let name = label(action.kind, title: title) {
@@ -48,13 +46,6 @@ struct LibraryCoverCard<Artwork: View>: View {
         .overlay(alignment: .topLeading) {
             if hovered, let logo = store?.logoAssetName {
                 LibraryCardBadge(logo: logo)
-                    .padding(Self.barInset + 2)
-                    .transition(.opacity.combined(with: .scale(scale: 0.85)))
-            }
-        }
-        .overlay(alignment: .topTrailing) {
-            if hovered, let platform {
-                LibraryCardBadge(logo: platform.logoAssetName)
                     .padding(Self.barInset + 2)
                     .transition(.opacity.combined(with: .scale(scale: 0.85)))
             }
@@ -244,7 +235,7 @@ private struct LibraryCardProgress: View {
     }
 }
 
-/// The system a game runs on, or its storefront, in glass over its cover.
+/// A game's storefront, in glass over its cover.
 struct LibraryCardBadge: View {
     let logo: String
 

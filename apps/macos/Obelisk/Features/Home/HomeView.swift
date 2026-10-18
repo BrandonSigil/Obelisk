@@ -314,7 +314,6 @@ private struct HomePage: View {
             help: [game.title, game.id.section.storeName, game.playtime.map(GameFormatting.playtime)]
                 .compactMap { $0 }
                 .joined(separator: " · "),
-            platform: game.platform,
             store: game.id.section,
             action: game.action,
             matchID: card,

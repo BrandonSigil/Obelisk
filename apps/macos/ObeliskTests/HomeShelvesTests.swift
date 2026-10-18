@@ -39,7 +39,6 @@ final class HomeShelvesTests: XCTestCase {
             title: title,
             lastPlayed: played.map { Date(timeIntervalSince1970: $0) },
             playtime: playtime.map { .seconds($0) },
-            platform: nil,
             isInstalled: installed,
             action: GameAction(kind: installed ? .launch : .download(.install),
                                title: L10n.string(installed ? "ui.game.play" : "model.game.download"),

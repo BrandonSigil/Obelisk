@@ -21,7 +21,6 @@ struct HomeGame: Identifiable {
     let title: String
     let lastPlayed: Date?
     let playtime: Duration?
-    let platform: GamePlatform?
     let isInstalled: Bool
     /// What the game's card and hero buttons show and do.
     let action: GameAction
@@ -60,7 +59,6 @@ extension LibraryStorefront {
                 title: title(of: game),
                 lastPlayed: lastPlayed(of: game),
                 playtime: playtime(of: game),
-                platform: platform(of: game),
                 isInstalled: actions.isInstalled(game.id),
                 action: actions(librarySelection(game)),
                 cover: { AnyView(cover(game)) },

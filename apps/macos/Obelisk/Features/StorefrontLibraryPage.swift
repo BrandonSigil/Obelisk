@@ -17,8 +17,9 @@ import SwiftUI
     /// When the account last played the game: on the storefront, or later
     /// from Obelisk.
     func lastPlayed(of game: Game) -> Date?
-    /// The build Obelisk installs or launches first, once the storefront told
-    /// the game's platforms.
+    /// The game's Mac build when the storefront ships one, else its Windows
+    /// build, once the storefront told the game's platforms: what the Native
+    /// macOS filter reads. A download picks the build it installs.
     func platform(of game: Game) -> GamePlatform?
     /// What the storefront told of the game that `sort` orders it by, the
     /// greatest first, such as its release date or its critics' score; nil
@@ -298,7 +299,6 @@ struct StorefrontLibraryPage<Model: LibraryStorefront, HeroArtwork: View, HeroLo
                                                     GameFormatting.lastPlayed(model.lastPlayed(of: game))),
                     help: [title, model.playtime(of: game).map(GameFormatting.playtime)].compactMap { $0 }
                         .joined(separator: " · "),
-                    platform: model.platform(of: game),
                     action: actions(model.librarySelection(game)),
                     matchID: game.id,
                     open: { open(game, .cover) }
