@@ -94,13 +94,16 @@ pub struct Configuration {
     pub prefix: Option<PathBuf>,
 }
 impl Configuration {
+    /// The game as Obelisk's profiles and logs name it.
+    pub(crate) fn profile_game(&self) -> crate::profile::Game<'_> {
+        crate::profile::Game::Epic {
+            namespace: &self.namespace,
+            app_name: &self.app_name,
+        }
+    }
     /// The game as Wine starts a Windows build.
     pub(crate) fn game(&self) -> crate::wine::Game<'_> {
         crate::wine::Game {
-            id: crate::profile::Game::Epic {
-                namespace: &self.namespace,
-                app_name: &self.app_name,
-            },
             install: &self.install,
             title: &self.title,
         }

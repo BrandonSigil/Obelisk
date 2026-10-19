@@ -1,21 +1,113 @@
-//! Launch settings: the player's choices for how one Windows installation
-//! runs, over what its game's profile says. The arguments added to its
-//! command line, its engine, then the CPU translator that engine has, then
-//! the graphics backend that renders its Direct3D there and that backend's
-//! options, each offered as the engine allows, and Metal's Performance HUD
-//! over the game. Only what differs from the profile is kept, one file per installation in Obelisk's library, named
-//! after the installation's folder as its Wine prefix is. It goes when the
+//! Launch settings: how one Windows installation runs, its game's profile
+//! with the player's choices over it. The player picks the arguments added
+//! to its command line, its engine, then the CPU translator that engine has,
+//! then the graphics backend that renders its Direct3D there and that
+//! backend's options, each offered as the engine allows, and Metal's
+//! Performance HUD over the game. Only what differs from the profile is kept,
+//! one file per installation in Obelisk's library, named after the
+//! installation's folder as its Wine prefix is. It goes when the
 //! installation is uninstalled, and a change applies from the game's next
 //! launch.
 use crate::{
-    profile::Profile,
+    profile::{self, Profile},
     wine::{Engine, Graphics, GraphicsOptions},
 };
+use obelisk_core::launch::LaunchTarget;
 use serde::{Deserialize, Serialize};
 use std::{
+    collections::BTreeMap,
     fs,
     path::{Path, PathBuf},
 };
+
+/// How one Windows installation runs from its next launch: its game's
+/// profile with its player's choices over it. It travels whole to the Game
+/// session, so nothing there looks the profile up again.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Settings {
+    pub engine: Engine,
+    /// What renders its Direct3D on that engine; always one `engine` offers.
+    pub graphics: Graphics,
+    /// What it asks of that backend.
+    pub options: GraphicsOptions,
+    /// The program its profile starts instead of its publisher's, relative
+    /// to the installation.
+    pub executable: Option<String>,
+    /// What its profile adds to the storefront's arguments.
+    pub profile_arguments: Vec<String>,
+    /// What its player adds after those, split as typed. The game's log
+    /// shows only these.
+    pub arguments: Vec<String>,
+    /// The environment variables every Wine command of its prefix runs
+    /// with, over Obelisk's own.
+    pub variables: BTreeMap<String, String>,
+    /// How Wine loads some of its DLLs, as `WINEDLLOVERRIDES` spells them.
+    pub dll_overrides: BTreeMap<String, String>,
+    /// Metal's Performance HUD shows over the game.
+    pub performance_hud: bool,
+}
+
+/// How a game no profile names runs without choices: in Rosetta's Wine,
+/// with D3DMetal.
+#[cfg(test)]
+impl Default for Settings {
+    fn default() -> Self {
+        Choices::default().apply(&Profile::default())
+    }
+}
+
+impl Settings {
+    /// What starts for `target` inside `install`: `target`, or the program
+    /// the profile names instead, with the same arguments, in that program's
+    /// folder; then the profile's arguments, then the player's.
+    pub(crate) fn started(&self, install: &Path, target: &LaunchTarget) -> LaunchTarget {
+        let mut started = match &self.executable {
+            None => target.clone(),
+            Some(executable) => {
+                let executable = install.join(executable);
+                LaunchTarget {
+                    working_directory: executable
+                        .parent()
+                        .unwrap_or(install)
+                        .to_string_lossy()
+                        .into_owned(),
+                    executable: executable.to_string_lossy().into_owned(),
+                    arguments: target.arguments.clone(),
+                    is_application_bundle: false,
+                }
+            }
+        };
+        started
+            .arguments
+            .extend(self.profile_arguments.iter().cloned());
+        started.arguments.extend(self.arguments.iter().cloned());
+        started
+    }
+}
+
+/// The launch settings of the Windows installation of `game` in `install`,
+/// by its profile and the choices kept for it in Obelisk's `library`. An
+/// installation without choices, or whose file cannot be read, runs as its
+/// profile says.
+pub fn of(library: &Path, game: profile::Game<'_>, install: &Path) -> View {
+    let profile = profile::of(game, install);
+    View::new(&profile, load(library, install))
+}
+
+/// Keeps `choices` for that installation, without those its profile or its
+/// engine already gives, and returns its launch settings from its next
+/// launch on. No choice at all leaves no file.
+pub fn choose(
+    library: &Path,
+    game: profile::Game<'_>,
+    install: &Path,
+    choices: Choices,
+) -> std::io::Result<View> {
+    let profile = profile::of(game, install);
+    let choices = choices.normalized(&profile);
+    save(library, install, &choices)?;
+    Ok(View::new(&profile, choices))
+}
 
 /// What the player changed from the profile. A missing choice follows the
 /// profile, or the engine's defaults on another engine than the profile's.
@@ -117,28 +209,33 @@ impl EngineOffer {
 }
 
 impl Choices {
-    /// How the game of `profile` runs with these choices, its program kept.
-    /// A backend its engine does not offer falls back to the default one.
-    pub fn apply(&self, profile: &Profile) -> Profile {
+    /// How the game of `profile` runs with these choices. A backend its
+    /// engine does not offer falls back to the default one.
+    fn apply(&self, profile: &Profile) -> Settings {
         let engine = self.engine.unwrap_or(profile.engine);
         let graphics = self
             .graphics
             .filter(|graphics| offer(engine).graphics(*graphics).is_some())
             .unwrap_or(default_graphics(profile, engine));
         let options = default_options(profile, engine, graphics);
-        Profile {
+        Settings {
             engine,
             graphics,
             options: GraphicsOptions {
                 ray_tracing: self.ray_tracing.unwrap_or(options.ray_tracing),
             },
-            ..*profile
+            executable: profile.executable.map(str::to_owned),
+            profile_arguments: profile.arguments.to_vec(),
+            arguments: crate::wine::command_line(self.arguments.as_deref().unwrap_or_default()),
+            variables: profile.variables.clone(),
+            dll_overrides: profile.dll_overrides.clone(),
+            performance_hud: self.performance_hud,
         }
     }
 
     /// These choices without those `profile` already gives, or the chosen
     /// engine gives by default, and without arguments that are only spaces.
-    pub fn normalized(&self, profile: &Profile) -> Self {
+    fn normalized(&self, profile: &Profile) -> Self {
         let applied = self.apply(profile);
         let graphics = default_graphics(profile, applied.engine);
         let options = default_options(profile, applied.engine, applied.graphics);
@@ -158,7 +255,7 @@ impl Choices {
     }
 
     /// Whether the player changed nothing.
-    pub fn is_empty(&self) -> bool {
+    fn is_empty(&self) -> bool {
         *self == Self::default()
     }
 }
@@ -196,7 +293,7 @@ fn file(library: &Path, install: &Path) -> Option<PathBuf> {
 
 /// The player's choices for the installation in `install`. An installation
 /// without any, or whose file cannot be read, has none.
-pub fn load(library: &Path, install: &Path) -> Choices {
+fn load(library: &Path, install: &Path) -> Choices {
     file(library, install)
         .and_then(|file| fs::read(file).ok())
         .and_then(|bytes| serde_json::from_slice(&bytes).ok())
@@ -205,7 +302,7 @@ pub fn load(library: &Path, install: &Path) -> Choices {
 
 /// Keeps `choices` for the installation in `install`. No choice at all
 /// leaves no file.
-pub fn save(library: &Path, install: &Path, choices: &Choices) -> std::io::Result<()> {
+fn save(library: &Path, install: &Path, choices: &Choices) -> std::io::Result<()> {
     let Some(file) = file(library, install) else {
         return Err(std::io::ErrorKind::InvalidInput.into());
     };
@@ -231,7 +328,7 @@ pub fn remove(library: &Path, install: &Path) -> std::io::Result<()> {
 /// what the player changed, and how it runs without choices.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct View {
-    pub settings: Profile,
+    pub settings: Settings,
     pub choices: Choices,
     /// The engine its profile names.
     pub default_engine: Engine,
@@ -241,7 +338,7 @@ pub struct View {
 
 impl View {
     /// The launch settings of `profile`'s game with `choices`.
-    pub fn new(profile: &Profile, choices: Choices) -> Self {
+    fn new(profile: &Profile, choices: Choices) -> Self {
         Self {
             settings: choices.apply(profile),
             choices,

@@ -1368,9 +1368,8 @@ impl<S: Storefront> Installations<S> {
     /// The launch settings of the Windows installation `receipt` names;
     /// `None` for a Mac build or an installation the account no longer has.
     pub fn launch_settings(&self, receipt: &str) -> Option<launch_settings::View> {
-        let (profile, install) = self.windows_game(receipt)?;
-        let choices = launch_settings::load(&self.shared.library, &install);
-        Some(launch_settings::View::new(&profile, choices))
+        let receipt = self.windows_receipt(receipt)?;
+        Some(receipt.launch_settings(&self.shared.library))
     }
 
     /// Keeps `choices` as the player's launch settings of the Windows
@@ -1381,26 +1380,19 @@ impl<S: Storefront> Installations<S> {
         receipt: &str,
         choices: launch_settings::Choices,
     ) -> std::io::Result<Option<launch_settings::View>> {
-        let Some((profile, install)) = self.windows_game(receipt) else {
+        let Some(receipt) = self.windows_receipt(receipt) else {
             return Ok(None);
         };
-        let choices = choices.normalized(&profile);
-        launch_settings::save(&self.shared.library, &install, &choices)?;
-        Ok(Some(launch_settings::View::new(&profile, choices)))
+        receipt
+            .choose_launch_settings(&self.shared.library, choices)
+            .map(Some)
     }
 
-    /// The profile and folder of the Windows installation `receipt` names;
-    /// `None` for a Mac build or an installation the account no longer has.
-    fn windows_game(&self, receipt: &str) -> Option<(crate::profile::Profile, PathBuf)> {
+    /// The Windows installation `receipt` names; `None` for a Mac build or an
+    /// installation the account no longer has.
+    fn windows_receipt(&self, receipt: &str) -> Option<Receipt<S>> {
         let receipt = self.shared.inner.lock().unwrap().receipt(receipt)?;
-        if !crate::wine::windows_build(&receipt.platform) {
-            return None;
-        }
-        let game = receipt.wine_game();
-        Some((
-            crate::profile::of(game.id, game.install),
-            game.install.to_owned(),
-        ))
+        crate::wine::windows_build(&receipt.platform).then_some(receipt)
     }
 
     /// Asks the storefront whether each installation has a newer build, at

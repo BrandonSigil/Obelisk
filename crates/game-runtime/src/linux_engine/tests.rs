@@ -1,4 +1,5 @@
 use super::*;
+use crate::launch_settings::Settings;
 use crate::wine::tests::{installation, pe, target as launch_target};
 
 fn linux_config(root: &Path) -> wine::Config {
@@ -6,13 +7,11 @@ fn linux_config(root: &Path) -> wine::Config {
         runtime: root.join("runtime"),
         prefix: root.join("Prefixes/game-linux/prefix"),
         log: root.join("logs/wine-game.log"),
-        engine: wine::Engine::Linux,
-        graphics: wine::Graphics::Dxmt,
-        options: wine::GraphicsOptions::default(),
-        arguments: Vec::new(),
-        performance_hud: false,
-        variables: Default::default(),
-        dll_overrides: Default::default(),
+        settings: Settings {
+            engine: wine::Engine::Linux,
+            graphics: wine::Graphics::Dxmt,
+            ..Settings::default()
+        },
     }
 }
 
@@ -133,10 +132,14 @@ fn the_guest_runs_with_the_profile_s_variables_and_dll_overrides() {
     fs::create_dir_all(&install).unwrap();
     let executable = install.join("Game.exe");
     fs::write(&executable, pe()).unwrap();
+    let config = linux_config(&root);
     let config = wine::Config {
-        variables: [("WINENCPU".to_owned(), "10".to_owned())].into(),
-        dll_overrides: [("xaudio2_7".to_owned(), "n,b".to_owned())].into(),
-        ..linux_config(&root)
+        settings: Settings {
+            variables: [("WINENCPU".to_owned(), "10".to_owned())].into(),
+            dll_overrides: [("xaudio2_7".to_owned(), "n,b".to_owned())].into(),
+            ..config.settings.clone()
+        },
+        ..config
     };
 
     let target = target::<Plain>(
@@ -178,9 +181,13 @@ fn a_d3dmetal_game_asks_the_launcher_for_the_d3dmetal_render_server() {
     let install = root.join("install");
     fs::create_dir_all(&install).unwrap();
     fs::write(install.join("Game.exe"), pe()).unwrap();
+    let config = linux_config(&root);
     let config = wine::Config {
-        graphics: wine::Graphics::D3DMetal,
-        ..linux_config(&root)
+        settings: Settings {
+            graphics: wine::Graphics::D3DMetal,
+            ..config.settings.clone()
+        },
+        ..config
     };
 
     let target = target::<Plain>(
@@ -542,10 +549,14 @@ fn the_launcher_refuses_an_option_it_does_not_know_or_a_variable_name_that_is_no
 /// record that they ran, into `calls`; the helper succeeds unless `failing`.
 fn translating_release(root: &Path, failing: bool) -> (wine::Config, PathBuf) {
     use std::os::unix::fs::PermissionsExt;
+    let config = linux_config(root);
     let config = wine::Config {
         runtime: root.join("release/linux"),
-        graphics: wine::Graphics::D3DMetal,
-        ..linux_config(root)
+        settings: Settings {
+            graphics: wine::Graphics::D3DMetal,
+            ..config.settings.clone()
+        },
+        ..config
     };
     let helpers = root.join("Helpers");
     let calls = root.join("calls");
@@ -618,7 +629,10 @@ fn a_failed_translation_is_tried_again_and_a_dxmt_game_needs_none() {
 
     fs::remove_file(&calls).unwrap();
     let dxmt = wine::Config {
-        graphics: wine::Graphics::Dxmt,
+        settings: Settings {
+            graphics: wine::Graphics::Dxmt,
+            ..config.settings.clone()
+        },
         ..config
     };
     translate_d3dmetal(&dxmt, &helpers);
@@ -645,16 +659,14 @@ fn smoke() {
         runtime,
         prefix: root.join("Prefixes/game-linux/prefix"),
         log: root.join("logs/game.log"),
-        engine: wine::Engine::Linux,
-        graphics: match std::env::var("OBELISK_LINUX_ENGINE_GRAPHICS").as_deref() {
-            Ok("d3dmetal") => wine::Graphics::D3DMetal,
-            _ => wine::Graphics::Dxmt,
+        settings: Settings {
+            engine: wine::Engine::Linux,
+            graphics: match std::env::var("OBELISK_LINUX_ENGINE_GRAPHICS").as_deref() {
+                Ok("d3dmetal") => wine::Graphics::D3DMetal,
+                _ => wine::Graphics::Dxmt,
+            },
+            ..Settings::default()
         },
-        options: wine::GraphicsOptions::default(),
-        arguments: Vec::new(),
-        performance_hud: false,
-        variables: Default::default(),
-        dll_overrides: Default::default(),
     };
     let arguments: Vec<&str> = arguments.split_whitespace().collect();
     let launch = launch_target(&executable, &arguments);

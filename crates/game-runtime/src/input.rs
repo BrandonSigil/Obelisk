@@ -29,7 +29,7 @@ impl Service {
     /// with the socket Wine must be given. Without a service in the runtime,
     /// or when it does not start, the game runs without gamepads.
     pub(crate) fn start(config: &Config) -> Option<(Self, PathBuf)> {
-        if config.engine != Engine::Rosetta {
+        if config.settings.engine != Engine::Rosetta {
             return None;
         }
         // It ships with the Linux engine's host programs, in every runtime.

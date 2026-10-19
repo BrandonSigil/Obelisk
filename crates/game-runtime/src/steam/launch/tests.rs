@@ -395,7 +395,10 @@ fn a_windows_game_starts_as_its_engine_runs_rosetta_s_wine_intel_and_the_linux_e
         Some(Architecture::Intel)
     );
     config.wine = Some(crate::wine::Config {
-        engine: crate::wine::Engine::Linux,
+        settings: crate::launch_settings::Settings {
+            engine: crate::wine::Engine::Linux,
+            ..wine.settings.clone()
+        },
         ..wine
     });
     assert_eq!(

@@ -124,7 +124,7 @@ fn native_target(
         launched,
         launched.arguments.clone(),
         environment.clone(),
-        crate::locations::game_log(&config.home, config.game().id, "game"),
+        crate::locations::game_log(&config.home, config.profile_game(), "game"),
     )?)
 }
 

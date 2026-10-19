@@ -21,7 +21,10 @@ fn a_windows_build_on_the_linux_engine_takes_its_store_title_in_the_dock() {
     };
     let wine = crate::wine::Config {
         prefix,
-        engine: crate::wine::Engine::Linux,
+        settings: crate::launch_settings::Settings {
+            engine: crate::wine::Engine::Linux,
+            ..Default::default()
+        },
         ..crate::wine::tests::config(&root)
     };
 

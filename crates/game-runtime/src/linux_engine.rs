@@ -107,7 +107,7 @@ fn guest_environment(config: &wine::Config) -> Vec<(String, String)> {
     ];
     own.into_iter()
         .map(|(name, value)| (name.to_owned(), value))
-        .chain(config.variables.clone())
+        .chain(config.settings.variables.clone())
         .collect()
 }
 
@@ -218,7 +218,9 @@ fn binds(config: &wine::Config, install: Option<&Path>) -> Result<String, Error>
 /// runs once per runtime and macOS build, through Obelisk's Intel helper in
 /// `helpers`. A failure only leaves the cost to the game.
 pub(crate) fn translate_d3dmetal(config: &wine::Config, helpers: &Path) {
-    if config.engine != wine::Engine::Linux || config.graphics != wine::Graphics::D3DMetal {
+    if config.settings.engine != wine::Engine::Linux
+        || config.settings.graphics != wine::Graphics::D3DMetal
+    {
         return;
     }
     let (Some(system), Some(release)) = (macos_build(), config.runtime.parent()) else {
@@ -352,7 +354,7 @@ pub(crate) fn target<S: wine::Storefront>(
         install.to_string_lossy().into_owned(),
         working_directory,
         "--graphics".to_owned(),
-        config.graphics.name().to_owned(),
+        config.settings.graphics.name().to_owned(),
     ];
     for (path, folder) in &guest.binds {
         arguments.push("--bind".to_owned());

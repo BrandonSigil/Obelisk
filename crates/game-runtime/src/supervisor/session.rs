@@ -360,7 +360,7 @@ impl<P: Provider> Session<P> {
             // lets the input server give each gamepad back its own behaviour.
             if wine
                 .as_ref()
-                .is_some_and(|wine| wine.engine == crate::wine::Engine::Linux)
+                .is_some_and(|wine| wine.settings.engine == crate::wine::Engine::Linux)
             {
                 self.signal(pid, "-TERM");
                 self.wait_reaped(pid, LAUNCHER_GRACE);
@@ -718,7 +718,7 @@ async fn run<L: Launch>(
         });
     // Metal reports the game's frames to its log, and shows them over the
     // game only to a player who asked in its launch settings.
-    let shown = wine.is_some_and(|wine| wine.performance_hud);
+    let shown = wine.is_some_and(|wine| wine.settings.performance_hud);
     prepared.environment.extend(
         crate::metal_hud::environment(shown)
             .map(|(name, value)| (name.to_owned(), value.to_owned())),
@@ -862,11 +862,11 @@ async fn run<L: Launch>(
             exit_code: status.code(),
             exit_signal: std::os::unix::process::ExitStatusExt::signal(&status),
             ended_by_obelisk: session.ended_by_obelisk.load(Ordering::Acquire),
-            graphics: wine.as_ref().map(|wine| wine.graphics),
+            graphics: wine.as_ref().map(|wine| wine.settings.graphics),
             voile: wine
                 .as_ref()
                 .and_then(|wine| crate::voile::release_of(&wine.runtime)),
-            engine: wine.map(|wine| wine.engine),
+            engine: wine.map(|wine| wine.settings.engine),
         })
     } else {
         None

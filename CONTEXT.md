@@ -35,7 +35,7 @@ The Windows machine one Windows installation runs in, shared by every account th
 _Avoid_: bottle, Wine folder
 
 **Launch settings**:
-The player's choices for how one Windows installation runs, for every account that launches it: the arguments added after its storefront's on its command line, its engine, then the graphics backend that renders its Direct3D there and that backend's options, each as the engine allows. Only what differs from what Obelisk knows of the game is kept. A change applies from the game's next launch, a game moved to the other engine runs in that engine's Wine prefix, and the settings go when the installation is uninstalled.
+How one Windows installation runs, for every account that launches it: what Obelisk knows of the game, with the player's choices over it. The player picks the arguments added after the storefront's and the game's own on its command line, its engine, then the graphics backend that renders its Direct3D there and that backend's options, each as the engine allows, and whether Metal's Performance HUD shows over the game. Only the choices that differ from what Obelisk knows of the game are kept. A change applies from the game's next launch, a game moved to the other engine runs in that engine's Wine prefix, and the settings go when the installation is uninstalled.
 _Avoid_: bottle, container, game settings, profile (what Obelisk itself knows of a game)
 
 **Graphics backend**:

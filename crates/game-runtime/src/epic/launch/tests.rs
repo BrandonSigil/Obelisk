@@ -348,7 +348,10 @@ fn a_windows_build_gets_its_ownership_token_where_its_engine_s_wine_reads_it() {
     let rosetta = crate::wine::tests::config(&directory);
     let linux = crate::wine::Config {
         prefix: directory.join("game-linux/prefix"),
-        engine: crate::wine::Engine::Linux,
+        settings: crate::launch_settings::Settings {
+            engine: crate::wine::Engine::Linux,
+            ..rosetta.settings.clone()
+        },
         ..rosetta.clone()
     };
     fs::create_dir_all(linux.prefix.join("drive_c")).unwrap();
@@ -367,7 +370,7 @@ fn a_windows_build_gets_its_ownership_token_where_its_engine_s_wine_reads_it() {
             .unwrap()
             .strip_prefix("-epicovt=")
             .unwrap();
-        let file = match wine.engine {
+        let file = match wine.settings.engine {
             crate::wine::Engine::Rosetta => {
                 PathBuf::from(token.strip_prefix("Z:").unwrap().replace('\\', "/"))
             }

@@ -94,7 +94,7 @@ impl From<View> for LaunchSettings {
             engine: view.settings.engine.into(),
             graphics: view.settings.graphics.into(),
             ray_tracing: view.settings.options.ray_tracing,
-            performance_hud: view.choices.performance_hud,
+            performance_hud: view.settings.performance_hud,
             choices: view.choices.into(),
             default_engine: view.default_engine.into(),
             engines: ENGINES
@@ -198,12 +198,10 @@ mod tests {
 
     #[test]
     fn a_game_s_settings_cross_with_every_engine_s_offer_and_default_backend() {
-        let view = View::new(
-            &profile::of(
-                profile::Game::Steam { app_id: 42 },
-                std::path::Path::new("/nowhere"),
-            ),
-            Choices::default(),
+        let view = launch_settings::of(
+            std::path::Path::new("/nowhere"),
+            profile::Game::Steam { app_id: 42 },
+            std::path::Path::new("/nowhere"),
         );
 
         let settings = LaunchSettings::from(view);

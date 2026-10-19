@@ -21,13 +21,9 @@ fn receipt(install: &Path, app_id: u32, name: &str) -> Receipt<crate::steam::Ste
     }
 }
 
-/// A game no profile names, in `install`.
+/// A game installed in `install`, without a store title.
 fn game(install: &Path) -> wine::Game<'_> {
-    wine::Game {
-        id: crate::profile::Game::Steam { app_id: 42 },
-        install,
-        title: "",
-    }
+    wine::Game { install, title: "" }
 }
 
 /// A Windows game in `root/game` whose Steam API sits beside Unity's plugins.
@@ -171,8 +167,8 @@ fn a_game_whose_profile_names_the_linux_engine_readies_the_engine_s_prefix_and_t
     .unwrap();
 
     let wine = request.config.wine.as_ref().unwrap();
-    assert_eq!(wine.engine, wine::Engine::Linux);
-    assert_eq!(wine.graphics, wine::Graphics::D3DMetal);
+    assert_eq!(wine.settings.engine, wine::Engine::Linux);
+    assert_eq!(wine.settings.graphics, wine::Graphics::D3DMetal);
     assert_eq!(wine.runtime, runtime);
     assert_eq!(wine.prefix, prefix);
     assert_eq!(

@@ -8,7 +8,6 @@
 //! with the defaults, in Rosetta's Wine with D3DMetal. The player's launch
 //! settings apply over it.
 use crate::wine::{Engine, Graphics, GraphicsOptions};
-use obelisk_core::launch::LaunchTarget;
 use serde::Deserialize;
 use std::{collections::BTreeMap, path::Path, sync::OnceLock};
 
@@ -31,7 +30,7 @@ pub enum Game<'a> {
 
 /// How Obelisk runs one Windows game.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Profile {
+pub(crate) struct Profile {
     pub engine: Engine,
     /// What renders its Direct3D on that engine.
     pub graphics: Graphics,
@@ -146,7 +145,7 @@ impl Known {
 /// The profile of `game`, installed in `install`: the one the table gives
 /// its storefront's id, else the one whose file the installation holds, else
 /// the defaults.
-pub fn of(game: Game<'_>, install: &Path) -> Profile {
+pub(crate) fn of(game: Game<'_>, install: &Path) -> Profile {
     let table = table();
     table
         .iter()
@@ -154,32 +153,6 @@ pub fn of(game: Game<'_>, install: &Path) -> Profile {
         .or_else(|| table.iter().find(|known| known.found_in(install)))
         .map(Known::profile)
         .unwrap_or_default()
-}
-
-impl Profile {
-    /// What starts for `target` inside `install`: `target`, or the program
-    /// the profile names instead, with the same arguments, in that program's
-    /// folder; then the profile's own arguments.
-    pub(crate) fn target(&self, install: &Path, target: &LaunchTarget) -> LaunchTarget {
-        let mut started = match self.executable {
-            None => target.clone(),
-            Some(executable) => {
-                let executable = install.join(executable);
-                LaunchTarget {
-                    working_directory: executable
-                        .parent()
-                        .unwrap_or(install)
-                        .to_string_lossy()
-                        .into_owned(),
-                    executable: executable.to_string_lossy().into_owned(),
-                    arguments: target.arguments.clone(),
-                    is_application_bundle: false,
-                }
-            }
-        };
-        started.arguments.extend(self.arguments.iter().cloned());
-        started
-    }
 }
 
 #[cfg(test)]

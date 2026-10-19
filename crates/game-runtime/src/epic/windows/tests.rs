@@ -125,7 +125,7 @@ fn a_windows_build_readies_its_prefix_with_its_prerequisite_before_any_credentia
     fs::write(config.install.join("Redist/setup.exe"), "").unwrap();
     let windows = wine::Installation::of(
         &locations,
-        config.game().id,
+        config.profile_game(),
         &config.platform,
         &config.install,
     )

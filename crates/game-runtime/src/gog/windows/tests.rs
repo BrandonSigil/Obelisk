@@ -75,7 +75,13 @@ fn a_windows_build_readies_its_prefix_with_its_prerequisites() {
     // readied.
     let started = config.game();
     assert_eq!(
-        wine::Installation::of(&locations, started.id, &config.platform, started.install).unwrap(),
+        wine::Installation::of(
+            &locations,
+            config.profile_game(),
+            &config.platform,
+            started.install
+        )
+        .unwrap(),
         Some(windows)
     );
     assert!(config.runs_in(Some(&wine)));

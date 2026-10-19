@@ -1,4 +1,6 @@
 use super::*;
+use crate::launch_settings::Settings;
+use std::collections::BTreeMap;
 
 /// The smallest file `portable_executable` accepts: a DOS header whose last
 /// field points just past it, at a PE signature.
@@ -62,13 +64,7 @@ pub(crate) fn config(root: &Path) -> Config {
         runtime: root.join("runtime"),
         prefix: root.join("prefix"),
         log: root.join("logs/wine-game.log"),
-        engine: Engine::Rosetta,
-        graphics: Graphics::D3DMetal,
-        options: GraphicsOptions::default(),
-        arguments: Vec::new(),
-        performance_hud: false,
-        variables: Default::default(),
-        dll_overrides: Default::default(),
+        settings: Settings::default(),
     }
 }
 
@@ -98,20 +94,19 @@ impl Storefront for Behind {
     }
 }
 
-/// The game no profile names, installed in `install`, without a store title.
+/// A game installed in `install`, without a store title.
 fn plain(install: &Path) -> Game<'_> {
-    Game {
-        id: OTHER,
-        install,
-        title: "",
-    }
+    Game { install, title: "" }
 }
 
 /// The engine's configuration of a prefix beside `root`.
 fn linux_config(root: &Path) -> Config {
     Config {
         prefix: root.join("Prefixes/game-linux/prefix"),
-        engine: Engine::Linux,
+        settings: Settings {
+            engine: Engine::Linux,
+            ..Settings::default()
+        },
         ..config(root)
     }
 }
@@ -251,7 +246,7 @@ fn a_private_file_is_read_through_the_z_drive_on_rosetta_and_from_the_c_drive_on
 
         let (folder, path) = private_file(&config, "ownership.bin", b"token").unwrap();
 
-        let file = match config.engine {
+        let file = match config.settings.engine {
             Engine::Rosetta => PathBuf::from(path.strip_prefix("Z:").unwrap().replace('\\', "/")),
             Engine::Linux => config
                 .prefix
@@ -365,11 +360,8 @@ fn the_program_a_profile_names_instead_is_the_one_readied_and_the_one_started() 
     let config = windows
         .ready(&locations, &launcher, &Plain::default())
         .unwrap();
-    let game = Game {
-        id: rocket_league,
-        ..plain(&install)
-    };
-    let started = super::target::<Plain>(&config, &game, &launcher, HashMap::new()).unwrap();
+    let started =
+        super::target::<Plain>(&config, &plain(&install), &launcher, HashMap::new()).unwrap();
 
     assert_eq!(
         guest_command(&started),
@@ -392,8 +384,15 @@ fn the_program_a_profile_names_instead_is_the_one_readied_and_the_one_started() 
         other.ready(&locations, &launcher, &Plain::default()),
         Err(Error::NotExecutable)
     ));
+    let without = Config {
+        settings: Settings {
+            executable: None,
+            ..config.settings.clone()
+        },
+        ..config.clone()
+    };
     assert!(matches!(
-        super::target::<Plain>(&config, &plain(&install), &launcher, HashMap::new()),
+        super::target::<Plain>(&without, &plain(&install), &launcher, HashMap::new()),
         Err(Error::NotExecutable)
     ));
     assert!(calls(&locations.wine_prefixes).is_empty());
@@ -484,7 +483,10 @@ fn a_game_s_backend_comes_before_wine_s_own_dlls_with_dxmt_behind_d3dmetal() {
     );
 
     let dxmt = Config {
-        graphics: Graphics::Dxmt,
+        settings: Settings {
+            graphics: Graphics::Dxmt,
+            ..d3dmetal.settings.clone()
+        },
         ..d3dmetal
     };
     let environment = self::environment(&dxmt);
@@ -520,14 +522,20 @@ fn turning_ray_tracing_off_reaches_d3dmetal_alone() {
     assert!(!defaults.keys().any(|name| name.starts_with("D3DM_")));
 
     let options = Config {
-        options: GraphicsOptions { ray_tracing: false },
+        settings: Settings {
+            options: GraphicsOptions { ray_tracing: false },
+            ..config.settings.clone()
+        },
         ..config
     };
     let environment = self::environment(&options);
     assert_eq!(environment["D3DM_SUPPORT_DXR"], "0");
 
     let dxmt = Config {
-        graphics: Graphics::Dxmt,
+        settings: Settings {
+            graphics: Graphics::Dxmt,
+            ..options.settings.clone()
+        },
         ..options
     };
     assert!(
@@ -552,9 +560,13 @@ fn backend_recording_runtime(root: &Path) -> Config {
 #[test]
 fn a_prefix_gets_every_backend_s_placeholders_when_created_or_when_its_runtime_gains_one() {
     let (_directory, root) = installation();
+    let config = backend_recording_runtime(&root);
     let config = Config {
-        graphics: Graphics::Dxmt,
-        ..backend_recording_runtime(&root)
+        settings: Settings {
+            graphics: Graphics::Dxmt,
+            ..config.settings.clone()
+        },
+        ..config
     };
     let runtime = config.runtime.to_string_lossy().into_owned();
     prepare_plain(&config, &root);
@@ -592,7 +604,7 @@ fn launch_settings_move_a_game_to_the_engine_and_backend_its_player_chose() {
         performance_hud: true,
         ..Default::default()
     };
-    crate::launch_settings::save(&locations.library, &install, &choices).unwrap();
+    crate::launch_settings::choose(&locations.library, OTHER, &install, choices).unwrap();
 
     let windows = Installation::of(&locations, OTHER, "windows", &install)
         .unwrap()
@@ -603,36 +615,24 @@ fn launch_settings_move_a_game_to_the_engine_and_backend_its_player_chose() {
         library.join("Prefixes/steam-42-windows-linux/prefix")
     );
     let config = windows.runtime(&locations).unwrap();
-    assert_eq!(config.engine, Engine::Linux);
-    assert_eq!(config.graphics, Graphics::D3DMetal);
-    assert!(config.performance_hud);
+    assert_eq!(config.settings.engine, Engine::Linux);
+    assert_eq!(config.settings.graphics, Graphics::D3DMetal);
+    assert!(config.settings.performance_hud);
 }
 
 #[test]
 fn the_player_s_launch_settings_arguments_follow_the_storefront_s() {
     let (_directory, root) = installation();
-    let locations = locations(&root);
-    let install = root.join("library/Games/Steam/steam-42-windows");
-    let choices = crate::launch_settings::Choices {
-        arguments: Some(r#"-dx11 "+exec auto exec.cfg""#.into()),
-        ..Default::default()
-    };
-    crate::launch_settings::save(&locations.library, &install, &choices).unwrap();
-    fs::create_dir_all(locations.voile.join("current/bin")).unwrap();
-    fs::write(locations.voile.join("current/bin/wine"), "").unwrap();
-    let windows = Installation::of(&locations, OTHER, "windows", &install)
-        .unwrap()
-        .unwrap();
-    let config = windows.runtime(&locations).unwrap();
-    assert_eq!(config.arguments, ["-dx11", "+exec auto exec.cfg"]);
-
     let (install, game_target) = game(&root);
     let game_target = LaunchTarget {
         arguments: vec!["-AUTH_TYPE=exchangecode".into()],
         ..game_target
     };
     let config = Config {
-        arguments: vec!["-dx11".into()],
+        settings: Settings {
+            arguments: vec!["-dx11".into()],
+            ..Settings::default()
+        },
         ..self::config(&root)
     };
     let started =
@@ -647,8 +647,12 @@ fn the_player_s_launch_settings_arguments_follow_the_storefront_s() {
 fn the_game_s_log_starts_with_how_obelisk_runs_it_and_only_the_player_s_arguments() {
     let (_directory, root) = installation();
     let config = Config {
-        options: GraphicsOptions { ray_tracing: false },
-        arguments: vec!["-dx11".into(), "+exec auto exec.cfg".into(), String::new()],
+        settings: Settings {
+            options: GraphicsOptions { ray_tracing: false },
+            profile_arguments: vec!["-secret".into()],
+            arguments: vec!["-dx11".into(), "+exec auto exec.cfg".into(), String::new()],
+            ..Settings::default()
+        },
         ..config(&root)
     };
     assert_eq!(
@@ -665,8 +669,9 @@ fn the_game_s_log_starts_with_how_obelisk_runs_it_and_only_the_player_s_argument
                 .1
                 .trim_end()
         ),
-        config.arguments
+        config.settings.arguments
     );
+    assert!(!config.log_header().contains("-secret"));
 
     // The Linux engine's render servers take no options; a release names
     // itself in its manifest, which the engine's runtime sits inside.
@@ -678,8 +683,11 @@ fn the_game_s_log_starts_with_how_obelisk_runs_it_and_only_the_player_s_argument
     .unwrap();
     let linux = Config {
         runtime: root.join("v26.3.0-15/linux"),
-        engine: Engine::Linux,
-        graphics: Graphics::Dxmt,
+        settings: Settings {
+            engine: Engine::Linux,
+            graphics: Graphics::Dxmt,
+            ..Settings::default()
+        },
         ..self::config(&root)
     };
     assert_eq!(
@@ -746,14 +754,17 @@ fn every_wine_command_syncs_through_mach_and_gives_32_bit_games_4_gb() {
 fn a_profile_s_variables_and_dll_overrides_come_after_obelisk_s_own_and_open_the_log() {
     let (_directory, root) = installation();
     let config = Config {
-        variables: BTreeMap::from([
-            ("ROSETTA_ADVERTISE_AVX".to_owned(), String::new()),
-            ("WINENCPU".to_owned(), "10".to_owned()),
-        ]),
-        dll_overrides: BTreeMap::from([
-            ("xaudio2_7".to_owned(), "n,b".to_owned()),
-            ("SpeechSynthWrapper".to_owned(), String::new()),
-        ]),
+        settings: Settings {
+            variables: BTreeMap::from([
+                ("ROSETTA_ADVERTISE_AVX".to_owned(), String::new()),
+                ("WINENCPU".to_owned(), "10".to_owned()),
+            ]),
+            dll_overrides: BTreeMap::from([
+                ("xaudio2_7".to_owned(), "n,b".to_owned()),
+                ("SpeechSynthWrapper".to_owned(), String::new()),
+            ]),
+            ..Settings::default()
+        },
         ..config(&root)
     };
 
@@ -1051,23 +1062,26 @@ fn a_windows_installation_runs_in_the_prefix_named_after_its_folder_whatever_the
 }
 
 #[test]
-fn a_saved_configuration_from_before_engines_and_graphics_runs_its_engine_s_default_backend() {
-    let saved = r#"{"runtime":"/Voile/v1","prefix":"/Prefixes/game","log":"/logs/game.log"}"#;
-    let config: Config = serde_json::from_str(saved).unwrap();
-    assert_eq!(config.engine, Engine::Rosetta);
-    assert_eq!(config.graphics, Graphics::D3DMetal);
-    assert_eq!(config.options, GraphicsOptions::default());
-    assert!(!config.performance_hud);
-
-    let saved = r#"{"runtime":"/Voile/v1/linux","prefix":"/Prefixes/game-linux/prefix","log":"/logs/game.log","engine":"Linux"}"#;
-    let config: Config = serde_json::from_str(saved).unwrap();
-    assert_eq!(config.engine, Engine::Linux);
-    assert_eq!(config.graphics, Graphics::Dxmt);
+fn a_configuration_reaches_its_game_session_whole() {
     let config = Config {
-        graphics: Graphics::D3DMetal,
-        ..config
+        runtime: "/Voile/v1/linux".into(),
+        prefix: "/Prefixes/game-linux/prefix".into(),
+        log: "/logs/game.log".into(),
+        settings: Settings {
+            engine: Engine::Linux,
+            graphics: Graphics::Dxmt,
+            options: GraphicsOptions::default(),
+            executable: Some("Binaries/Game.exe".into()),
+            profile_arguments: vec!["-windowed".into()],
+            arguments: vec!["-dx11".into(), "+exec auto exec.cfg".into()],
+            variables: BTreeMap::from([("SteamDeck".to_owned(), "1".to_owned())]),
+            dll_overrides: BTreeMap::from([("xaudio2_7".to_owned(), "n,b".to_owned())]),
+            performance_hud: true,
+        },
     };
-    let again: Config = serde_json::from_str(&serde_json::to_string(&config).unwrap()).unwrap();
+
+    let again: Config = serde_json::from_slice(&serde_json::to_vec(&config).unwrap()).unwrap();
+
     assert_eq!(again, config);
 }
 
@@ -1088,8 +1102,8 @@ fn a_game_whose_profile_names_the_linux_engine_runs_there_in_its_own_prefix_with
         library.join("Prefixes/steam-1245620-windows-linux/prefix")
     );
     let config = windows.runtime(&locations).unwrap();
-    assert_eq!(config.engine, Engine::Linux);
-    assert_eq!(config.graphics, Graphics::D3DMetal);
+    assert_eq!(config.settings.engine, Engine::Linux);
+    assert_eq!(config.settings.graphics, Graphics::D3DMetal);
     assert_eq!(config.runtime, runtime);
     let other = Installation::of(&locations, OTHER, "windows", &install)
         .unwrap()
@@ -1150,7 +1164,7 @@ fn uninstalling_removes_both_engines_prefixes_and_the_launch_settings() {
         engine: Some(Engine::Rosetta),
         ..Default::default()
     };
-    crate::launch_settings::save(&locations.library, &install, &choices).unwrap();
+    crate::launch_settings::choose(&locations.library, ELDEN_RING, &install, choices).unwrap();
     let settings = locations
         .library
         .join("LaunchSettings/steam-1245620-windows.json");
@@ -1213,7 +1227,10 @@ fn quitting_a_windows_game_asks_its_windows_to_close_and_kills_nothing() {
 fn quitting_a_linux_engine_game_uses_its_window_server_quit() {
     let (_directory, root) = installation();
     let config = Config {
-        engine: Engine::Linux,
+        settings: Settings {
+            engine: Engine::Linux,
+            ..Settings::default()
+        },
         ..config(&root)
     };
     let environment = HashMap::from([("TMPDIR".to_owned(), "/var/folders/T/".to_owned())]);
@@ -1254,7 +1271,10 @@ fn only_a_prefix_and_its_wine_server_belong_to_one_windows_game() {
     );
     let linux = Config {
         prefix: root.join("Game-linux/prefix"),
-        engine: Engine::Linux,
+        settings: Settings {
+            engine: Engine::Linux,
+            ..config.settings.clone()
+        },
         ..config
     };
     assert_eq!(private_folders(&linux), [root.join("Game-linux")]);

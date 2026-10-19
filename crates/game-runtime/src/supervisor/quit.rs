@@ -48,7 +48,7 @@ impl Scope {
         if let Some(wine) = wine {
             scope.runs.push(wine.runtime.clone());
             scope.uses.extend(wine::private_folders(wine));
-            if wine.engine == wine::Engine::Linux
+            if wine.settings.engine == wine::Engine::Linux
                 && let Some(pid) = pid
             {
                 scope

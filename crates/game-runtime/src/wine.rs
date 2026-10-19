@@ -9,7 +9,7 @@ use crate::{
 use obelisk_core::launch::LaunchTarget;
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::{BTreeMap, BTreeSet, HashMap},
+    collections::{BTreeSet, HashMap},
     fs,
     io::Read,
     path::{Path, PathBuf},
@@ -54,65 +54,14 @@ pub fn profile(prefix: &Path) -> PathBuf {
 }
 
 /// How one Windows installation runs: the Wine runtime, the installation's
-/// prefix, the log Wine writes while its game runs, the engine that runs
-/// that Wine, the graphics backend that renders its Direct3D, with that
-/// backend's options, the arguments its player adds to its command line,
-/// whether Metal's Performance HUD shows over its game, and the environment
-/// variables and DLL overrides its game's profile adds to Wine's.
+/// prefix, the log Wine writes while its game runs, and the launch settings
+/// it runs with.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(from = "SavedConfig")]
 pub struct Config {
     pub runtime: PathBuf,
     pub prefix: PathBuf,
     pub log: PathBuf,
-    pub engine: Engine,
-    pub graphics: Graphics,
-    pub options: GraphicsOptions,
-    pub arguments: Vec<String>,
-    pub performance_hud: bool,
-    pub variables: BTreeMap<String, String>,
-    pub dll_overrides: BTreeMap<String, String>,
-}
-
-/// A configuration as an earlier Obelisk may have saved it: one without a
-/// backend renders with its engine's default.
-#[derive(Deserialize)]
-struct SavedConfig {
-    runtime: PathBuf,
-    prefix: PathBuf,
-    log: PathBuf,
-    #[serde(default)]
-    engine: Engine,
-    graphics: Option<Graphics>,
-    #[serde(default)]
-    options: GraphicsOptions,
-    #[serde(default)]
-    arguments: Vec<String>,
-    #[serde(default)]
-    performance_hud: bool,
-    #[serde(default)]
-    variables: BTreeMap<String, String>,
-    #[serde(default)]
-    dll_overrides: BTreeMap<String, String>,
-}
-
-impl From<SavedConfig> for Config {
-    fn from(saved: SavedConfig) -> Self {
-        Self {
-            runtime: saved.runtime,
-            prefix: saved.prefix,
-            log: saved.log,
-            engine: saved.engine,
-            graphics: saved
-                .graphics
-                .unwrap_or_else(|| Graphics::default_on(saved.engine)),
-            options: saved.options,
-            arguments: saved.arguments,
-            performance_hud: saved.performance_hud,
-            variables: saved.variables,
-            dll_overrides: saved.dll_overrides,
-        }
-    }
+    pub settings: crate::launch_settings::Settings,
 }
 
 /// What runs a Windows game's Wine.
@@ -188,7 +137,7 @@ impl Config {
 
     /// Whether the runtime is in place.
     pub fn installed(&self) -> bool {
-        match self.engine {
+        match self.settings.engine {
             Engine::Rosetta => self.wine().is_file(),
             Engine::Linux => self.runtime.join("engine/fexdarwin-run").is_file(),
         }
@@ -197,7 +146,7 @@ impl Config {
     /// How the game starts: Wine for macOS is an Intel program, the Linux
     /// engine's launcher a native one.
     pub(crate) fn architecture(&self) -> Architecture {
-        match self.engine {
+        match self.settings.engine {
             Engine::Rosetta => ARCHITECTURE,
             Engine::Linux => Architecture::Arm64,
         }
@@ -221,7 +170,7 @@ impl Config {
     /// backend's, then, behind D3DMetal, DXMT's for the 32-bit programs
     /// D3DMetal does not run.
     fn graphics_folders(&self) -> Vec<PathBuf> {
-        match self.graphics {
+        match self.settings.graphics {
             Graphics::D3DMetal => self.backends(),
             Graphics::Dxmt => self.dll_folders(&[DXMT_DLLS]),
         }
@@ -240,11 +189,11 @@ impl Config {
     /// carries it: Wine reports the hardware scheduling D3D12 expects from
     /// D3DMetal alone.
     fn active_graphics(&self) -> Option<&'static str> {
-        let carried = match self.graphics {
+        let carried = match self.settings.graphics {
             Graphics::D3DMetal => self.d3dmetal().is_some(),
             Graphics::Dxmt => self.runtime.join(DXMT_DLLS).is_dir(),
         };
-        carried.then_some(self.graphics.name())
+        carried.then_some(self.settings.graphics.name())
     }
 
     /// The GStreamer plugins the runtime carries, which decode games' videos
@@ -285,7 +234,8 @@ impl Config {
 
     /// The profile's DLL overrides, each as `WINEDLLOVERRIDES` spells it.
     fn profile_overrides(&self) -> impl Iterator<Item = String> + '_ {
-        self.dll_overrides
+        self.settings
+            .dll_overrides
             .iter()
             .map(|(dll, mode)| format!("{dll}={mode}"))
     }
@@ -360,12 +310,12 @@ impl Config {
             environment.insert("CX_ACTIVE_GRAPHICS_BACKEND".into(), active.into());
         }
         // Direct3D 12 offers DirectX Raytracing unless D3DMetal is told not to.
-        if self.graphics == Graphics::D3DMetal && !self.options.ray_tracing {
+        if self.settings.graphics == Graphics::D3DMetal && !self.settings.options.ray_tracing {
             environment.insert("D3DM_SUPPORT_DXR".into(), "0".into());
         }
         // The profile's variables come last, so that they may replace
         // Obelisk's own for their game.
-        environment.extend(self.variables.clone());
+        environment.extend(self.settings.variables.clone());
         environment
     }
 
@@ -373,20 +323,23 @@ impl Config {
     /// reads the log, such as a bug report's reader. Of the arguments, only
     /// those its player adds: a storefront's may carry credentials.
     pub(crate) fn log_header(&self) -> String {
-        let engine = match self.engine {
+        let engine = match self.settings.engine {
             Engine::Rosetta => "wine-macos",
             Engine::Linux => "wine-linux",
         };
-        let mut header = format!("obelisk: engine={engine} graphics={}", self.graphics.name());
-        let ray_tracing = crate::launch_settings::offer(self.engine)
-            .graphics(self.graphics)
+        let mut header = format!(
+            "obelisk: engine={engine} graphics={}",
+            self.settings.graphics.name()
+        );
+        let ray_tracing = crate::launch_settings::offer(self.settings.engine)
+            .graphics(self.settings.graphics)
             .is_some_and(|offer| {
                 offer
                     .options
                     .contains(&crate::launch_settings::GraphicsOption::RayTracing)
             });
         if ray_tracing {
-            let state = if self.options.ray_tracing {
+            let state = if self.settings.options.ray_tracing {
                 "on"
             } else {
                 "off"
@@ -399,20 +352,21 @@ impl Config {
             " voile={}",
             voile.as_deref().unwrap_or("development")
         ));
-        if !self.variables.is_empty() {
+        if !self.settings.variables.is_empty() {
             let variables: Vec<_> = self
+                .settings
                 .variables
                 .iter()
                 .map(|(name, value)| format!("{name}={value}"))
                 .collect();
             header.push_str(&format!(" variables={}", typed(&variables)));
         }
-        if !self.dll_overrides.is_empty() {
+        if !self.settings.dll_overrides.is_empty() {
             let overrides: Vec<_> = self.profile_overrides().collect();
             header.push_str(&format!(" dll_overrides={}", overrides.join(";")));
         }
-        if !self.arguments.is_empty() {
-            header.push_str(&format!(" arguments={}", typed(&self.arguments)));
+        if !self.settings.arguments.is_empty() {
+            header.push_str(&format!(" arguments={}", typed(&self.settings.arguments)));
         }
         header.push('\n');
         header
@@ -448,10 +402,9 @@ pub trait Storefront {
     }
 }
 
-/// A storefront's Windows game as Wine starts it: the game its profile is
-/// looked up by, its installation's folder, and its name in the store.
+/// A storefront's Windows game as Wine starts it: its installation's folder
+/// and its name in the store.
 pub(crate) struct Game<'a> {
-    pub id: crate::profile::Game<'a>,
     pub install: &'a Path,
     pub title: &'a str,
 }
@@ -468,7 +421,7 @@ fn prepare<S: Storefront>(
     target: &LaunchTarget,
     storefront: &S,
 ) -> Result<(), Error> {
-    if config.engine == Engine::Linux {
+    if config.settings.engine == Engine::Linux {
         return crate::linux_engine::prepare(config, install, target, storefront);
     }
     program(install, target)?;
@@ -481,18 +434,17 @@ fn prepare<S: Storefront>(
     }
 }
 
-/// The game `target` names, or the program its profile names instead, that
-/// Wine starts in the prefix with `environment` and Wine's own settings, as S
-/// completes it, logging to the installation's log.
+/// The game `target` names, or the program its launch settings start
+/// instead, that Wine starts in the prefix with `environment` and Wine's own
+/// settings, as S completes it, logging to the installation's log.
 pub(crate) fn target<S: Storefront>(
     config: &Config,
     game: &Game<'_>,
     target: &LaunchTarget,
     environment: HashMap<String, String>,
 ) -> Result<Target, Error> {
-    let mut launched = crate::profile::of(game.id, game.install).target(game.install, target);
-    launched.arguments.extend(config.arguments.iter().cloned());
-    if config.engine == Engine::Linux {
+    let launched = config.settings.started(game.install, target);
+    if config.settings.engine == Engine::Linux {
         return crate::linux_engine::target::<S>(
             game.install,
             &launched,
@@ -527,7 +479,7 @@ pub(crate) fn private_file(
     name: &str,
     bytes: &[u8],
 ) -> Result<(tempfile::TempDir, String), Error> {
-    if config.engine == Engine::Linux {
+    if config.settings.engine == Engine::Linux {
         return crate::linux_engine::private_file(config, name, bytes);
     }
     let (directory, path) =
@@ -662,11 +614,7 @@ pub struct Installation {
     prefix: PathBuf,
     /// Where Wine logs while its game runs.
     log: PathBuf,
-    profile: crate::profile::Profile,
-    /// What its player adds to its game's command line.
-    arguments: Vec<String>,
-    /// Whether its player shows Metal's Performance HUD over its game.
-    performance_hud: bool,
+    settings: crate::launch_settings::Settings,
 }
 
 impl Installation {
@@ -682,11 +630,9 @@ impl Installation {
         if !windows_build(platform) {
             return Ok(None);
         }
-        let choices = crate::launch_settings::load(&locations.library, install);
-        let arguments = command_line(choices.arguments.as_deref().unwrap_or_default());
-        let profile = choices.apply(&crate::profile::of(game, install));
+        let settings = crate::launch_settings::of(&locations.library, game, install).settings;
         let prefix = prefix(&locations.wine_prefixes, install)?;
-        let prefix = match profile.engine {
+        let prefix = match settings.engine {
             Engine::Rosetta => prefix,
             Engine::Linux => crate::linux_engine::prefix(&prefix)?,
         };
@@ -694,9 +640,7 @@ impl Installation {
             install: install.to_owned(),
             prefix,
             log: log(locations, game),
-            profile,
-            arguments,
-            performance_hud: choices.performance_hud,
+            settings,
         }))
     }
 
@@ -716,7 +660,7 @@ impl Installation {
         storefront: &S,
     ) -> Result<Config, Error> {
         let config = self.runtime(locations)?;
-        let target = self.profile.target(&self.install, target);
+        let target = self.settings.started(&self.install, target);
         prepare(&config, &locations.home, &self.install, &target, storefront)?;
         crate::linux_engine::translate_d3dmetal(&config, &locations.helpers);
         Ok(config)
@@ -724,7 +668,7 @@ impl Installation {
 
     /// How its game runs, once Voile is installed.
     fn runtime(&self, locations: &crate::Locations) -> Result<Config, Error> {
-        let runtime = match self.profile.engine {
+        let runtime = match self.settings.engine {
             Engine::Rosetta => crate::voile::runtime(&locations.voile),
             Engine::Linux => crate::voile::linux_runtime(&locations.voile),
         };
@@ -732,13 +676,7 @@ impl Installation {
             runtime: runtime.ok_or(Error::WineUnavailable)?,
             prefix: self.prefix.clone(),
             log: self.log.clone(),
-            engine: self.profile.engine,
-            graphics: self.profile.graphics,
-            options: self.profile.options,
-            arguments: self.arguments.clone(),
-            performance_hud: self.performance_hud,
-            variables: self.profile.variables.clone(),
-            dll_overrides: self.profile.dll_overrides.clone(),
+            settings: self.settings.clone(),
         })
     }
 
@@ -918,7 +856,7 @@ pub(crate) fn wait(mut child: Child, timeout: Duration) -> Result<Option<i32>, E
 /// those that remain, including the ones it started apart from the game.
 pub(crate) fn stop(config: &Config) {
     // The engine's processes follow its launcher, which the session stops.
-    if config.engine == Engine::Rosetta {
+    if config.settings.engine == Engine::Rosetta {
         let _ = wineserver(&config.runtime, &config.prefix, "-k");
     }
 }
@@ -947,7 +885,7 @@ fn quit_command(
     program: Option<&Path>,
     pid: u32,
 ) -> Option<Command> {
-    let command = match config.engine {
+    let command = match config.settings.engine {
         Engine::Rosetta => {
             let mut command = Command::new(config.wine());
             command
@@ -973,7 +911,7 @@ fn quit_command(
 /// on a Wine server frozen with its game for longer than `QUIT_TIMEOUT`.
 pub(crate) fn kill(config: &Config) {
     // The engine's processes follow its launcher, which the session kills.
-    if config.engine == Engine::Rosetta {
+    if config.settings.engine == Engine::Rosetta {
         let mut command = Command::new(config.runtime.join("bin/wineserver"));
         command
             .arg("-k")
@@ -988,7 +926,7 @@ pub(crate) fn kill(config: &Config) {
 /// the prefix's device and inode.
 pub(crate) fn private_folders(config: &Config) -> Vec<PathBuf> {
     use std::os::unix::fs::MetadataExt;
-    match config.engine {
+    match config.settings.engine {
         Engine::Rosetta => {
             let mut folders = vec![config.prefix.clone()];
             if let Ok(prefix) = fs::metadata(&config.prefix) {
@@ -1067,7 +1005,7 @@ fn wineserver(runtime: &Path, prefix: &Path, argument: &str) -> Result<(), Error
 }
 
 /// Splits a Windows command line on the spaces outside double quotes.
-fn command_line(line: &str) -> Vec<String> {
+pub(crate) fn command_line(line: &str) -> Vec<String> {
     let mut arguments = Vec::new();
     let mut current = String::new();
     let mut quoted = false;

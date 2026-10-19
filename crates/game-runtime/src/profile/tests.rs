@@ -1,5 +1,4 @@
 use super::*;
-use crate::launch_settings::Choices;
 use std::{collections::HashSet, path::Component};
 
 /// The profile of `game` found by its id, in an installation that holds no
@@ -16,6 +15,10 @@ const ROCKET_LEAGUE: Game<'static> = Game::Epic {
 #[test]
 fn rocket_league_and_elden_ring_run_on_the_linux_engine_and_nothing_else_does() {
     assert_eq!(by_id(ROCKET_LEAGUE).engine, Engine::Linux);
+    assert_eq!(
+        by_id(ROCKET_LEAGUE).executable,
+        Some("Binaries/Win64/RocketLeague_EAC.exe")
+    );
     assert_eq!(by_id(Game::Steam { app_id: 1245620 }).engine, Engine::Linux);
     for other in [
         Game::Epic {
@@ -45,58 +48,6 @@ fn elden_ring_renders_through_d3dmetal_rocket_league_through_dxmt_and_others_thr
     assert_eq!(by_id(ROCKET_LEAGUE).graphics, Graphics::Dxmt);
     assert_eq!(Profile::default().graphics, Graphics::D3DMetal);
     assert_eq!(Profile::default().options, GraphicsOptions::default());
-}
-
-#[test]
-fn the_player_s_launch_settings_apply_over_the_profile_and_keep_its_program() {
-    let choices = Choices {
-        engine: Some(Engine::Rosetta),
-        ray_tracing: Some(false),
-        ..Choices::default()
-    };
-
-    let profile = choices.apply(&by_id(ROCKET_LEAGUE));
-
-    assert_eq!(profile.engine, Engine::Rosetta);
-    assert_eq!(profile.graphics, Graphics::D3DMetal);
-    assert!(!profile.options.ray_tracing);
-    assert_eq!(profile.executable, by_id(ROCKET_LEAGUE).executable);
-}
-
-#[test]
-fn rocket_league_starts_its_anti_cheat_bootstrapper_instead_of_its_dotnet_launcher() {
-    let install = Path::new("/games/rl");
-    let publisher = LaunchTarget {
-        executable: "/games/rl/Binaries/Win64/Launcher.exe".into(),
-        arguments: vec!["-AUTH_TYPE=exchangecode".into()],
-        working_directory: "/games/rl/Binaries/Win64".into(),
-        is_application_bundle: false,
-    };
-
-    let started = by_id(ROCKET_LEAGUE).target(install, &publisher);
-
-    assert_eq!(
-        started.executable,
-        "/games/rl/Binaries/Win64/RocketLeague_EAC.exe"
-    );
-    assert_eq!(started.working_directory, "/games/rl/Binaries/Win64");
-    assert_eq!(started.arguments, publisher.arguments);
-}
-
-#[test]
-fn a_game_without_a_substitute_starts_its_publisher_s_program() {
-    let publisher = LaunchTarget {
-        executable: "/games/er/Game/start_protected_game.exe".into(),
-        arguments: Vec::new(),
-        working_directory: "/games/er/Game".into(),
-        is_application_bundle: false,
-    };
-    let install = Path::new("/games/er");
-    assert_eq!(
-        by_id(Game::Steam { app_id: 1245620 }).target(install, &publisher),
-        publisher
-    );
-    assert_eq!(Profile::default().target(install, &publisher), publisher);
 }
 
 /// Every game of `profiles.json` as written there.
@@ -234,17 +185,7 @@ fn a_game_of_the_table_keeps_the_defaults_it_does_not_change_and_adds_its_argume
     assert_eq!(profile.graphics, Graphics::D3DMetal);
     assert_eq!(profile.variables["WINENCPU"], "10");
     assert_eq!(profile.dll_overrides["xaudio2_7"], "n,b");
-
-    let publisher = LaunchTarget {
-        executable: "/games/g/Game.exe".into(),
-        arguments: vec!["-AUTH_TYPE=exchangecode".into()],
-        working_directory: "/games/g".into(),
-        is_application_bundle: false,
-    };
-    assert_eq!(
-        profile.target(Path::new("/games/g"), &publisher).arguments,
-        ["-AUTH_TYPE=exchangecode", "-dx11"]
-    );
+    assert_eq!(profile.arguments, ["-dx11"]);
 }
 
 #[test]

@@ -278,7 +278,7 @@ pub(super) fn native_target(
         &plan.target,
         arguments,
         environment.clone(),
-        crate::locations::game_log(&config.home, config.game().id, "game"),
+        crate::locations::game_log(&config.home, config.profile_game(), "game"),
     )?;
     Ok((target, architecture, ownership))
 }

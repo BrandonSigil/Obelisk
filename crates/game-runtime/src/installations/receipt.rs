@@ -74,14 +74,38 @@ impl<S: Storefront> Receipt<S> {
         S::receipt_id(&self.game(), &self.platform)
     }
 
-    /// Its game as Wine starts a Windows build: the game its profile is
-    /// looked up by, in its folder, with its name in the store.
+    /// Its game as Wine starts a Windows build: in its folder, with its name
+    /// in the store.
     pub(crate) fn wine_game(&self) -> crate::wine::Game<'_> {
         crate::wine::Game {
-            id: S::profile_game(&self.product),
             install: Path::new(&self.directory),
             title: &self.name,
         }
+    }
+
+    /// Its launch settings, by its game's profile and the choices kept for it
+    /// in Obelisk's `library`.
+    pub(crate) fn launch_settings(&self, library: &Path) -> crate::launch_settings::View {
+        crate::launch_settings::of(
+            library,
+            S::profile_game(&self.product),
+            Path::new(&self.directory),
+        )
+    }
+
+    /// Keeps `choices` as its player's launch settings in Obelisk's
+    /// `library`, and returns its launch settings from its next launch on.
+    pub(crate) fn choose_launch_settings(
+        &self,
+        library: &Path,
+        choices: crate::launch_settings::Choices,
+    ) -> std::io::Result<crate::launch_settings::View> {
+        crate::launch_settings::choose(
+            library,
+            S::profile_game(&self.product),
+            Path::new(&self.directory),
+            choices,
+        )
     }
 
     /// Its Wine prefix and how its game runs there, when it is a Windows
@@ -90,8 +114,12 @@ impl<S: Storefront> Receipt<S> {
         &self,
         locations: &crate::Locations,
     ) -> Result<Option<crate::wine::Installation>, crate::Error> {
-        let game = self.wine_game();
-        crate::wine::Installation::of(locations, game.id, &self.platform, game.install)
+        crate::wine::Installation::of(
+            locations,
+            S::profile_game(&self.product),
+            &self.platform,
+            Path::new(&self.directory),
+        )
     }
 
     /// Deletes its Wine prefix once its folder is gone. `None` when it has

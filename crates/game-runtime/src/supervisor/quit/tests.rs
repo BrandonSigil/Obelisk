@@ -1,4 +1,5 @@
 use super::*;
+use crate::launch_settings::Settings;
 
 fn scope() -> Scope {
     Scope {
@@ -76,13 +77,7 @@ fn each_engine_scopes_the_sweep_to_the_game_and_spares_obelisk() {
         runtime: "/lib/Voile/v1".into(),
         prefix: "/lib/Prefixes/Peak".into(),
         log: "/logs/wine-Peak.log".into(),
-        engine: wine::Engine::Rosetta,
-        graphics: wine::Graphics::D3DMetal,
-        options: wine::GraphicsOptions::default(),
-        arguments: Vec::new(),
-        performance_hud: false,
-        variables: Default::default(),
-        dll_overrides: Default::default(),
+        settings: Settings::default(),
     };
     let windows = Scope::of(&game, Some(&rosetta), Some(7), own);
     assert_eq!(
@@ -97,7 +92,10 @@ fn each_engine_scopes_the_sweep_to_the_game_and_spares_obelisk() {
     let linux = wine::Config {
         prefix: "/lib/Prefixes/Peak-linux/prefix".into(),
         runtime: "/lib/Voile/v1/linux".into(),
-        engine: wine::Engine::Linux,
+        settings: Settings {
+            engine: wine::Engine::Linux,
+            ..Settings::default()
+        },
         ..rosetta
     };
     let engine = Scope::of(&game, Some(&linux), Some(7), own);
