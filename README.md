@@ -31,6 +31,12 @@
   <a href="https://getobelisk.app"><img src="assets/readme/macbook.png" alt="Obelisk's Home on a MacBook Pro: Rocket League, the recently played games and the games installed on this Mac" width="800"></a>
 </p>
 
+> [!IMPORTANT]
+> Obelisk is tested on a limited number of Macs and games, so expect bugs. When something goes wrong, **SOS** on the game's page sends us what we need to fix it.
+>
+> - **Not every game runs yet.** Windows games run through Wine, like CrossOver and Steam's Proton. Many run well, some run poorly or not at all. Before downloading a large game, check how it runs on [getobelisk.app](https://getobelisk.app).
+> - **Games with anti-cheat.** Obelisk runs a game's anti-cheat through the Linux version its publisher enabled, and never modifies or bypasses it. Games whose anti-cheat only supports Windows do not run yet.
+
 ## Contents
 
 - [What is Obelisk?](#what-is-obelisk)
