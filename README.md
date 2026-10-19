@@ -40,6 +40,7 @@
 - [Features](#features)
 - [Store support](#store-support)
 - [Windows games](#windows-games)
+- [Performance](#performance)
 - [How games run](#how-games-run)
 - [Privacy](#privacy)
 - [Known limitations](#known-limitations)
@@ -168,6 +169,28 @@ When a game has no Mac version, Obelisk installs its Windows version and runs it
 **Anti-cheat:** We already run games whose anti-cheat supports Linux, such as **Rocket League** and **ELDEN RING**, and more are coming. We are currently working on BattlEye support, and still studying how to run games whose anti-cheat only supports Windows, such as Easy Anti-Cheat on Windows, or works at a lower level of the system. We never modify or bypass an anti-cheat, so every game runs fully legitimately.
 
 We cannot test every game that exists. If a game does not work well, or does not work at all, please [open an issue](#support).
+
+## Performance
+
+Performance and compatibility are our priority. If a tool slows a game down or keeps it from running, we change it. If no tool does the job, we write our own, down to the layers that draw the game. All of it is open source.
+
+We wrote these from scratch:
+
+- [Voile](https://github.com/Zagrios/voile), the Windows runtime Obelisk installs. It builds every piece below from pinned sources and ships them in one release.
+- [voile-lkd](https://github.com/Zagrios/voile-lkd), the Linux engine behind games whose anti-cheat supports Linux, such as Rocket League and ELDEN RING. It runs x86-64 Linux programs as native macOS processes, with no virtual machine:
+  - LKD implements about 375 Linux system calls on top of macOS.
+  - fexdarwin runs the game's x86-64 code, translated to arm64 by FEX.
+  - wsd opens the game's windows and shows its frames with Metal, without copying them.
+  - obelisk-input serves your gamepads to both of Voile's engines.
+
+We forked and changed these:
+
+- [voile-wine](https://github.com/Zagrios/voile-wine), CrossOver's open-source Wine with fixes from Proton's Wine and our own, for Steam, gamepads, fullscreen windows and audio. It also holds the drivers that connect Wine to the Linux engine.
+- [FEX](https://github.com/Zagrios/FEX), FEX-Emu's x86-64 translator, ported to run inside a macOS process.
+- [DXMT](https://github.com/Zagrios/dxmt), 3Shain's Direct3D 10 and 11 on Metal. Our fork adds the native backend of UTM's fork and a fix of our own, so the Linux engine can render with it.
+- [Neptune](https://github.com/Zagrios/neptune), UTM's Direct3D 11 and 12 driver for virtual machines, adapted to run in Wine on voile-lkd. It hands each Direct3D call to a render server on macOS, which draws it with DXMT or D3DMetal.
+
+If a game runs worse in Obelisk than in another app on the same Mac, [tell us](#support). We treat that as a bug.
 
 ## How games run
 
