@@ -4,7 +4,6 @@ use std::{future::Future, sync::Arc, time::Instant};
 
 use obelisk_core::{
     platform::{Platform, Spelling},
-    transfer::Picking,
     watch::Revisions,
 };
 use serde::Serializer;
@@ -52,12 +51,9 @@ pub struct Client {
     downloads: download::Downloads,
     tokens: TokenSource,
     avatar_url: Option<String>,
-    /// Whether each Mac build's game runs natively on Apple silicon, by
-    /// product, build and language.
-    native_builds: download::NativeBuilds,
-    /// What the last build picked read of its depots, for its download.
-    picked_build: download::PickedBuild,
-    picking: Picking,
+    /// Each Mac build's verdict, by product, build and language, and the
+    /// depot items the last native one read, for its download.
+    build_choice: download::BuildChoice,
 }
 
 impl Client {
@@ -89,9 +85,7 @@ impl Client {
                 credential_events: Revisions::new(),
             },
             avatar_url: profile.avatar_url,
-            native_builds: Default::default(),
-            picked_build: Default::default(),
-            picking: Picking::default(),
+            build_choice: Default::default(),
         })
     }
 

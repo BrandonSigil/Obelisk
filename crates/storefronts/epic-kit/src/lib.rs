@@ -42,6 +42,7 @@ pub enum EpicError {
 }
 
 use obelisk_core::{
+    build_choice::{NOT_NATIVE, Unavailable},
     install::InstallError,
     storefront::{StorefrontCapabilities, StorefrontDescriptor, StorefrontId},
     transfer::Cancelled,
@@ -50,6 +51,17 @@ use obelisk_core::{
 impl From<Cancelled> for EpicError {
     fn from(_: Cancelled) -> Self {
         Self::Cancelled
+    }
+}
+
+impl From<Unavailable> for EpicError {
+    fn from(unavailable: Unavailable) -> Self {
+        match unavailable {
+            Unavailable::NoBuild => Self::Protocol,
+            Unavailable::NotNative => Self::Service {
+                message: NOT_NATIVE.into(),
+            },
+        }
     }
 }
 

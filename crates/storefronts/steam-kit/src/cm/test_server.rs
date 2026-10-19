@@ -2,10 +2,10 @@
 //! WebSocket, with the test answering as Steam.
 use super::*;
 
-pub(super) struct TestServer(tokio_tungstenite::WebSocketStream<tokio::net::TcpStream>);
+pub(crate) struct TestServer(tokio_tungstenite::WebSocketStream<tokio::net::TcpStream>);
 
 /// A connection for `steam_id`, already logged on when `logged_on`.
-pub(super) async fn connection(steam_id: u64, logged_on: bool) -> (SteamConnection, TestServer) {
+pub(crate) async fn connection(steam_id: u64, logged_on: bool) -> (SteamConnection, TestServer) {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let endpoint = format!("ws://{}", listener.local_addr().unwrap());
     let (client, server) = tokio::join!(tokio_tungstenite::connect_async(endpoint), async {

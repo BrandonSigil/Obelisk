@@ -1,7 +1,7 @@
 //! Asynchronous, account-scoped Steam API for Swift. Secrets cross this seam only
 //! for authentication and the macOS Keychain; they are never part of a catalog.
 use crate::{
-    LibraryCache,
+    GamePlatform, LibraryCache,
     installations::Named,
     library_cache::{self, GameAchievements, LibraryAchievement, SteamLibrary},
 };
@@ -268,8 +268,9 @@ impl From<artwork::LibraryArtwork> for SteamGameArtwork {
 pub struct SteamGameDetails {
     pub app_id: u32,
     pub name: String,
-    pub windows: bool,
-    pub macos: bool,
+    /// The build the game's page shows; none when the account can install
+    /// neither.
+    pub platform: Option<GamePlatform>,
     pub windows_bytes: u64,
     pub macos_bytes: u64,
 }
@@ -484,8 +485,7 @@ impl SteamSession {
         Ok(SteamGameDetails {
             app_id: details.app_id,
             name: details.name,
-            windows: details.windows,
-            macos: details.macos,
+            platform: details.platform.map(Into::into),
             windows_bytes: details.windows_bytes,
             macos_bytes: details.macos_bytes,
         })

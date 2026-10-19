@@ -133,66 +133,6 @@ impl Drop for BlockingWorker {
     }
 }
 
-/// Lets a cancellation reach a download still picking its build, before its
-/// Transfer exists.
-#[derive(Default)]
-pub struct Picking(Mutex<Option<CancelToken>>);
-
-impl Picking {
-    /// Runs `work` with the token `cancel` cancels while it runs.
-    pub async fn run<T>(&self, work: impl AsyncFnOnce(&CancelToken) -> T) -> T {
-        let token = CancelToken::new();
-        *self.lock() = Some(token.clone());
-        let output = work(&token).await;
-        self.lock().take();
-        output
-    }
-
-    pub fn cancel(&self) {
-        if let Some(token) = self.lock().as_ref() {
-            token.cancel();
-        }
-    }
-
-    fn lock(&self) -> std::sync::MutexGuard<'_, Option<CancelToken>> {
-        self.0.lock().unwrap_or_else(PoisonError::into_inner)
-    }
-}
-
-/// What picking a build read of it, kept for the download of that build: one
-/// build's at a time, which that download takes once.
-pub struct PickedBuild<K, V>(Mutex<Option<(K, V)>>);
-
-impl<K, V> Default for PickedBuild<K, V> {
-    fn default() -> Self {
-        Self(Mutex::new(None))
-    }
-}
-
-impl<K: PartialEq, V> PickedBuild<K, V> {
-    /// Keeps `value` for `build`, in place of any other build's.
-    pub fn put(&self, build: K, value: V) {
-        *self.lock() = Some((build, value));
-    }
-
-    /// What was kept for `build`, once.
-    pub fn take(&self, build: &K) -> Option<V> {
-        let mut picked = self.lock();
-        match picked.as_ref() {
-            Some((kept, _)) if kept == build => picked.take().map(|(_, value)| value),
-            _ => None,
-        }
-    }
-
-    pub fn clear(&self) {
-        self.lock().take();
-    }
-
-    fn lock(&self) -> std::sync::MutexGuard<'_, Option<(K, V)>> {
-        self.0.lock().unwrap_or_else(PoisonError::into_inner)
-    }
-}
-
 /// Returned by [`CancelToken::cancel_on_drop`].
 pub struct CancelOnDrop(Option<CancelToken>);
 

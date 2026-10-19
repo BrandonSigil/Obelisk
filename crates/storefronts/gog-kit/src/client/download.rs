@@ -1,15 +1,13 @@
 //! GOG's side of an installation Transfer: obelisk-core runs the order around
 //! it, this module picks the build, its depots and redistributables, and runs
 //! the content engine.
-use std::{
-    collections::{HashMap, HashSet},
-    path::Path,
-    sync::{Arc, Mutex, PoisonError},
-};
+use std::{collections::HashSet, path::Path, sync::Arc};
 
+use build_choice::CurrentBuilds;
 use futures_util::{FutureExt, StreamExt, TryStreamExt, stream};
 use md5::Digest as _;
 use obelisk_core::{
+    build_choice::GameBuilds,
     install::hex,
     installation::{self, Destination, InstallFailure, InstalledFiles, TransferError},
     mac_build,
@@ -75,36 +73,27 @@ pub struct Dependency {
     pub arguments: String,
 }
 
-pub(super) type Downloads = Transfers<TransferProgress>;
+mod build_choice;
 
-/// Whether each Mac build's game runs natively on Apple silicon, by product,
-/// build and language.
-#[derive(Default)]
-pub(super) struct NativeBuilds(Mutex<HashMap<(String, String, String), bool>>);
+pub(super) type Downloads = Transfers<TransferProgress>;
 
 /// A build of a product, in a language: what a Mac build's facts are kept by.
 type BuildKey = (String, String, String);
 
-/// The depot items of the Mac build the last pick found native, which the
-/// download of that build starts from.
-pub(super) type PickedBuild = obelisk_core::transfer::PickedBuild<BuildKey, Installed>;
-
-impl NativeBuilds {
-    fn get(&self, build: &(String, String, String)) -> Option<bool> {
-        self.0
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .get(build)
-            .copied()
-    }
-
-    fn insert(&self, build: (String, String, String), native: bool) {
-        self.0
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .insert(build, native);
-    }
+/// The key of a build of a product in `language`; none for a build GOG gives no id.
+fn build_key(product_id: &str, build_id: &str, language: &str) -> Option<BuildKey> {
+    (!build_id.is_empty()).then(|| {
+        (
+            product_id.to_owned(),
+            build_id.to_owned(),
+            language.to_owned(),
+        )
+    })
 }
+
+/// Each Mac build's verdict, and the depot items of the last native one,
+/// which its download starts from.
+pub(super) type BuildChoice = obelisk_core::build_choice::BuildChoice<BuildKey, Installed>;
 
 impl From<TransferBusy> for GogError {
     fn from(_: TransferBusy) -> Self {
@@ -341,52 +330,27 @@ impl Client {
     }
 
     pub fn cancel_download(&self) {
-        self.picking.cancel();
+        self.build_choice.cancel();
         self.downloads.cancel();
-        self.picked_build.clear();
     }
 
     /// The build a download of the game installs, with the depots of
     /// `language`: the Mac build when its game runs natively on Apple
     /// silicon, else the Windows build. `cancel_download` stops it.
     pub async fn platform(&self, product_id: &str, language: &str) -> Result<Platform, GogError> {
-        self.picking
-            .run(async |picking| {
-                picking
-                    .race(self.pick_platform(product_id, language, picking))
-                    .await?
+        self.build_choice
+            .pick(async |pick| {
+                if !valid_product_id(product_id) || language.is_empty() || language.len() > 32 {
+                    return Err(GogError::Protocol);
+                }
+                pick.of(&CurrentBuilds {
+                    client: self,
+                    product_id,
+                    language,
+                })
+                .await
             })
             .await
-    }
-
-    async fn pick_platform(
-        &self,
-        product_id: &str,
-        language: &str,
-        cancel: &CancelToken,
-    ) -> Result<Platform, GogError> {
-        if !valid_product_id(product_id) || language.is_empty() || language.len() > 32 {
-            return Err(GogError::Protocol);
-        }
-        let api = &self.tokens.api;
-        let (mac, windows) = tokio::try_join!(
-            present_build(api, product_id, content_platform(Platform::Mac)),
-            present_build(api, product_id, content_platform(Platform::Windows)),
-        )?;
-        if let Some(build) = &mac
-            && self
-                .runs_natively(product_id, build, language, cancel)
-                .await?
-        {
-            return Ok(Platform::Mac);
-        }
-        match (mac, windows) {
-            (_, Some(_)) => Ok(Platform::Windows),
-            (Some(_), None) => Err(GogError::Service {
-                message: "backend.install.macBuildNotNative".into(),
-            }),
-            (None, None) => Err(GogError::NoBuild),
-        }
     }
 
     /// The build the game's page shows before any download, and its size
@@ -399,25 +363,17 @@ impl Client {
         product_id: &str,
         language: &str,
     ) -> Result<(Platform, Option<u64>), GogError> {
-        let api = &self.tokens.api;
-        let (mac, windows) = tokio::try_join!(
-            present_build(api, product_id, content_platform(Platform::Mac)),
-            present_build(api, product_id, content_platform(Platform::Windows)),
-        )?;
-        let not_native = mac.as_ref().is_some_and(|build| {
-            !build.build_id.is_empty()
-                && self.native_builds.get(&(
-                    product_id.to_owned(),
-                    build.build_id.clone(),
-                    language.to_owned(),
-                )) == Some(false)
-        });
-        let (platform, build) = match (mac, windows) {
-            (Some(_), Some(windows)) if not_native => (Platform::Windows, windows),
-            (Some(mac), _) => (Platform::Mac, mac),
-            (None, Some(windows)) => (Platform::Windows, windows),
-            (None, None) => return Err(GogError::NoBuild),
+        let game = CurrentBuilds {
+            client: self,
+            product_id,
+            language,
         };
+        let offered = game.builds().await?;
+        let (platform, build) = self
+            .build_choice
+            .shown(&game, offered)
+            .await
+            .ok_or(GogError::NoBuild)?;
         let size = match self
             .build_size(access_token, product_id, &build, language)
             .await
@@ -427,58 +383,6 @@ impl Client {
             Err(_) => None,
         };
         Ok((platform, size))
-    }
-
-    /// Whether the game of the Mac build `build` runs natively on Apple
-    /// silicon: the program its primary play task names holds an arm64
-    /// slice. It reads the build's manifests, then the first bytes of a few
-    /// of its files. A build Obelisk cannot install does not. The depot
-    /// items of a native build are kept for its download.
-    async fn runs_natively(
-        &self,
-        product_id: &str,
-        build: &Build,
-        language: &str,
-        cancel: &CancelToken,
-    ) -> Result<bool, GogError> {
-        let key = (
-            product_id.to_owned(),
-            build.build_id.clone(),
-            language.to_owned(),
-        );
-        if !build.build_id.is_empty()
-            && let Some(native) = self.native_builds.get(&key)
-        {
-            return Ok(native);
-        }
-        let api = &self.tokens.api;
-        let manifest = build_manifest(api, product_id, build).await?;
-        let owned = self
-            .with_access_token(|token| async move { owned(api, &token).await })
-            .await?;
-        let (_, depots) = owned_depots(&manifest, &owned, language)?;
-        let content_root = manifest.content_root()?;
-        let mut installed = Installed::default();
-        let depots = depots
-            .iter()
-            .map(|depot| (depot.manifest.as_str(), depot.product_id.as_str()));
-        add_depots(api, &mut installed, &content_root, "meta", depots).await?;
-        let native = match installed.validate() {
-            Ok(()) => {
-                self.plays_natively(product_id, &installed, &content_root, cancel)
-                    .await?
-            }
-            Err(_) => false,
-        };
-        if build.build_id.is_empty() {
-            return Ok(native);
-        }
-        self.native_builds.insert(key.clone(), native);
-        match native {
-            true => self.picked_build.put(key, installed),
-            false => self.picked_build.clear(),
-        }
-        Ok(native)
     }
 
     /// Whether the program the primary play task of `installed` starts holds
@@ -626,14 +530,9 @@ impl Client {
         let (products, depots) = owned_depots(&manifest, &owned, language)?;
         let content_root = manifest.content_root()?;
         // The depot items the build's pick read, when it is that build.
-        let picked = (!manifest.build_id.is_empty()).then(|| {
-            self.picked_build.take(&(
-                product_id.to_owned(),
-                manifest.build_id.clone(),
-                language.to_owned(),
-            ))
-        });
-        let mut installed = match picked.flatten() {
+        let picked = build_key(product_id, &manifest.build_id, language)
+            .and_then(|key| self.build_choice.take(&key));
+        let mut installed = match picked {
             Some(installed) => installed,
             None => {
                 let mut installed = Installed::default();

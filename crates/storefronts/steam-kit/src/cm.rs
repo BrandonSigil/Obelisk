@@ -42,7 +42,7 @@ mod platforms_tests;
 #[cfg(test)]
 mod social_tests;
 #[cfg(test)]
-mod test_server;
+pub(crate) mod test_server;
 
 const PROTOCOL: u32 = 65_581;
 const PROTO_MASK: u32 = 0x8000_0000;

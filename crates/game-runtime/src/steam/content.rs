@@ -87,10 +87,19 @@ impl Network for steam_kit::client::Client {
         transfer: &'a Transfer<Steam>,
     ) -> BoxFuture<'a, Result<steam_kit::client::Installation, Failure>> {
         Box::pin(async move {
+            // The Transfer's begin set it; Steam still refuses a download without one.
+            let platform = transfer
+                .platform
+                .ok_or_else(|| {
+                    steam_kit::client::ClientError::Failure(
+                        "backend.steam.client.unsupportedPlatformOrLanguage".into(),
+                    )
+                })
+                .map_err(failed)?;
             steam_kit::client::Client::download(
                 self,
                 transfer.product.app_id,
-                transfer.platform,
+                platform,
                 &transfer.product.language,
                 &transfer.directory,
             )

@@ -9090,18 +9090,24 @@ public func FfiConverterTypeSteamGameArtwork_lower(_ value: SteamGameArtwork) ->
 public struct SteamGameDetails: Equatable, Hashable {
     public var appId: UInt32
     public var name: String
-    public var windows: Bool
-    public var macos: Bool
+    /**
+     * The build the game's page shows; none when the account can install
+     * neither.
+     */
+    public var platform: GamePlatform?
     public var windowsBytes: UInt64
     public var macosBytes: UInt64
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(appId: UInt32, name: String, windows: Bool, macos: Bool, windowsBytes: UInt64, macosBytes: UInt64) {
+    public init(appId: UInt32, name: String, 
+        /**
+         * The build the game's page shows; none when the account can install
+         * neither.
+         */platform: GamePlatform?, windowsBytes: UInt64, macosBytes: UInt64) {
         self.appId = appId
         self.name = name
-        self.windows = windows
-        self.macos = macos
+        self.platform = platform
         self.windowsBytes = windowsBytes
         self.macosBytes = macosBytes
     }
@@ -9124,8 +9130,7 @@ public struct FfiConverterTypeSteamGameDetails: FfiConverterRustBuffer {
             try SteamGameDetails(
                 appId: FfiConverterUInt32.read(from: &buf), 
                 name: FfiConverterString.read(from: &buf), 
-                windows: FfiConverterBool.read(from: &buf), 
-                macos: FfiConverterBool.read(from: &buf), 
+                platform: FfiConverterOptionTypeGamePlatform.read(from: &buf), 
                 windowsBytes: FfiConverterUInt64.read(from: &buf), 
                 macosBytes: FfiConverterUInt64.read(from: &buf)
         )
@@ -9134,8 +9139,7 @@ public struct FfiConverterTypeSteamGameDetails: FfiConverterRustBuffer {
     public static func write(_ value: SteamGameDetails, into buf: inout [UInt8]) {
         FfiConverterUInt32.write(value.appId, into: &buf)
         FfiConverterString.write(value.name, into: &buf)
-        FfiConverterBool.write(value.windows, into: &buf)
-        FfiConverterBool.write(value.macos, into: &buf)
+        FfiConverterOptionTypeGamePlatform.write(value.platform, into: &buf)
         FfiConverterUInt64.write(value.windowsBytes, into: &buf)
         FfiConverterUInt64.write(value.macosBytes, into: &buf)
     }

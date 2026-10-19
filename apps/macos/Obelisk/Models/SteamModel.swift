@@ -46,7 +46,7 @@ final class SteamModel {
     private(set) var detailsError: String?
     private(set) var newsError: String?
     var platform: GamePlatform {
-        if let details, details.appId == selectedGame?.appId { return details.preferredPlatform }
+        if let details, details.appId == selectedGame?.appId { return details.platform ?? .windows }
         // Installation receipts are available before remote details. Never use
         // the previous game's platform to present the newly selected game.
         return installations.receipts.contains { $0.gameID == selectedGame?.appId && $0.platform == .mac }
@@ -1008,14 +1008,10 @@ extension SteamGame: LibraryGame {
 }
 
 extension SteamGameDetails {
-    /// The build the page shows: the Mac build, unless a download found that
-    /// its game does not run natively. The download picks its own.
-    var preferredPlatform: GamePlatform { macos ? .mac : .windows }
-
     /// What Steam can install of `game` for the account. Steam picks the
     /// build again as the Transfer starts.
     func offer(for game: SteamGame, language: String) -> GameOffer? {
-        guard macos || windows else { return nil }
+        guard platform != nil else { return nil }
         return .steam(appId: game.appId, name: game.name, language: language)
     }
 }

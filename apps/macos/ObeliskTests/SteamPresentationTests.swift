@@ -334,7 +334,7 @@ final class SteamPresentationTests: XCTestCase {
         model.open(fixtureGames[1])
         XCTAssertEqual(model.installations.activeTransferGame, 620)
         var windowsOnly = fixtureDetails(570)
-        windowsOnly.macos = false
+        windowsOnly.platform = .windows
         await details.release(DetailsRequest(appId: 570, language: "tchinese"), value: windowsOnly)
         await news.release(570, value: fixtureNews(570))
         try await eventually { model.details?.appId == 570 }
@@ -1305,7 +1305,7 @@ private let fixtureGames = [
 ]
 
 private func fixtureDetails(_ appId: UInt32) -> SteamGameDetails {
-    SteamGameDetails(appId: appId, name: fixtureGames.first { $0.appId == appId }?.name ?? "Game", windows: true, macos: true, windowsBytes: 12_300_000_000, macosBytes: 11_900_000_000)
+    SteamGameDetails(appId: appId, name: fixtureGames.first { $0.appId == appId }?.name ?? "Game", platform: .mac, windowsBytes: 12_300_000_000, macosBytes: 11_900_000_000)
 }
 
 private func fixtureNews(_ appId: UInt32) -> [SteamNews] {

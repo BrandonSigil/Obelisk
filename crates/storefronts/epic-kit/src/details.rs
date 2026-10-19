@@ -1,6 +1,6 @@
 //! Current platform manifests for installation estimates and verified
-//! downloads, and the build a download without a platform installs.
-use obelisk_core::{Platform, install::unhex, mac_build, transfer::CancelToken};
+//! downloads, and the build a download installs.
+use obelisk_core::{Platform, build_choice::GameBuilds, install::unhex};
 use reqwest::Url;
 use serde::Deserialize;
 use sha1::{Digest, Sha1};
@@ -15,13 +15,15 @@ use crate::{
     EpicError,
     auth::{self, Api, credential_free},
     client::{PLATFORM, validate_identity},
-    content::ContentClient,
     content_manifest::Manifest,
     manifest,
 };
 
+mod build_choice;
 pub(crate) mod diagnostic;
 pub(crate) mod manifest_cache;
+
+pub(crate) use build_choice::LiveBuilds;
 
 /// What a build's manifest told, by game identity and live asset hash, which
 /// names one immutable build: reopening a game's page skips its manifest.
@@ -29,8 +31,6 @@ pub(crate) struct ByBuild<T>(Mutex<HashMap<BuildKey, T>>);
 
 /// Installation sizes.
 pub(crate) type InstallationSizes = ByBuild<u64>;
-/// Whether each Mac build's game runs natively on Apple silicon.
-pub(crate) type NativeBuilds = ByBuild<bool>;
 
 type BuildKey = ([String; 4], String);
 
@@ -65,9 +65,9 @@ fn build_key(identity: [&str; 4], asset: &Asset) -> Option<BuildKey> {
         .map(|hash| (identity.map(str::to_owned), hash))
 }
 
-/// The manifest of the Mac build the last pick found native, which the
-/// download of that build starts from.
-pub(crate) type PickedManifest = obelisk_core::transfer::PickedBuild<BuildKey, FetchedManifest>;
+/// Each Mac build's verdict, and the manifest of the last native one, which
+/// its download starts from.
+pub(crate) type BuildChoice = obelisk_core::build_choice::BuildChoice<BuildKey, FetchedManifest>;
 
 /// The build a game's page shows before any download, and its size: the
 /// Mac build, unless a download found that its game does not run natively
@@ -78,23 +78,16 @@ pub(crate) async fn shown_build(
     namespace: &str,
     catalog_item_id: &str,
     app_name: &str,
-    natives: &NativeBuilds,
+    choice: &BuildChoice,
     sizes: &InstallationSizes,
 ) -> Result<(Platform, Option<u64>), EpicError> {
     let identity = |platform| [namespace, catalog_item_id, app_name, platform];
-    let (mac, windows) =
-        live_builds(api, access_token, namespace, catalog_item_id, app_name).await?;
-    let not_native = mac
-        .as_ref()
-        .and_then(|asset| build_key(identity(PLATFORM.name(Platform::Mac)), asset))
-        .and_then(|key| natives.get(&key))
-        == Some(false);
-    let (platform, asset) = match (mac, windows) {
-        (Some(_), Some(windows)) if not_native => (Platform::Windows, windows),
-        (Some(mac), _) => (Platform::Mac, mac),
-        (None, Some(windows)) => (Platform::Windows, windows),
-        (None, None) => return Err(EpicError::Protocol),
-    };
+    let game = LiveBuilds::new(api, access_token, namespace, catalog_item_id, app_name);
+    let offered = game.builds().await?;
+    let (platform, asset) = choice
+        .shown(&game, offered)
+        .await
+        .ok_or(EpicError::Protocol)?;
     let label = PLATFORM.name(platform);
     let mut trace = trace(namespace, catalog_item_id, app_name, label);
     let size = asset_size(api, &asset, identity(label), sizes, &mut trace).await;
@@ -155,7 +148,7 @@ pub(crate) async fn fetch_manifest(
     app_name: &str,
     platform: Platform,
     cache_directory: Option<&Path>,
-    picked: &PickedManifest,
+    take: impl FnOnce(&BuildKey) -> Option<FetchedManifest>,
 ) -> Result<FetchedManifest, EpicError> {
     let platform = PLATFORM.name(platform);
     let mut trace = trace(namespace, catalog_item_id, app_name, platform);
@@ -171,7 +164,7 @@ pub(crate) async fn fetch_manifest(
         )
         .await?;
         let identity = [namespace, catalog_item_id, app_name, platform];
-        if let Some(mut fetched) = build_key(identity, &asset).and_then(|key| picked.take(&key)) {
+        if let Some(mut fetched) = build_key(identity, &asset).and_then(|key| take(&key)) {
             fetched.cache_key = cache_directory.and_then(|_| {
                 manifest_cache::ManifestCacheKey::new(
                     namespace,
@@ -259,40 +252,6 @@ fn reported<T>(
     result
 }
 
-/// The build a download without a platform installs: the Mac build when its
-/// game runs natively on Apple silicon, else the Windows build. A Mac build
-/// is read once: its manifest, then the first bytes of its program.
-#[allow(clippy::too_many_arguments)]
-pub(crate) async fn platform(
-    api: &Api,
-    access_token: &str,
-    namespace: &str,
-    catalog_item_id: &str,
-    app_name: &str,
-    natives: &NativeBuilds,
-    picked: &PickedManifest,
-    cancel: &CancelToken,
-) -> Result<Platform, EpicError> {
-    let (mac, windows) =
-        live_builds(api, access_token, namespace, catalog_item_id, app_name).await?;
-    if let Some(asset) = &mac {
-        let label = PLATFORM.name(Platform::Mac);
-        let identity = [namespace, catalog_item_id, app_name, label];
-        let mut trace = trace(namespace, catalog_item_id, app_name, label);
-        let native = runs_natively(api, asset, identity, natives, picked, cancel, &mut trace).await;
-        if reported(&mut trace, native)? {
-            return Ok(Platform::Mac);
-        }
-    }
-    match (mac, windows) {
-        (_, Some(_)) => Ok(Platform::Windows),
-        (Some(_), None) => Err(EpicError::Service {
-            message: "backend.install.macBuildNotNative".into(),
-        }),
-        (None, None) => Err(EpicError::Protocol),
-    }
-}
-
 /// The game's live Mac and Windows builds; none for a platform Epic has no
 /// build for.
 async fn live_builds(
@@ -332,84 +291,6 @@ async fn live_builds(
         reported(&mut mac_trace, mac)?,
         reported(&mut windows_trace, windows)?,
     ))
-}
-
-/// Whether the game of the Mac build `asset` describes runs natively on
-/// Apple silicon: its launch executable holds an arm64 slice. A build
-/// Obelisk cannot install does not. The manifest of a native build is kept
-/// for its download.
-async fn runs_natively(
-    api: &Api,
-    asset: &Asset,
-    identity: [&str; 4],
-    natives: &NativeBuilds,
-    picked: &PickedManifest,
-    cancel: &CancelToken,
-    trace: &mut diagnostic::Trace,
-) -> Result<bool, EpicError> {
-    let key = build_key(identity, asset);
-    if let Some(native) = key.as_ref().and_then(|key| natives.get(key)) {
-        return Ok(native);
-    }
-    let [namespace, catalog_item_id, app_name, platform] = identity;
-    let FetchedManifest {
-        bytes,
-        base_urls,
-        deployment_id,
-        network_bytes,
-        ..
-    } = asset_manifest(
-        api,
-        asset,
-        namespace,
-        catalog_item_id,
-        app_name,
-        platform,
-        None,
-        trace,
-    )
-    .await?;
-    let validated = tokio::task::spawn_blocking(move || (manifest_cache::validate(&bytes), bytes))
-        .await
-        .map_err(|_| EpicError::Protocol)?;
-    let (manifest, bytes) = match validated {
-        (Ok(manifest), bytes) => (manifest, bytes),
-        (Err(EpicError::UnsupportedContent), _) => {
-            if let Some(key) = key {
-                natives.insert(key, false);
-            }
-            return Ok(false);
-        }
-        (Err(error), _) => return Err(error),
-    };
-    let mut listing = mac_build::Listing::default();
-    for (index, file) in manifest.files.iter().enumerate() {
-        listing.file(&file.filename, index, file.size());
-    }
-    let content = ContentClient::new(api.http.clone());
-    let read = |index: usize, bytes: u64| {
-        content.read(&manifest, &base_urls, &manifest.files[index], bytes, cancel)
-    };
-    let native = mac_build::runs_natively(&listing, &manifest.launch_executable, &[], read).await?;
-    let Some(key) = key else {
-        return Ok(native);
-    };
-    natives.insert(key.clone(), native);
-    match native {
-        true => picked.put(
-            key,
-            FetchedManifest {
-                bytes,
-                base_urls,
-                deployment_id,
-                network_bytes,
-                manifest: Some(manifest),
-                cache_key: None,
-            },
-        ),
-        false => picked.clear(),
-    }
-    Ok(native)
 }
 
 /// The game's live build as the launcher service describes it.
@@ -627,7 +508,7 @@ struct AssetResponse {
 }
 
 #[derive(Deserialize)]
-struct Asset {
+pub(crate) struct Asset {
     hash: Option<String>,
     /// The build's version, as its manifest records it too.
     #[serde(default, rename = "buildVersion")]
@@ -870,7 +751,7 @@ mod tests {
                 "game",
                 Platform::Mac,
                 Some(directory.path()),
-                &PickedManifest::default(),
+                |_| None,
             )
             .await;
             let request = server.join().unwrap();
@@ -929,22 +810,19 @@ mod tests {
             write!(socket, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", response.len()).unwrap();
             socket.write_all(&response).unwrap();
         });
-        let picked = PickedManifest::default();
-        let key = (
+        let expected = (
             ["ns", "catalog", "game", "Mac"].map(str::to_owned),
             "0123456789abcdef0123456789abcdef01234567".to_owned(),
         );
-        picked.put(
-            key,
-            FetchedManifest {
-                bytes: b"picked manifest".to_vec(),
-                base_urls: vec![Url::parse("https://download.epicgames.com/").unwrap()],
-                deployment_id: None,
-                network_bytes: 15,
-                manifest: None,
-                cache_key: None,
-            },
-        );
+        let mut picked = Some(FetchedManifest {
+            bytes: b"picked manifest".to_vec(),
+            base_urls: vec![Url::parse("https://download.epicgames.com/").unwrap()],
+            deployment_id: None,
+            network_bytes: 15,
+            manifest: None,
+            cache_key: None,
+        });
+        let mut asked = None;
         let directory = tempfile::tempdir().unwrap();
         let fetched = fetch_manifest(
             &api,
@@ -954,22 +832,18 @@ mod tests {
             "game",
             Platform::Mac,
             Some(directory.path()),
-            &picked,
+            |key| {
+                asked = Some(key.clone());
+                picked.take()
+            },
         )
         .await
         .unwrap();
         server.join().unwrap();
+        assert_eq!(asked, Some(expected), "it asks for the live build's");
         assert_eq!(fetched.bytes, b"picked manifest");
         assert_eq!(fetched.network_bytes, 15, "its download counts it");
         assert!(fetched.cache_key.is_some(), "the installation caches it");
-        let key = (
-            ["ns", "catalog", "game", "Mac"].map(str::to_owned),
-            "0123456789abcdef0123456789abcdef01234567".to_owned(),
-        );
-        assert!(
-            picked.take(&key).is_none(),
-            "a manifest starts one download"
-        );
     }
 
     #[tokio::test]
@@ -1016,7 +890,7 @@ mod tests {
             "game/name",
             Platform::Mac,
             None,
-            &PickedManifest::default(),
+            |_| None,
         )
         .await;
         assert!(matches!(result, Err(EpicError::Unauthorized)));

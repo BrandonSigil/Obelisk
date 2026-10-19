@@ -10,7 +10,6 @@ use std::{
 use futures_util::{StreamExt, TryStreamExt, stream};
 use obelisk_core::{
     platform::{Platform, Spelling},
-    transfer::{CancelToken, Picking},
     watch::Revisions,
 };
 use reqwest::Url;
@@ -85,10 +84,9 @@ pub struct Client {
     credential_events: Revisions,
     social: crate::social::SocialService,
     installation_sizes: crate::details::InstallationSizes,
-    native_builds: crate::details::NativeBuilds,
-    /// What the last build picked read of its manifest, for its download.
-    picked_manifest: crate::details::PickedManifest,
-    picking: Picking,
+    /// Each Mac build's verdict, and the manifest the last native one read,
+    /// for its download.
+    build_choice: crate::details::BuildChoice,
 }
 
 impl Client {
@@ -196,7 +194,7 @@ impl Client {
                     namespace,
                     catalog_item_id,
                     app_name,
-                    &self.native_builds,
+                    &self.build_choice,
                     &self.installation_sizes,
                 )
                 .await;
@@ -226,37 +224,23 @@ impl Client {
         catalog_item_id: &str,
         app_name: &str,
     ) -> Result<Platform, EpicError> {
-        self.picking
-            .run(async |picking| {
-                picking
-                    .race(self.pick_platform(namespace, catalog_item_id, app_name, picking))
-                    .await?
+        self.build_choice
+            .pick(async |pick| {
+                validate_identity(namespace, catalog_item_id, app_name)?;
+                let pick = &pick;
+                self.with_access_token(|token| async move {
+                    let game = crate::details::LiveBuilds::new(
+                        &self.api,
+                        &token,
+                        namespace,
+                        catalog_item_id,
+                        app_name,
+                    );
+                    pick.of(&game).await
+                })
+                .await
             })
             .await
-    }
-
-    async fn pick_platform(
-        &self,
-        namespace: &str,
-        catalog_item_id: &str,
-        app_name: &str,
-        cancel: &CancelToken,
-    ) -> Result<Platform, EpicError> {
-        validate_identity(namespace, catalog_item_id, app_name)?;
-        self.with_access_token(|token| async move {
-            crate::details::platform(
-                &self.api,
-                &token,
-                namespace,
-                catalog_item_id,
-                app_name,
-                &self.native_builds,
-                &self.picked_manifest,
-                cancel,
-            )
-            .await
-        })
-        .await
     }
 
     /// Every game's playtime in seconds, by app name, in one request. A game
@@ -279,9 +263,7 @@ impl Client {
             credential_events: Revisions::new(),
             social,
             installation_sizes: Default::default(),
-            native_builds: Default::default(),
-            picked_manifest: Default::default(),
-            picking: Picking::default(),
+            build_choice: Default::default(),
         }
     }
 

@@ -39,6 +39,7 @@ pub enum GogError {
 }
 
 use obelisk_core::{
+    build_choice::{NOT_NATIVE, Unavailable},
     install::InstallError,
     storefront::{StorefrontCapabilities, StorefrontDescriptor, StorefrontId},
     transfer::Cancelled,
@@ -47,6 +48,17 @@ use obelisk_core::{
 impl From<Cancelled> for GogError {
     fn from(_: Cancelled) -> Self {
         Self::Cancelled
+    }
+}
+
+impl From<Unavailable> for GogError {
+    fn from(unavailable: Unavailable) -> Self {
+        match unavailable {
+            Unavailable::NoBuild => Self::NoBuild,
+            Unavailable::NotNative => Self::Service {
+                message: NOT_NATIVE.into(),
+            },
+        }
     }
 }
 
