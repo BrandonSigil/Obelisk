@@ -54,7 +54,7 @@ impl Harness for EpicGame {
             namespace: "namespace".into(),
             catalog_item_id: "catalog".into(),
             app_name: "game".into(),
-            platform: "Mac".into(),
+            platform: Platform::Mac,
             language: "en".into(),
             title: String::new(),
             prefix: None,
@@ -124,7 +124,7 @@ impl Harness for EpicGame {
         self.cloud.set_rules(available.then(rules));
     }
     fn run_in(&mut self, prefix: &Path) {
-        self.config.platform = "Windows".into();
+        self.config.platform = Platform::Windows;
         self.config.prefix = Some(prefix.to_owned());
         fs::create_dir_all(Harness::save(self).parent().unwrap()).unwrap();
     }
@@ -179,7 +179,7 @@ fn fixture() -> (tempfile::TempDir, Vault, Context) {
         namespace: "namespace".into(),
         catalog_item_id: "catalog".into(),
         app_name: "game".into(),
-        platform: "Mac".into(),
+        platform: Platform::Mac,
         language: "en".into(),
         title: String::new(),
         prefix: None,
@@ -403,6 +403,20 @@ fn an_epic_record_the_previous_version_saved_keeps_loading() {
             installation_removed: true,
         }
     );
+}
+
+#[test]
+fn an_epic_cloud_record_keeps_epic_s_spelling() {
+    let (_temporary, _vault, mut context) = fixture();
+    let written = serde_json::to_value(&context).unwrap();
+    assert_eq!(written["config"]["platform"], "Mac");
+    let read: Context = serde_json::from_value(written).unwrap();
+    assert_eq!(read.config.platform, Platform::Mac);
+
+    context.config.platform = Platform::Windows;
+    context.config.prefix = Some(context.config.root.join("prefix"));
+    let written = serde_json::to_value(&context).unwrap();
+    assert_eq!(written["config"]["platform"], "Windows");
 }
 
 #[test]

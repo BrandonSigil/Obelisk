@@ -9,6 +9,7 @@ use std::{
     sync::Arc,
 };
 
+use obelisk_core::Platform;
 use serde::{Deserialize, Serialize};
 use sha1::{Digest, Sha1};
 use unicode_normalization::UnicodeNormalization;
@@ -61,11 +62,10 @@ pub enum CloudPlatform {
 
 impl CloudPlatform {
     /// The catalog attribute naming this build's save folder.
-    fn attribute(platform: &str) -> Option<&'static str> {
+    fn attribute(platform: Platform) -> &'static str {
         match platform {
-            "Mac" => Some("CloudSaveFolder_MAC"),
-            "Windows" => Some("CloudSaveFolder"),
-            _ => None,
+            Platform::Mac => "CloudSaveFolder_MAC",
+            Platform::Windows => "CloudSaveFolder",
         }
     }
 }
@@ -153,11 +153,11 @@ impl CloudListing {
 }
 
 impl CloudRules {
-    /// The rules of the `platform` build ("Mac" or "Windows"), or `None` when
-    /// the catalog names no save folder for it.
+    /// The rules of the Mac or the Windows build, or `None` when the catalog
+    /// names no save folder for it.
     pub(crate) fn from_attributes(
         attributes: &BTreeMap<String, serde_json::Value>,
-        platform: &str,
+        platform: Platform,
     ) -> Result<Option<Self>, EpicError> {
         let attr = |key: &str| -> Result<Option<String>, EpicError> {
             attributes
@@ -172,8 +172,7 @@ impl CloudRules {
                 })
                 .transpose()
         };
-        let key = CloudPlatform::attribute(platform).ok_or(EpicError::UnsupportedContent)?;
-        let Some(folder) = attr(key)? else {
+        let Some(folder) = attr(CloudPlatform::attribute(platform))? else {
             return Ok(None);
         };
         if folder.trim().is_empty() {

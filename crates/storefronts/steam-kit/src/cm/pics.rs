@@ -2,7 +2,10 @@
 //! launch options, and the rights a license package grants.
 use std::collections::{BTreeMap, BTreeSet};
 
+use obelisk_core::Platform;
+
 use super::CmError;
+use crate::client::PLATFORM;
 use crate::kv;
 
 #[derive(Clone, Debug)]
@@ -74,8 +77,8 @@ pub struct DepotInfo {
 }
 
 /// Steam `oslist` semantics: an empty list means no platform restriction.
-pub(crate) fn supports_platform(os_list: &[String], platform: &str) -> bool {
-    os_list.is_empty() || os_list.iter().any(|os| os == platform)
+pub(crate) fn supports_platform(os_list: &[String], platform: Platform) -> bool {
+    os_list.is_empty() || os_list.iter().any(|os| os == PLATFORM.name(platform))
 }
 
 #[derive(Clone, Debug)]

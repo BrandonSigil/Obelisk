@@ -71,9 +71,9 @@ final class GameActionTests: XCTestCase {
     func testAnInstallationLaunchesAndUpdatesBeforeTheStorefrontKnowsWhatItCanInstall() async throws {
         let fixture = InstallationsFixture()
         // The storefront would install the Windows build, once it knows it can.
-        let installations = fixture.connect(platform: "windows", installable: false)
+        let installations = fixture.connect(platform: .windows, installable: false)
 
-        XCTAssertEqual(installations.selectedReceipt?.platform, "macos")
+        XCTAssertEqual(installations.selectedReceipt?.platform, .mac)
         XCTAssertEqual(installations.selectedAction?.title, L10n.string("model.game.launch"))
         XCTAssertEqual(installations.selectedAction?.isAvailable, true)
 
@@ -87,12 +87,12 @@ final class GameActionTests: XCTestCase {
 
     func testANewInstallationIsWhatTheStorefrontOffers() async throws {
         let fixture = InstallationsFixture(installed: false)
-        let installations = fixture.connect(platform: "windows")
+        let installations = fixture.connect(platform: .windows)
 
         XCTAssertEqual(installations.selectedAction?.title, L10n.string("model.game.download"))
         installations.selectedAction?.perform()
 
-        XCTAssertEqual(fixture.backend.actions, [.install(fixture.offer("windows"))])
+        XCTAssertEqual(fixture.backend.actions, [.install(fixture.offer())])
     }
 
     func testALibraryDownloadNeedsAnOffer() async throws {
@@ -108,7 +108,7 @@ final class GameActionTests: XCTestCase {
         let offered = actions(fixture.selection(620))
         XCTAssertTrue(offered.isAvailable)
         offered.perform()
-        XCTAssertEqual(fixture.backend.actions, [.install(fixture.offer("macos"))])
+        XCTAssertEqual(fixture.backend.actions, [.install(fixture.offer())])
     }
 
     func testAFailedTransferIsReportedAndResumesWhereItStopped() async throws {
@@ -124,7 +124,7 @@ final class GameActionTests: XCTestCase {
         try await eventually { installations.selectedAction?.title == L10n.string("model.game.resume") }
         XCTAssertEqual(fixture.reported, [L10n.message("backend.steam.content.network")])
         installations.selectedAction?.perform()
-        XCTAssertEqual(fixture.backend.actions, [.install(fixture.offer("macos"))], "Rust resumes the Transfer")
+        XCTAssertEqual(fixture.backend.actions, [.install(fixture.offer())], "Rust resumes the Transfer")
     }
 
     func testAnInterruptedTransferResumesFromTheLibraryAsFromThePage() async throws {
@@ -142,7 +142,7 @@ final class GameActionTests: XCTestCase {
             XCTAssertTrue(action.isAvailable)
         }
         GameActions(installations, in: .library)(fixture.selection(620)).perform()
-        XCTAssertEqual(fixture.backend.actions, [.install(fixture.offer("macos"))], "Rust resumes the Transfer")
+        XCTAssertEqual(fixture.backend.actions, [.install(fixture.offer())], "Rust resumes the Transfer")
     }
 
     func testThePageOffersOnlyWhatRustsGateLetsStart() async throws {

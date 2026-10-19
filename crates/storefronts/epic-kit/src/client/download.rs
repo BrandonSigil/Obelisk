@@ -5,12 +5,13 @@ use std::{path::Path, sync::Arc};
 use obelisk_core::{
     install::hex,
     installation::{self, Destination, InstallFailure, InstalledFiles, TransferError},
+    platform::Platform,
     transfer::{TransferBusy, TransferContext, Transfers},
 };
 use serde::{Deserialize, Serialize};
 use sha1::{Digest, Sha1};
 
-use super::{Client, validate_identity};
+use super::{Client, PLATFORM, validate_identity, write_platform};
 pub use crate::content_manifest::Prerequisite;
 use crate::{EpicError, content::ContentClient, details};
 
@@ -23,7 +24,8 @@ pub struct Installation {
     pub catalog_item_id: String,
     pub account_id: String,
     pub directory: String,
-    pub platform: String,
+    #[serde(serialize_with = "write_platform")]
+    pub platform: Platform,
     pub total_bytes: u64,
     pub build_version: String,
     pub launch_executable: String,
@@ -93,10 +95,10 @@ impl Client {
         namespace: &str,
         catalog_item_id: &str,
         app_name: &str,
-        platform: &str,
+        platform: Platform,
         directory: &Path,
     ) -> Result<bool, EpicError> {
-        validate_identity(namespace, catalog_item_id, app_name, platform)?;
+        validate_identity(namespace, catalog_item_id, app_name)?;
         let Some(installed) =
             installation::read_receipt::<Installation>(directory)?.filter(|receipt| {
                 receipt.namespace == namespace
@@ -127,10 +129,10 @@ impl Client {
         namespace: &str,
         catalog_item_id: &str,
         app_name: &str,
-        platform: &str,
+        platform: Platform,
         parent: &Path,
     ) -> Result<Installation, EpicError> {
-        validate_identity(namespace, catalog_item_id, app_name, platform)?;
+        validate_identity(namespace, catalog_item_id, app_name)?;
         let directory = installation_directory_name(namespace, catalog_item_id, app_name, platform);
         installation::install(
             &self.downloads,
@@ -178,7 +180,7 @@ impl Client {
         namespace: &str,
         catalog_item_id: &str,
         app_name: &str,
-        platform: &str,
+        platform: Platform,
         prepared: PreparedDownload,
         destination: &Path,
         transfer: &TransferContext<TransferProgress>,
@@ -230,7 +232,7 @@ impl Client {
                 catalog_item_id: catalog_item_id.into(),
                 account_id,
                 directory: destination.to_string_lossy().into_owned(),
-                platform: platform.into(),
+                platform,
                 total_bytes: summary.total_bytes,
                 build_version: manifest.build_version.clone(),
                 launch_executable: manifest.launch_executable.clone(),
@@ -249,7 +251,7 @@ impl Client {
         namespace: &str,
         catalog_item_id: &str,
         app_name: &str,
-        platform: &str,
+        platform: Platform,
         cache_directory: &Path,
     ) -> Result<PreparedDownload, EpicError> {
         let fetched = self
@@ -282,11 +284,15 @@ pub fn installation_directory_name(
     namespace: &str,
     catalog_item_id: &str,
     app_name: &str,
-    platform: &str,
+    platform: Platform,
 ) -> String {
     // Identity is hashed, never interpolated into a filesystem path. App names
     // can include separators and are not globally unique across namespaces.
     let identity =
         serde_json::to_vec(&(namespace, catalog_item_id, app_name)).expect("strings serialize");
-    format!("epic-{}-{platform}", hex(&Sha1::digest(identity)))
+    format!(
+        "epic-{}-{}",
+        hex(&Sha1::digest(identity)),
+        PLATFORM.name(platform)
+    )
 }

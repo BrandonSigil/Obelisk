@@ -18,9 +18,9 @@ final class AccountLibraryTests: XCTestCase {
             steamGame(5, "Portal", lastPlayed: 200, minutes: 100),
         ]
         let fake = FakeInstallations<SteamGames>(receipts: [
-            .steam(appId: 4, name: "zéro", directory: root.appending(path: "4-windows").path, platform: "windows", totalBytes: 100),
-            .steam(appId: 4, name: "zéro", directory: root.appending(path: "4-macos").path, platform: "macos", totalBytes: 50),
-            .steam(appId: 2, name: "Portal", directory: root.appending(path: "2-macos").path, platform: "macos", totalBytes: 120),
+            .steam(appId: 4, name: "zéro", directory: root.appending(path: "4-windows").path, platform: .windows, totalBytes: 100),
+            .steam(appId: 4, name: "zéro", directory: root.appending(path: "4-macos").path, platform: .mac, totalBytes: 50),
+            .steam(appId: 2, name: "Portal", directory: root.appending(path: "2-macos").path, platform: .mac, totalBytes: 120),
         ])
         let library = steamLibrary(root: root, installations: fake)
         let values: [UInt32: [StorefrontLibrarySort: Double]] = [
@@ -57,8 +57,8 @@ final class AccountLibraryTests: XCTestCase {
     func testSearchAndFiltersNarrowEveryOrder() throws {
         let root = try temporaryDirectory()
         let steam = steamLibrary(root: root, installations: FakeInstallations(receipts: [
-            .steam(appId: 1, name: "Portal Z", directory: root.appending(path: "1").path, platform: "windows"),
-            .steam(appId: 2, name: "Portal A", directory: root.appending(path: "2").path, platform: "macos"),
+            .steam(appId: 1, name: "Portal Z", directory: root.appending(path: "1").path, platform: .windows),
+            .steam(appId: 2, name: "Portal A", directory: root.appending(path: "2").path, platform: .mac),
         ]))
         steam.connect(42)
         steam.show([
@@ -90,7 +90,7 @@ final class AccountLibraryTests: XCTestCase {
         let availableMac = epicGame("available", title: "Étoiles C", macOS: true)
         let unknown = epicGame("unknown", title: "Unknown")
         let epic = epicLibrary(root: root, installations: FakeInstallations(receipts: [
-            epicReceipt(installedWindows, platform: "windows", root: root), epicReceipt(installedMac, platform: "macos", root: root),
+            epicReceipt(installedWindows, platform: .windows, root: root), epicReceipt(installedMac, platform: .mac, root: root),
         ]))
         epic.show([installedWindows, unknown, availableMac, otherNamespace, installedMac])
         XCTAssertEqual(epic.shown.count, 5)
@@ -110,16 +110,16 @@ final class AccountLibraryTests: XCTestCase {
         let small = epicGame("small", title: "Small"), large = epicGame("large", title: "Large")
         let absent = epicGame("absent", title: "Absent")
         let fake = FakeInstallations<EpicGames>(receipts: [
-            epicReceipt(small, platform: "windows", root: root, bytes: 10),
-            epicReceipt(large, platform: "windows", root: root, bytes: 400),
-            epicReceipt(large, platform: "macos", root: root, bytes: 400),
+            epicReceipt(small, platform: .windows, root: root, bytes: 10),
+            epicReceipt(large, platform: .windows, root: root, bytes: 400),
+            epicReceipt(large, platform: .mac, root: root, bytes: 400),
         ])
         let library = epicLibrary(root: root, installations: fake)
         library.show([small, absent, large])
         library.sort = .size
         XCTAssertEqual(library.shown.map(\.appName), ["large", "small", "absent"],
                        "Both of a game's installations count, and a game not installed comes last")
-        fake.publish { $0.receipts.append(self.epicReceipt(absent, platform: "windows", root: root, bytes: 5_000)) }
+        fake.publish { $0.receipts.append(self.epicReceipt(absent, platform: .windows, root: root, bytes: 5_000)) }
         try await eventually { library.shown.map(\.appName) == ["absent", "large", "small"] }
     }
 
@@ -360,7 +360,7 @@ final class AccountLibraryTests: XCTestCase {
         library.filter = .installed
         XCTAssertTrue(library.shown.isEmpty)
         changed = changes(of: { _ = library.shown }, "The receipts")
-        fake.publish { $0.receipts = [self.epicReceipt(alpha, platform: "windows", root: root)] }
+        fake.publish { $0.receipts = [self.epicReceipt(alpha, platform: .windows, root: root)] }
         await fulfillment(of: [changed], timeout: 1)
         XCTAssertEqual(library.shown, [alpha])
     }
@@ -484,9 +484,10 @@ final class AccountLibraryTests: XCTestCase {
                  description: "", imageUrl: nil, headerImageUrl: nil, developer: "", windows: true, macos: macOS)
     }
 
-    private func epicReceipt(_ game: EpicGame, platform: String, root: URL, bytes: UInt64 = 1) -> InstallationReceipt<String> {
+    private func epicReceipt(_ game: EpicGame, platform: GamePlatform, root: URL, bytes: UInt64 = 1)
+        -> InstallationReceipt<String> {
         .epic(namespace: game.namespace, appName: game.appName, name: game.title,
-              directory: root.appending(path: "epic-\(game.namespace)-\(game.appName)-\(platform)").path,
+              directory: root.appending(path: "epic-\(game.namespace)-\(game.appName)-\(platform == .mac ? "Mac" : "Windows")").path,
               platform: platform, totalBytes: bytes)
     }
 }

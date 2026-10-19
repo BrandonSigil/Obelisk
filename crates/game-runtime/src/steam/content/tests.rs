@@ -21,7 +21,7 @@ struct Fake {
     /// asked for them.
     calls: Mutex<Vec<String>>,
     /// The build Steam picks; the Mac one without it.
-    picked: Mutex<Option<String>>,
+    picked: Mutex<Option<Platform>>,
     downloads: Mutex<Vec<Transfer<Steam>>>,
     /// Each maintenance's target, and whether a Steam launch could start
     /// meanwhile.
@@ -37,11 +37,11 @@ impl Fake {
 }
 
 impl Network for Fake {
-    fn platform<'a>(&'a self, _: u32, _: &'a str) -> BoxFuture<'a, Result<String, Failure>> {
+    fn platform<'a>(&'a self, _: u32, _: &'a str) -> BoxFuture<'a, Result<Platform, Failure>> {
         Box::pin(async move {
             self.calls.lock().unwrap().push("platform".into());
-            let picked = self.picked.lock().unwrap().clone();
-            Ok(picked.unwrap_or_else(|| "macos".into()))
+            let picked = *self.picked.lock().unwrap();
+            Ok(picked.unwrap_or(Platform::Mac))
         })
     }
     fn download<'a>(
@@ -51,19 +51,19 @@ impl Network for Fake {
         Box::pin(async move {
             self.calls.lock().unwrap().push("game".into());
             self.downloads.lock().unwrap().push(transfer.clone());
+            let platform = transfer.platform.unwrap_or(Platform::Mac);
             Ok(steam_kit::client::Installation {
                 app_id: transfer.product.app_id,
                 name: transfer.name.clone(),
                 directory: transfer
                     .directory
-                    .join(format!(
-                        "steam-{}-{}",
+                    .join(steam_kit::client::installation_directory_name(
                         transfer.product.app_id,
-                        transfer.platform.as_deref().unwrap_or("macos")
+                        platform,
                     ))
                     .to_string_lossy()
                     .into_owned(),
-                platform: transfer.platform.clone().unwrap_or_else(|| "macos".into()),
+                platform,
                 language: transfer.product.language.clone(),
                 total_bytes: 100,
                 manifests: Vec::new(),
@@ -84,7 +84,7 @@ impl Network for Fake {
     fn launch_target<'a>(
         &'a self,
         _: u32,
-        _: &'a str,
+        _: Platform,
         install: &'a Path,
     ) -> BoxFuture<'a, Result<LaunchTarget, Failure>> {
         Box::pin(async move {
@@ -152,27 +152,26 @@ impl Fixture {
         }
     }
     /// Portal 2, installed for `platform`.
-    fn installed(&self, platform: &str) -> Receipt<Steam> {
-        let directory = self
-            .locations
-            .library
-            .join(format!("Games/Steam/steam-620-{platform}"));
+    fn installed(&self, platform: Platform) -> Receipt<Steam> {
+        let directory = self.locations.library.join("Games/Steam").join(
+            steam_kit::client::installation_directory_name(620, platform),
+        );
         std::fs::create_dir_all(&directory).unwrap();
         Receipt {
             product: portal(),
             name: "Portal 2".into(),
             directory: directory.to_string_lossy().into_owned(),
-            platform: platform.into(),
+            platform,
             total_bytes: 100,
             needs_verification: false,
         }
     }
     /// Portal 2's Transfer for `platform`.
-    fn transfer(&self, platform: &str) -> Transfer<Steam> {
+    fn transfer(&self, platform: Platform) -> Transfer<Steam> {
         Transfer {
             product: portal(),
             name: "Portal 2".into(),
-            platform: Some(platform.into()),
+            platform: Some(platform),
             directory: self.locations.library.join("Games/Steam"),
         }
     }
@@ -203,7 +202,7 @@ fn installed_config(target: &steam_cloud::MaintenanceTarget) -> steam_cloud::Con
 #[tokio::test]
 async fn a_completed_transfer_is_an_installation_that_needs_no_verification() {
     let fixture = Fixture::new();
-    let transfer = fixture.transfer("macos");
+    let transfer = fixture.transfer(Platform::Mac);
 
     let receipt = fixture.content.download(&transfer).await.unwrap();
 
@@ -212,7 +211,7 @@ async fn a_completed_transfer_is_an_installation_that_needs_no_verification() {
         vec![transfer.clone()]
     );
     assert_eq!(receipt.product, portal());
-    assert_eq!(receipt.platform, "macos");
+    assert_eq!(receipt.platform, Platform::Mac);
     assert!(!receipt.needs_verification);
     assert_eq!(
         PathBuf::from(&receipt.directory),
@@ -223,7 +222,10 @@ async fn a_completed_transfer_is_an_installation_that_needs_no_verification() {
 #[tokio::test]
 async fn a_windows_game_keeps_its_cloud_saves_in_its_wine_prefix_and_a_mac_game_has_none() {
     let fixture = Fixture::new();
-    let (windows, mac) = (fixture.installed("windows"), fixture.installed("macos"));
+    let (windows, mac) = (
+        fixture.installed(Platform::Windows),
+        fixture.installed(Platform::Mac),
+    );
 
     for receipt in [&windows, &mac] {
         fixture
@@ -251,7 +253,7 @@ async fn a_windows_game_keeps_its_cloud_saves_in_its_wine_prefix_and_a_mac_game_
 #[tokio::test]
 async fn cloud_maintenance_keeps_every_steam_launch_out_while_it_runs() {
     let fixture = Fixture::new();
-    let receipt = fixture.installed("macos");
+    let receipt = fixture.installed(Platform::Mac);
 
     fixture
         .content
@@ -293,7 +295,7 @@ async fn an_uninstalled_game_syncs_what_its_saved_context_names() {
 #[tokio::test]
 async fn a_game_without_steam_cloud_archives_nothing_and_a_failure_is_its_cloud_key() {
     let fixture = Fixture::new();
-    let receipt = fixture.installed("macos");
+    let receipt = fixture.installed(Platform::Mac);
 
     fixture.content.archive(&receipt).await.unwrap();
 
@@ -307,7 +309,10 @@ async fn a_game_without_steam_cloud_archives_nothing_and_a_failure_is_its_cloud_
 #[tokio::test]
 async fn each_build_of_a_game_installs_into_a_folder_named_after_its_app_and_platform() {
     let fixture = Fixture::new();
-    let (windows, mac) = (fixture.installed("windows"), fixture.installed("macos"));
+    let (windows, mac) = (
+        fixture.installed(Platform::Windows),
+        fixture.installed(Platform::Mac),
+    );
 
     assert_eq!(
         fixture.content.directory_name(&windows),
@@ -320,15 +325,21 @@ async fn each_build_of_a_game_installs_into_a_folder_named_after_its_app_and_pla
 async fn a_transfer_without_a_platform_begins_with_the_build_steam_picks_and_one_with_a_platform_asks_nothing()
  {
     let fixture = Fixture::new();
-    *fixture.fake.picked.lock().unwrap() = Some("windows".into());
-    let mut transfer = fixture.transfer("windows");
+    *fixture.fake.picked.lock().unwrap() = Some(Platform::Windows);
+    let mut transfer = fixture.transfer(Platform::Windows);
     transfer.platform = None;
 
-    assert_eq!(fixture.content.begin(&transfer).await.unwrap(), "windows");
+    assert_eq!(
+        fixture.content.begin(&transfer).await.unwrap(),
+        Platform::Windows
+    );
     assert_eq!(fixture.fake.calls(), ["platform"]);
 
-    let transfer = fixture.transfer("macos");
-    assert_eq!(fixture.content.begin(&transfer).await.unwrap(), "macos");
+    let transfer = fixture.transfer(Platform::Mac);
+    assert_eq!(
+        fixture.content.begin(&transfer).await.unwrap(),
+        Platform::Mac
+    );
     assert_eq!(fixture.fake.calls(), ["platform"]);
 }
 
@@ -347,7 +358,7 @@ async fn a_launch_gets_steam_components_for_every_build_and_voile_for_a_windows_
     let admission = sessions.admit(620, 42).unwrap();
     let launched = fixture
         .content
-        .launch(&fixture.installed("macos"), admission, None)
+        .launch(&fixture.installed(Platform::Mac), admission, None)
         .await;
     assert_eq!(
         launched,
@@ -358,7 +369,7 @@ async fn a_launch_gets_steam_components_for_every_build_and_voile_for_a_windows_
     runtimes.hold();
     let admission = sessions.admit(620, 42).unwrap();
     let canceller = admission.canceller();
-    let windows = fixture.installed("windows");
+    let windows = fixture.installed(Platform::Windows);
     let (launched, ()) = tokio::join!(fixture.content.launch(&windows, admission, None), async {
         eventually(|| events.lock().unwrap().len() == 2).await;
         canceller.cancel();

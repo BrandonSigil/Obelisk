@@ -55,7 +55,7 @@ impl lifecycle::Launch for Launch {
         let request = &self.request;
         let installed = gog_kit::client::installed_launch(
             &request.config.product_id,
-            &request.config.platform,
+            request.config.platform,
             &request.config.install,
         )?;
         let (target, architecture) = match &request.wine {

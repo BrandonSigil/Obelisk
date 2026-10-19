@@ -11,7 +11,9 @@ use crate::{
     sessions::{self, Admission, Failure, Storefront as _, Supervised, failed},
 };
 use cloud_vault::StoreScope;
-use obelisk_core::{installation::TransferProgress, launch::LaunchTarget, transfer::CancelToken};
+use obelisk_core::{
+    Platform, installation::TransferProgress, launch::LaunchTarget, transfer::CancelToken,
+};
 use std::{path::Path, sync::Arc};
 use steam_kit::cloud::{CloudListing, CloudMetadata};
 
@@ -25,7 +27,7 @@ pub trait Network: Send + Sync + 'static {
         &'a self,
         app_id: u32,
         language: &'a str,
-    ) -> BoxFuture<'a, Result<String, Failure>>;
+    ) -> BoxFuture<'a, Result<Platform, Failure>>;
     /// Runs `transfer` into the folder it names.
     fn download<'a>(
         &'a self,
@@ -49,7 +51,7 @@ pub trait Network: Send + Sync + 'static {
     fn launch_target<'a>(
         &'a self,
         app_id: u32,
-        platform: &'a str,
+        platform: Platform,
         install: &'a Path,
     ) -> BoxFuture<'a, Result<LaunchTarget, Failure>>;
     /// The Cloud rules the saves of `app_id` follow, `None` without Steam Cloud.
@@ -73,11 +75,10 @@ impl Network for steam_kit::client::Client {
         &'a self,
         app_id: u32,
         language: &'a str,
-    ) -> BoxFuture<'a, Result<String, Failure>> {
+    ) -> BoxFuture<'a, Result<Platform, Failure>> {
         Box::pin(async move {
             steam_kit::client::Client::platform(self, app_id, language)
                 .await
-                .map(str::to_owned)
                 .map_err(failed)
         })
     }
@@ -89,7 +90,7 @@ impl Network for steam_kit::client::Client {
             steam_kit::client::Client::download(
                 self,
                 transfer.product.app_id,
-                transfer.platform.as_deref(),
+                transfer.platform,
                 &transfer.product.language,
                 &transfer.directory,
             )
@@ -111,7 +112,7 @@ impl Network for steam_kit::client::Client {
             steam_kit::client::Client::update_available(
                 self,
                 receipt.product.app_id,
-                &receipt.platform,
+                receipt.platform,
                 &receipt.product.language,
                 Path::new(&receipt.directory),
             )
@@ -122,7 +123,7 @@ impl Network for steam_kit::client::Client {
     fn launch_target<'a>(
         &'a self,
         app_id: u32,
-        platform: &'a str,
+        platform: Platform,
         install: &'a Path,
     ) -> BoxFuture<'a, Result<LaunchTarget, Failure>> {
         Box::pin(async move {
@@ -208,10 +209,10 @@ impl<N: Network> installations::Content<Steam> for Content<N> {
     fn begin<'a>(
         &'a self,
         transfer: &'a Transfer<Steam>,
-    ) -> BoxFuture<'a, Result<String, Failure>> {
+    ) -> BoxFuture<'a, Result<Platform, Failure>> {
         Box::pin(async move {
-            match &transfer.platform {
-                Some(platform) => Ok(platform.clone()),
+            match transfer.platform {
+                Some(platform) => Ok(platform),
                 None => {
                     self.network
                         .platform(transfer.product.app_id, &transfer.product.language)
@@ -265,12 +266,12 @@ impl<N: Network> installations::Content<Steam> for Content<N> {
                 .network
                 .launch_target(
                     receipt.product.app_id,
-                    &receipt.platform,
+                    receipt.platform,
                     Path::new(&receipt.directory),
                 )
                 .await?;
             if let Some(join) = join {
-                target.arguments.extend(join.arguments(&receipt.platform));
+                target.arguments.extend(join.arguments(receipt.platform));
             }
             admission
                 .hand_off(Handover {
@@ -311,7 +312,7 @@ impl<N: Network> installations::Content<Steam> for Content<N> {
         })
     }
     fn directory_name(&self, receipt: &Receipt<Steam>) -> String {
-        format!("steam-{}-{}", receipt.product.app_id, receipt.platform)
+        steam_kit::client::installation_directory_name(receipt.product.app_id, receipt.platform)
     }
     fn remove_prefix(&self, receipt: &Receipt<Steam>) -> Option<Result<(), String>> {
         receipt.remove_prefix(&self.locations)
@@ -376,8 +377,8 @@ struct Handover {
 
 impl sessions::Handover<Steam> for Handover {
     type Prepared = super::Request;
-    fn platform(&self) -> &str {
-        &self.receipt.platform
+    fn platform(&self) -> Platform {
+        self.receipt.platform
     }
     fn prepare(&self) -> BoxFuture<'_, Result<super::Request, Failure>> {
         let (locations, receipt, target) = (

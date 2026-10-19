@@ -555,7 +555,7 @@ final class GameOverlayController {
     }
 
     private static func nativeFolders<Store: InstallationStorefront>(_ installations: GameInstallations<Store>, game: Store.GameID) -> [String] {
-        installations.receipts.filter { $0.gameID == game && $0.platform == Store.nativePlatform }.map(\.directory)
+        installations.receipts.filter { $0.gameID == game && $0.platform == .mac }.map(\.directory)
     }
 
     /// Shift-Tab is the overlay's while the game or the overlay is in front.

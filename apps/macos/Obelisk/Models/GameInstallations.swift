@@ -11,8 +11,6 @@ protocol InstallationStorefront: GameStorefront {
     static func name(_ game: GameID) -> String
     /// Shown on a game's page while another game's operation holds the storefront.
     static var otherGameOperation: String { get }
-    /// How the storefront names a build for macOS, which Obelisk prefers.
-    static var nativePlatform: String { get }
     /// Whether Obelisk syncs the storefront's Cloud saves.
     static var syncsCloud: Bool { get }
     /// Names a Cloud question or banner; the game's name follows it.
@@ -30,7 +28,7 @@ struct InstallationReceipt<GameID: Hashable & Sendable>: Identifiable, Equatable
     let gameID: GameID
     let name: String
     let directory: String
-    let platform: String
+    let platform: GamePlatform
     let totalBytes: UInt64
     /// A Transfer started over it and has not succeeded since.
     var needsVerification = false
@@ -40,7 +38,7 @@ struct InstallationReceipt<GameID: Hashable & Sendable>: Identifiable, Equatable
     /// The installation for `platform` among one game's `receipts`, else its
     /// other one: an installed build shows whatever the storefront would
     /// install now.
-    static func preferred(among receipts: [Self], platform: String) -> Self? {
+    static func preferred(among receipts: [Self], platform: GamePlatform) -> Self? {
         receipts.first { $0.platform == platform } ?? receipts.first
     }
 }
@@ -48,7 +46,7 @@ struct InstallationReceipt<GameID: Hashable & Sendable>: Identifiable, Equatable
 /// A game as the storefront model sees it: the one on screen, or one of its library.
 struct InstallationSelection<Store: InstallationStorefront> {
     let game: Store.GameID
-    let platform: String
+    let platform: GamePlatform
     /// The build Obelisk can install, once the storefront knows one.
     let offer: GameOffer?
 }
@@ -402,7 +400,7 @@ final class GameInstallations<Store: InstallationStorefront> {
     }
 
     /// The game's installation for `platform`, else its other one.
-    func receipt(for game: Store.GameID, preferring platform: String) -> Receipt? {
+    func receipt(for game: Store.GameID, preferring platform: GamePlatform) -> Receipt? {
         Receipt.preferred(among: receipts.filter { $0.gameID == game }, platform: platform)
     }
 
@@ -461,7 +459,7 @@ final class GameInstallations<Store: InstallationStorefront> {
         guard let active = sessions.active else { return }
         // Only a Mac build runs from its own installation.
         let macApps = active.account != account ? [] : receipts
-            .filter { $0.gameID == active.game && $0.platform == Store.nativePlatform }
+            .filter { $0.gameID == active.game && $0.platform == .mac }
             .map(\.directory)
         Task { await sessions.quit(macApps: macApps) }
     }
@@ -545,7 +543,6 @@ extension GameInstallations where Store == SteamGames {
 }
 
 extension SteamGames: InstallationStorefront {
-    static let nativePlatform = "macos"
     static func game(_ id: String) -> UInt32? { UInt32(id) }
     static func name(_ game: UInt32) -> String { String(game) }
     static let otherGameOperation = "ui.steam.other_game_operation"
@@ -554,7 +551,6 @@ extension SteamGames: InstallationStorefront {
 }
 
 extension EpicGames: InstallationStorefront {
-    static let nativePlatform = "Mac"
     /// Rust names an Epic game as its library ID does.
     static func game(_ id: String) -> String? { epicGameID(id) == nil ? nil : id }
     static func name(_ game: String) -> String { game }
@@ -562,7 +558,6 @@ extension EpicGames: InstallationStorefront {
 }
 
 extension GogGames: InstallationStorefront {
-    static let nativePlatform = "macos"
     /// GOG product ids are decimal numbers.
     static func game(_ id: String) -> String? {
         !id.isEmpty && id.utf8.count <= 20 && id.utf8.allSatisfy { (48...57).contains($0) } ? id : nil

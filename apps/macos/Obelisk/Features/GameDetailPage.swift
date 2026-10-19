@@ -133,7 +133,7 @@ struct GameDetailPage<Model: LibraryStorefront, HeroArtwork: View, Cover: View, 
                             verify: { installations.verify(receipt) },
                             uninstall: { installations.uninstall(receipt) },
                             directory: receipt.directory,
-                            launchSettings: receipt.platform == Model.Store.nativePlatform ? nil : {
+                            launchSettings: receipt.platform == .mac ? nil : {
                                 launchSettings = LaunchSettingsModel(
                                     load: { [installations] in try await installations.launchSettings(receipt) },
                                     save: { [installations] in

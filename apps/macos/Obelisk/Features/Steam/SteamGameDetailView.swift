@@ -8,7 +8,7 @@ struct SteamGameDetailView: View {
     private var installations: SteamInstallations { model.installations }
 
     private var estimatedBytes: UInt64 {
-        model.platform == SteamGames.nativePlatform ? model.details?.macosBytes ?? 0 : model.details?.windowsBytes ?? 0
+        model.platform == .mac ? model.details?.macosBytes ?? 0 : model.details?.windowsBytes ?? 0
     }
 
     private static var newsColumns: [GridItem] {

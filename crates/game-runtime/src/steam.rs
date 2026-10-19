@@ -6,7 +6,7 @@ use crate::{
     runtimes::Runtime,
     supervisor::{self, Record, Target},
 };
-use obelisk_core::transfer::CancelToken;
+use obelisk_core::{Platform, transfer::CancelToken};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
@@ -67,7 +67,7 @@ impl Join {
     /// The arguments it adds after the game's own, for a build of
     /// `platform`: `+connect_lobby <lobby>`, or the connect string split as
     /// that platform's command line does, never through a shell.
-    pub fn arguments(&self, platform: &str) -> Vec<String> {
+    pub fn arguments(&self, platform: Platform) -> Vec<String> {
         match self {
             Self::Lobby { lobby_id } => vec!["+connect_lobby".into(), lobby_id.to_string()],
             Self::Connect { connect } => obelisk_core::launch::parse_arguments(connect, platform)
@@ -248,11 +248,8 @@ pub struct Product {
 
 impl crate::installations::Storefront for Steam {
     type Product = Product;
-    /// None while Steam picks the build the account can install: the Mac
-    /// build when its game runs natively on Apple silicon, else the Windows
-    /// build.
-    type Platform = Option<String>;
     type Join = Join;
+    const PLATFORM: obelisk_core::platform::Spelling = steam_kit::client::PLATFORM;
     const RECEIPTS_UNAVAILABLE: &'static str = "model.steam.receiptsUnavailable";
     const RECEIPTS_NOT_SAVED: &'static str = "model.steam.receiptsNotSaved";
     const GAMES_DIRECTORY: &'static str = "Games/Steam";
@@ -265,8 +262,8 @@ impl crate::installations::Storefront for Steam {
             app_id: product.app_id,
         }
     }
-    fn receipt_id(app_id: &u32, platform: &str) -> String {
-        format!("{app_id}-{platform}")
+    fn receipt_id(app_id: &u32, platform: Platform) -> String {
+        format!("{app_id}-{}", Self::PLATFORM.name(platform))
     }
     fn transfer_name(app_id: &u32) -> String {
         app_id.to_string()
@@ -337,6 +334,7 @@ impl crate::sessions::Sessions<Steam> {
 #[cfg(test)]
 mod join_tests {
     use super::Join;
+    use obelisk_core::Platform;
 
     #[test]
     fn a_join_adds_what_steams_client_adds_to_the_command_line() {
@@ -345,24 +343,24 @@ mod join_tests {
         };
         assert!(lobby.valid());
         assert_eq!(
-            lobby.arguments("windows"),
+            lobby.arguments(Platform::Windows),
             ["+connect_lobby", "109775244421126053"]
         );
         let connect = Join::Connect {
             connect: r#"+connect "10.0.0.1:27015" +password "two words""#.into(),
         };
-        for platform in ["windows", "macos"] {
+        for platform in [Platform::Windows, Platform::Mac] {
             assert_eq!(
                 connect.arguments(platform),
                 ["+connect", "10.0.0.1:27015", "+password", "two words"],
-                "{platform}"
+                "{platform:?}"
             );
         }
         // A Mac command line it cannot read splits on spaces.
         let unbalanced = Join::Connect {
             connect: "+connect 'x y".into(),
         };
-        assert_eq!(unbalanced.arguments("macos"), ["+connect", "'x", "y"]);
+        assert_eq!(unbalanced.arguments(Platform::Mac), ["+connect", "'x", "y"]);
         for invalid in [
             Join::Lobby {
                 lobby_id: 76_561_197_960_265_729,

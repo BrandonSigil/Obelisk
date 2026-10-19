@@ -114,7 +114,6 @@ extension EpicGames: WebStorefront {
 extension EpicGameDetails: WebGameDetails {}
 
 extension EpicGame: WebGame {
-    var preferredPlatform: String { macos ? EpicGames.nativePlatform : "Windows" }
     var libraryID: String { epicLibraryID(namespace: namespace, appName: appName) }
     public var id: String { libraryID }
 
@@ -122,8 +121,7 @@ extension EpicGame: WebGame {
     /// Transfer starts.
     var offer: GameOffer? {
         guard macos || windows else { return nil }
-        return .epic(namespace: namespace, catalogItemId: catalogItemId, appName: appName, title: title,
-                     platform: nil)
+        return .epic(namespace: namespace, catalogItemId: catalogItemId, appName: appName, title: title)
     }
 
     func libraryValue(for sort: StorefrontLibrarySort) -> Double? {

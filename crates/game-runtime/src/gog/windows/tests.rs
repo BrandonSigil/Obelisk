@@ -25,7 +25,7 @@ fn a_windows_build_readies_its_prefix_with_its_prerequisites() {
         product_id: "1207658924".into(),
         user_id: "48628349957132247".into(),
         directory: install.to_string_lossy().into_owned(),
-        platform: gog_kit::client::WINDOWS.into(),
+        platform: obelisk_core::Platform::Windows,
         total_bytes: 1,
         build_id: "1".into(),
         version_name: "1.0".into(),
@@ -51,7 +51,7 @@ fn a_windows_build_readies_its_prefix_with_its_prerequisites() {
         session_directory: locations.gog_sessions.clone(),
         helper: locations.helper.clone(),
         product_id: "1207658924".into(),
-        platform: gog_kit::client::WINDOWS.into(),
+        platform: obelisk_core::Platform::Windows,
         title: "The Witcher".into(),
         prefix: Some(locations.wine_prefixes.join("gog-1207658924-windows")),
     };
@@ -61,7 +61,7 @@ fn a_windows_build_readies_its_prefix_with_its_prerequisites() {
         },
         name: "The Witcher".into(),
         directory: install.to_string_lossy().into_owned(),
-        platform: gog_kit::client::WINDOWS.into(),
+        platform: obelisk_core::Platform::Windows,
         total_bytes: 1,
         needs_verification: false,
     }
@@ -78,7 +78,7 @@ fn a_windows_build_readies_its_prefix_with_its_prerequisites() {
         wine::Installation::of(
             &locations,
             config.profile_game(),
-            &config.platform,
+            config.platform,
             started.install
         )
         .unwrap(),

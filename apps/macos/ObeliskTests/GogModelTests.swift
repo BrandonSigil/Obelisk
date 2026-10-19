@@ -10,9 +10,9 @@ final class GogModelTests: XCTestCase {
     func testTheLibraryLeavesTheBuildToGog() {
         var both = GogGames.game("1", title: "Both")
         both.macos = true
-        XCTAssertEqual(both.offer, .gog(productId: "1", title: "Both", platform: nil))
+        XCTAssertEqual(both.offer, .gog(productId: "1", title: "Both"))
         let windows = GogGames.game("2", title: "Windows")
-        XCTAssertEqual(windows.offer, .gog(productId: "2", title: "Windows", platform: nil))
+        XCTAssertEqual(windows.offer, .gog(productId: "2", title: "Windows"))
         var neither = windows
         neither.windows = false
         XCTAssertNil(neither.offer)
@@ -124,7 +124,7 @@ final class GogModelTests: XCTestCase {
         // Installed, so an Epic game in its place would show an indicator.
         let backend = FakeInstallations<GogGames>(receipts: [InstallationReceipt(
             id: "1-windows", gameID: "1", name: "Alpha", directory: directory.appending(path: "Alpha").path,
-            platform: "windows", totalBytes: 100
+            platform: .windows, totalBytes: 100
         )])
         backend.indicators = [("1", .neverSynced)]
         defer { try? FileManager.default.removeItem(at: directory) }

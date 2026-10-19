@@ -113,14 +113,13 @@ extension GogGames: WebStorefront {
 extension GogGameDetails: WebGameDetails {}
 
 extension GogGame: WebGame {
-    var preferredPlatform: String { macos ? GogGames.nativePlatform : "windows" }
     public var id: String { productId }
 
     /// What GOG can install of the game. GOG picks the build as the Transfer
     /// starts.
     var offer: GameOffer? {
         guard macos || windows else { return nil }
-        return .gog(productId: productId, title: title, platform: nil)
+        return .gog(productId: productId, title: title)
     }
 
     func libraryValue(for sort: StorefrontLibrarySort) -> Double? {

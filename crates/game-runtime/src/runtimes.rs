@@ -9,7 +9,7 @@ use crate::{
     installations::blocking,
     sessions::{self, BoxFuture, Failure, failed},
 };
-use obelisk_core::transfer::CancelToken;
+use obelisk_core::{Platform, transfer::CancelToken};
 use std::{
     path::PathBuf,
     sync::{Arc, Mutex},
@@ -91,7 +91,7 @@ impl Runtimes {
     /// any after it. Never removes a release.
     pub(crate) async fn get<P: sessions::Storefront>(
         &self,
-        platform: &str,
+        platform: Platform,
         cancel: &CancelToken,
         shown: impl Fn(Progress) + Send,
     ) -> Result<(), Failure> {
@@ -139,7 +139,7 @@ impl Runtimes {
     /// nothing.
     pub(crate) async fn get_for_launch<P: sessions::Storefront>(
         &self,
-        platform: &str,
+        platform: Platform,
         cancel: &CancelToken,
         shown: impl Fn(Progress) + Send,
     ) -> Result<(), Failure> {
@@ -163,9 +163,9 @@ impl Runtimes {
 
 /// The runtimes a build of `platform` from P needs, in the order they are
 /// got: the storefront's own, then Voile for a build that runs in Wine.
-fn needed<P: sessions::Storefront>(platform: &str) -> Vec<Runtime> {
+fn needed<P: sessions::Storefront>(platform: Platform) -> Vec<Runtime> {
     let mut needed = P::RUNTIMES.to_vec();
-    if crate::wine::windows_build(platform) {
+    if platform == Platform::Windows {
         needed.push(Runtime::Voile);
     }
     needed

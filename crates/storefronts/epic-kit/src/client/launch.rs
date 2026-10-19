@@ -5,6 +5,7 @@ use std::{collections::BTreeMap, path::Path};
 use obelisk_core::{
     installation::{self, InstallFailure},
     launch::{self, LaunchTarget},
+    platform::Platform,
 };
 use serde::Deserialize;
 
@@ -20,7 +21,7 @@ pub struct LaunchPlan {
     pub app_name: String,
     /// Absent when the catalog offers no publishable presence identity.
     pub activity: Option<Activity>,
-    pub platform: String,
+    pub platform: Platform,
     pub target: LaunchTarget,
     pub ownership_token: Option<Vec<u8>>,
 }
@@ -75,11 +76,10 @@ pub fn installed_launch(
     namespace: &str,
     catalog_item_id: &str,
     app_name: &str,
-    platform: &str,
+    platform: Platform,
     directory: &Path,
 ) -> Result<InstalledLaunch, EpicError> {
-    let native_platform = native_platform(platform)?;
-    validate_identity(namespace, catalog_item_id, app_name, platform)?;
+    validate_identity(namespace, catalog_item_id, app_name)?;
     let installed = open_installation(directory)?;
     let receipt = installed
         .receipt
@@ -93,17 +93,9 @@ pub fn installed_launch(
         return Err(launch_error("incompleteInstallation"));
     }
     Ok(InstalledLaunch {
-        target: installed_target(native_platform, &installed.root, receipt)?,
+        target: installed_target(platform, &installed.root, receipt)?,
         prerequisite: receipt.prerequisite.clone(),
     })
-}
-
-fn native_platform(platform: &str) -> Result<&'static str, EpicError> {
-    match platform {
-        "Mac" => Ok("macos"),
-        "Windows" => Ok("windows"),
-        _ => Err(launch_error("unsupportedPlatform")),
-    }
 }
 
 /// The catalog item of the build installed in `directory`, as its own receipt
@@ -127,7 +119,7 @@ fn open_installation(
 /// The exact publisher executable and argv, with Steam's shared path
 /// confinement and quoting rules. Never a shell.
 fn installed_target(
-    native_platform: &str,
+    platform: Platform,
     root: &Path,
     receipt: &Installation,
 ) -> Result<LaunchTarget, EpicError> {
@@ -137,7 +129,7 @@ fn installed_target(
         .and_then(Path::to_str)
         .unwrap_or("");
     launch::resolve(
-        native_platform,
+        platform,
         root,
         &executable,
         &receipt.launch_command,
@@ -152,12 +144,11 @@ impl Client {
         namespace: &str,
         catalog_item_id: &str,
         app_name: &str,
-        platform: &str,
+        platform: Platform,
         directory: &Path,
         language: &str,
     ) -> Result<LaunchPlan, EpicError> {
-        let native_platform = native_platform(platform)?;
-        validate_identity(namespace, catalog_item_id, app_name, platform)?;
+        validate_identity(namespace, catalog_item_id, app_name)?;
         let credentials = self.credentials().await?;
         if !directory.is_absolute() || !directory.is_dir() {
             return Err(launch_error("directoryMissing"));
@@ -178,7 +169,7 @@ impl Client {
         {
             return Err(launch_error("incompleteInstallation"));
         }
-        let mut target = installed_target(native_platform, root, receipt)?;
+        let mut target = installed_target(platform, root, receipt)?;
         let account_id = credentials.account_id.as_str();
         let launch = self
             .with_access_token(|token| async move {
@@ -192,7 +183,7 @@ impl Client {
             return Err(EpicError::Unauthorized);
         }
         target.arguments.extend(
-            launch::parse_arguments(&launch.additional, native_platform)
+            launch::parse_arguments(&launch.additional, platform)
                 .map_err(|error| launch_error(error.key_suffix()))?,
         );
         target.arguments.extend([
@@ -218,7 +209,7 @@ impl Client {
         Ok(LaunchPlan {
             app_name: app_name.into(),
             activity: launch.activity,
-            platform: platform.into(),
+            platform,
             target,
             ownership_token: launch.ownership_token,
         })

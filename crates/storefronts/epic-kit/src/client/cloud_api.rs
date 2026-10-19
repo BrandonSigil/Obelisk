@@ -6,6 +6,7 @@ use std::{
 };
 
 use obelisk_core::{
+    Platform,
     install::hex,
     transfer::{CancelToken, Window},
 };
@@ -98,9 +99,9 @@ impl Client {
         namespace: &str,
         catalog_item_id: &str,
         app_name: &str,
-        platform: &str,
+        platform: Platform,
     ) -> Result<Option<CloudRules>, EpicError> {
-        validate_identity(namespace, catalog_item_id, app_name, platform)?;
+        validate_identity(namespace, catalog_item_id, app_name)?;
         #[derive(Deserialize)]
         #[serde(rename_all = "camelCase")]
         struct Catalog {

@@ -58,10 +58,10 @@ impl Network for Fake {
         &'a self,
         _: &'a Product,
         language: &'a str,
-    ) -> BoxFuture<'a, Result<String, Failure>> {
+    ) -> BoxFuture<'a, Result<Platform, Failure>> {
         Box::pin(async move {
             self.call(&format!("platform {language}"));
-            Ok("windows".into())
+            Ok(Platform::Windows)
         })
     }
     fn download<'a>(
@@ -72,13 +72,15 @@ impl Network for Fake {
         Box::pin(async move {
             self.call(&format!("download {language}"));
             let product_id = &transfer.product.product_id;
-            let platform = transfer.platform.clone().unwrap_or_default();
+            let platform = transfer.platform.expect("a settled platform");
             Ok(gog_kit::client::Installation {
                 product_id: product_id.clone(),
                 user_id: ACCOUNT.into(),
                 directory: transfer
                     .directory
-                    .join(format!("gog-{product_id}-{platform}"))
+                    .join(gog_kit::client::installation_directory_name(
+                        product_id, platform,
+                    ))
                     .to_string_lossy()
                     .into_owned(),
                 platform,
@@ -139,26 +141,25 @@ impl Fixture {
         }
     }
 
-    fn transfer(&self, platform: &str) -> Transfer<Gog> {
+    fn transfer(&self, platform: Platform) -> Transfer<Gog> {
         Transfer {
             product: witcher(),
             name: "The Witcher".into(),
-            platform: Some(platform.into()),
+            platform: Some(platform),
             directory: self.locations.library.join("Games/GOG"),
         }
     }
 
-    fn receipt(&self, platform: &str) -> Receipt<Gog> {
-        let directory = self
-            .locations
-            .library
-            .join(format!("Games/GOG/gog-1207658924-{platform}"));
+    fn receipt(&self, platform: Platform) -> Receipt<Gog> {
+        let directory = self.locations.library.join("Games/GOG").join(
+            gog_kit::client::installation_directory_name("1207658924", platform),
+        );
         std::fs::create_dir_all(&directory).unwrap();
         Receipt {
             product: witcher(),
             name: "The Witcher".into(),
             directory: directory.to_string_lossy().into_owned(),
-            platform: platform.into(),
+            platform,
             total_bytes: 100,
             needs_verification: false,
         }
@@ -175,12 +176,15 @@ fn witcher() -> Product {
 #[tokio::test]
 async fn a_transfer_saves_renewed_credentials_first_and_installs_the_language() {
     let fixture = Fixture::new();
-    let transfer = fixture.transfer("windows");
-    assert_eq!(fixture.content.begin(&transfer).await.unwrap(), "windows");
+    let transfer = fixture.transfer(Platform::Windows);
+    assert_eq!(
+        fixture.content.begin(&transfer).await.unwrap(),
+        Platform::Windows
+    );
     let receipt = fixture.content.download(&transfer).await.unwrap();
     assert_eq!(receipt.product, witcher());
     assert_eq!(receipt.name, "The Witcher");
-    assert_eq!(receipt.platform, "windows");
+    assert_eq!(receipt.platform, Platform::Windows);
     assert!(!receipt.needs_verification);
     assert_eq!(
         Path::new(&receipt.directory),
@@ -198,9 +202,12 @@ async fn a_transfer_without_a_platform_installs_the_build_gog_picks_in_its_langu
     let fixture = Fixture::new();
     let transfer = Transfer {
         platform: None,
-        ..fixture.transfer("macos")
+        ..fixture.transfer(Platform::Mac)
     };
-    assert_eq!(fixture.content.begin(&transfer).await.unwrap(), "windows");
+    assert_eq!(
+        fixture.content.begin(&transfer).await.unwrap(),
+        Platform::Windows
+    );
     // Picking the build may renew the credentials: they are saved after it.
     eventually(|| fixture.fake.calls().len() == 4).await;
     assert_eq!(
@@ -216,7 +223,7 @@ async fn a_transfer_cancelled_while_its_credentials_renew_never_begins() {
     let beginning = {
         let fixture = fixture.clone();
         tokio::spawn(async move {
-            let transfer = fixture.transfer("macos");
+            let transfer = fixture.transfer(Platform::Mac);
             fixture.content.begin(&transfer).await
         })
     };
@@ -243,7 +250,7 @@ async fn a_windows_launch_gets_voile_before_it_is_prepared_and_a_mac_launch_gets
         .admit(witcher().product_id, ACCOUNT.into())
         .unwrap();
     let canceller = admission.canceller();
-    let windows = fixture.receipt("windows");
+    let windows = fixture.receipt(Platform::Windows);
 
     let (launched, ()) = tokio::join!(fixture.content.launch(&windows, admission, None), async {
         eventually(|| !events.lock().unwrap().is_empty()).await;
@@ -262,7 +269,7 @@ async fn a_windows_launch_gets_voile_before_it_is_prepared_and_a_mac_launch_gets
         .unwrap();
     let launched = fixture
         .content
-        .launch(&fixture.receipt("macos"), admission, None)
+        .launch(&fixture.receipt(Platform::Mac), admission, None)
         .await;
     assert_eq!(
         launched,
@@ -274,7 +281,7 @@ async fn a_windows_launch_gets_voile_before_it_is_prepared_and_a_mac_launch_gets
 #[tokio::test]
 async fn gog_keeps_no_cloud_saves() {
     let fixture = Fixture::new();
-    let receipt = fixture.receipt("macos");
+    let receipt = fixture.receipt(Platform::Mac);
     assert_eq!(fixture.content.archive(&receipt).await, Ok(()));
     assert_eq!(fixture.content.removed(&receipt).await, Ok(()));
     assert!(
@@ -297,7 +304,7 @@ async fn gog_keeps_no_cloud_saves() {
 #[test]
 fn only_a_windows_build_runs_in_its_own_prefix() {
     let fixture = Fixture::new();
-    let windows = fixture.receipt("windows");
+    let windows = fixture.receipt(Platform::Windows);
     let configuration = fixture.content.configuration(&windows);
     assert_eq!(
         configuration.prefix.as_deref(),
@@ -316,7 +323,7 @@ fn only_a_windows_build_runs_in_its_own_prefix() {
     assert_eq!(configuration.title, "The Witcher");
     configuration.validate(ACCOUNT).unwrap();
 
-    let mac = fixture.receipt("macos");
+    let mac = fixture.receipt(Platform::Mac);
     let configuration = fixture.content.configuration(&mac);
     assert_eq!(configuration.prefix, None);
     configuration.validate(ACCOUNT).unwrap();
@@ -324,7 +331,7 @@ fn only_a_windows_build_runs_in_its_own_prefix() {
 }
 
 #[tokio::test]
-async fn an_installed_build_updates_in_place_and_another_platform_installs_beside_it() {
+async fn an_installed_build_updates_in_place_whether_updated_or_offered_again() {
     let fixture = Fixture::new();
     let library = fixture.locations.library.clone();
     let previous = library.join("Previous location/gog-1207658924-windows");
@@ -368,21 +375,15 @@ async fn an_installed_build_updates_in_place_and_another_platform_installs_besid
     installations.install(Offer {
         product: witcher(),
         name: "The Witcher".into(),
-        platform: Some("macos".into()),
     });
     eventually(idle).await;
     let state = installations.state();
     assert_eq!(state.report, None);
-    let mac = state
-        .receipts
-        .iter()
-        .find(|receipt| receipt.id() == "1207658924:macos")
-        .unwrap();
     assert_eq!(
-        Path::new(&mac.directory),
-        library.join("Games/GOG/gog-1207658924-macos")
+        state.receipts,
+        [windows],
+        "the offer goes over the installed build"
     );
-    assert!(state.receipts.contains(&windows));
     assert_eq!(
         fixture
             .fake

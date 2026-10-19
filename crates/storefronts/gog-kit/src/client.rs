@@ -2,7 +2,12 @@
 //! release the session lock so disconnect can invalidate them promptly.
 use std::{future::Future, sync::Arc, time::Instant};
 
-use obelisk_core::{transfer::Picking, watch::Revisions};
+use obelisk_core::{
+    platform::{Platform, Spelling},
+    transfer::Picking,
+    watch::Revisions,
+};
+use serde::Serializer;
 use tokio::sync::Mutex;
 
 use crate::{
@@ -18,21 +23,28 @@ pub use download::{Installation, TransferProgress, TransferState, installation_d
 pub use gameplay::Achievement;
 pub use launch::{InstalledLaunch, Prerequisite, installed_launch};
 
-/// How Obelisk names GOG's two desktop builds.
-pub const MACOS: &str = "macos";
-pub const WINDOWS: &str = "windows";
+/// How Obelisk names GOG's two desktop builds in its receipts, folders and
+/// ids; the content system's "osx" stays inside `content_platform`.
+pub const PLATFORM: Spelling = Spelling::new("macos", "windows");
+
+/// Writes a platform as Obelisk spells GOG's builds.
+pub fn write_platform<S: Serializer>(
+    platform: &Platform,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    PLATFORM.serialize(*platform, serializer)
+}
 
 /// GOG product ids are decimal numbers; they name URLs and folders.
 pub fn valid_product_id(value: &str) -> bool {
     !value.is_empty() && value.len() <= 20 && value.bytes().all(|byte| byte.is_ascii_digit())
 }
 
-/// The content system's name for an Obelisk platform.
-pub(crate) fn content_platform(platform: &str) -> Result<&'static str, GogError> {
+/// The content system's name for a build.
+pub(crate) fn content_platform(platform: Platform) -> &'static str {
     match platform {
-        MACOS => Ok("osx"),
-        WINDOWS => Ok("windows"),
-        _ => Err(GogError::Protocol),
+        Platform::Mac => "osx",
+        Platform::Windows => "windows",
     }
 }
 
@@ -137,7 +149,7 @@ impl Client {
             .await?;
         Ok(match shown {
             Some((platform, size)) => GameDetails {
-                platform: Some(platform.into()),
+                platform: Some(platform),
                 installation_bytes: size,
             },
             None => GameDetails::default(),

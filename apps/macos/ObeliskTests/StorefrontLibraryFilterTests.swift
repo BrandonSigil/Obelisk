@@ -47,7 +47,7 @@ final class StorefrontLibraryFilterTests: XCTestCase {
     func testEpicSignOutResetsFilterAndCachedLibrary() async throws {
         let root = try temporaryDirectory()
         let native = epicGame("native", title: "Native", macOS: true)
-        let model = epicModel(root: root, games: [native], receipts: epicReceipts([(native, "macos")], root: root))
+        let model = epicModel(root: root, games: [native], receipts: epicReceipts([(native, .mac)], root: root))
         await model.start()
         model.library.filter = .installed
         XCTAssertEqual(model.library.shown.map(\.appName), ["native"])
@@ -92,10 +92,11 @@ final class StorefrontLibraryFilterTests: XCTestCase {
                          installations: EpicModel.installations(FakeInstallations(receipts: receipts)))
     }
 
-    private func epicReceipts(_ entries: [(EpicGame, String)], root: URL) -> [InstallationReceipt<String>] {
+    private func epicReceipts(_ entries: [(EpicGame, GamePlatform)], root: URL) -> [InstallationReceipt<String>] {
         entries.map { game, platform in
             InstallationReceipt.epic(namespace: game.namespace, appName: game.appName, name: game.title,
-                               directory: root.appending(path: "epic-\(game.namespace)-\(game.appName)-\(platform)").path,
+                               directory: root.appending(
+                                   path: "epic-\(game.namespace)-\(game.appName)-\(platform == .mac ? "Mac" : "Windows")").path,
                                platform: platform, totalBytes: 1)
         }
     }

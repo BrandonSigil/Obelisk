@@ -197,14 +197,14 @@ private final class Fixture {
     init(installed: Bool = false) {
         installations = SteamInstallations(sessions: sessions, cloud: SteamCloudModel(sessions: sessions))
         receipt = installed ? .steam(appId: 42, name: "Fixture", directory: "/fixture/Games/Steam/steam-42-macos",
-                                     platform: "macos", totalBytes: 0) : nil
+                                     platform: .mac, totalBytes: 0) : nil
     }
 
     /// Connects the account as SteamModel does.
     func connect(_ account: UInt64 = 0x0110_0001_0000_002a) {
         installations.selection = {
-            InstallationSelection(game: 42, platform: "macos",
-                                  offer: GameOffer.steam(appId: 42, name: "Fixture", platform: "macos", language: "english"))
+            InstallationSelection(game: 42, platform: .mac,
+                                  offer: GameOffer.steam(appId: 42, name: "Fixture", language: "english"))
         }
         backend = FakeInstallations(receipts: receipt.map { [$0] } ?? [])
         installations.connect(account: account, backend: backend, port: InstallationPort(

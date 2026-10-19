@@ -9,11 +9,12 @@ use std::{
 
 use futures_util::{StreamExt, TryStreamExt, stream};
 use obelisk_core::{
+    platform::{Platform, Spelling},
     transfer::{CancelToken, Picking},
     watch::Revisions,
 };
 use reqwest::Url;
-use serde::Deserialize;
+use serde::{Deserialize, Serializer};
 use tokio::sync::Mutex;
 
 use crate::{
@@ -30,6 +31,18 @@ pub use download::{
     Installation, Prerequisite, TransferProgress, TransferState, installation_directory_name,
 };
 pub use launch::{InstalledLaunch, LaunchPlan, installed_catalog_item, installed_launch};
+
+/// Epic's asset API labels for the two builds; also its receipts', folders'
+/// and ids' spelling.
+pub const PLATFORM: Spelling = Spelling::new("Mac", "Windows");
+
+/// Writes a platform as Epic spells it.
+pub fn write_platform<S: Serializer>(
+    platform: &Platform,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    PLATFORM.serialize(*platform, serializer)
+}
 
 const MAX_LIBRARY_PAGES: usize = 1000;
 const MAX_LIBRARY_RECORDS: usize = 100_000;
@@ -58,9 +71,9 @@ pub struct Game {
 /// any download, and its size.
 #[derive(Clone, Debug, Default)]
 pub struct GameDetails {
-    /// `Mac` or `Windows`: the Mac build, unless a download found that its
-    /// game does not run natively. Unknown when Epic could not tell.
-    pub platform: Option<String>,
+    /// The Mac build, unless a download found that its game does not run
+    /// natively. Unknown when Epic could not tell.
+    pub platform: Option<Platform>,
     /// Unknown when Epic serves no manifest of the build.
     pub installation_bytes: Option<u64>,
 }
@@ -174,7 +187,7 @@ impl Client {
         catalog_item_id: &str,
         app_name: &str,
     ) -> Result<GameDetails, EpicError> {
-        validate_identity(namespace, catalog_item_id, app_name, "Mac")?;
+        validate_identity(namespace, catalog_item_id, app_name)?;
         let shown = self
             .with_access_token(|token| async move {
                 let shown = crate::details::shown_build(
@@ -197,7 +210,7 @@ impl Client {
             .await?;
         Ok(match shown {
             Some((platform, size)) => GameDetails {
-                platform: Some(platform.into()),
+                platform: Some(platform),
                 installation_bytes: size,
             },
             None => GameDetails::default(),
@@ -212,7 +225,7 @@ impl Client {
         namespace: &str,
         catalog_item_id: &str,
         app_name: &str,
-    ) -> Result<&'static str, EpicError> {
+    ) -> Result<Platform, EpicError> {
         self.picking
             .run(async |picking| {
                 picking
@@ -228,8 +241,8 @@ impl Client {
         catalog_item_id: &str,
         app_name: &str,
         cancel: &CancelToken,
-    ) -> Result<&'static str, EpicError> {
-        validate_identity(namespace, catalog_item_id, app_name, "Mac")?;
+    ) -> Result<Platform, EpicError> {
+        validate_identity(namespace, catalog_item_id, app_name)?;
         self.with_access_token(|token| async move {
             crate::details::platform(
                 &self.api,
@@ -389,18 +402,15 @@ impl Client {
 }
 
 /// Catalog identity strings are interpolated into service URLs and hashed into
-/// cache and installation paths: reject empty, oversized or NUL-bearing values
-/// and any platform other than the two Epic desktop labels.
+/// cache and installation paths: reject empty, oversized or NUL-bearing values.
 pub(crate) fn validate_identity(
     namespace: &str,
     catalog_item_id: &str,
     app_name: &str,
-    platform: &str,
 ) -> Result<(), EpicError> {
-    if !matches!(platform, "Mac" | "Windows")
-        || [namespace, catalog_item_id, app_name]
-            .iter()
-            .any(|value| value.is_empty() || value.len() > 1024 || value.contains('\0'))
+    if [namespace, catalog_item_id, app_name]
+        .iter()
+        .any(|value| value.is_empty() || value.len() > 1024 || value.contains('\0'))
     {
         return Err(EpicError::Protocol);
     }
@@ -537,10 +547,14 @@ struct ReleaseInfo {
 }
 
 async fn library(api: &Api, access_token: &str) -> Result<Vec<Game>, EpicError> {
+    let (windows_label, mac_label) = (
+        PLATFORM.name(Platform::Windows),
+        PLATFORM.name(Platform::Mac),
+    );
     let (owned, windows, macos) = tokio::try_join!(
         library_items(api, access_token),
-        assets(api, access_token, "Windows"),
-        assets(api, access_token, "Mac"),
+        assets(api, access_token, windows_label),
+        assets(api, access_token, mac_label),
     )?;
     let excluded: HashSet<_> = owned
         .iter()
@@ -554,8 +568,8 @@ async fn library(api: &Api, access_token: &str) -> Result<Vec<Game>, EpicError> 
     let mut sources: BTreeMap<(String, String), BTreeMap<&str, Vec<serde_json::Value>>> =
         BTreeMap::new();
     let tagged = (owned.into_iter().map(|item| ("library", item)))
-        .chain(windows.into_iter().map(|item| ("Windows", item)))
-        .chain(macos.into_iter().map(|item| ("Mac", item)));
+        .chain(windows.into_iter().map(|item| (windows_label, item)))
+        .chain(macos.into_iter().map(|item| (mac_label, item)));
     for (source, mut item) in tagged {
         if item.usable() && !excluded.contains(&item.key()) {
             let records = sources

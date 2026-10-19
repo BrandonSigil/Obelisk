@@ -151,7 +151,7 @@ impl<R: CloudRemote> Storefront for Adapter<R> {
                 &self.config.namespace,
                 &self.config.catalog_item_id,
                 &self.config.app_name,
-                &self.config.platform,
+                self.config.platform,
             )
             .await?;
         let Some(rules) = rules else {
@@ -298,7 +298,7 @@ async fn archive_with(config: Configuration, api: &impl CloudRemote) -> Result<(
                 &config.namespace,
                 &config.catalog_item_id,
                 &config.app_name,
-                &config.platform,
+                config.platform,
             )
             .await?
         else {

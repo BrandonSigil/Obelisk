@@ -114,7 +114,7 @@ impl CloudRemote for FakeCloud {
         _namespace: &str,
         _catalog_item_id: &str,
         _app_name: &str,
-        _platform: &str,
+        _platform: Platform,
     ) -> std::result::Result<Option<CloudRules>, EpicError> {
         self.failure(Call::Configuration)?;
         Ok(self.rules.lock().unwrap().clone())

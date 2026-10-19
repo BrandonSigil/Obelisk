@@ -151,7 +151,7 @@ final class EpicCloudTests: XCTestCase {
                              description: "", imageUrl: nil, headerImageUrl: nil, developer: "", windows: false, macos: true)
         let receipt = InstallationReceipt.epic(namespace: "sandbox", appName: "game", name: "Fixture",
                                          directory: directory.appending(path: "Games/Epic/epic-game-Mac").path,
-                                         platform: "Mac", totalBytes: 0)
+                                         platform: .mac, totalBytes: 0)
         let backend = FakeInstallations<EpicGames>(receipts: [receipt])
         backend.onCall = { call in
             if case .maintain = call {

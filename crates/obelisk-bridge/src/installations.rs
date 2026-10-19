@@ -17,6 +17,7 @@ use game_runtime::{
     sessions::{Sessions, Storefront as _},
     steam,
 };
+use obelisk_core::Platform;
 use std::sync::Arc;
 
 /// One installation of the account, as its receipt records it.
@@ -27,7 +28,7 @@ pub struct Installation {
     pub game: String,
     pub name: String,
     pub directory: String,
-    pub platform: String,
+    pub platform: GamePlatform,
     pub total_bytes: u64,
     /// A Transfer started over it and has not succeeded since.
     pub needs_verification: bool,
@@ -35,35 +36,42 @@ pub struct Installation {
     pub update_available: bool,
 }
 
+/// Which of a game's builds: the Mac build or the Windows build.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Enum)]
+pub enum GamePlatform {
+    Mac,
+    Windows,
+}
+
+impl From<Platform> for GamePlatform {
+    fn from(platform: Platform) -> Self {
+        match platform {
+            Platform::Mac => Self::Mac,
+            Platform::Windows => Self::Windows,
+        }
+    }
+}
+
 /// What a storefront offers to install of one game.
 #[derive(Clone, Debug, PartialEq, Eq, uniffi::Enum)]
 pub enum GameOffer {
-    /// Its build for `platform`, with the depots of `language`. Without a
-    /// platform, Steam picks the build the account can install as the
-    /// Transfer starts: the Mac build when its game runs natively on Apple
-    /// silicon, else the Windows build.
+    /// With the depots of `language`. Steam picks the build the account can
+    /// install as the Transfer starts: the Mac build when its game runs
+    /// natively on Apple silicon, else the Windows build.
     Steam {
         app_id: u32,
         name: String,
-        platform: Option<String>,
         language: String,
     },
-    /// Its build for `platform`, `Mac` or `Windows`; without one, Epic picks
-    /// it as Steam does.
+    /// Epic picks the build as Steam does.
     Epic {
         namespace: String,
         catalog_item_id: String,
         app_name: String,
         title: String,
-        platform: Option<String>,
     },
-    /// Its build for `platform`, `macos` or `windows`; without one, GOG
-    /// picks it as Steam does.
-    Gog {
-        product_id: String,
-        title: String,
-        platform: Option<String>,
-    },
+    /// GOG picks the build as Steam does.
+    Gog { product_id: String, title: String },
 }
 
 /// A failure the player sees, and what it is about.
@@ -206,12 +214,10 @@ impl Named for steam::Steam {
             GameOffer::Steam {
                 app_id,
                 name,
-                platform,
                 language,
             } => Some(installations::Offer {
                 product: steam::Product { app_id, language },
                 name,
-                platform,
             }),
             _ => None,
         }
@@ -237,7 +243,6 @@ impl Named for epic::Epic {
                 catalog_item_id,
                 app_name,
                 title,
-                platform,
             } => Some(installations::Offer {
                 product: epic::Product {
                     namespace,
@@ -245,7 +250,6 @@ impl Named for epic::Epic {
                     app_name,
                 },
                 name: title,
-                platform,
             }),
             _ => None,
         }
@@ -261,14 +265,9 @@ impl Named for gog::Gog {
     }
     fn offer(offer: GameOffer) -> Option<installations::Offer<Self>> {
         match offer {
-            GameOffer::Gog {
-                product_id,
-                title,
-                platform,
-            } => Some(installations::Offer {
+            GameOffer::Gog { product_id, title } => Some(installations::Offer {
                 product: gog::Product { product_id },
                 name: title,
-                platform,
             }),
             _ => None,
         }
@@ -284,7 +283,7 @@ fn installation<S: Named>(receipt: installations::Receipt<S>, updates: &[String]
         game,
         name: receipt.name,
         directory: receipt.directory,
-        platform: receipt.platform,
+        platform: receipt.platform.into(),
         total_bytes: receipt.total_bytes,
         needs_verification: receipt.needs_verification,
     }
@@ -606,9 +605,9 @@ impl AccountInstallations {
         each!(self, installations => installations.set_diagnostic(running))
     }
 
-    /// Installs what `offer` names, or updates the installation of its
-    /// platform; a Transfer of the game that stopped resumes instead. An
-    /// offer of the other storefront does nothing.
+    /// Installs what `offer` names, or updates the game's installation; a
+    /// Transfer of the game that stopped resumes instead. An offer of the
+    /// other storefront does nothing.
     pub fn install(&self, offer: GameOffer) {
         each!(self, installations => install(installations, offer))
     }
@@ -748,19 +747,19 @@ mod tests {
             },
             name: "Fixture".into(),
             directory: "/library/Games/Epic/epic-hash-Windows".into(),
-            platform: "Windows".into(),
+            platform: Platform::Windows,
             total_bytes: 7,
             needs_verification: true,
         };
         let installation = installation::<epic::Epic>(receipt, &["sandbox:game:Windows".into()]);
         assert_eq!(installation.id, "sandbox:game:Windows");
         assert_eq!(installation.game, "sandbox:game");
+        assert_eq!(installation.platform, GamePlatform::Windows);
         assert!(installation.needs_verification);
         assert!(installation.update_available);
         let offer = GameOffer::Steam {
             app_id: 620,
             name: "Portal 2".into(),
-            platform: Some("macos".into()),
             language: "french".into(),
         };
         assert_eq!(

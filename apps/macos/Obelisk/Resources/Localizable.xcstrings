@@ -800,23 +800,6 @@
         }
       }
     },
-    "backend.epic.launch.unsupportedPlatform": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "This launch platform is not supported."
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Cette plateforme de lancement n’est pas prise en charge."
-          }
-        }
-      }
-    },
     "backend.epic.launch.windowsExecutable": {
       "extractionState": "manual",
       "localizations": {
@@ -3890,23 +3873,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Les arguments Steam contiennent des guillemets non fermés."
-          }
-        }
-      }
-    },
-    "backend.steam.launch.unsupportedPlatform": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "This launch platform is not supported."
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Cette plateforme de lancement n’est pas prise en charge."
           }
         }
       }
@@ -11699,23 +11665,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Les arguments GOG contiennent des guillemets non fermés."
-          }
-        }
-      }
-    },
-    "backend.gog.launch.unsupportedPlatform": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "This launch platform is not supported."
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Cette plateforme de lancement n’est pas prise en charge."
           }
         }
       }

@@ -43,7 +43,7 @@ extension LibraryStorefront {
     /// A game of the library, as its Game action reads it: its native build
     /// first, and what the library installs without opening its page.
     func librarySelection(_ game: Game) -> InstallationSelection<Store> {
-        InstallationSelection(game: game.id, platform: Store.nativePlatform, offer: libraryOffer(of: game))
+        InstallationSelection(game: game.id, platform: .mac, offer: libraryOffer(of: game))
     }
 }
 

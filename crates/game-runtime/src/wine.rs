@@ -7,7 +7,7 @@ use crate::{
     Error,
     supervisor::{Target, architecture::Architecture},
 };
-use obelisk_core::launch::LaunchTarget;
+use obelisk_core::{Platform, launch::LaunchTarget};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
@@ -488,16 +488,16 @@ pub struct Installation {
 }
 
 impl Installation {
-    /// The installation of `game` in `install`, when `platform` names a
+    /// The installation of `game` in `install`, when `platform` is the
     /// Windows build, run as the game's profile and its player's launch
     /// settings say.
     pub fn of(
         locations: &crate::Locations,
         game: crate::profile::Game<'_>,
-        platform: &str,
+        platform: Platform,
         install: &Path,
     ) -> Result<Option<Self>, Error> {
-        if !windows_build(platform) {
+        if platform != Platform::Windows {
             return Ok(None);
         }
         let settings = crate::launch_settings::of(&locations.library, game, install).settings;
@@ -562,12 +562,6 @@ impl Installation {
         crate::launch_settings::remove(&locations.library, &self.install)?;
         Ok(())
     }
-}
-
-/// Whether `platform` names a Windows build, as a storefront spells it:
-/// Steam's and GOG's `windows`, Epic's `Windows`.
-pub(crate) fn windows_build(platform: &str) -> bool {
-    platform.eq_ignore_ascii_case("windows")
 }
 
 /// Where Wine logs `game`: in its storefront's diagnostics folder.

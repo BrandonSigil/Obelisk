@@ -31,7 +31,7 @@ final class EpicDownloadTests: XCTestCase {
             $0.downloading = false
             $0.gate = .open
             $0.transfer?.state = .complete
-            $0.receipts = [fixture.receipt("native", platform: "Mac")]
+            $0.receipts = [fixture.receipt("native", platform: .mac)]
         }
         try await eventually { !fixture.model.installations.isDownloading }
         XCTAssertEqual(fixture.model.installations.selectedReceipt?.name, "Game native")
@@ -44,8 +44,7 @@ final class EpicDownloadTests: XCTestCase {
         let fixture = try await fixture(game: game("windows"))
         XCTAssertEqual(fixture.model.installations.selectedAction?.isAvailable, true)
         fixture.model.installations.selectedAction?.perform()
-        guard case let .install(offer) = fixture.backend.actions.first else { return XCTFail("No Transfer") }
-        XCTAssertNil(offer.platform, "Epic picks the build as the Transfer starts")
+        guard case .install = fixture.backend.actions.first else { return XCTFail("No Transfer") }
 
         var unsupported = game("unsupported")
         unsupported.windows = false
@@ -89,7 +88,7 @@ final class EpicDownloadTests: XCTestCase {
         fixture.backend.publish {
             $0.downloading = false
             $0.gate = .open
-            $0.receipts = [fixture.receipt("one", platform: "Windows")]
+            $0.receipts = [fixture.receipt("one", platform: .windows)]
         }
         try await eventually { !fixture.model.installations.isDownloading }
         XCTAssertEqual(fixture.model.selectedGame?.libraryID, other.libraryID)
@@ -100,7 +99,7 @@ final class EpicDownloadTests: XCTestCase {
     }
 
     func testAnInstalledBuildShowsEachStepOfItsLaunch() async throws {
-        let fixture = try await fixture(game: game("native", macos: true), installed: "Mac")
+        let fixture = try await fixture(game: game("native", macos: true), installed: .mac)
         let receipt = try XCTUnwrap(fixture.model.installations.selectedReceipt)
 
         fixture.model.installations.selectedAction?.perform()
@@ -133,7 +132,7 @@ final class EpicDownloadTests: XCTestCase {
     }
 
     func testChangingSelectionDoesNotRetargetAPendingLaunch() async throws {
-        let fixture = try await fixture(installed: "Windows")
+        let fixture = try await fixture(installed: .windows)
         fixture.model.installations.selectedAction?.perform()
         fixture.backend.publish {
             $0.launching = true
@@ -157,7 +156,7 @@ final class EpicDownloadTests: XCTestCase {
     }
 
     func testUninstallRemovesTheInstalledBuildAndRestoresTheDownloadAction() async throws {
-        let fixture = try await fixture(installed: "Windows")
+        let fixture = try await fixture(installed: .windows)
         let receipt = try XCTUnwrap(fixture.model.installations.selectedReceipt)
         XCTAssertTrue(fixture.model.installations.canUninstallSelectedGame)
 
@@ -186,14 +185,14 @@ final class EpicDownloadTests: XCTestCase {
     }
 
     func testAFailedUninstallShowsItsReason() async throws {
-        let fixture = try await fixture(installed: "Windows")
+        let fixture = try await fixture(installed: .windows)
         fixture.backend.publish { $0.report = .uninstall(reason: "model.game.installationBusy") }
         try await eventually { fixture.model.errorMessage != nil }
         XCTAssertNotNil(fixture.model.installations.selectedReceipt)
     }
 
     func testUninstallRejectsAStaleReceiptAndAnActiveDownload() async throws {
-        let fixture = try await fixture(installed: "Windows")
+        let fixture = try await fixture(installed: .windows)
         let receipt = try XCTUnwrap(fixture.model.installations.selectedReceipt)
         let forged = InstallationReceipt(id: receipt.id, gameID: receipt.gameID, name: receipt.name,
                                          directory: fixture.directory.path, platform: receipt.platform,
@@ -223,12 +222,12 @@ final class EpicDownloadTests: XCTestCase {
     }
 
     func testLibraryLaunchesTheNativeInstallationWithoutOpeningTheGame() async throws {
-        let fixture = try await fixture(game: game("native", macos: true), installed: "Mac")
+        let fixture = try await fixture(game: game("native", macos: true), installed: .mac)
         fixture.model.closeGame()
 
         libraryAction(fixture.game, of: fixture.model).perform()
 
-        XCTAssertEqual(fixture.backend.actions, [.launch(fixture.receipt("native", platform: "Mac"))])
+        XCTAssertEqual(fixture.backend.actions, [.launch(fixture.receipt("native", platform: .mac))])
         XCTAssertNil(fixture.model.selectedGame)
     }
 
@@ -251,7 +250,7 @@ final class EpicDownloadTests: XCTestCase {
     }
 
     /// An account with `owned` on screen, installed for `installed`.
-    private func fixture(game owned: EpicGame? = nil, installed: String? = nil) async throws -> EpicDownloadFixture {
+    private func fixture(game owned: EpicGame? = nil, installed: GamePlatform? = nil) async throws -> EpicDownloadFixture {
         let owned = owned ?? game("one")
         let directory = FileManager.default.temporaryDirectory
             .appending(path: "ObeliskEpicDownloadTests-\(UUID().uuidString)", directoryHint: .isDirectory)
@@ -288,18 +287,19 @@ private struct EpicDownloadFixture {
     /// build as the Transfer starts.
     var offer: GameOffer {
         GameOffer.epic(namespace: game.namespace, catalogItemId: game.catalogItemId, appName: game.appName,
-                  title: game.title, platform: nil)
+                  title: game.title)
     }
 
-    func receipt(_ app: String, platform: String) -> InstallationReceipt<String> {
+    func receipt(_ app: String, platform: GamePlatform) -> InstallationReceipt<String> {
         var owned = game
         owned.appName = app
         return Self.receipt(owned, directory: directory, platform: platform)
     }
 
-    static func receipt(_ game: EpicGame, directory: URL, platform: String) -> InstallationReceipt<String> {
+    static func receipt(_ game: EpicGame, directory: URL, platform: GamePlatform) -> InstallationReceipt<String> {
         InstallationReceipt.epic(namespace: game.namespace, appName: game.appName, name: game.title,
-                           directory: directory.appending(path: "Games/Epic/epic-\(game.appName)-\(platform)").path,
+                           directory: directory.appending(
+                               path: "Games/Epic/epic-\(game.appName)-\(platform == .mac ? "Mac" : "Windows")").path,
                            platform: platform, totalBytes: 100)
     }
 }

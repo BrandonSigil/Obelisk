@@ -1,5 +1,6 @@
 use super::*;
 use crate::wine::tests::{calls, installation, locations, pe, record_calls};
+use obelisk_core::Platform;
 use std::fs;
 
 fn configuration(root: &Path) -> Configuration {
@@ -13,7 +14,7 @@ fn configuration(root: &Path) -> Configuration {
         namespace: "space".into(),
         catalog_item_id: "base".into(),
         app_name: "game".into(),
-        platform: "Windows".into(),
+        platform: Platform::Windows,
         language: "en".into(),
         title: String::new(),
         prefix: Some(root.join("library/Prefixes/epic-hash-Windows")),
@@ -35,7 +36,7 @@ fn install(
         catalog_item_id: config.catalog_item_id.clone(),
         account_id: "account".into(),
         directory: config.install.to_string_lossy().into_owned(),
-        platform: config.platform.clone(),
+        platform: config.platform,
         total_bytes: 1,
         build_version: "1.0".into(),
         launch_executable: "Binaries/Game.exe".into(),
@@ -126,7 +127,7 @@ fn a_windows_build_readies_its_prefix_with_its_prerequisite_before_any_credentia
     let windows = wine::Installation::of(
         &locations,
         config.profile_game(),
-        &config.platform,
+        config.platform,
         &config.install,
     )
     .unwrap()

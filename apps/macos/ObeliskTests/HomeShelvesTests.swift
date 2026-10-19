@@ -104,7 +104,7 @@ final class HomeShelvesTests: XCTestCase {
         }
         let receipts = zip(games, entries).filter { $1.installed }.map { game, _ in
             InstallationReceipt.steam(appId: game.appId, name: game.name, directory: root.appending(path: "\(game.appId)").path,
-                                      platform: "macos")
+                                      platform: .mac)
         }
         let history = LaunchHistory(cache: LibraryCache(directory: root.path))
         let sessions = GameSessions<SteamGames>(FakeSessions(), history: history)

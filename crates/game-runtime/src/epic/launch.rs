@@ -46,7 +46,7 @@ impl Services for epic_kit::client::Client {
             &config.namespace,
             &config.catalog_item_id,
             &config.app_name,
-            &config.platform,
+            config.platform,
             &config.install,
             &config.language,
         )

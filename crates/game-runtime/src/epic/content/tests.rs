@@ -66,10 +66,10 @@ impl Network for Fake {
             Ok("fixture-code".into())
         })
     }
-    fn platform<'a>(&'a self, _: &'a Product) -> BoxFuture<'a, Result<String, Failure>> {
+    fn platform<'a>(&'a self, _: &'a Product) -> BoxFuture<'a, Result<Platform, Failure>> {
         Box::pin(async move {
             self.call("platform");
-            Ok("Windows".into())
+            Ok(Platform::Windows)
         })
     }
     fn download<'a>(
@@ -88,7 +88,7 @@ impl Network for Fake {
                     .join("epic-hash-Mac")
                     .to_string_lossy()
                     .into_owned(),
-                platform: transfer.platform.clone().unwrap_or_default(),
+                platform: transfer.platform.expect("a settled platform"),
                 total_bytes: 100,
                 build_version: "1".into(),
                 launch_executable: "Game.app".into(),
@@ -174,26 +174,26 @@ impl Fixture {
         }
     }
     /// The build of `platform`, installed.
-    fn installed(&self, platform: &str) -> Receipt<Epic> {
-        let directory = self
-            .locations
-            .library
-            .join(format!("Games/Epic/epic-hash-{platform}"));
+    fn installed(&self, platform: Platform) -> Receipt<Epic> {
+        let directory = self.locations.library.join(format!(
+            "Games/Epic/epic-hash-{}",
+            epic_kit::client::PLATFORM.name(platform)
+        ));
         std::fs::create_dir_all(&directory).unwrap();
         Receipt {
             product: product(),
             name: "Fixture".into(),
             directory: directory.to_string_lossy().into_owned(),
-            platform: platform.into(),
+            platform,
             total_bytes: 100,
             needs_verification: false,
         }
     }
-    fn transfer(&self, platform: &str) -> Transfer<Epic> {
+    fn transfer(&self, platform: Platform) -> Transfer<Epic> {
         Transfer {
             product: product(),
             name: "Fixture".into(),
-            platform: Some(platform.into()),
+            platform: Some(platform),
             directory: self.locations.library.join("Games/Epic"),
         }
     }
@@ -222,9 +222,12 @@ fn control() -> Arc<Control> {
 #[tokio::test]
 async fn every_account_call_renews_and_saves_the_credentials_first() {
     let fixture = Fixture::new();
-    let transfer = fixture.transfer("Mac");
+    let transfer = fixture.transfer(Platform::Mac);
 
-    assert_eq!(fixture.content.begin(&transfer).await.unwrap(), "Mac");
+    assert_eq!(
+        fixture.content.begin(&transfer).await.unwrap(),
+        Platform::Mac
+    );
     let receipt = fixture.content.download(&transfer).await.unwrap();
 
     assert_eq!(receipt.product, product());
@@ -237,7 +240,7 @@ async fn every_account_call_renews_and_saves_the_credentials_first() {
         ["prepare", "saved", "download", "saved"]
     );
 
-    let receipt = fixture.installed("Mac");
+    let receipt = fixture.installed(Platform::Mac);
     fixture.content.archive(&receipt).await.unwrap();
     eventually(|| fixture.fake.calls().len() == 8).await;
     assert_eq!(
@@ -256,10 +259,13 @@ async fn a_transfer_without_a_platform_installs_the_build_epic_picks() {
     let fixture = Fixture::new();
     let transfer = Transfer {
         platform: None,
-        ..fixture.transfer("Mac")
+        ..fixture.transfer(Platform::Mac)
     };
 
-    assert_eq!(fixture.content.begin(&transfer).await.unwrap(), "Windows");
+    assert_eq!(
+        fixture.content.begin(&transfer).await.unwrap(),
+        Platform::Windows
+    );
     // Picking the build may renew the credentials: they are saved after it.
     eventually(|| fixture.fake.calls().len() == 4).await;
     assert_eq!(
@@ -271,10 +277,10 @@ async fn a_transfer_without_a_platform_installs_the_build_epic_picks() {
     assert_eq!(
         fixture
             .content
-            .begin(&fixture.transfer("Mac"))
+            .begin(&fixture.transfer(Platform::Mac))
             .await
             .unwrap(),
-        "Mac"
+        Platform::Mac
     );
     assert!(!fixture.fake.calls().contains(&"platform".to_string()));
 }
@@ -282,7 +288,7 @@ async fn a_transfer_without_a_platform_installs_the_build_epic_picks() {
 #[tokio::test]
 async fn a_transfer_cancelled_while_its_credentials_renew_never_begins() {
     let fixture = Fixture::new();
-    let transfer = fixture.transfer("Mac");
+    let transfer = fixture.transfer(Platform::Mac);
     *fixture.fake.held.lock().unwrap() = true;
 
     let (begun, ()) = tokio::join!(fixture.content.begin(&transfer), async {
@@ -297,7 +303,7 @@ async fn a_transfer_cancelled_while_its_credentials_renew_never_begins() {
 #[tokio::test]
 async fn a_windows_build_keeps_its_saves_in_its_wine_prefix_and_a_mac_build_has_none() {
     let fixture = Fixture::new();
-    for platform in ["Windows", "Mac"] {
+    for platform in [Platform::Windows, Platform::Mac] {
         let receipt = fixture.installed(platform);
         fixture
             .content
@@ -336,7 +342,7 @@ async fn an_uninstalled_game_without_a_saved_context_cannot_sync_and_a_cancelled
     );
     assert!(fixture.fake.maintained.lock().unwrap().is_empty());
 
-    let receipt = fixture.installed("Mac");
+    let receipt = fixture.installed(Platform::Mac);
     *fixture.fake.maintenance.lock().unwrap() = Some(Error::Cancelled);
     assert_eq!(
         fixture
@@ -351,7 +357,7 @@ async fn an_uninstalled_game_without_a_saved_context_cannot_sync_and_a_cancelled
 async fn an_uninstalled_game_syncs_the_configuration_its_record_names_with_this_obelisks_paths() {
     use crate::cloud::record::{self, Record as _};
     let fixture = Fixture::new();
-    let receipt = fixture.installed("Mac");
+    let receipt = fixture.installed(Platform::Mac);
     std::fs::create_dir_all(fixture.locations.home.join("Saves")).unwrap();
     // An earlier Obelisk, whose sessions and helper lived elsewhere, saved
     // the record of the game it installed.
@@ -396,7 +402,7 @@ async fn an_uninstalled_game_syncs_the_configuration_its_record_names_with_this_
 #[tokio::test]
 async fn a_launch_code_that_another_account_signed_is_refused_before_the_game_starts() {
     let fixture = Fixture::new();
-    let receipt = fixture.installed("Mac");
+    let receipt = fixture.installed(Platform::Mac);
     fixture
         .fake
         .accounts
@@ -436,7 +442,7 @@ async fn a_windows_launch_gets_voile_before_it_is_prepared_and_a_mac_launch_gets
     eventually(|| !sessions.state().recovering).await;
     let admission = sessions.admit(game(), ACCOUNT.into()).unwrap();
     let canceller = admission.canceller();
-    let windows = fixture.installed("Windows");
+    let windows = fixture.installed(Platform::Windows);
 
     let (launched, ()) = tokio::join!(fixture.content.launch(&windows, admission, None), async {
         eventually(|| !events.lock().unwrap().is_empty()).await;
@@ -458,7 +464,7 @@ async fn a_windows_launch_gets_voile_before_it_is_prepared_and_a_mac_launch_gets
     let admission = sessions.admit(game(), ACCOUNT.into()).unwrap();
     let launched = fixture
         .content
-        .launch(&fixture.installed("Mac"), admission, None)
+        .launch(&fixture.installed(Platform::Mac), admission, None)
         .await;
     assert_eq!(
         launched,
@@ -470,25 +476,30 @@ async fn a_windows_launch_gets_voile_before_it_is_prepared_and_a_mac_launch_gets
 #[test]
 fn a_build_installs_into_the_folder_epic_names_for_it() {
     let fixture = Fixture::new();
-    let windows = fixture.installed("Windows");
+    let windows = fixture.installed(Platform::Windows);
 
     assert_eq!(
         fixture.content.directory_name(&windows),
-        epic_kit::client::installation_directory_name("sandbox", "catalog", "game", "Windows")
+        epic_kit::client::installation_directory_name(
+            "sandbox",
+            "catalog",
+            "game",
+            Platform::Windows
+        )
     );
 }
 
 #[tokio::test]
 async fn an_older_receipt_learns_its_catalog_item_from_the_installation_itself() {
     let fixture = Fixture::new();
-    let mut receipt = fixture.installed("Mac");
+    let mut receipt = fixture.installed(Platform::Mac);
     let installed = epic_kit::client::Installation {
         app_name: "game".into(),
         namespace: "sandbox".into(),
         catalog_item_id: "catalog".into(),
         account_id: ACCOUNT.into(),
         directory: receipt.directory.clone(),
-        platform: "Mac".into(),
+        platform: Platform::Mac,
         total_bytes: 100,
         build_version: "1".into(),
         launch_executable: "Game.app".into(),

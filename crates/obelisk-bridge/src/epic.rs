@@ -3,7 +3,7 @@
 use std::{collections::HashMap, sync::Arc};
 
 use crate::{
-    LibraryCache,
+    GamePlatform, LibraryCache,
     library_cache::{self, EpicLibrary, GameAchievements, LibraryAchievement},
 };
 use epic_kit::{auth, client};
@@ -140,8 +140,8 @@ impl From<client::Achievement> for LibraryAchievement {
 /// any download, and its size.
 #[derive(Clone, Debug, uniffi::Record)]
 pub struct EpicGameDetails {
-    /// `Mac` or `Windows`; unknown when Epic could not tell.
-    pub platform: Option<String>,
+    /// Unknown when Epic could not tell.
+    pub platform: Option<GamePlatform>,
     /// Unknown when Epic serves no manifest of the build.
     pub installation_bytes: Option<u64>,
 }
@@ -149,7 +149,7 @@ pub struct EpicGameDetails {
 impl From<client::GameDetails> for EpicGameDetails {
     fn from(details: client::GameDetails) -> Self {
         Self {
-            platform: details.platform,
+            platform: details.platform.map(Into::into),
             installation_bytes: details.installation_bytes,
         }
     }

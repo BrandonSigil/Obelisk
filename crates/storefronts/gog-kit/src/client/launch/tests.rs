@@ -4,12 +4,12 @@ use crate::manifest::Product;
 use serde_json::json;
 use std::fs;
 
-fn installation(directory: &Path, platform: &str, content_root: &str) -> Installation {
+fn installation(directory: &Path, platform: Platform, content_root: &str) -> Installation {
     Installation {
         product_id: "1207658924".into(),
         user_id: "48628349957132247".into(),
         directory: directory.to_string_lossy().into_owned(),
-        platform: platform.into(),
+        platform,
         total_bytes: 1,
         build_id: "57325240911024496".into(),
         version_name: "1.5 (gog-3)".into(),
@@ -43,6 +43,24 @@ fn info(tasks: serde_json::Value) -> Vec<u8> {
 }
 
 #[test]
+fn gog_spells_its_builds_as_obelisk_and_its_content_system_do() {
+    assert_eq!(crate::client::content_platform(Platform::Mac), "osx");
+    assert_eq!(
+        crate::client::content_platform(Platform::Windows),
+        "windows"
+    );
+    let folder = tempfile::tempdir().unwrap();
+    let written = serde_json::to_value(installation(folder.path(), Platform::Mac, "")).unwrap();
+    assert_eq!(written["platform"], "macos");
+    let read: Installation = serde_json::from_value(written).unwrap();
+    assert_eq!(read.platform, Platform::Mac);
+    assert_eq!(
+        crate::client::installation_directory_name("1", Platform::Windows),
+        "gog-1-windows"
+    );
+}
+
+#[test]
 fn a_windows_build_plays_its_primary_task() {
     let folder = tempfile::tempdir().unwrap();
     let root = folder.path().join("gog-1207658924-windows");
@@ -59,9 +77,9 @@ fn a_windows_build_plays_its_primary_task() {
     );
     write(
         &root.join(obelisk_core::install::RECEIPT_FILE),
-        &serde_json::to_vec(&installation(&root, WINDOWS, "")).unwrap(),
+        &serde_json::to_vec(&installation(&root, Platform::Windows, "")).unwrap(),
     );
-    let launch = installed_launch("1207658924", WINDOWS, &root).unwrap();
+    let launch = installed_launch("1207658924", Platform::Windows, &root).unwrap();
     let root = root.canonicalize().unwrap();
     assert_eq!(
         Path::new(&launch.target.executable),
@@ -124,13 +142,13 @@ fn a_mac_build_reads_its_bundles_resources() {
         &bundle.join("Contents/Resources/goggame-1207658924.info"),
         &info(json!([{"category": "game", "path": "Contents/MacOS/Game", "type": "FileTask"}])),
     );
-    let mut installed = installation(&root, MACOS, "Game.app");
+    let mut installed = installation(&root, Platform::Mac, "Game.app");
     installed.dependencies.clear();
     write(
         &root.join(obelisk_core::install::RECEIPT_FILE),
         &serde_json::to_vec(&installed).unwrap(),
     );
-    let launch = installed_launch("1207658924", MACOS, &root).unwrap();
+    let launch = installed_launch("1207658924", Platform::Mac, &root).unwrap();
     assert_eq!(
         Path::new(&launch.target.executable),
         bundle.canonicalize().unwrap().join("Contents/MacOS/Game")
@@ -152,19 +170,19 @@ fn an_installation_without_its_receipt_or_task_does_not_launch() {
         _ => panic!("expected {key}"),
     };
     refused(
-        installed_launch("1207658924", WINDOWS, &root),
+        installed_launch("1207658924", Platform::Windows, &root),
         "backend.gog.launch.incompleteInstallation",
     );
     write(
         &root.join(obelisk_core::install::RECEIPT_FILE),
-        &serde_json::to_vec(&installation(&root, WINDOWS, "")).unwrap(),
+        &serde_json::to_vec(&installation(&root, Platform::Windows, "")).unwrap(),
     );
     refused(
-        installed_launch("1207658924", MACOS, &root),
+        installed_launch("1207658924", Platform::Mac, &root),
         "backend.gog.launch.incompleteInstallation",
     );
     refused(
-        installed_launch("1207658924", WINDOWS, &root),
+        installed_launch("1207658924", Platform::Windows, &root),
         "backend.gog.launch.noPlayTask",
     );
     write(
@@ -172,7 +190,7 @@ fn an_installation_without_its_receipt_or_task_does_not_launch() {
         &info(json!([{"category": "game", "path": "..\\outside.exe", "type": "FileTask"}])),
     );
     refused(
-        installed_launch("1207658924", WINDOWS, &root),
+        installed_launch("1207658924", Platform::Windows, &root),
         "backend.gog.launch.pathOutsideGame",
     );
 }

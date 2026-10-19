@@ -11,8 +11,8 @@ use crate::{
     sessions::{self, Admission, BeforeBegin, Failure, Storefront as _, Supervised, failed},
 };
 use cloud_vault::{EpicScope, StoreScope};
-use epic_kit::client::Client as EpicClient;
-use obelisk_core::{installation::TransferProgress, transfer::CancelToken};
+use epic_kit::{EpicError, client::Client as EpicClient};
+use obelisk_core::{Platform, installation::TransferProgress, transfer::CancelToken};
 use std::{path::Path, sync::Arc};
 
 /// What an account's installations ask of Epic's network. Every call may wait
@@ -26,7 +26,7 @@ pub trait Network: Send + Sync + 'static {
     fn exchange_code(&self) -> BoxFuture<'_, Result<String, Failure>>;
     /// The build a Transfer without a platform installs: the Mac build when
     /// its game runs natively on Apple silicon, else the Windows build.
-    fn platform<'a>(&'a self, product: &'a Product) -> BoxFuture<'a, Result<String, Failure>>;
+    fn platform<'a>(&'a self, product: &'a Product) -> BoxFuture<'a, Result<Platform, Failure>>;
     /// Runs `transfer` into the folder its begin settled the platform of.
     fn download<'a>(
         &'a self,
@@ -66,7 +66,7 @@ impl Network for EpicClient {
     fn exchange_code(&self) -> BoxFuture<'_, Result<String, Failure>> {
         Box::pin(async move { EpicClient::exchange_code(self).await.map_err(failed) })
     }
-    fn platform<'a>(&'a self, product: &'a Product) -> BoxFuture<'a, Result<String, Failure>> {
+    fn platform<'a>(&'a self, product: &'a Product) -> BoxFuture<'a, Result<Platform, Failure>> {
         Box::pin(async move {
             EpicClient::platform(
                 self,
@@ -75,7 +75,6 @@ impl Network for EpicClient {
                 &product.app_name,
             )
             .await
-            .map(str::to_owned)
             .map_err(failed)
         })
     }
@@ -84,13 +83,17 @@ impl Network for EpicClient {
         transfer: &'a Transfer<Epic>,
     ) -> BoxFuture<'a, Result<epic_kit::client::Installation, Failure>> {
         Box::pin(async move {
+            // The Transfer's begin set it; Epic still refuses a download without one.
+            let platform = transfer
+                .platform
+                .ok_or(EpicError::Protocol)
+                .map_err(failed)?;
             EpicClient::download(
                 self,
                 &transfer.product.namespace,
                 &transfer.product.catalog_item_id,
                 &transfer.product.app_name,
-                // Epic refuses an empty platform; the Transfer's begin set it.
-                transfer.platform.as_deref().unwrap_or_default(),
+                platform,
                 &transfer.directory,
             )
             .await
@@ -113,7 +116,7 @@ impl Network for EpicClient {
                 &receipt.product.namespace,
                 &receipt.product.catalog_item_id,
                 &receipt.product.app_name,
-                &receipt.platform,
+                receipt.platform,
                 Path::new(&receipt.directory),
             )
             .await
@@ -177,7 +180,7 @@ impl<N: Network> Content<N> {
             namespace: receipt.product.namespace.clone(),
             catalog_item_id: receipt.product.catalog_item_id.clone(),
             app_name: receipt.product.app_name.clone(),
-            platform: receipt.platform.clone(),
+            platform: receipt.platform,
             language: self.language.clone(),
             title: receipt.name.clone(),
             prefix: receipt
@@ -225,11 +228,14 @@ impl<N: Network> Content<N> {
 }
 
 impl<N: Network> installations::Content<Epic> for Content<N> {
-    fn begin<'a>(&'a self, transfer: &'a Transfer<Epic>) -> BoxFuture<'a, Result<String, Failure>> {
+    fn begin<'a>(
+        &'a self,
+        transfer: &'a Transfer<Epic>,
+    ) -> BoxFuture<'a, Result<Platform, Failure>> {
         Box::pin(async move {
             self.prepare().await?;
-            match &transfer.platform {
-                Some(platform) => Ok(platform.clone()),
+            match transfer.platform {
+                Some(platform) => Ok(platform),
                 None => {
                     let platform = self.network.platform(&transfer.product).await;
                     // The call may have renewed the account's credentials.
@@ -322,7 +328,7 @@ impl<N: Network> installations::Content<Epic> for Content<N> {
             &receipt.product.namespace,
             &receipt.product.catalog_item_id,
             &receipt.product.app_name,
-            &receipt.platform,
+            receipt.platform,
         )
     }
     fn remove_prefix(&self, receipt: &Receipt<Epic>) -> Option<Result<(), String>> {
@@ -390,8 +396,8 @@ struct Handover<N: Network> {
 impl<N: Network> sessions::Handover<Epic> for Handover<N> {
     /// The account, its exchange code, and how a Windows build runs.
     type Prepared = (String, String, Option<crate::wine::Config>);
-    fn platform(&self) -> &str {
-        &self.configuration.platform
+    fn platform(&self) -> Platform {
+        self.configuration.platform
     }
     fn prepare(&self) -> BoxFuture<'_, Result<Self::Prepared, Failure>> {
         Box::pin(async move {

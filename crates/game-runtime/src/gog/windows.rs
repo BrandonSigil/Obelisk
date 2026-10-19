@@ -11,7 +11,7 @@ pub(super) fn ready(
     locations: &crate::Locations,
 ) -> Result<wine::Config> {
     let installed =
-        gog_kit::client::installed_launch(&config.product_id, &config.platform, &config.install)?;
+        gog_kit::client::installed_launch(&config.product_id, config.platform, &config.install)?;
     let prefix = Prefix {
         prerequisites: installed.prerequisites(wine::windows_path),
     };

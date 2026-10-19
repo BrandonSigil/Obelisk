@@ -1047,7 +1047,7 @@ type Started<P> = Result<Arc<dyn Supervised<P>>, String>;
 /// A storefront's handover the test scripts, which records its steps.
 struct Scripted<P: Provider> {
     /// The platform of the build it starts: a Mac one unless the test says.
-    platform: &'static str,
+    platform: Platform,
     steps: Arc<Mutex<Vec<&'static str>>>,
     /// Preparing waits until the test notifies it.
     held: Option<Arc<tokio::sync::Notify>>,
@@ -1060,7 +1060,7 @@ struct Scripted<P: Provider> {
 impl<P: Provider> Scripted<P> {
     fn starting(supervisor: Started<P>) -> Self {
         Self {
-            platform: "macos",
+            platform: Platform::Mac,
             steps: Arc::default(),
             held: None,
             prepared: Ok(()),
@@ -1075,7 +1075,7 @@ impl<P: Provider> Scripted<P> {
 
 impl<P: Storefront> Handover<P> for Scripted<P> {
     type Prepared = ();
-    fn platform(&self) -> &str {
+    fn platform(&self) -> Platform {
         self.platform
     }
     fn prepare(&self) -> BoxFuture<'_, Result<(), Failure>> {
@@ -1241,7 +1241,7 @@ async fn a_launch_gets_the_runtimes_its_build_needs_and_shows_their_download_bef
     let (sessions, store) = epic_launches(Runtimes::from_source(runtimes.clone())).await;
     let game = Fake::<Epic>::with("account".into(), store.clone(), Phase::Preparing);
     let mut handover = Scripted::starting(Ok(game.clone() as Arc<dyn Supervised<Epic>>));
-    handover.platform = "Windows";
+    handover.platform = Platform::Windows;
     let held = Arc::new(tokio::sync::Notify::new());
     handover.held = Some(held.clone());
     let steps = handover.steps();
@@ -1280,7 +1280,7 @@ async fn cancelling_a_launch_while_a_runtime_downloads_cancels_it_and_gives_the_
     runtimes.hold();
     let (sessions, store) = epic_launches(Runtimes::from_source(runtimes.clone())).await;
     let mut handover = Scripted::starting(Err("never started".into()));
-    handover.platform = "Windows";
+    handover.platform = Platform::Windows;
     let steps = handover.steps();
     let admission = sessions.admit(store, "account".into()).unwrap();
     let canceller = admission.canceller();
@@ -1308,7 +1308,7 @@ async fn a_runtime_that_fails_to_download_refuses_the_launch_before_it_prepares(
     runtimes.fail(failure.clone());
     let (sessions, store) = epic_launches(Runtimes::from_source(runtimes)).await;
     let mut handover = Scripted::starting(Err("never started".into()));
-    handover.platform = "Windows";
+    handover.platform = Platform::Windows;
     let steps = handover.steps();
 
     let outcome = sessions
@@ -1352,7 +1352,7 @@ async fn a_launch_keeps_the_replaced_voile_releases_while_another_storefronts_ga
     .await;
     let launch = |game: Arc<Fake<Steam>>| {
         let mut handover = Scripted::starting(Ok(game as Arc<dyn Supervised<Steam>>));
-        handover.platform = "windows";
+        handover.platform = Platform::Windows;
         steam_sessions.admit(42, 42).unwrap().hand_off(handover)
     };
 

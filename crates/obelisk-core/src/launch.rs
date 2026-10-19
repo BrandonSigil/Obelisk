@@ -1,6 +1,8 @@
 //! Validate storefront launch metadata without executing a process or a shell.
 use std::path::{Component, Path, PathBuf};
 
+use crate::Platform;
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LaunchTarget {
     pub executable: String,
@@ -37,12 +39,11 @@ impl LaunchDirectory {
 
     pub fn resolve(
         &self,
-        platform: &str,
+        platform: Platform,
         executable: &str,
         launch_arguments: &str,
         working_directory: &str,
     ) -> Result<LaunchTarget, LaunchError> {
-        validate_platform(platform)?;
         let relative = relative_path(executable)?;
         if relative.as_os_str().is_empty() {
             return Err(LaunchError("executableMissing"));
@@ -52,14 +53,14 @@ impl LaunchDirectory {
             .extension()
             .and_then(|ext| ext.to_str())
             .unwrap_or("");
-        if platform == "macos"
+        if platform == Platform::Mac
             && ["exe", "com", "bat", "cmd"]
                 .iter()
                 .any(|ext| extension.eq_ignore_ascii_case(ext))
         {
             return Err(LaunchError("windowsExecutable"));
         }
-        let bundle = if platform == "macos" {
+        let bundle = if platform == Platform::Mac {
             application_bundle(&executable)?
         } else {
             None
@@ -83,21 +84,13 @@ impl LaunchDirectory {
 }
 
 pub fn resolve(
-    platform: &str,
+    platform: Platform,
     directory: &Path,
     executable: &str,
     arguments: &str,
     working_directory: &str,
 ) -> Result<LaunchTarget, LaunchError> {
     LaunchDirectory::new(directory)?.resolve(platform, executable, arguments, working_directory)
-}
-
-fn validate_platform(platform: &str) -> Result<(), LaunchError> {
-    if matches!(platform, "macos" | "windows") {
-        Ok(())
-    } else {
-        Err(LaunchError("unsupportedPlatform"))
-    }
 }
 
 fn relative_path(value: &str) -> Result<PathBuf, LaunchError> {
@@ -149,15 +142,13 @@ fn path_string(path: &Path) -> Result<String, LaunchError> {
 }
 
 /// Split publisher arguments with platform quoting rules and no shell expansion.
-pub fn parse_arguments(source: &str, platform: &str) -> Result<Vec<String>, LaunchError> {
-    validate_platform(platform)?;
+pub fn parse_arguments(source: &str, platform: Platform) -> Result<Vec<String>, LaunchError> {
     if source.contains('\0') || source.len() > 65_536 {
         return Err(LaunchError("invalidArguments"));
     }
-    if platform == "windows" {
-        Ok(windows_arguments(source))
-    } else {
-        macos_arguments(source)
+    match platform {
+        Platform::Windows => Ok(windows_arguments(source)),
+        Platform::Mac => macos_arguments(source),
     }
 }
 
@@ -270,7 +261,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         file(root.path(), "My Game.app/Contents/MacOS/custom-executable");
         let bundle = resolve(
-            "macos",
+            Platform::Mac,
             root.path(),
             "My Game.app",
             "--title 'My game'",
@@ -282,7 +273,7 @@ mod tests {
         assert_eq!(bundle.arguments, ["--title", "My game"]);
         assert!(bundle.working_directory.ends_with("/My Game.app/Contents"));
         let explicit = resolve(
-            "macos",
+            Platform::Mac,
             root.path(),
             "My Game.app/Contents/MacOS/custom-executable",
             "",
@@ -300,7 +291,8 @@ mod tests {
             root.path().canonicalize().unwrap().to_str().unwrap()
         );
         file(root.path(), "bin/game.exe");
-        let windows = resolve("windows", root.path(), r"bin\game.exe", "", r"bin\").unwrap();
+        let windows =
+            resolve(Platform::Windows, root.path(), r"bin\game.exe", "", r"bin\").unwrap();
         assert!(!windows.is_application_bundle);
         assert!(windows.executable.ends_with("/bin/game.exe"));
     }
@@ -325,7 +317,7 @@ mod tests {
             ("directory", "notExecutable"),
         ] {
             assert_eq!(
-                resolve("macos", root.path(), executable, "", "")
+                resolve(Platform::Mac, root.path(), executable, "", "")
                     .unwrap_err()
                     .key_suffix(),
                 expected,
@@ -333,19 +325,13 @@ mod tests {
             );
         }
         assert_eq!(
-            resolve("macos", root.path(), "game", "", "game")
+            resolve(Platform::Mac, root.path(), "game", "", "game")
                 .unwrap_err()
                 .key_suffix(),
             "invalidWorkingDirectory"
         );
         assert_eq!(
-            resolve("linux", root.path(), "game", "", "")
-                .unwrap_err()
-                .key_suffix(),
-            "unsupportedPlatform"
-        );
-        assert_eq!(
-            resolve("macos", Path::new("relative"), "game", "", "")
+            resolve(Platform::Mac, Path::new("relative"), "game", "", "")
                 .unwrap_err()
                 .key_suffix(),
             "directoryMissing"
@@ -362,7 +348,7 @@ mod tests {
         symlink(outside.path(), root.path().join("linked")).unwrap();
         for executable in ["linked/Game.app", "linked/Game.app/Contents/MacOS/game"] {
             assert_eq!(
-                resolve("macos", root.path(), executable, "", "")
+                resolve(Platform::Mac, root.path(), executable, "", "")
                     .unwrap_err()
                     .key_suffix(),
                 "linkOutsideGame"
@@ -370,7 +356,7 @@ mod tests {
         }
         file(root.path(), "game");
         assert_eq!(
-            resolve("macos", root.path(), "game", "", "linked")
+            resolve(Platform::Mac, root.path(), "game", "", "linked")
                 .unwrap_err()
                 .key_suffix(),
             "linkOutsideGame"
@@ -379,7 +365,7 @@ mod tests {
 
     #[test]
     fn rejects_invalid_argument_sources_and_preserves_quote_boundaries() {
-        for platform in ["windows", "macos"] {
+        for platform in [Platform::Windows, Platform::Mac] {
             for source in ["bad\0argument".to_owned(), "x".repeat(65_537)] {
                 assert_eq!(
                     parse_arguments(&source, platform).unwrap_err().key_suffix(),
@@ -388,20 +374,16 @@ mod tests {
             }
         }
         assert_eq!(
-            parse_arguments("'unfinished", "macos")
+            parse_arguments("'unfinished", Platform::Mac)
                 .unwrap_err()
                 .key_suffix(),
             "unclosedQuotes"
         );
         assert_eq!(
-            parse_arguments("unfinished\\", "macos")
+            parse_arguments("unfinished\\", Platform::Mac)
                 .unwrap_err()
                 .key_suffix(),
             "incompleteEscape"
-        );
-        assert_eq!(
-            parse_arguments("", "linux").unwrap_err().key_suffix(),
-            "unsupportedPlatform"
         );
     }
 
@@ -421,7 +403,7 @@ mod tests {
             (r#"C:\Games\ next"#, vec![r"C:\Games\", "next"]),
         ] {
             assert_eq!(
-                parse_arguments(source, "windows").unwrap(),
+                parse_arguments(source, Platform::Windows).unwrap(),
                 expected,
                 "{source}"
             );
@@ -433,7 +415,7 @@ mod tests {
         assert_eq!(
             parse_arguments(
                 r#"--title 'My game' "" escaped\ space "$HOME" $(id) && * "a\qb" "a\"b""#,
-                "macos"
+                Platform::Mac
             )
             .unwrap(),
             [
@@ -449,8 +431,8 @@ mod tests {
                 "a\"b"
             ]
         );
-        assert!(parse_arguments("\"unfinished", "macos").is_err());
-        assert!(parse_arguments("unfinished\\", "macos").is_err());
-        assert!(parse_arguments("contains\0nul", "macos").is_err());
+        assert!(parse_arguments("\"unfinished", Platform::Mac).is_err());
+        assert!(parse_arguments("unfinished\\", Platform::Mac).is_err());
+        assert!(parse_arguments("contains\0nul", Platform::Mac).is_err());
     }
 }

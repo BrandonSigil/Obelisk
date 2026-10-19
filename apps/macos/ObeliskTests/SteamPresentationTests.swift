@@ -9,8 +9,8 @@ final class SteamPresentationTests: XCTestCase {
         let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
         let receipts = [
-            InstallationReceipt.steam(appId: 620, name: "Portal 2", directory: root.appending(path: "steam-620-macos").path, platform: "macos", totalBytes: 100),
-            InstallationReceipt.steam(appId: 570, name: "Dota 2", directory: root.appending(path: "steam-570-windows").path, platform: "windows", totalBytes: 200)
+            InstallationReceipt.steam(appId: 620, name: "Portal 2", directory: root.appending(path: "steam-620-macos").path, platform: .mac, totalBytes: 100),
+            InstallationReceipt.steam(appId: 570, name: "Dota 2", directory: root.appending(path: "steam-570-windows").path, platform: .windows, totalBytes: 200)
         ]
         let details = FixtureResponses<DetailsRequest, SteamGameDetails>()
         let session = FixtureSteamSession(games: fixtureGames, details: details)
@@ -22,7 +22,7 @@ final class SteamPresentationTests: XCTestCase {
         model.open(fixtureGames[0])
         XCTAssertNil(model.details)
         XCTAssertFalse(model.isLoadingDetails, "An installed game needs no remote details")
-        XCTAssertEqual(model.platform, "macos")
+        XCTAssertEqual(model.platform, .mac)
         XCTAssertEqual(model.installations.selectedReceipt, receipts[0])
         XCTAssertEqual(model.installations.selectedAction?.title, L10n.string("model.game.launch"))
         XCTAssertEqual(model.installations.selectedAction?.launches, true)
@@ -32,7 +32,7 @@ final class SteamPresentationTests: XCTestCase {
         // Windows installation.
         model.open(fixtureGames[1])
         XCTAssertFalse(model.isLoadingDetails)
-        XCTAssertEqual(model.platform, "windows")
+        XCTAssertEqual(model.platform, .windows)
         XCTAssertEqual(model.installations.selectedReceipt, receipts[1])
         XCTAssertEqual(model.installations.selectedAction?.title, L10n.string("model.game.launch"))
         XCTAssertEqual(model.installations.selectedAction?.isAvailable, true)
@@ -321,11 +321,11 @@ final class SteamPresentationTests: XCTestCase {
         await details.release(DetailsRequest(appId: 620, language: "tchinese"), value: fixtureDetails(620))
         await news.release(620, value: fixtureNews(620))
         try await eventually { model.details?.appId == 620 }
-        XCTAssertEqual(model.platform, "macos")
+        XCTAssertEqual(model.platform, .mac)
 
         model.installations.selectedAction?.perform()
 
-        XCTAssertEqual(backend.actions, [.install(GameOffer.steam(appId: 620, name: "Portal 2", platform: nil, language: "tchinese"))])
+        XCTAssertEqual(backend.actions, [.install(GameOffer.steam(appId: 620, name: "Portal 2", language: "tchinese"))])
         XCTAssertEqual(model.installations.transfer?.state, .preparing, "Progress shows before its first snapshot")
         XCTAssertEqual(model.installations.activeTransferGame, 620)
         model.closeGame()
@@ -338,14 +338,14 @@ final class SteamPresentationTests: XCTestCase {
         await details.release(DetailsRequest(appId: 570, language: "tchinese"), value: windowsOnly)
         await news.release(570, value: fixtureNews(570))
         try await eventually { model.details?.appId == 570 }
-        XCTAssertEqual(model.platform, "windows")
+        XCTAssertEqual(model.platform, .windows)
 
         backend.publish {
             $0.downloading = false
             $0.gate = .open
             $0.transfer?.state = .complete
             $0.receipts = [.steam(appId: 620, name: "Portal 2", directory: root.appending(path: "Games/Steam/steam-620-macos").path,
-                                  platform: "macos", totalBytes: 100)]
+                                  platform: .mac, totalBytes: 100)]
         }
         try await eventually { !model.installations.isDownloading }
         XCTAssertNil(model.installations.activeTransferGame)
@@ -382,7 +382,7 @@ final class SteamPresentationTests: XCTestCase {
         await model.start()
 
         libraryAction(fixtureGames[0], of: model).perform()
-        XCTAssertEqual(backend.actions, [.install(GameOffer.steam(appId: 620, name: "Portal 2", platform: nil, language: "french"))],
+        XCTAssertEqual(backend.actions, [.install(GameOffer.steam(appId: 620, name: "Portal 2", language: "french"))],
                        "Steam picks the build as the Transfer starts, without the game's details")
         XCTAssertNil(model.selectedGame)
         XCTAssertNil(model.errorMessage)
@@ -1014,7 +1014,7 @@ final class SteamPresentationTests: XCTestCase {
     private func launchFixture(sessions: SteamGameSessions? = nil) async throws -> LaunchFixture {
         let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         let installedDirectory = root.appending(path: "Installed games/steam-620-macos")
-        let receipt = InstallationReceipt.steam(appId: 620, name: "Portal 2", directory: installedDirectory.path, platform: "macos", totalBytes: 100)
+        let receipt = InstallationReceipt.steam(appId: 620, name: "Portal 2", directory: installedDirectory.path, platform: .mac, totalBytes: 100)
         let suite = "ObeliskLaunchFixture.\(UUID().uuidString)"
         let preferences = try XCTUnwrap(UserDefaults(suiteName: suite))
         let details = FixtureResponses<DetailsRequest, SteamGameDetails>()

@@ -13,7 +13,7 @@ use crate::supervisor::{self, Record, Target};
 pub use crate::supervisor::{FailureReason, Phase};
 pub use client::start;
 pub use launch::serve;
-use obelisk_core::transfer::CancelToken;
+use obelisk_core::{Platform, transfer::CancelToken};
 use serde::{Deserialize, Serialize};
 pub use session::{archive, maintain};
 use std::{
@@ -82,7 +82,8 @@ pub struct Configuration {
     pub namespace: String,
     pub catalog_item_id: String,
     pub app_name: String,
-    pub platform: String,
+    #[serde(serialize_with = "epic_kit::client::write_platform")]
+    pub platform: Platform,
     pub language: String,
     /// The game's name in the store, which the Linux engine shows in the
     /// menu bar, the Dock and Cmd-Tab.
@@ -134,9 +135,9 @@ impl Configuration {
     fn validate(&self, account: &str) -> Result<()> {
         cloud_vault::StoreScope::from(self.scope(account)).validate()?;
         // A Mac build runs natively; a Windows build in its prefix.
-        let prefix = match (self.platform.as_str(), &self.prefix) {
-            ("Mac", None) => None,
-            ("Windows", Some(prefix)) => Some(prefix),
+        let prefix = match (self.platform, &self.prefix) {
+            (Platform::Mac, None) => None,
+            (Platform::Windows, Some(prefix)) => Some(prefix),
             _ => return Err(Error::Unsupported),
         };
         if [
@@ -269,11 +270,9 @@ impl crate::sessions::Storefront for Epic {
 
 impl crate::installations::Storefront for Epic {
     type Product = Product;
-    /// None while Epic picks the build: the Mac build when its game runs
-    /// natively on Apple silicon, else the Windows build.
-    type Platform = Option<String>;
     /// Nothing joins a game through this storefront.
     type Join = std::convert::Infallible;
+    const PLATFORM: obelisk_core::platform::Spelling = epic_kit::client::PLATFORM;
     const RECEIPTS_UNAVAILABLE: &'static str = "model.epic.receiptsUnavailable";
     const RECEIPTS_NOT_SAVED: &'static str = "model.epic.receiptsNotSaved";
     const GAMES_DIRECTORY: &'static str = "Games/Epic";
@@ -290,8 +289,13 @@ impl crate::installations::Storefront for Epic {
             app_name: &product.app_name,
         }
     }
-    fn receipt_id(game: &Store, platform: &str) -> String {
-        format!("{}:{}:{platform}", game.namespace, game.app_name)
+    fn receipt_id(game: &Store, platform: Platform) -> String {
+        format!(
+            "{}:{}:{}",
+            game.namespace,
+            game.app_name,
+            Self::PLATFORM.name(platform)
+        )
     }
     fn transfer_name(game: &Store) -> String {
         game.app_name.clone()

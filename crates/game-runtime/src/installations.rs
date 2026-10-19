@@ -15,10 +15,12 @@ use crate::{
     sessions::{self, Admission, Canceller, Failure, Sessions},
 };
 use obelisk_core::{
+    Platform,
     installation::TransferProgress,
+    platform::Spelling,
     transfer::{CancelToken, TransferState},
 };
-pub use receipt::{Offer, PlatformChoice, Receipt, Transfer};
+pub use receipt::{Offer, Receipt, Transfer};
 use receipt::{load, save};
 use serde::{Serialize, de::DeserializeOwned};
 use std::{
@@ -50,9 +52,9 @@ pub trait Storefront: sessions::Storefront {
     /// item, GOG's product. The receipt file keeps its fields beside the
     /// receipt's own.
     type Product: Clone + fmt::Debug + PartialEq + Eq + Serialize + DeserializeOwned + Send + Sync;
-    /// A Transfer's or Offer's platform: `Option<String>` for a storefront
-    /// that may pick the build as the Transfer starts, as Steam does.
-    type Platform: PlatformChoice;
+    /// How the storefront spells a platform in its receipt file, receipt ids
+    /// and folder names: its kit's.
+    const PLATFORM: Spelling;
     /// Shown when the receipt file cannot be read, or saved.
     const RECEIPTS_UNAVAILABLE: &'static str;
     const RECEIPTS_NOT_SAVED: &'static str;
@@ -68,7 +70,7 @@ pub trait Storefront: sessions::Storefront {
     /// The game `product` names, as Obelisk's profiles look it up.
     fn profile_game(product: &Self::Product) -> crate::profile::Game<'_>;
     /// An installation's id, one per game and platform, as Swift names it.
-    fn receipt_id(game: &Self::Game, platform: &str) -> String;
+    fn receipt_id(game: &Self::Game, platform: Platform) -> String;
     /// The name a Transfer's progress gives the game.
     fn transfer_name(game: &Self::Game) -> String;
     /// Fills in what an older receipt file did not record, from the
@@ -87,7 +89,7 @@ pub trait Content<S: Storefront>: Send + Sync {
     /// credentials for a storefront whose session rotates them, and returns
     /// the platform of the build it installs, the one it names or else the
     /// one the storefront picks.
-    fn begin<'a>(&'a self, transfer: &'a Transfer<S>) -> BoxFuture<'a, Result<String, Failure>>;
+    fn begin<'a>(&'a self, transfer: &'a Transfer<S>) -> BoxFuture<'a, Result<Platform, Failure>>;
     /// Downloads the game's files of `transfer`, whose platform is settled
     /// and whose runtimes are in place, and returns the receipt of the
     /// completed installation.
@@ -789,7 +791,7 @@ impl<S: Storefront> Shared<S> {
             let got = self
                 .sessions
                 .runtimes()
-                .get::<S>(&platform, &cancel, |progress| {
+                .get::<S>(platform, &cancel, |progress| {
                     self.update(|inner| inner.state.transfer = Some(shown(&name, progress)));
                 })
                 .await;
@@ -808,7 +810,7 @@ impl<S: Storefront> Shared<S> {
             }
             got?;
             let transfer = Transfer {
-                platform: platform.into(),
+                platform: Some(platform),
                 ..transfer.clone()
             };
             let polling = {
@@ -1270,9 +1272,8 @@ impl<S: Storefront> Installations<S> {
     }
 
     /// Installs what `offer` names under Obelisk's library, or updates the
-    /// installation of its platform in place; an offer that leaves the build
-    /// to the storefront updates the game's installation. A Transfer of the
-    /// game that stopped before its receipt resumes instead.
+    /// game's installation in place. A Transfer of the game that stopped
+    /// before its receipt resumes instead.
     pub fn install(&self, offer: Offer<S>) {
         let fresh = offer.transfer(self.shared.library.join(S::GAMES_DIRECTORY));
         let transfer = {
@@ -1392,7 +1393,7 @@ impl<S: Storefront> Installations<S> {
     /// installation the account no longer has.
     fn windows_receipt(&self, receipt: &str) -> Option<Receipt<S>> {
         let receipt = self.shared.inner.lock().unwrap().receipt(receipt)?;
-        crate::wine::windows_build(&receipt.platform).then_some(receipt)
+        (receipt.platform == Platform::Windows).then_some(receipt)
     }
 
     /// Asks the storefront whether each installation has a newer build, at

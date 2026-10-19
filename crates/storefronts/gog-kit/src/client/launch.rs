@@ -8,10 +8,11 @@ use obelisk_core::{
     install::read_file_bounded,
     installation::{self, InstallFailure},
     launch::{self, LaunchTarget},
+    platform::Platform,
 };
 use serde::Deserialize;
 
-use super::{Installation, MACOS, WINDOWS, valid_product_id};
+use super::{Installation, valid_product_id};
 use crate::{GogError, manifest::SUPPORT_DIRECTORY};
 
 pub(super) const MAX_INFO_BYTES: usize = 1024 * 1024;
@@ -63,12 +64,9 @@ struct PlayTask {
 /// What the installation in `directory` starts, from its receipt alone.
 pub fn installed_launch(
     product_id: &str,
-    platform: &str,
+    platform: Platform,
     directory: &Path,
 ) -> Result<InstalledLaunch, GogError> {
-    if !matches!(platform, MACOS | WINDOWS) {
-        return Err(launch_error("unsupportedPlatform"));
-    }
     if !valid_product_id(product_id) {
         return Err(GogError::Protocol);
     }
@@ -159,7 +157,7 @@ impl InstalledLaunch {
     /// `windows_path` names a Mac path as Wine sees it.
     pub fn prerequisites(&self, windows_path: impl Fn(&Path) -> String) -> Vec<Prerequisite> {
         let installation = &self.installation;
-        if installation.platform != WINDOWS {
+        if installation.platform != Platform::Windows {
             return Vec::new();
         }
         let language = &installation.language;

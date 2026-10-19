@@ -14,7 +14,7 @@ pub(crate) trait CloudRemote: Send + Sync + 'static {
         namespace: &str,
         catalog_item_id: &str,
         app_name: &str,
-        platform: &str,
+        platform: Platform,
     ) -> impl Future<Output = std::result::Result<Option<CloudRules>, EpicError>> + Send;
 
     /// The game's Cloud now: each file's name, size and hash.
@@ -63,7 +63,7 @@ impl CloudRemote for EpicClient {
         namespace: &str,
         catalog_item_id: &str,
         app_name: &str,
-        platform: &str,
+        platform: Platform,
     ) -> std::result::Result<Option<CloudRules>, EpicError> {
         EpicClient::cloud_configuration(self, namespace, catalog_item_id, app_name, platform).await
     }

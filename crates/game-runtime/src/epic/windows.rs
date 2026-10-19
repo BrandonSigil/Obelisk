@@ -17,7 +17,7 @@ pub(super) fn ready(
         &config.namespace,
         &config.catalog_item_id,
         &config.app_name,
-        &config.platform,
+        config.platform,
         &config.install,
     )?;
     let prefix = Prefix {

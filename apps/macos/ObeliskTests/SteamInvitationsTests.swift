@@ -12,7 +12,7 @@ final class SteamInvitationsTests: XCTestCase {
 
     func testAFriendsInvitationIsToldOnceAndJoinsByStartingTheInstalledGame() async throws {
         let receipt = InstallationReceipt.steam(appId: Self.peak.appId, name: "PEAK", directory: "/tmp/peak",
-                                                platform: "windows")
+                                                platform: .windows)
         let (model, session, backend, notifier) = try await signedIn(receipts: [receipt])
         defer { model.signOut() }
 
@@ -62,7 +62,7 @@ final class SteamInvitationsTests: XCTestCase {
 
         // Installed, but another launch holds Play.
         let receipt = InstallationReceipt.steam(appId: Self.peak.appId, name: "PEAK", directory: "/tmp/peak",
-                                                platform: "windows")
+                                                platform: .windows)
         backend.publish {
             $0.receipts = [receipt]
             $0.gate = .action(620)
@@ -82,7 +82,7 @@ final class SteamInvitationsTests: XCTestCase {
 
     func testAFriendsGameJoinsFromTheLobbySteamPushesOfThem() async throws {
         let receipt = InstallationReceipt.steam(appId: Self.peak.appId, name: "PEAK", directory: "/tmp/peak",
-                                                platform: "windows")
+                                                platform: .windows)
         let (model, session, backend, _) = try await signedIn(receipts: [receipt])
         defer { model.signOut() }
         func alice() -> FriendPresentation? { model.friends?.friends.first { $0.steamID == Self.alice } }

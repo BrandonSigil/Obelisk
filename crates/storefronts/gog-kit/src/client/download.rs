@@ -13,11 +13,12 @@ use obelisk_core::{
     install::hex,
     installation::{self, Destination, InstallFailure, InstalledFiles, TransferError},
     mac_build,
+    platform::Platform,
     transfer::{CancelToken, TransferBusy, TransferContext, Transfers},
 };
 use serde::{Deserialize, Serialize};
 
-use super::{Client, MACOS, WINDOWS, content_platform, launch, valid_product_id};
+use super::{Client, PLATFORM, content_platform, launch, valid_product_id, write_platform};
 use crate::{
     GogError,
     auth::Api,
@@ -43,8 +44,8 @@ pub struct Installation {
     pub product_id: String,
     pub user_id: String,
     pub directory: String,
-    /// `macos` or `windows`.
-    pub platform: String,
+    #[serde(serialize_with = "write_platform")]
+    pub platform: Platform,
     pub total_bytes: u64,
     pub build_id: String,
     pub version_name: String,
@@ -348,11 +349,7 @@ impl Client {
     /// The build a download of the game installs, with the depots of
     /// `language`: the Mac build when its game runs natively on Apple
     /// silicon, else the Windows build. `cancel_download` stops it.
-    pub async fn platform(
-        &self,
-        product_id: &str,
-        language: &str,
-    ) -> Result<&'static str, GogError> {
+    pub async fn platform(&self, product_id: &str, language: &str) -> Result<Platform, GogError> {
         self.picking
             .run(async |picking| {
                 picking
@@ -367,24 +364,24 @@ impl Client {
         product_id: &str,
         language: &str,
         cancel: &CancelToken,
-    ) -> Result<&'static str, GogError> {
+    ) -> Result<Platform, GogError> {
         if !valid_product_id(product_id) || language.is_empty() || language.len() > 32 {
             return Err(GogError::Protocol);
         }
         let api = &self.tokens.api;
         let (mac, windows) = tokio::try_join!(
-            present_build(api, product_id, "osx"),
-            present_build(api, product_id, "windows"),
+            present_build(api, product_id, content_platform(Platform::Mac)),
+            present_build(api, product_id, content_platform(Platform::Windows)),
         )?;
         if let Some(build) = &mac
             && self
                 .runs_natively(product_id, build, language, cancel)
                 .await?
         {
-            return Ok(MACOS);
+            return Ok(Platform::Mac);
         }
         match (mac, windows) {
-            (_, Some(_)) => Ok(WINDOWS),
+            (_, Some(_)) => Ok(Platform::Windows),
             (Some(_), None) => Err(GogError::Service {
                 message: "backend.install.macBuildNotNative".into(),
             }),
@@ -401,11 +398,11 @@ impl Client {
         access_token: &str,
         product_id: &str,
         language: &str,
-    ) -> Result<(&'static str, Option<u64>), GogError> {
+    ) -> Result<(Platform, Option<u64>), GogError> {
         let api = &self.tokens.api;
         let (mac, windows) = tokio::try_join!(
-            present_build(api, product_id, "osx"),
-            present_build(api, product_id, "windows"),
+            present_build(api, product_id, content_platform(Platform::Mac)),
+            present_build(api, product_id, content_platform(Platform::Windows)),
         )?;
         let not_native = mac.as_ref().is_some_and(|build| {
             !build.build_id.is_empty()
@@ -416,9 +413,9 @@ impl Client {
                 )) == Some(false)
         });
         let (platform, build) = match (mac, windows) {
-            (Some(_), Some(windows)) if not_native => (WINDOWS, windows),
-            (Some(mac), _) => (MACOS, mac),
-            (None, Some(windows)) => (WINDOWS, windows),
+            (Some(_), Some(windows)) if not_native => (Platform::Windows, windows),
+            (Some(mac), _) => (Platform::Mac, mac),
+            (None, Some(windows)) => (Platform::Windows, windows),
             (None, None) => return Err(GogError::NoBuild),
         };
         let size = match self
@@ -548,19 +545,19 @@ impl Client {
     pub async fn update_available(
         &self,
         product_id: &str,
-        platform: &str,
+        platform: Platform,
         directory: &Path,
     ) -> Result<bool, GogError> {
         if !valid_product_id(product_id) {
             return Err(GogError::Protocol);
         }
-        let content_platform = content_platform(platform)?;
         let Some(installed) = installation::read_receipt::<Installation>(directory)?
             .filter(|receipt| receipt.product_id == product_id && receipt.platform == platform)
         else {
             return Ok(true);
         };
-        let current = listed_build(&self.tokens.api, product_id, content_platform).await?;
+        let current =
+            listed_build(&self.tokens.api, product_id, content_platform(platform)).await?;
         // A build without its identity cannot be compared.
         Ok(!current.build_id.is_empty()
             && !installed.build_id.is_empty()
@@ -573,14 +570,13 @@ impl Client {
     pub async fn download(
         &self,
         product_id: &str,
-        platform: &str,
+        platform: Platform,
         language: &str,
         parent: &Path,
     ) -> Result<Installation, GogError> {
         if !valid_product_id(product_id) || language.is_empty() || language.len() > 32 {
             return Err(GogError::Protocol);
         }
-        let content_platform = content_platform(platform)?;
         let directory = installation_directory_name(product_id, platform);
         installation::install(
             &self.downloads,
@@ -591,7 +587,7 @@ impl Client {
             },
             |_, cancel| async move {
                 let prepared = cancel
-                    .race(self.prepare_download(product_id, content_platform, language))
+                    .race(self.prepare_download(product_id, platform, language))
                     .await??;
                 // A revoked account withdraws nothing: the receipt stays until
                 // the installation lock is taken.
@@ -618,13 +614,13 @@ impl Client {
     async fn prepare_download(
         &self,
         product_id: &str,
-        platform: &str,
+        platform: Platform,
         language: &str,
     ) -> Result<Prepared, GogError> {
         let user_id = self.credentials().await?.user_id;
         let api = &self.tokens.api;
         let ((manifest, version_name), owned) = tokio::try_join!(
-            current_build(api, product_id, platform),
+            current_build(api, product_id, content_platform(platform)),
             self.with_access_token(|token| async move { owned(api, &token).await }),
         )?;
         let (products, depots) = owned_depots(&manifest, &owned, language)?;
@@ -648,7 +644,7 @@ impl Client {
                 installed
             }
         };
-        let dependencies = if platform == "windows" && !manifest.dependencies.is_empty() {
+        let dependencies = if platform == Platform::Windows && !manifest.dependencies.is_empty() {
             self.add_dependencies(&manifest, &content_root, &mut installed)
                 .await?
         } else {
@@ -721,7 +717,7 @@ impl Client {
     async fn install_files(
         &self,
         product_id: &str,
-        platform: &str,
+        platform: Platform,
         language: &str,
         prepared: Prepared,
         destination: &Path,
@@ -760,7 +756,7 @@ impl Client {
                 product_id: product_id.into(),
                 user_id,
                 directory: destination.to_string_lossy().into_owned(),
-                platform: platform.into(),
+                platform,
                 total_bytes: summary.total_bytes,
                 build_id: manifest.build_id.clone(),
                 version_name,
@@ -821,6 +817,6 @@ impl Client {
 
 /// The dedicated directory name for one GOG installation. The host relies on
 /// this exact scheme to recognise and remove installations it created.
-pub fn installation_directory_name(product_id: &str, platform: &str) -> String {
-    format!("gog-{product_id}-{platform}")
+pub fn installation_directory_name(product_id: &str, platform: Platform) -> String {
+    format!("gog-{product_id}-{}", PLATFORM.name(platform))
 }

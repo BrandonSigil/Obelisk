@@ -95,8 +95,8 @@ impl Connection {
 }
 
 impl Network for Connection {
-    fn platform<'a>(&'a self, _: u32, _: &'a str) -> BoxFuture<'a, Result<String, Failure>> {
-        Box::pin(async move { self.serve("platform").map(|()| "macos".into()) })
+    fn platform<'a>(&'a self, _: u32, _: &'a str) -> BoxFuture<'a, Result<Platform, Failure>> {
+        Box::pin(async move { self.serve("platform").map(|()| Platform::Mac) })
     }
     fn download<'a>(
         &'a self,
@@ -123,7 +123,7 @@ impl Network for Connection {
                     .join(format!("steam-{app_id}-macos"))
                     .to_string_lossy()
                     .into_owned(),
-                platform: "macos".into(),
+                platform: Platform::Mac,
                 language: transfer.product.language.clone(),
                 total_bytes: 100,
                 manifests: Vec::new(),
@@ -148,7 +148,7 @@ impl Network for Connection {
     fn launch_target<'a>(
         &'a self,
         _: u32,
-        _: &'a str,
+        _: Platform,
         install: &'a Path,
     ) -> BoxFuture<'a, Result<LaunchTarget, Failure>> {
         Box::pin(async move {
@@ -297,7 +297,7 @@ fn transfer(app_id: u32) -> Transfer<Steam> {
     Transfer {
         product: product(app_id),
         name: format!("Game {app_id}"),
-        platform: Some("macos".into()),
+        platform: Some(Platform::Mac),
         directory: PathBuf::from("/Games/Steam"),
     }
 }
@@ -308,7 +308,7 @@ fn receipt() -> Receipt<Steam> {
         product: product(620),
         name: "Portal 2".into(),
         directory: "/Games/Steam/steam-620-macos".into(),
-        platform: "macos".into(),
+        platform: Platform::Mac,
         total_bytes: 100,
         needs_verification: false,
     }
@@ -360,12 +360,11 @@ impl Account {
         }
     }
 
-    /// Installs the Mac build of `app_id`.
+    /// Installs `app_id`, whose Mac build Steam picks.
     fn install(&self, app_id: u32) {
         self.installations.install(Offer {
             product: product(app_id),
             name: format!("Game {app_id}"),
-            platform: Some("macos".into()),
         });
     }
 }
@@ -626,7 +625,12 @@ async fn calls_go_through_the_connection_of_the_moment_and_fail_at_once_while_re
         session.update_available(&receipt()).await,
         Err(Failure::Failed(DISCONNECTED.into()))
     );
-    assert!(session.launch_target(620, "macos", install).await.is_err());
+    assert!(
+        session
+            .launch_target(620, Platform::Mac, install)
+            .await
+            .is_err()
+    );
     assert!(matches!(
         session.archive_rules(620).await,
         Err(steam_cloud::Failure::Network)
@@ -636,7 +640,12 @@ async fn calls_go_through_the_connection_of_the_moment_and_fail_at_once_while_re
 
     changed(&session).await;
     assert_eq!(session.update_available(&receipt()).await, Ok(false));
-    assert!(session.launch_target(620, "macos", install).await.is_ok());
+    assert!(
+        session
+            .launch_target(620, Platform::Mac, install)
+            .await
+            .is_ok()
+    );
     assert_eq!(b.calls(), ["update", "launch"]);
 }
 
@@ -653,7 +662,7 @@ async fn a_transfer_waits_for_the_reconnection_and_downloads_through_the_new_con
         let session = session.clone();
         async move { session.platform(620, "english").await }
     });
-    assert_eq!(picked.await.unwrap(), Ok("macos".into()));
+    assert_eq!(picked.await.unwrap(), Ok(Platform::Mac));
     assert_eq!(Instant::now() - dropped, Duration::from_secs(1));
     assert_eq!(downloading(&session, 620).await.unwrap(), Ok(620));
     assert!(a.calls().is_empty());
@@ -726,7 +735,7 @@ async fn queued_transfers_wait_out_a_reconnection_and_download_through_the_new_c
     let installations = &account.installations;
     account.install(620);
     account.install(730);
-    eventually(|| a.calls() == ["download:620"]).await;
+    eventually(|| a.calls() == ["platform", "download:620"]).await;
     assert_eq!(installations.state().queued, [730]);
 
     // 620's download ends with its connection, as it always did. 730's turn
@@ -745,8 +754,8 @@ async fn queued_transfers_wait_out_a_reconnection_and_download_through_the_new_c
     assert!(b.calls().is_empty());
 
     eventually(|| !installations.state().downloading).await;
-    assert_eq!(a.calls(), ["download:620"]);
-    assert_eq!(b.calls(), ["download:730"]);
+    assert_eq!(a.calls(), ["platform", "download:620"]);
+    assert_eq!(b.calls(), ["platform", "download:730"]);
     let saved: Vec<Receipt<Steam>> =
         serde_json::from_slice(&std::fs::read(&account.receipts).unwrap()).unwrap();
     assert_eq!(
@@ -771,7 +780,7 @@ async fn a_reconnection_asks_the_new_connection_for_newer_builds_at_once() {
     account.install(620);
     eventually(|| installations.state().receipts.len() == 1).await;
     installations.check_updates();
-    eventually(|| a.calls() == ["download:620", "update"]).await;
+    eventually(|| a.calls() == ["platform", "download:620", "update"]).await;
 
     a.drops();
     eventually(|| installations.state().updates == ["620-macos"]).await;

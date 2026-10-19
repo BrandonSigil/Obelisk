@@ -1,14 +1,17 @@
 //! Resolve publisher-provided launch options without executing a game or a shell.
 use std::path::Path;
 
-use obelisk_core::launch::{LaunchDirectory, LaunchTarget};
+use obelisk_core::{
+    Platform,
+    launch::{LaunchDirectory, LaunchTarget},
+};
 
 use crate::cm::{AppInfo, LaunchConfig, supports_platform};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LaunchPlan {
     pub app_id: u32,
-    pub platform: String,
+    pub platform: Platform,
     pub target: LaunchTarget,
 }
 
@@ -17,12 +20,11 @@ pub struct LaunchPlan {
 pub struct LaunchError(String);
 
 /// The caller checks account ownership and the installation receipt first.
-pub fn plan(app: &AppInfo, platform: &str, directory: &Path) -> Result<LaunchPlan, LaunchError> {
-    if !matches!(platform, "macos" | "windows") {
-        return Err(LaunchError(
-            "backend.steam.launch.unsupportedPlatform".into(),
-        ));
-    }
+pub fn plan(
+    app: &AppInfo,
+    platform: Platform,
+    directory: &Path,
+) -> Result<LaunchPlan, LaunchError> {
     if !supports_platform(&app.os_list, platform) {
         return Err(LaunchError(
             "backend.steam.launch.platformUnavailable".into(),
@@ -42,13 +44,13 @@ pub fn plan(app: &AppInfo, platform: &str, directory: &Path) -> Result<LaunchPla
         .map_err(shared_error)?;
     Ok(LaunchPlan {
         app_id: app.app_id,
-        platform: platform.into(),
+        platform,
         target,
     })
 }
 
 /// The publisher's launch option a build for `platform` starts with.
-pub(crate) fn configuration<'a>(app: &'a AppInfo, platform: &str) -> Option<&'a LaunchConfig> {
+pub(crate) fn configuration(app: &AppInfo, platform: Platform) -> Option<&LaunchConfig> {
     app.launch_configs
         .iter()
         .filter(|config| supports_platform(&config.os_list, platform))
@@ -120,14 +122,13 @@ mod tests {
             config("alternate", "macos", "option1"),
             config("game", "macos", "default"),
         ]);
-        let plan = plan(&app, "macos", root.path()).unwrap();
+        let plan = plan(&app, Platform::Mac, root.path()).unwrap();
         assert_eq!(
             Path::new(&plan.target.executable).file_name().unwrap(),
             "game"
         );
         assert_eq!(plan.target.arguments, ["--title", "My game"]);
         assert!(!plan.target.is_application_bundle);
-        assert!(super::plan(&app, "linux", root.path()).is_err());
     }
 
     #[test]
@@ -136,7 +137,7 @@ mod tests {
         file(root.path(), "My Game.app/Contents/MacOS/My Game");
         let mut launch = config("My Game.app", "macos", "default");
         launch.working_directory = "My Game.app/Contents".into();
-        let resolved = plan(&app(vec![launch]), "macos", root.path()).unwrap();
+        let resolved = plan(&app(vec![launch]), Platform::Mac, root.path()).unwrap();
         assert!(resolved.target.is_application_bundle);
         assert!(resolved.target.executable.ends_with("/My Game.app"));
         assert!(
@@ -146,7 +147,7 @@ mod tests {
                 .ends_with("/My Game.app/Contents")
         );
         let explicit = config("My Game.app/Contents/MacOS/My Game", "macos", "default");
-        let resolved = plan(&app(vec![explicit]), "macos", root.path()).unwrap();
+        let resolved = plan(&app(vec![explicit]), Platform::Mac, root.path()).unwrap();
         assert!(!resolved.target.is_application_bundle);
         assert!(
             resolved
@@ -172,7 +173,7 @@ mod tests {
             assert!(
                 plan(
                     &app(vec![config(path, "macos", "default")]),
-                    "macos",
+                    Platform::Mac,
                     root.path()
                 )
                 .is_err(),
@@ -181,7 +182,7 @@ mod tests {
         }
         let mut app = app(vec![config("game.exe", "windows", "default")]);
         app.os_list = vec!["windows".into()];
-        assert!(plan(&app, "macos", root.path()).is_err());
+        assert!(plan(&app, Platform::Mac, root.path()).is_err());
     }
 
     #[cfg(unix)]
@@ -195,7 +196,7 @@ mod tests {
         assert!(
             plan(
                 &app(vec![config("linked/game", "macos", "default")]),
-                "macos",
+                Platform::Mac,
                 root.path()
             )
             .is_err()
@@ -203,20 +204,20 @@ mod tests {
         file(root.path(), "game");
         let mut config = config("game", "macos", "default");
         config.working_directory = "linked".into();
-        assert!(plan(&app(vec![config]), "macos", root.path()).is_err());
+        assert!(plan(&app(vec![config]), Platform::Mac, root.path()).is_err());
     }
 
     #[test]
     fn shared_resolution_preserves_steam_error_keys_and_validation_order() {
         let root = tempfile::tempdir().unwrap();
         assert_eq!(
-            plan(&app(vec![]), "macos", Path::new("missing"))
+            plan(&app(vec![]), Platform::Mac, Path::new("missing"))
                 .unwrap_err()
                 .to_string(),
             "backend.steam.launch.directoryMissing"
         );
         assert_eq!(
-            plan(&app(vec![]), "macos", root.path())
+            plan(&app(vec![]), Platform::Mac, root.path())
                 .unwrap_err()
                 .to_string(),
             "backend.steam.launch.noCompatibleConfiguration"
@@ -224,7 +225,7 @@ mod tests {
         let mut windows_only = app(vec![]);
         windows_only.os_list = vec!["windows".into()];
         assert_eq!(
-            plan(&windows_only, "macos", Path::new("missing"))
+            plan(&windows_only, Platform::Mac, Path::new("missing"))
                 .unwrap_err()
                 .to_string(),
             "backend.steam.launch.platformUnavailable"
@@ -232,7 +233,7 @@ mod tests {
         assert_eq!(
             plan(
                 &app(vec![config("../game", "macos", "default")]),
-                "macos",
+                Platform::Mac,
                 root.path()
             )
             .unwrap_err()
@@ -243,7 +244,7 @@ mod tests {
         let mut launch = config("game", "macos", "default");
         launch.arguments = "'unfinished".into();
         assert_eq!(
-            plan(&app(vec![launch]), "macos", root.path())
+            plan(&app(vec![launch]), Platform::Mac, root.path())
                 .unwrap_err()
                 .to_string(),
             "backend.steam.launch.unclosedQuotes"

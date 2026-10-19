@@ -7,8 +7,8 @@ use crate::{
     installations::{self, BoxFuture, Credentials, Receipt, Transfer, blocking},
     sessions::{self, Admission, Failure, Storefront as _, Supervised, failed},
 };
-use gog_kit::client::Client as GogClient;
-use obelisk_core::{installation::TransferProgress, transfer::CancelToken};
+use gog_kit::{GogError, client::Client as GogClient};
+use obelisk_core::{Platform, installation::TransferProgress, transfer::CancelToken};
 use std::{path::Path, sync::Arc};
 
 /// What an account's installations ask of GOG's network. Every call may wait
@@ -25,7 +25,7 @@ pub trait Network: Send + Sync + 'static {
         &'a self,
         product: &'a Product,
         language: &'a str,
-    ) -> BoxFuture<'a, Result<String, Failure>>;
+    ) -> BoxFuture<'a, Result<Platform, Failure>>;
     /// Runs `transfer` into the folder it names, with the depots of `language`.
     fn download<'a>(
         &'a self,
@@ -57,11 +57,10 @@ impl Network for GogClient {
         &'a self,
         product: &'a Product,
         language: &'a str,
-    ) -> BoxFuture<'a, Result<String, Failure>> {
+    ) -> BoxFuture<'a, Result<Platform, Failure>> {
         Box::pin(async move {
             GogClient::platform(self, &product.product_id, language)
                 .await
-                .map(str::to_owned)
                 .map_err(failed)
         })
     }
@@ -71,11 +70,15 @@ impl Network for GogClient {
         language: &'a str,
     ) -> BoxFuture<'a, Result<gog_kit::client::Installation, Failure>> {
         Box::pin(async move {
+            // The Transfer's begin set it; GOG still refuses a download without one.
+            let platform = transfer
+                .platform
+                .ok_or(GogError::Protocol)
+                .map_err(failed)?;
             GogClient::download(
                 self,
                 &transfer.product.product_id,
-                // GOG refuses an empty platform; the Transfer's begin set it.
-                transfer.platform.as_deref().unwrap_or_default(),
+                platform,
                 language,
                 &transfer.directory,
             )
@@ -97,7 +100,7 @@ impl Network for GogClient {
             GogClient::update_available(
                 self,
                 &receipt.product.product_id,
-                &receipt.platform,
+                receipt.platform,
                 Path::new(&receipt.directory),
             )
             .await
@@ -137,7 +140,7 @@ impl<N: Network> Content<N> {
             session_directory: self.locations.gog_sessions.clone(),
             helper: self.locations.helper.clone(),
             product_id: receipt.product.product_id.clone(),
-            platform: receipt.platform.clone(),
+            platform: receipt.platform,
             title: receipt.name.clone(),
             prefix: receipt
                 .windows(&self.locations)
@@ -149,12 +152,15 @@ impl<N: Network> Content<N> {
 }
 
 impl<N: Network> installations::Content<Gog> for Content<N> {
-    fn begin<'a>(&'a self, transfer: &'a Transfer<Gog>) -> BoxFuture<'a, Result<String, Failure>> {
+    fn begin<'a>(
+        &'a self,
+        transfer: &'a Transfer<Gog>,
+    ) -> BoxFuture<'a, Result<Platform, Failure>> {
         Box::pin(async move {
             // As every GOG account call: renewed and saved credentials first.
             self.credentials.prepare(self.network.prepare()).await?;
-            match &transfer.platform {
-                Some(platform) => Ok(platform.clone()),
+            match transfer.platform {
+                Some(platform) => Ok(platform),
                 None => {
                     let platform = self
                         .network
@@ -224,7 +230,7 @@ impl<N: Network> installations::Content<Gog> for Content<N> {
         Box::pin(async { Ok(()) })
     }
     fn directory_name(&self, receipt: &Receipt<Gog>) -> String {
-        gog_kit::client::installation_directory_name(&receipt.product.product_id, &receipt.platform)
+        gog_kit::client::installation_directory_name(&receipt.product.product_id, receipt.platform)
     }
     fn remove_prefix(&self, receipt: &Receipt<Gog>) -> Option<Result<(), String>> {
         receipt.remove_prefix(&self.locations)
@@ -255,8 +261,8 @@ struct Handover<N: Network> {
 impl<N: Network> sessions::Handover<Gog> for Handover<N> {
     /// The account, and how a Windows build runs.
     type Prepared = (String, Option<crate::wine::Config>);
-    fn platform(&self) -> &str {
-        &self.configuration.platform
+    fn platform(&self) -> Platform {
+        self.configuration.platform
     }
     fn prepare(&self) -> BoxFuture<'_, Result<Self::Prepared, Failure>> {
         Box::pin(async move {

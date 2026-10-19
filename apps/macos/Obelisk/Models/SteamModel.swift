@@ -45,12 +45,12 @@ final class SteamModel {
     private(set) var isLoadingNews = false
     private(set) var detailsError: String?
     private(set) var newsError: String?
-    var platform: String {
+    var platform: GamePlatform {
         if let details, details.appId == selectedGame?.appId { return details.preferredPlatform }
         // Installation receipts are available before remote details. Never use
         // the previous game's platform to present the newly selected game.
-        return installations.receipts.contains { $0.gameID == selectedGame?.appId && $0.platform == SteamGames.nativePlatform }
-            ? SteamGames.nativePlatform : "windows"
+        return installations.receipts.contains { $0.gameID == selectedGame?.appId && $0.platform == .mac }
+            ? .mac : .windows
     }
     private(set) var language: String
     let installations: SteamInstallations
@@ -921,7 +921,7 @@ final class SteamModel {
     /// starts. It needs the session's CM connection to.
     func libraryOffer(of game: SteamGame) -> GameOffer? {
         guard transport != nil else { return nil }
-        return .steam(appId: game.appId, name: game.name, platform: nil, language: language)
+        return .steam(appId: game.appId, name: game.name, language: language)
     }
 
     func closeGame() {
@@ -1010,12 +1010,12 @@ extension SteamGame: LibraryGame {
 extension SteamGameDetails {
     /// The build the page shows: the Mac build, unless a download found that
     /// its game does not run natively. The download picks its own.
-    var preferredPlatform: String { macos ? SteamGames.nativePlatform : "windows" }
+    var preferredPlatform: GamePlatform { macos ? .mac : .windows }
 
     /// What Steam can install of `game` for the account. Steam picks the
     /// build again as the Transfer starts.
     func offer(for game: SteamGame, language: String) -> GameOffer? {
         guard macos || windows else { return nil }
-        return .steam(appId: game.appId, name: game.name, platform: nil, language: language)
+        return .steam(appId: game.appId, name: game.name, language: language)
     }
 }

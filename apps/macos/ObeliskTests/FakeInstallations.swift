@@ -105,32 +105,25 @@ final class FakeInstallations<Store: InstallationStorefront>: InstallationsBacke
 
 /// Installations as Rust names them.
 extension InstallationReceipt where GameID == UInt32 {
-    static func steam(appId: UInt32, name: String, directory: String, platform: String,
+    static func steam(appId: UInt32, name: String, directory: String, platform: GamePlatform,
                       totalBytes: UInt64 = 100) -> Self {
-        Self(id: "\(appId)-\(platform)", gameID: appId, name: name, directory: directory, platform: platform,
-             totalBytes: totalBytes)
+        Self(id: "\(appId)-\(platform == .mac ? "macos" : "windows")", gameID: appId, name: name,
+             directory: directory, platform: platform, totalBytes: totalBytes)
     }
 }
 
 extension InstallationReceipt where GameID == String {
-    static func epic(namespace: String, appName: String, name: String, directory: String, platform: String,
+    static func epic(namespace: String, appName: String, name: String, directory: String, platform: GamePlatform,
                      totalBytes: UInt64 = 100) -> Self {
-        Self(id: "\(namespace):\(appName):\(platform)", gameID: epicLibraryID(namespace: namespace, appName: appName),
+        Self(id: "\(namespace):\(appName):\(platform == .mac ? "Mac" : "Windows")",
+             gameID: epicLibraryID(namespace: namespace, appName: appName),
              name: name, directory: directory, platform: platform, totalBytes: totalBytes)
     }
 }
 
 extension GameOffer {
-    /// Nil when Steam picks the build.
-    var platform: String? {
-        switch self {
-        case let .steam(_, _, platform, _): platform
-        case let .epic(_, _, _, _, platform): platform
-        case let .gog(_, _, platform): platform
-        }
-    }
     var steamApp: UInt32? {
-        guard case let .steam(appId, _, _, _) = self else { return nil }
+        guard case let .steam(appId, _, _) = self else { return nil }
         return appId
     }
 }
@@ -227,23 +220,24 @@ final class InstallationsFixture {
         self.installed = installed
         sessions = SteamGameSessions(quitting: quitting.quitting)
         receipt = .steam(appId: 620, name: "Portal 2", directory: "/fixture/Games/Steam/steam-620-macos",
-                         platform: "macos", totalBytes: 100)
+                         platform: .mac, totalBytes: 100)
         installations = SteamInstallations(sessions: sessions, cloud: SteamCloudModel(sessions: sessions))
     }
 
-    /// What Steam offers to install of Portal 2, for `platform`.
-    func offer(_ platform: String) -> GameOffer {
-        GameOffer.steam(appId: 620, name: receipt.name, platform: platform, language: "english")
+    /// What Steam offers to install of Portal 2; Steam picks its build as
+    /// the Transfer starts.
+    func offer() -> GameOffer {
+        GameOffer.steam(appId: 620, name: receipt.name, language: "english")
     }
 
     /// `game` as its page or the library reads it. Steam offers Portal 2
     /// alone, once the storefront knows what it can install.
-    func selection(_ game: UInt32, platform: String = "macos",
+    func selection(_ game: UInt32, platform: GamePlatform = .mac,
                    installable: Bool = true) -> InstallationSelection<SteamGames> {
-        InstallationSelection(game: game, platform: platform, offer: installable && game == 620 ? offer(platform) : nil)
+        InstallationSelection(game: game, platform: platform, offer: installable && game == 620 ? offer() : nil)
     }
 
-    func connect(platform: String = "macos", installable: Bool = true) -> SteamInstallations {
+    func connect(platform: GamePlatform = .mac, installable: Bool = true) -> SteamInstallations {
         let selection = selection(620, platform: platform, installable: installable)
         installations.selection = { selection }
         backend = FakeInstallations(receipts: installed ? [receipt] : [])

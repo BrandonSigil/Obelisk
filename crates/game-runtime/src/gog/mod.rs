@@ -11,6 +11,7 @@ use crate::supervisor::{self, Record};
 pub use crate::supervisor::{FailureReason, Phase};
 pub use client::start;
 pub use launch::serve;
+use obelisk_core::Platform;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -49,7 +50,8 @@ pub struct Configuration {
     pub session_directory: PathBuf,
     pub helper: PathBuf,
     pub product_id: String,
-    pub platform: String,
+    #[serde(serialize_with = "gog_kit::client::write_platform")]
+    pub platform: Platform,
     /// The game's name in the store, which the Linux engine shows in the
     /// menu bar, the Dock and Cmd-Tab.
     #[serde(default)]
@@ -79,9 +81,9 @@ impl Configuration {
     }
     fn validate(&self, account: &str) -> Result<()> {
         // A Mac build runs natively; a Windows build in its prefix.
-        let prefix = match (self.platform.as_str(), &self.prefix) {
-            (gog_kit::client::MACOS, None) => None,
-            (gog_kit::client::WINDOWS, Some(prefix)) => Some(prefix),
+        let prefix = match (self.platform, &self.prefix) {
+            (Platform::Mac, None) => None,
+            (Platform::Windows, Some(prefix)) => Some(prefix),
             _ => return Err(Error::Unsupported),
         };
         if [
@@ -182,11 +184,9 @@ pub struct Product {
 
 impl crate::installations::Storefront for Gog {
     type Product = Product;
-    /// None while GOG picks the build: the Mac build when its game runs
-    /// natively on Apple silicon, else the Windows build.
-    type Platform = Option<String>;
     /// Nothing joins a game through this storefront.
     type Join = std::convert::Infallible;
+    const PLATFORM: obelisk_core::platform::Spelling = gog_kit::client::PLATFORM;
     const RECEIPTS_UNAVAILABLE: &'static str = "model.gog.receiptsUnavailable";
     const RECEIPTS_NOT_SAVED: &'static str = "model.gog.receiptsNotSaved";
     const GAMES_DIRECTORY: &'static str = "Games/GOG";
@@ -199,8 +199,8 @@ impl crate::installations::Storefront for Gog {
             product_id: &product.product_id,
         }
     }
-    fn receipt_id(product_id: &String, platform: &str) -> String {
-        format!("{product_id}:{platform}")
+    fn receipt_id(product_id: &String, platform: Platform) -> String {
+        format!("{product_id}:{}", Self::PLATFORM.name(platform))
     }
     fn transfer_name(product_id: &String) -> String {
         product_id.clone()

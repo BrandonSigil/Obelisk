@@ -136,7 +136,7 @@ pub(crate) fn recorded() -> (
 #[tokio::test]
 async fn a_build_gets_the_runtimes_its_storefront_and_platform_need_in_order() {
     /// What a build of `platform` from P downloads with nothing in place.
-    async fn downloads<P: sessions::Storefront>(platform: &str) -> Vec<String> {
+    async fn downloads<P: sessions::Storefront>(platform: Platform) -> Vec<String> {
         let (events, record) = recorded();
         let runtimes = Runtimes::from_source(FakeRuntimes::new(&[], record));
         runtimes
@@ -147,14 +147,17 @@ async fn a_build_gets_the_runtimes_its_storefront_and_platform_need_in_order() {
     }
 
     assert_eq!(
-        downloads::<Steam>("windows").await,
+        downloads::<Steam>(Platform::Windows).await,
         ["steam components", "voile"]
     );
-    assert_eq!(downloads::<Steam>("macos").await, ["steam components"]);
-    assert_eq!(downloads::<Epic>("Windows").await, ["voile"]);
-    assert_eq!(downloads::<Epic>("Mac").await, Vec::<String>::new());
-    assert_eq!(downloads::<Gog>("windows").await, ["voile"]);
-    assert_eq!(downloads::<Gog>("macos").await, Vec::<String>::new());
+    assert_eq!(
+        downloads::<Steam>(Platform::Mac).await,
+        ["steam components"]
+    );
+    assert_eq!(downloads::<Epic>(Platform::Windows).await, ["voile"]);
+    assert_eq!(downloads::<Epic>(Platform::Mac).await, Vec::<String>::new());
+    assert_eq!(downloads::<Gog>(Platform::Windows).await, ["voile"]);
+    assert_eq!(downloads::<Gog>(Platform::Mac).await, Vec::<String>::new());
 }
 
 #[tokio::test]
@@ -165,11 +168,11 @@ async fn runtimes_in_place_are_not_downloaded_again() {
     let cancel = CancelToken::new();
 
     runtimes
-        .get::<Steam>("windows", &cancel, |_| {})
+        .get::<Steam>(Platform::Windows, &cancel, |_| {})
         .await
         .unwrap();
     runtimes
-        .get::<Steam>("windows", &cancel, |_| {})
+        .get::<Steam>(Platform::Windows, &cancel, |_| {})
         .await
         .unwrap();
 
@@ -189,7 +192,7 @@ async fn a_download_shows_its_runtime_and_bytes_and_cancelling_stops_it() {
         let (runtimes, cancel, shown) = (runtimes.clone(), cancel.clone(), shown.clone());
         tokio::spawn(async move {
             runtimes
-                .get::<Epic>("Windows", &cancel, |progress| {
+                .get::<Epic>(Platform::Windows, &cancel, |progress| {
                     shown.lock().unwrap().push(progress)
                 })
                 .await
@@ -211,13 +214,15 @@ async fn a_download_shows_its_runtime_and_bytes_and_cancelling_stops_it() {
     assert!(fake.in_place().is_empty());
     // The same token gets nothing more; a fresh one downloads again.
     assert_eq!(
-        runtimes.get::<Epic>("Windows", &cancel, |_| {}).await,
+        runtimes
+            .get::<Epic>(Platform::Windows, &cancel, |_| {})
+            .await,
         Err(Failure::Cancelled)
     );
     assert_eq!(*events.lock().unwrap(), ["voile"]);
     fake.release();
     runtimes
-        .get::<Epic>("Windows", &CancelToken::new(), |_| {})
+        .get::<Epic>(Platform::Windows, &CancelToken::new(), |_| {})
         .await
         .unwrap();
     assert_eq!(*events.lock().unwrap(), ["voile", "voile"]);
@@ -233,7 +238,7 @@ async fn a_failed_download_ends_the_wait_with_its_own_failure_before_the_next_ru
     let runtimes = Runtimes::from_source(fake);
 
     let got = runtimes
-        .get::<Steam>("windows", &CancelToken::new(), |_| {})
+        .get::<Steam>(Platform::Windows, &CancelToken::new(), |_| {})
         .await;
 
     assert_eq!(got, Err(failure));
@@ -247,7 +252,7 @@ async fn a_transfer_keeps_the_voile_releases_the_pinned_one_replaced() {
 
     for _ in 0..2 {
         runtimes
-            .get::<Epic>("Windows", &CancelToken::new(), |_| {})
+            .get::<Epic>(Platform::Windows, &CancelToken::new(), |_| {})
             .await
             .unwrap();
     }
@@ -263,7 +268,7 @@ async fn a_launch_removes_the_replaced_voile_releases_once_no_game_may_run_from_
     let watched = running.clone();
     runtimes.watch_sessions(move || watched.load(Ordering::Acquire));
     runtimes.watch_sessions(|| false);
-    let launch = |platform: &'static str| {
+    let launch = |platform: Platform| {
         let runtimes = runtimes.clone();
         async move {
             runtimes
@@ -273,15 +278,15 @@ async fn a_launch_removes_the_replaced_voile_releases_once_no_game_may_run_from_
         }
     };
 
-    launch("Windows").await;
+    launch(Platform::Windows).await;
     assert_eq!(*events.lock().unwrap(), ["voile"], "a game may run");
 
     running.store(false, Ordering::Release);
     // Voile is in place now: the releases go all the same.
-    launch("Windows").await;
+    launch(Platform::Windows).await;
     assert_eq!(*events.lock().unwrap(), ["voile", "remove replaced"]);
 
-    launch("Mac").await;
+    launch(Platform::Mac).await;
     assert_eq!(
         *events.lock().unwrap(),
         ["voile", "remove replaced"],
@@ -297,12 +302,12 @@ async fn a_failed_or_cancelled_launch_removes_nothing() {
     let runtimes = Runtimes::from_source(fake);
 
     let failed = runtimes
-        .get_for_launch::<Gog>("windows", &CancelToken::new(), |_| {})
+        .get_for_launch::<Gog>(Platform::Windows, &CancelToken::new(), |_| {})
         .await;
     let cancel = CancelToken::new();
     cancel.cancel();
     let cancelled = runtimes
-        .get_for_launch::<Gog>("windows", &cancel, |_| {})
+        .get_for_launch::<Gog>(Platform::Windows, &cancel, |_| {})
         .await;
 
     assert_eq!(

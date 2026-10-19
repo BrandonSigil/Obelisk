@@ -28,7 +28,7 @@ impl ManifestCacheKey {
         hash: Option<&str>,
     ) -> Option<Self> {
         let hash = hash?;
-        if validate_identity(namespace, catalog_item_id, app_name, platform).is_err()
+        if validate_identity(namespace, catalog_item_id, app_name).is_err()
             || unhex::<20>(hash).is_none()
         {
             return None;

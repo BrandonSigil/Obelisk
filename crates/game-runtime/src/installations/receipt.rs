@@ -3,30 +3,9 @@
 //! adds only its product. Which installation a Transfer goes over is decided
 //! here alone.
 use super::Storefront;
+use obelisk_core::Platform;
 use serde::{Deserialize, Serialize};
-use std::{
-    fmt,
-    path::{Path, PathBuf},
-};
-
-/// A Transfer's or Offer's platform: one build, or none while the storefront
-/// picks it.
-pub trait PlatformChoice: Clone + fmt::Debug + PartialEq + Eq + Send + Sync + From<String> {
-    /// None while the storefront picks the build, as the Transfer starts.
-    fn chosen(&self) -> Option<&str>;
-}
-
-impl PlatformChoice for String {
-    fn chosen(&self) -> Option<&str> {
-        Some(self)
-    }
-}
-
-impl PlatformChoice for Option<String> {
-    fn chosen(&self) -> Option<&str> {
-        self.as_deref()
-    }
-}
+use std::path::{Path, PathBuf};
 
 /// An Installation receipt, as the account's receipt file records it: the
 /// storefront's product keys beside its own.
@@ -37,7 +16,8 @@ pub struct Receipt<S: Storefront> {
     pub product: S::Product,
     pub name: String,
     pub directory: String,
-    pub platform: String,
+    #[serde(serialize_with = "spelled::<S, _>")]
+    pub platform: Platform,
     pub total_bytes: u64,
     /// A Transfer started over this installation and has not succeeded since.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -50,18 +30,26 @@ pub struct Transfer<S: Storefront> {
     pub product: S::Product,
     /// The game's title, as the download queue shows it.
     pub name: String,
-    pub platform: S::Platform,
+    /// None while the storefront picks the build, as the Transfer starts.
+    pub platform: Option<Platform>,
     /// The parent folder the installation directory goes in.
     pub directory: PathBuf,
 }
 
-/// What the storefront offers to install: one game's build, before any
-/// folder is chosen.
+/// What the storefront offers to install: one game, whose build it picks as
+/// the Transfer starts, before any folder is chosen.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Offer<S: Storefront> {
     pub product: S::Product,
     pub name: String,
-    pub platform: S::Platform,
+}
+
+/// Writes `platform` as storefront S spells it in its receipt file.
+fn spelled<S: Storefront, Z: serde::Serializer>(
+    platform: &Platform,
+    serializer: Z,
+) -> Result<Z::Ok, Z::Error> {
+    S::PLATFORM.serialize(*platform, serializer)
 }
 
 impl<S: Storefront> Receipt<S> {
@@ -71,7 +59,7 @@ impl<S: Storefront> Receipt<S> {
 
     /// One per game and platform: the installation each action names.
     pub fn id(&self) -> String {
-        S::receipt_id(&self.game(), &self.platform)
+        S::receipt_id(&self.game(), self.platform)
     }
 
     /// Its game as Wine starts a Windows build: in its folder, with its name
@@ -117,7 +105,7 @@ impl<S: Storefront> Receipt<S> {
         crate::wine::Installation::of(
             locations,
             S::profile_game(&self.product),
-            &self.platform,
+            self.platform,
             Path::new(&self.directory),
         )
     }
@@ -135,7 +123,7 @@ impl<S: Storefront> Receipt<S> {
         Transfer {
             product: self.product.clone(),
             name: self.name.clone(),
-            platform: self.platform.clone().into(),
+            platform: Some(self.platform),
             directory: parent(&self.directory),
         }
     }
@@ -157,7 +145,6 @@ impl<S: Storefront> Transfer<S> {
         receipt.game() == self.game()
             && self
                 .platform
-                .chosen()
                 .is_none_or(|platform| platform == receipt.platform)
     }
 }
@@ -168,7 +155,7 @@ impl<S: Storefront> Offer<S> {
         Transfer {
             product: self.product,
             name: self.name,
-            platform: self.platform,
+            platform: None,
             directory,
         }
     }

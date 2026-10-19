@@ -15,7 +15,7 @@ fn a_windows_build_on_the_linux_engine_takes_its_store_title_in_the_dock() {
         session_directory: root.join("GOGSessions"),
         helper: root.join("SteamNative/obelisk-steam-host"),
         product_id: "1207658924".into(),
-        platform: gog_kit::client::WINDOWS.into(),
+        platform: obelisk_core::Platform::Windows,
         title: "The Witcher".into(),
         prefix: Some(prefix.clone()),
     };

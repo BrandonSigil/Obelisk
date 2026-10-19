@@ -6,14 +6,14 @@ import Observation
 protocol WebGame: LibraryGame, Sendable where ID == String {
     var macos: Bool { get }
     var windows: Bool { get }
-    /// How the storefront names the build the game shows before its page's
-    /// details load: the Mac build when there is one.
-    var preferredPlatform: String { get }
     /// What the storefront can install of the game; nil when it ships no build.
     var offer: GameOffer? { get }
 }
 
 extension WebGame {
+    /// The build the game shows before its page's details load: the Mac
+    /// build when there is one.
+    var preferredPlatform: GamePlatform { macos ? .mac : .windows }
     /// Neither web storefront tells a playtime in its library entry, nor a
     /// last played date: the playtimes load after the games.
     var playtime: Duration? { nil }
@@ -23,8 +23,8 @@ extension WebGame {
 /// What a game's page reads besides its library entry, starting with the
 /// build it shows before any download.
 protocol WebGameDetails: Equatable, Sendable {
-    /// How the storefront names that build; nil when it could not tell.
-    var platform: String? { get }
+    /// The build the page shows; nil when the storefront could not tell.
+    var platform: GamePlatform? { get }
 }
 
 /// What lives as long as an account's connection besides its library, such

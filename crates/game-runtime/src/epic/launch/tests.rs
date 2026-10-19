@@ -25,7 +25,7 @@ fn config(directory: &Path, sessions: &Path) -> Configuration {
         namespace: "namespace".into(),
         catalog_item_id: "catalog".into(),
         app_name: "game".into(),
-        platform: "Mac".into(),
+        platform: Platform::Mac,
         language: "en".into(),
         title: String::new(),
         prefix: None,
@@ -111,7 +111,7 @@ impl Services for FakeEpic {
         }
         Ok(LaunchPlan {
             app_name: config.app_name.clone(),
-            platform: config.platform.clone(),
+            platform: config.platform,
             activity: Some(Activity {
                 id: "fixture-activity".into(),
                 name: None,
@@ -226,7 +226,7 @@ fn a_running_epic_game_publishes_its_activity() {
 fn launch_plan(install: &Path, working: &Path) -> LaunchPlan {
     LaunchPlan {
         app_name: "game".into(),
-        platform: "Mac".into(),
+        platform: Platform::Mac,
         activity: None,
         ownership_token: None,
         target: obelisk_core::launch::LaunchTarget {
@@ -312,7 +312,7 @@ fn a_windows_build_runs_only_in_its_prefix_and_a_mac_build_never_does() {
     assert!(config.validate(ACCOUNT).is_ok());
     config.prefix = Some(directory.join("prefix"));
     assert!(matches!(config.validate(ACCOUNT), Err(Error::Unsupported)));
-    config.platform = "Windows".into();
+    config.platform = Platform::Windows;
     assert!(config.validate(ACCOUNT).is_ok());
     assert_eq!(
         config.cloud_platform(),
@@ -338,12 +338,12 @@ fn a_windows_build_gets_its_ownership_token_where_its_engine_s_wine_reads_it() {
     let root = tempfile::tempdir().unwrap();
     let directory = root.path().canonicalize().unwrap();
     let mut config = config(&directory, &directory.join("sessions"));
-    config.platform = "Windows".into();
+    config.platform = Platform::Windows;
     config.title = "Rocket League".into();
     fs::create_dir_all(&config.install).unwrap();
     fs::write(config.install.join("game"), crate::wine::tests::pe()).unwrap();
     let mut plan = launch_plan(&config.install, &config.install);
-    plan.platform = "Windows".into();
+    plan.platform = Platform::Windows;
     plan.ownership_token = Some(b"ownership".to_vec());
     let rosetta = crate::wine::tests::config(&directory);
     let linux = crate::wine::Config {

@@ -11,12 +11,13 @@ use futures_util::{StreamExt, TryStreamExt, future::BoxFuture};
 use obelisk_core::{
     installation::{self, Destination, InstallFailure, InstalledFiles, TransferError},
     mac_build,
+    platform::{Platform, Spelling},
     transfer::{
         self, BodyError, BodySize, Cancelled, DownloadProgress, Picking, TransferBusy,
         TransferContext, Transfers,
     },
 };
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, Serializer};
 use tokio::sync::Mutex as AsyncMutex;
 
 use crate::{
@@ -126,12 +127,30 @@ pub struct GameDetails {
     pub macos_bytes: u64,
 }
 
+/// How Steam names the two builds, as PICS oslists do; also its receipts',
+/// folders' and ids' spelling.
+pub const PLATFORM: Spelling = Spelling::new("macos", "windows");
+
+/// Writes a platform as Steam spells it.
+pub fn write_platform<S: Serializer>(
+    platform: &Platform,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    PLATFORM.serialize(*platform, serializer)
+}
+
+/// The folder an installation of `app_id`'s `platform` build gets under its parent.
+pub fn installation_directory_name(app_id: u32, platform: Platform) -> String {
+    format!("steam-{app_id}-{}", PLATFORM.name(platform))
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Installation {
     pub app_id: u32,
     pub name: String,
     pub directory: String,
-    pub platform: String,
+    #[serde(serialize_with = "write_platform")]
+    pub platform: Platform,
     pub language: String,
     pub total_bytes: u64,
     pub manifests: Vec<InstalledDepot>,
@@ -600,8 +619,8 @@ impl Client {
     pub async fn details(&self, app_id: u32, language: &str) -> Result<GameDetails, ClientError> {
         let owned = self.licensed_content().await?;
         let app = self.app_info(app_id).await?;
-        let windows = select_depots(&app, &owned, "windows", language);
-        let macos = select_depots(&app, &owned, "macos", language);
+        let windows = select_depots(&app, &owned, Platform::Windows, language);
+        let macos = select_depots(&app, &owned, Platform::Mac, language);
         // Only a download reads the Mac build's files: the page shows the Mac
         // build until one found that its game does not run natively.
         let native = macos.is_empty()
@@ -633,7 +652,7 @@ impl Client {
     pub async fn launch_plan(
         &self,
         app_id: u32,
-        platform: &str,
+        platform: Platform,
         directory: &Path,
     ) -> Result<crate::launch::LaunchPlan, ClientError> {
         if !directory.is_absolute() || !directory.is_dir() {
@@ -666,7 +685,7 @@ impl Client {
     /// natively on Apple silicon, else the Windows build. It asks Steam for
     /// the licenses, then reads a few of the Mac build's files;
     /// `cancel_download` stops it.
-    pub async fn platform(&self, app_id: u32, language: &str) -> Result<&'static str, ClientError> {
+    pub async fn platform(&self, app_id: u32, language: &str) -> Result<Platform, ClientError> {
         if !crate::language::is_supported(language) {
             return Err(ClientError::Failure(
                 "backend.steam.client.unsupportedPlatformOrLanguage".into(),
@@ -686,7 +705,7 @@ impl Client {
     pub async fn download(
         &self,
         app_id: u32,
-        platform: Option<&str>,
+        platform: Option<Platform>,
         language: &str,
         parent: &Path,
     ) -> Result<Installation, ClientError> {
@@ -702,7 +721,7 @@ impl Client {
     async fn install_build(
         &self,
         app_id: u32,
-        platform: Option<&str>,
+        platform: Option<Platform>,
         language: &str,
         parent: &Path,
         picking: &CancelToken,
@@ -720,12 +739,9 @@ impl Client {
                     .await??
             }
         };
-        if !matches!(platform, "windows" | "macos") {
-            return Err(unsupported());
-        }
         // The chosen folder is the only caller-controlled path. App IDs and depot
         // manifest validation determine every path beneath it.
-        let directory = format!("steam-{app_id}-{platform}");
+        let directory = installation_directory_name(app_id, platform);
         installation::install(
             &self.downloads,
             app_id.to_string(),
@@ -760,14 +776,14 @@ impl Client {
         app_id: u32,
         language: &str,
         cancel: &CancelToken,
-    ) -> Result<&'static str, ClientError> {
+    ) -> Result<Platform, ClientError> {
         let (owned, app) = self.owned_app(app_id).await?;
         let (macos, windows) = installable_builds(&app, &owned, language);
         if macos && self.runs_natively(&app, &owned, language, cancel).await? {
-            return Ok("macos");
+            return Ok(Platform::Mac);
         }
         match (macos, windows) {
-            (_, true) => Ok("windows"),
+            (_, true) => Ok(Platform::Windows),
             (true, false) => Err(ClientError::Failure(
                 "backend.install.macBuildNotNative".into(),
             )),
@@ -784,7 +800,7 @@ impl Client {
         owned: &ContentLicenses,
         language: &str,
     ) -> Result<MacBuild, ClientError> {
-        let selected = select_depots(app, owned, "macos", language);
+        let selected = select_depots(app, owned, Platform::Mac, language);
         let sources = self
             .cached_app_infos(&shared_sources(app, &selected))
             .await?;
@@ -809,8 +825,8 @@ impl Client {
         language: &str,
         cancel: &CancelToken,
     ) -> Result<bool, ClientError> {
-        let Some(executable) =
-            crate::launch::configuration(app, "macos").map(|config| config.executable.clone())
+        let Some(executable) = crate::launch::configuration(app, Platform::Mac)
+            .map(|config| config.executable.clone())
         else {
             return Ok(false);
         };
@@ -818,7 +834,7 @@ impl Client {
         if let Some(native) = self.lock_native_builds().get(&build) {
             return Ok(*native);
         }
-        let selected = select_depots(app, owned, "macos", language);
+        let selected = select_depots(app, owned, Platform::Mac, language);
         let sources = self
             .cached_app_infos(&shared_sources(app, &selected))
             .await?;
@@ -918,7 +934,7 @@ impl Client {
     pub async fn update_available(
         &self,
         app_id: u32,
-        platform: &str,
+        platform: Platform,
         language: &str,
         directory: &Path,
     ) -> Result<bool, ClientError> {
@@ -956,7 +972,7 @@ impl Client {
     async fn install_depots(
         &self,
         app_id: u32,
-        platform: &str,
+        platform: Platform,
         language: &str,
         prepared: PreparedInstall,
         destination: &Path,
@@ -1014,7 +1030,7 @@ impl Client {
                 app_id,
                 name: prepared.name,
                 directory: destination.to_string_lossy().into_owned(),
-                platform: platform.into(),
+                platform,
                 language: language.into(),
                 total_bytes: base.completed,
                 manifests,
@@ -1030,7 +1046,7 @@ impl Client {
     async fn prepare_depots(
         &self,
         app_id: u32,
-        platform: &str,
+        platform: Platform,
         language: &str,
         cancel: &CancelToken,
     ) -> Result<PreparedInstall, ClientError> {
@@ -1237,13 +1253,13 @@ fn public_manifest(
 /// Whether the account's licenses grant the Mac build and the Windows build.
 fn installable_builds(app: &AppInfo, owned: &ContentLicenses, language: &str) -> (bool, bool) {
     let installable = |platform| !select_depots(app, owned, platform, language).is_empty();
-    (installable("macos"), installable("windows"))
+    (installable(Platform::Mac), installable(Platform::Windows))
 }
 
 fn select_depots<'a>(
     app: &'a AppInfo,
     owned: &ContentLicenses,
-    platform: &str,
+    platform: Platform,
     language: &str,
 ) -> Vec<&'a DepotInfo> {
     if !supports_platform(&app.os_list, platform) {
@@ -1268,7 +1284,7 @@ fn select_depots<'a>(
     if app.os_list.is_empty()
         && !eligible
             .iter()
-            .any(|depot| depot.os_list.iter().any(|os| os == platform))
+            .any(|depot| depot.os_list.iter().any(|os| os == PLATFORM.name(platform)))
     {
         return Vec::new();
     }
@@ -1388,6 +1404,34 @@ impl TransferError for ClientError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn steam_spells_its_builds_as_pics_oslists_do() {
+        let installation = Installation {
+            app_id: 620,
+            name: "Portal 2".into(),
+            directory: "/Games/steam-620-macos".into(),
+            platform: Platform::Mac,
+            language: "english".into(),
+            total_bytes: 1,
+            manifests: Vec::new(),
+        };
+        let written = serde_json::to_value(&installation).unwrap();
+        assert_eq!(written["platform"], "macos");
+        let read: Installation = serde_json::from_value(written).unwrap();
+        assert_eq!(read.platform, Platform::Mac);
+        assert_eq!(
+            installation_directory_name(620, Platform::Mac),
+            "steam-620-macos"
+        );
+        assert_eq!(
+            installation_directory_name(620, Platform::Windows),
+            "steam-620-windows"
+        );
+        assert!(supports_platform(&["windows".into()], Platform::Windows));
+        assert!(!supports_platform(&["windows".into()], Platform::Mac));
+        assert!(supports_platform(&[], Platform::Mac));
+    }
     fn depot(id: u32, os: &str, language: Option<&str>, dlc: Option<u32>) -> DepotInfo {
         DepotInfo {
             depot_id: id,
@@ -1425,13 +1469,16 @@ mod tests {
         ]);
         app.app_id = 588650;
         let rights = licenses([588650], [588651, 588652, 588653, 588654]);
-        let selected: Vec<_> = select_depots(&app, &rights, "macos", "english")
+        let selected: Vec<_> = select_depots(&app, &rights, Platform::Mac, "english")
             .iter()
             .map(|d| d.depot_id)
             .collect();
         assert_eq!(selected, [588652]);
         let rights = licenses([588650], [588652, 1046443]);
-        assert_eq!(select_depots(&app, &rights, "macos", "english").len(), 2);
+        assert_eq!(
+            select_depots(&app, &rights, Platform::Mac, "english").len(),
+            2
+        );
     }
 
     #[test]
@@ -1460,9 +1507,9 @@ mod tests {
     #[test]
     fn depot_rights_do_not_grant_dlc_app_ownership() {
         let app = app(vec![depot(2, "macos", None, Some(99))]);
-        assert!(select_depots(&app, &licenses([1], [2, 99]), "macos", "english").is_empty());
+        assert!(select_depots(&app, &licenses([1], [2, 99]), Platform::Mac, "english").is_empty());
         assert_eq!(
-            select_depots(&app, &licenses([1, 99], [2]), "macos", "english").len(),
+            select_depots(&app, &licenses([1, 99], [2]), Platform::Mac, "english").len(),
             1
         );
     }
@@ -1470,10 +1517,10 @@ mod tests {
     #[test]
     fn free_to_download_depots_do_not_require_package_membership() {
         let mut app = app(vec![depot(2, "macos", None, None)]);
-        assert!(select_depots(&app, &licenses([1], []), "macos", "english").is_empty());
+        assert!(select_depots(&app, &licenses([1], []), Platform::Mac, "english").is_empty());
         app.free_to_download = true;
         assert_eq!(
-            select_depots(&app, &licenses([1], []), "macos", "english").len(),
+            select_depots(&app, &licenses([1], []), Platform::Mac, "english").len(),
             1
         );
     }
@@ -1486,7 +1533,7 @@ mod tests {
         unlicensed.os_arch = Some("64".into());
         let app = app(vec![english, unlicensed]);
         let rights = licenses([1], [2]);
-        let selected = select_depots(&app, &rights, "macos", "french");
+        let selected = select_depots(&app, &rights, Platform::Mac, "french");
         assert_eq!(selected.iter().map(|d| d.depot_id).collect::<Vec<_>>(), [2]);
     }
 
@@ -1510,14 +1557,14 @@ mod tests {
         };
         let owned = licenses([1], [1, 2, 3, 4, 5]);
         assert_eq!(
-            select_depots(&app, &owned, "windows", "french")
+            select_depots(&app, &owned, Platform::Windows, "french")
                 .iter()
                 .map(|d| d.depot_id)
                 .collect::<Vec<_>>(),
             vec![1, 3]
         );
         assert_eq!(
-            select_depots(&app, &owned, "macos", "french")
+            select_depots(&app, &owned, Platform::Mac, "french")
                 .iter()
                 .map(|d| d.depot_id)
                 .collect::<Vec<_>>(),
@@ -1554,11 +1601,15 @@ mod tests {
             unpublished,
             other_platform,
         ]);
-        let selected: Vec<_> =
-            select_depots(&app, &licenses([1], [1, 2, 3, 4, 5]), "windows", "french")
-                .into_iter()
-                .map(|depot| depot.depot_id)
-                .collect();
+        let selected: Vec<_> = select_depots(
+            &app,
+            &licenses([1], [1, 2, 3, 4, 5]),
+            Platform::Windows,
+            "french",
+        )
+        .into_iter()
+        .map(|depot| depot.depot_id)
+        .collect();
         assert_eq!(selected, [1, 2]);
     }
     #[test]
@@ -1569,13 +1620,19 @@ mod tests {
             depot(2, "windows", None, None),
         ]);
         app.os_list = vec!["windows".into()];
-        assert!(select_depots(&app, &owned, "macos", "english").is_empty());
-        assert_eq!(select_depots(&app, &owned, "windows", "english").len(), 2);
+        assert!(select_depots(&app, &owned, Platform::Mac, "english").is_empty());
+        assert_eq!(
+            select_depots(&app, &owned, Platform::Windows, "english").len(),
+            2
+        );
         app.os_list.clear();
-        assert!(select_depots(&app, &owned, "macos", "english").is_empty());
-        assert_eq!(select_depots(&app, &owned, "windows", "english").len(), 2);
+        assert!(select_depots(&app, &owned, Platform::Mac, "english").is_empty());
+        assert_eq!(
+            select_depots(&app, &owned, Platform::Windows, "english").len(),
+            2
+        );
         app.depots.retain(|depot| depot.os_list.is_empty());
-        assert!(select_depots(&app, &owned, "windows", "english").is_empty());
+        assert!(select_depots(&app, &owned, Platform::Windows, "english").is_empty());
     }
     #[test]
     fn unowned_platform_specific_dlc_cannot_establish_unknown_app_platform() {
@@ -1585,13 +1642,19 @@ mod tests {
         ]);
         app.os_list.clear();
         assert!(
-            select_depots(&app, &licenses([1], [1, 2, 3, 4, 5]), "macos", "english").is_empty()
+            select_depots(
+                &app,
+                &licenses([1], [1, 2, 3, 4, 5]),
+                Platform::Mac,
+                "english"
+            )
+            .is_empty()
         );
         assert_eq!(
             select_depots(
                 &app,
                 &licenses([1, 99], [1, 2, 3, 4, 5]),
-                "macos",
+                Platform::Mac,
                 "english"
             )
             .len(),
@@ -1606,7 +1669,13 @@ mod tests {
         french.os_arch = Some("32".into());
         let app = app(vec![english, french]);
         assert_eq!(
-            select_depots(&app, &licenses([1], [1, 2, 3, 4, 5]), "windows", "french")[0].depot_id,
+            select_depots(
+                &app,
+                &licenses([1], [1, 2, 3, 4, 5]),
+                Platform::Windows,
+                "french"
+            )[0]
+            .depot_id,
             3
         );
     }
@@ -1632,14 +1701,14 @@ mod tests {
         let selected: Vec<_> = select_depots(
             &app,
             &licenses([1], [2, 228_989, 229_005]),
-            "windows",
+            Platform::Windows,
             "english",
         )
         .iter()
         .map(|depot| depot.depot_id)
         .collect();
         assert_eq!(selected, [2, 228_990, 228_989]);
-        assert!(select_depots(&app, &licenses([1], [2]), "macos", "english").is_empty());
+        assert!(select_depots(&app, &licenses([1], [2]), Platform::Mac, "english").is_empty());
     }
     #[test]
     fn free_to_download_shared_depots_use_the_requesting_app_for_authorization() {

@@ -28,7 +28,7 @@ fn mac(home: &Path) -> CloudPlatform {
 fn mac_rules_require_explicit_metadata_and_preserve_both_platforms() {
     use serde_json::json;
     assert!(
-        CloudRules::from_attributes(&BTreeMap::new(), "Mac")
+        CloudRules::from_attributes(&BTreeMap::new(), Platform::Mac)
             .unwrap()
             .is_none()
     );
@@ -47,7 +47,9 @@ fn mac_rules_require_explicit_metadata_and_preserve_both_platforms() {
             json!({"value":"*.bak,profile/cache/"}),
         ),
     ]);
-    let rules = CloudRules::from_attributes(&attrs, "Mac").unwrap().unwrap();
+    let rules = CloudRules::from_attributes(&attrs, Platform::Mac)
+        .unwrap()
+        .unwrap();
     assert!(rules.accepts("nested/one.sav").unwrap());
     assert!(rules.accepts("profile/options.json").unwrap());
     assert!(!rules.accepts("profile/cache/slot.sav").unwrap());
@@ -56,9 +58,9 @@ fn mac_rules_require_explicit_metadata_and_preserve_both_platforms() {
     assert!(rules.accepts("../foreign.sav").is_err());
     let mut bad = attrs.clone();
     bad.insert("CloudSaveFolder_MAC".into(), json!({"value":false}));
-    assert!(CloudRules::from_attributes(&bad, "Mac").is_err());
+    assert!(CloudRules::from_attributes(&bad, Platform::Mac).is_err());
     bad.insert("CloudSaveFolder_MAC".into(), json!({"value":""}));
-    assert!(CloudRules::from_attributes(&bad, "Mac").is_err());
+    assert!(CloudRules::from_attributes(&bad, Platform::Mac).is_err());
     assert!(parse_filters(Some("*.sav,,*.json".into())).is_err());
     assert!(parse_filters(Some("[0-9].sav".into())).is_err());
 }

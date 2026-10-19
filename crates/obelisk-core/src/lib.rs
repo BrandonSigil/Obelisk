@@ -11,6 +11,7 @@ pub mod launch;
 mod library;
 pub mod library_cache;
 pub mod mac_build;
+pub mod platform;
 pub mod storefront;
 pub mod transfer;
 pub mod verification;
@@ -18,3 +19,4 @@ pub mod watch;
 
 pub use atomic_file::{write_atomic, write_atomic_with};
 pub use library::{CoreError, Game, GameKind, Library};
+pub use platform::Platform;

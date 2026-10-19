@@ -1,6 +1,6 @@
 //! Current platform manifests for installation estimates and verified
 //! downloads, and the build a download without a platform installs.
-use obelisk_core::{install::unhex, mac_build, transfer::CancelToken};
+use obelisk_core::{Platform, install::unhex, mac_build, transfer::CancelToken};
 use reqwest::Url;
 use serde::Deserialize;
 use sha1::{Digest, Sha1};
@@ -14,7 +14,7 @@ use std::{
 use crate::{
     EpicError,
     auth::{self, Api, credential_free},
-    client::validate_identity,
+    client::{PLATFORM, validate_identity},
     content::ContentClient,
     content_manifest::Manifest,
     manifest,
@@ -80,23 +80,24 @@ pub(crate) async fn shown_build(
     app_name: &str,
     natives: &NativeBuilds,
     sizes: &InstallationSizes,
-) -> Result<(&'static str, Option<u64>), EpicError> {
+) -> Result<(Platform, Option<u64>), EpicError> {
     let identity = |platform| [namespace, catalog_item_id, app_name, platform];
     let (mac, windows) =
         live_builds(api, access_token, namespace, catalog_item_id, app_name).await?;
     let not_native = mac
         .as_ref()
-        .and_then(|asset| build_key(identity("Mac"), asset))
+        .and_then(|asset| build_key(identity(PLATFORM.name(Platform::Mac)), asset))
         .and_then(|key| natives.get(&key))
         == Some(false);
     let (platform, asset) = match (mac, windows) {
-        (Some(_), Some(windows)) if not_native => ("Windows", windows),
-        (Some(mac), _) => ("Mac", mac),
-        (None, Some(windows)) => ("Windows", windows),
+        (Some(_), Some(windows)) if not_native => (Platform::Windows, windows),
+        (Some(mac), _) => (Platform::Mac, mac),
+        (None, Some(windows)) => (Platform::Windows, windows),
         (None, None) => return Err(EpicError::Protocol),
     };
-    let mut trace = trace(namespace, catalog_item_id, app_name, platform);
-    let size = asset_size(api, &asset, identity(platform), sizes, &mut trace).await;
+    let label = PLATFORM.name(platform);
+    let mut trace = trace(namespace, catalog_item_id, app_name, label);
+    let size = asset_size(api, &asset, identity(label), sizes, &mut trace).await;
     Ok((platform, reported(&mut trace, size).ok()))
 }
 
@@ -152,10 +153,11 @@ pub(crate) async fn fetch_manifest(
     namespace: &str,
     catalog_item_id: &str,
     app_name: &str,
-    platform: &str,
+    platform: Platform,
     cache_directory: Option<&Path>,
     picked: &PickedManifest,
 ) -> Result<FetchedManifest, EpicError> {
+    let platform = PLATFORM.name(platform);
     let mut trace = trace(namespace, catalog_item_id, app_name, platform);
     let result = async {
         let asset = live_asset(
@@ -204,8 +206,9 @@ pub(crate) async fn live_build_version(
     namespace: &str,
     catalog_item_id: &str,
     app_name: &str,
-    platform: &str,
+    platform: Platform,
 ) -> Result<String, EpicError> {
+    let platform = PLATFORM.name(platform);
     let mut trace = trace(namespace, catalog_item_id, app_name, platform);
     let version = live_asset(
         api,
@@ -269,19 +272,20 @@ pub(crate) async fn platform(
     natives: &NativeBuilds,
     picked: &PickedManifest,
     cancel: &CancelToken,
-) -> Result<&'static str, EpicError> {
+) -> Result<Platform, EpicError> {
     let (mac, windows) =
         live_builds(api, access_token, namespace, catalog_item_id, app_name).await?;
     if let Some(asset) = &mac {
-        let identity = [namespace, catalog_item_id, app_name, "Mac"];
-        let mut trace = trace(namespace, catalog_item_id, app_name, "Mac");
+        let label = PLATFORM.name(Platform::Mac);
+        let identity = [namespace, catalog_item_id, app_name, label];
+        let mut trace = trace(namespace, catalog_item_id, app_name, label);
         let native = runs_natively(api, asset, identity, natives, picked, cancel, &mut trace).await;
         if reported(&mut trace, native)? {
-            return Ok("Mac");
+            return Ok(Platform::Mac);
         }
     }
     match (mac, windows) {
-        (_, Some(_)) => Ok("Windows"),
+        (_, Some(_)) => Ok(Platform::Windows),
         (Some(_), None) => Err(EpicError::Service {
             message: "backend.install.macBuildNotNative".into(),
         }),
@@ -298,8 +302,12 @@ async fn live_builds(
     catalog_item_id: &str,
     app_name: &str,
 ) -> Result<(Option<Asset>, Option<Asset>), EpicError> {
-    let mut mac_trace = trace(namespace, catalog_item_id, app_name, "Mac");
-    let mut windows_trace = trace(namespace, catalog_item_id, app_name, "Windows");
+    let (mac_label, windows_label) = (
+        PLATFORM.name(Platform::Mac),
+        PLATFORM.name(Platform::Windows),
+    );
+    let mut mac_trace = trace(namespace, catalog_item_id, app_name, mac_label);
+    let mut windows_trace = trace(namespace, catalog_item_id, app_name, windows_label);
     let (mac, windows) = tokio::join!(
         live_build(
             api,
@@ -307,7 +315,7 @@ async fn live_builds(
             namespace,
             catalog_item_id,
             app_name,
-            "Mac",
+            mac_label,
             &mut mac_trace
         ),
         live_build(
@@ -316,7 +324,7 @@ async fn live_builds(
             namespace,
             catalog_item_id,
             app_name,
-            "Windows",
+            windows_label,
             &mut windows_trace,
         ),
     );
@@ -438,7 +446,7 @@ async fn live_build(
     trace: &mut diagnostic::Trace,
 ) -> Result<Option<Asset>, EpicError> {
     trace.step = "identity";
-    validate_identity(namespace, catalog_item_id, app_name, platform)?;
+    validate_identity(namespace, catalog_item_id, app_name)?;
     let mut url = Url::parse(&api.launcher).map_err(|_| EpicError::Protocol)?;
     url.path_segments_mut()
         .map_err(|_| EpicError::Protocol)?
@@ -860,7 +868,7 @@ mod tests {
                 "ns",
                 "catalog",
                 "game",
-                "Mac",
+                Platform::Mac,
                 Some(directory.path()),
                 &PickedManifest::default(),
             )
@@ -944,7 +952,7 @@ mod tests {
             "ns",
             "catalog",
             "game",
-            "Mac",
+            Platform::Mac,
             Some(directory.path()),
             &picked,
         )
@@ -1006,7 +1014,7 @@ mod tests {
             "ns",
             "catalog",
             "game/name",
-            "Mac",
+            Platform::Mac,
             None,
             &PickedManifest::default(),
         )

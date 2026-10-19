@@ -15,7 +15,7 @@ fn receipt(install: &Path, app_id: u32, name: &str) -> Receipt<crate::steam::Ste
         },
         name: name.into(),
         directory: install.to_string_lossy().into_owned(),
-        platform: "windows".into(),
+        platform: obelisk_core::Platform::Windows,
         total_bytes: 1,
         needs_verification: false,
     }

@@ -700,9 +700,9 @@ public protocol AccountInstallationsProtocol: AnyObject, Sendable {
     func cloudIndicators(games: [String]) async throws  -> [GameCloudIndicator]
     
     /**
-     * Installs what `offer` names, or updates the installation of its
-     * platform; a Transfer of the game that stopped resumes instead. An
-     * offer of the other storefront does nothing.
+     * Installs what `offer` names, or updates the game's installation; a
+     * Transfer of the game that stopped resumes instead. An offer of the
+     * other storefront does nothing.
      */
     func install(offer: GameOffer) 
     
@@ -962,9 +962,9 @@ open func cloudIndicators(games: [String])async throws  -> [GameCloudIndicator] 
 }
     
     /**
-     * Installs what `offer` names, or updates the installation of its
-     * platform; a Transfer of the game that stopped resumes instead. An
-     * offer of the other storefront does nothing.
+     * Installs what `offer` names, or updates the game's installation; a
+     * Transfer of the game that stopped resumes instead. An offer of the
+     * other storefront does nothing.
      */
 open func install(offer: GameOffer)  {try! rustCall() {
         uniffiCallStatus in
@@ -5984,9 +5984,9 @@ public func FfiConverterTypeEpicGame_lower(_ value: EpicGame) -> RustBuffer {
  */
 public struct EpicGameDetails: Equatable, Hashable {
     /**
-     * `Mac` or `Windows`; unknown when Epic could not tell.
+     * Unknown when Epic could not tell.
      */
-    public var platform: String?
+    public var platform: GamePlatform?
     /**
      * Unknown when Epic serves no manifest of the build.
      */
@@ -5996,8 +5996,8 @@ public struct EpicGameDetails: Equatable, Hashable {
     // declare one manually.
     public init(
         /**
-         * `Mac` or `Windows`; unknown when Epic could not tell.
-         */platform: String?, 
+         * Unknown when Epic could not tell.
+         */platform: GamePlatform?, 
         /**
          * Unknown when Epic serves no manifest of the build.
          */installationBytes: UInt64?) {
@@ -6021,13 +6021,13 @@ public struct FfiConverterTypeEpicGameDetails: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> EpicGameDetails {
         return
             try EpicGameDetails(
-                platform: FfiConverterOptionString.read(from: &buf), 
+                platform: FfiConverterOptionTypeGamePlatform.read(from: &buf), 
                 installationBytes: FfiConverterOptionUInt64.read(from: &buf)
         )
     }
 
     public static func write(_ value: EpicGameDetails, into buf: inout [UInt8]) {
-        FfiConverterOptionString.write(value.platform, into: &buf)
+        FfiConverterOptionTypeGamePlatform.write(value.platform, into: &buf)
         FfiConverterOptionUInt64.write(value.installationBytes, into: &buf)
     }
 }
@@ -6992,9 +6992,9 @@ public func FfiConverterTypeGogGame_lower(_ value: GogGame) -> RustBuffer {
  */
 public struct GogGameDetails: Equatable, Hashable {
     /**
-     * `macos` or `windows`; unknown when GOG could not tell.
+     * Unknown when GOG could not tell.
      */
-    public var platform: String?
+    public var platform: GamePlatform?
     /**
      * Unknown when GOG serves no build for the platform.
      */
@@ -7004,8 +7004,8 @@ public struct GogGameDetails: Equatable, Hashable {
     // declare one manually.
     public init(
         /**
-         * `macos` or `windows`; unknown when GOG could not tell.
-         */platform: String?, 
+         * Unknown when GOG could not tell.
+         */platform: GamePlatform?, 
         /**
          * Unknown when GOG serves no build for the platform.
          */installationBytes: UInt64?) {
@@ -7029,13 +7029,13 @@ public struct FfiConverterTypeGogGameDetails: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> GogGameDetails {
         return
             try GogGameDetails(
-                platform: FfiConverterOptionString.read(from: &buf), 
+                platform: FfiConverterOptionTypeGamePlatform.read(from: &buf), 
                 installationBytes: FfiConverterOptionUInt64.read(from: &buf)
         )
     }
 
     public static func write(_ value: GogGameDetails, into buf: inout [UInt8]) {
-        FfiConverterOptionString.write(value.platform, into: &buf)
+        FfiConverterOptionTypeGamePlatform.write(value.platform, into: &buf)
         FfiConverterOptionUInt64.write(value.installationBytes, into: &buf)
     }
 }
@@ -7124,7 +7124,7 @@ public struct Installation: Equatable, Hashable {
     public var game: String
     public var name: String
     public var directory: String
-    public var platform: String
+    public var platform: GamePlatform
     public var totalBytes: UInt64
     /**
      * A Transfer started over it and has not succeeded since.
@@ -7140,7 +7140,7 @@ public struct Installation: Equatable, Hashable {
     public init(
         /**
          * Names the installation in every action.
-         */id: String, game: String, name: String, directory: String, platform: String, totalBytes: UInt64, 
+         */id: String, game: String, name: String, directory: String, platform: GamePlatform, totalBytes: UInt64, 
         /**
          * A Transfer started over it and has not succeeded since.
          */needsVerification: Bool, 
@@ -7177,7 +7177,7 @@ public struct FfiConverterTypeInstallation: FfiConverterRustBuffer {
                 game: FfiConverterString.read(from: &buf), 
                 name: FfiConverterString.read(from: &buf), 
                 directory: FfiConverterString.read(from: &buf), 
-                platform: FfiConverterString.read(from: &buf), 
+                platform: FfiConverterTypeGamePlatform.read(from: &buf), 
                 totalBytes: FfiConverterUInt64.read(from: &buf), 
                 needsVerification: FfiConverterBool.read(from: &buf), 
                 updateAvailable: FfiConverterBool.read(from: &buf)
@@ -7189,7 +7189,7 @@ public struct FfiConverterTypeInstallation: FfiConverterRustBuffer {
         FfiConverterString.write(value.game, into: &buf)
         FfiConverterString.write(value.name, into: &buf)
         FfiConverterString.write(value.directory, into: &buf)
-        FfiConverterString.write(value.platform, into: &buf)
+        FfiConverterTypeGamePlatform.write(value.platform, into: &buf)
         FfiConverterUInt64.write(value.totalBytes, into: &buf)
         FfiConverterBool.write(value.needsVerification, into: &buf)
         FfiConverterBool.write(value.updateAvailable, into: &buf)
@@ -11325,24 +11325,21 @@ public func FfiConverterTypeGameKind_lower(_ value: GameKind) -> RustBuffer {
 public enum GameOffer: Equatable, Hashable {
     
     /**
-     * Its build for `platform`, with the depots of `language`. Without a
-     * platform, Steam picks the build the account can install as the
-     * Transfer starts: the Mac build when its game runs natively on Apple
-     * silicon, else the Windows build.
+     * With the depots of `language`. Steam picks the build the account can
+     * install as the Transfer starts: the Mac build when its game runs
+     * natively on Apple silicon, else the Windows build.
      */
-    case steam(appId: UInt32, name: String, platform: String?, language: String
+    case steam(appId: UInt32, name: String, language: String
     )
     /**
-     * Its build for `platform`, `Mac` or `Windows`; without one, Epic picks
-     * it as Steam does.
+     * Epic picks the build as Steam does.
      */
-    case epic(namespace: String, catalogItemId: String, appName: String, title: String, platform: String?
+    case epic(namespace: String, catalogItemId: String, appName: String, title: String
     )
     /**
-     * Its build for `platform`, `macos` or `windows`; without one, GOG
-     * picks it as Steam does.
+     * GOG picks the build as Steam does.
      */
-    case gog(productId: String, title: String, platform: String?
+    case gog(productId: String, title: String
     )
 
 
@@ -11365,13 +11362,13 @@ public struct FfiConverterTypeGameOffer: FfiConverterRustBuffer {
         let variant: Int32 = try readInt(&buf)
         switch variant {
         
-        case 1: return .steam(appId: try FfiConverterUInt32.read(from: &buf), name: try FfiConverterString.read(from: &buf), platform: try FfiConverterOptionString.read(from: &buf), language: try FfiConverterString.read(from: &buf)
+        case 1: return .steam(appId: try FfiConverterUInt32.read(from: &buf), name: try FfiConverterString.read(from: &buf), language: try FfiConverterString.read(from: &buf)
         )
         
-        case 2: return .epic(namespace: try FfiConverterString.read(from: &buf), catalogItemId: try FfiConverterString.read(from: &buf), appName: try FfiConverterString.read(from: &buf), title: try FfiConverterString.read(from: &buf), platform: try FfiConverterOptionString.read(from: &buf)
+        case 2: return .epic(namespace: try FfiConverterString.read(from: &buf), catalogItemId: try FfiConverterString.read(from: &buf), appName: try FfiConverterString.read(from: &buf), title: try FfiConverterString.read(from: &buf)
         )
         
-        case 3: return .gog(productId: try FfiConverterString.read(from: &buf), title: try FfiConverterString.read(from: &buf), platform: try FfiConverterOptionString.read(from: &buf)
+        case 3: return .gog(productId: try FfiConverterString.read(from: &buf), title: try FfiConverterString.read(from: &buf)
         )
         
         default: throw UniffiInternalError.unexpectedEnumCase
@@ -11382,28 +11379,25 @@ public struct FfiConverterTypeGameOffer: FfiConverterRustBuffer {
         switch value {
         
         
-        case let .steam(appId,name,platform,language):
+        case let .steam(appId,name,language):
             writeInt(&buf, Int32(1))
             FfiConverterUInt32.write(appId, into: &buf)
             FfiConverterString.write(name, into: &buf)
-            FfiConverterOptionString.write(platform, into: &buf)
             FfiConverterString.write(language, into: &buf)
             
         
-        case let .epic(namespace,catalogItemId,appName,title,platform):
+        case let .epic(namespace,catalogItemId,appName,title):
             writeInt(&buf, Int32(2))
             FfiConverterString.write(namespace, into: &buf)
             FfiConverterString.write(catalogItemId, into: &buf)
             FfiConverterString.write(appName, into: &buf)
             FfiConverterString.write(title, into: &buf)
-            FfiConverterOptionString.write(platform, into: &buf)
             
         
-        case let .gog(productId,title,platform):
+        case let .gog(productId,title):
             writeInt(&buf, Int32(3))
             FfiConverterString.write(productId, into: &buf)
             FfiConverterString.write(title, into: &buf)
-            FfiConverterOptionString.write(platform, into: &buf)
             
         }
     }
@@ -11584,6 +11578,75 @@ public func FfiConverterTypeGamePhase_lift(_ buf: RustBuffer) throws -> GamePhas
 #endif
 public func FfiConverterTypeGamePhase_lower(_ value: GamePhase) -> RustBuffer {
     return FfiConverterTypeGamePhase.lower(value)
+}
+
+
+
+/**
+ * Which of a game's builds: the Mac build or the Windows build.
+ */
+
+public enum GamePlatform: Equatable, Hashable {
+    
+    case mac
+    case windows
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension GamePlatform: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeGamePlatform: FfiConverterRustBuffer {
+    typealias SwiftType = GamePlatform
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> GamePlatform {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .mac
+        
+        case 2: return .windows
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: GamePlatform, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case .mac:
+            writeInt(&buf, Int32(1))
+        
+        
+        case .windows:
+            writeInt(&buf, Int32(2))
+        
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeGamePlatform_lift(_ buf: RustBuffer) throws -> GamePlatform {
+    return try FfiConverterTypeGamePlatform.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeGamePlatform_lower(_ value: GamePlatform) -> RustBuffer {
+    return FfiConverterTypeGamePlatform.lower(value)
 }
 
 
@@ -13993,6 +14056,30 @@ fileprivate struct FfiConverterOptionTypeSteamOverlayRequest: FfiConverterRustBu
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterOptionTypeGamePlatform: FfiConverterRustBuffer {
+    typealias SwiftType = GamePlatform?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypeGamePlatform.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypeGamePlatform.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterOptionTypeInstallationReport: FfiConverterRustBuffer {
     typealias SwiftType = InstallationReport?
 
@@ -15392,7 +15479,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_obelisk_bridge_checksum_method_accountinstallations_cloud_indicators() != 38851) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_obelisk_bridge_checksum_method_accountinstallations_install() != 48233) {
+    if (uniffi_obelisk_bridge_checksum_method_accountinstallations_install() != 6039) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_obelisk_bridge_checksum_method_accountinstallations_join() != 43648) {

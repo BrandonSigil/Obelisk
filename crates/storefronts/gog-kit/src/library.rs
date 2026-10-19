@@ -4,6 +4,7 @@
 use std::{collections::HashSet, time::Duration};
 
 use futures_util::{StreamExt, TryStreamExt, stream};
+use obelisk_core::Platform;
 use reqwest::Url;
 use serde::Deserialize;
 use serde_json::Value;
@@ -97,9 +98,9 @@ impl GameInfo {
 /// any download, and its size.
 #[derive(Clone, Debug, Default)]
 pub struct GameDetails {
-    /// `macos` or `windows`: the Mac build, unless a download found that its
-    /// game does not run natively. Unknown when GOG could not tell.
-    pub platform: Option<String>,
+    /// The Mac build, unless a download found that its game does not run
+    /// natively. Unknown when GOG could not tell.
+    pub platform: Option<Platform>,
     /// Unknown when GOG serves no build Obelisk installs.
     pub installation_bytes: Option<u64>,
 }

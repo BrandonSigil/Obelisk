@@ -11,8 +11,12 @@ One account-scoped attempt to install, verify or repair a game's files. Its life
 A record identifying a game installation whose required files were successfully installed. Partial download data is not an installation receipt.
 
 **Offer**:
-What a storefront says Obelisk can install of one game: its build for one platform, with Steam's language, before any folder is chosen. A new installation's offer leaves the platform to the storefront, which picks the build as the Transfer starts: the Mac build when its game runs natively on Apple silicon, as its program's first bytes tell, else the Windows build. A Mac build without an arm64 slice, Intel or 32-bit, is never installed, nor launched. A new installation starts from an offer; an installed game launches, updates and uninstalls from its Installation receipt alone.
+What a storefront says Obelisk can install of one game, with Steam's language, before any folder is chosen. The storefront picks its build as the Transfer starts: the Mac build when its game runs natively on Apple silicon, as its program's first bytes tell, else the Windows build. A Mac build without an arm64 slice, Intel or 32-bit, is never installed, nor launched. A new installation starts from an offer; an installed game launches, updates and uninstalls from its Installation receipt alone.
 _Avoid_: download request, install target
+
+**Platform**:
+Which of a game's builds a Transfer installs, picked by the storefront as it starts, or an Installation receipt records: the Mac build, which runs natively, or the Windows build, which runs in Wine. Each storefront spells it its own way in its requests, receipts and folder names; Obelisk names it one way everywhere else.
+_Avoid_: OS, os list (Steam's declared platforms, Linux included), macos/osx/Mac as values
 
 **Account session**:
 One storefront account's signed-in connection to its storefront, from sign-in or restoration until sign-out. The account's library, Transfers, launches, friends and chat go through it. Steam's connects again by itself when its CM connection drops: three attempts after growing waits, then only the player's retry or the Mac's wake tries again, and never once Steam asked the account to sign in again. A Transfer whose turn comes meanwhile waits for the new connection, and the download queue waits with it. Each CM connection of a session is numbered, 0 for the first: its transport, in the code.

@@ -278,33 +278,37 @@ async fn supervisor_exchange_rejects_and_revokes_an_unexpected_account() {
 #[tokio::test]
 async fn cloud_configuration_requires_ownership_and_reads_the_rules_of_the_platform_build() {
     for (platform, attributes, expected) in [
-        ("Mac", json!({}), "none"),
+        (Platform::Mac, json!({}), "none"),
         (
-            "Mac",
+            Platform::Mac,
             json!({"CloudSaveFolder_MAC":{"value":"{Home}/Game"},"CloudExcludeList":{"value":"*.log"}}),
             "some",
         ),
         (
-            "Mac",
+            Platform::Mac,
             json!({"CloudSaveFolder_MAC":{"value":false}}),
             "error",
         ),
         (
-            "Mac",
+            Platform::Mac,
             json!({"CloudSaveFolder":{"value":"{AppData}/Game"}}),
             "none",
         ),
         (
-            "Windows",
+            Platform::Windows,
             json!({"CloudSaveFolder":{"value":"{AppData}/Game"}}),
             "some",
         ),
         (
-            "Windows",
+            Platform::Windows,
             json!({"CloudSaveFolder_MAC":{"value":"{Home}/Game"}}),
             "none",
         ),
-        ("Windows", json!({"CloudSaveFolder":{"value":""}}), "error"),
+        (
+            Platform::Windows,
+            json!({"CloudSaveFolder":{"value":""}}),
+            "error",
+        ),
     ] {
         let mock = Mock::new(vec![
             reply(
@@ -335,7 +339,7 @@ async fn cloud_configuration_requires_ownership_and_reads_the_rules_of_the_platf
     )]);
     assert!(
         mock.client(false)
-            .cloud_configuration("space", "item", "app", "Mac")
+            .cloud_configuration("space", "item", "app", Platform::Mac)
             .await
             .is_err()
     );
@@ -374,7 +378,7 @@ async fn game_details_name_the_build_a_download_installs_whose_manifest_may_be_u
         .game_details("space", "base", "game")
         .await
         .unwrap();
-    assert_eq!(details.platform.as_deref(), Some("Windows"));
+    assert_eq!(details.platform, Some(Platform::Windows));
     assert_eq!(details.installation_bytes, None);
     assert_eq!(
         mock.requests().len(),
@@ -451,13 +455,13 @@ async fn a_game_s_page_shows_its_mac_build_until_a_download_found_it_is_not_nati
     ]);
     let client = mock.client(false);
     let shown = client.game_details("space", "base", "game").await.unwrap();
-    assert_eq!(shown.platform.as_deref(), Some("Mac"));
+    assert_eq!(shown.platform, Some(Platform::Mac));
     assert_eq!(
         client.platform("space", "base", "game").await.unwrap(),
-        "Windows"
+        Platform::Windows
     );
     let shown = client.game_details("space", "base", "game").await.unwrap();
-    assert_eq!(shown.platform.as_deref(), Some("Windows"));
+    assert_eq!(shown.platform, Some(Platform::Windows));
     assert_eq!(mock.requests().len(), 9);
 }
 
@@ -473,7 +477,7 @@ async fn a_mac_build_that_does_not_run_natively_leaves_the_download_to_the_windo
     let client = mock.client(false);
     assert_eq!(
         client.platform("space", "base", "game").await.unwrap(),
-        "Windows"
+        Platform::Windows
     );
     // Without a Windows build, the game cannot be installed.
     let mut replies = mac_build_without_program();
@@ -1018,12 +1022,12 @@ async fn download_checks_ownership_fetches_manifest_without_bearer_and_writes_re
     let client = mock.client(false);
     let parent = tempfile::tempdir().unwrap();
     let installed = client
-        .download("space", "base", "game", "Mac", parent.path())
+        .download("space", "base", "game", Platform::Mac, parent.path())
         .await
         .unwrap();
     assert_eq!(installed.account_id, "account-a");
     assert_eq!(installed.app_name, "game");
-    assert_eq!(installed.platform, "Mac");
+    assert_eq!(installed.platform, Platform::Mac);
     let directory = std::path::Path::new(&installed.directory);
     assert!(directory.starts_with(parent.path().canonicalize().unwrap()));
     assert!(directory.join("Game.app/Contents/empty").is_file());
@@ -1058,16 +1062,19 @@ async fn an_update_is_a_live_build_whose_version_differs_from_the_installed_one(
     let client = mock.client(false);
     let parent = tempfile::tempdir().unwrap();
     let installed = client
-        .download("space", "base", "game", "Mac", parent.path())
+        .download("space", "base", "game", Platform::Mac, parent.path())
         .await
         .unwrap();
     let directory = std::path::Path::new(&installed.directory);
 
     let update = |platform| client.update_available("space", "base", "game", platform, directory);
-    assert!(!update("Mac").await.unwrap(), "the installed build is live");
-    assert!(update("Mac").await.unwrap(), "Epic published 1.1");
     assert!(
-        update("Windows").await.unwrap(),
+        !update(Platform::Mac).await.unwrap(),
+        "the installed build is live"
+    );
+    assert!(update(Platform::Mac).await.unwrap(), "Epic published 1.1");
+    assert!(
+        update(Platform::Windows).await.unwrap(),
         "no build of that platform is installed there"
     );
     assert_eq!(mock.requests().len(), 5, "only the live build is asked for");
@@ -1079,7 +1086,7 @@ async fn a_manifest_naming_another_app_still_installs() {
     let client = mock.client(false);
     let parent = tempfile::tempdir().unwrap();
     let installation = client
-        .download("space", "base", "game", "Mac", parent.path())
+        .download("space", "base", "game", Platform::Mac, parent.path())
         .await
         .unwrap();
     assert_eq!(installation.app_name, "game");
@@ -1095,7 +1102,7 @@ async fn unowned_games_never_create_an_installation() {
     )]);
     let client = mock.client(false);
     assert!(
-        matches!(client.download("space", "base", "game", "Mac", parent.path()).await, Err(EpicError::Service {message}) if message == "backend.epic.game_not_owned")
+        matches!(client.download("space", "base", "game", Platform::Mac, parent.path()).await, Err(EpicError::Service {message}) if message == "backend.epic.game_not_owned")
     );
     assert_eq!(mock.requests().len(), 1);
     assert_eq!(std::fs::read_dir(parent.path()).unwrap().count(), 0);
@@ -1112,7 +1119,7 @@ async fn download_refreshes_rejected_session_once_before_fetching_content() {
     let client = mock.client(false);
     let parent = tempfile::tempdir().unwrap();
     client
-        .download("space", "base", "game", "Mac", parent.path())
+        .download("space", "base", "game", Platform::Mac, parent.path())
         .await
         .unwrap();
     assert_eq!(
@@ -1138,7 +1145,11 @@ async fn cancellation_interrupts_preparation_rejects_concurrent_download_and_rel
     let path = parent.path().to_owned();
     let running = tokio::spawn({
         let client = client.clone();
-        async move { client.download("space", "base", "game", "Mac", &path).await }
+        async move {
+            client
+                .download("space", "base", "game", Platform::Mac, &path)
+                .await
+        }
     });
     for _ in 0..100 {
         if !mock.requests().is_empty() {
@@ -1148,7 +1159,7 @@ async fn cancellation_interrupts_preparation_rejects_concurrent_download_and_rel
     }
     assert!(matches!(
         client
-            .download("space", "base", "game", "Mac", parent.path())
+            .download("space", "base", "game", Platform::Mac, parent.path())
             .await,
         Err(EpicError::AlreadyDownloading)
     ));
@@ -1163,7 +1174,7 @@ async fn cancellation_interrupts_preparation_rejects_concurrent_download_and_rel
     assert_eq!(client.progress().unwrap().state, TransferState::Cancelled);
     assert!(matches!(
         client
-            .download("space", "base", "game", "Unsupported", parent.path())
+            .download("space", "base", "", Platform::Mac, parent.path())
             .await,
         Err(EpicError::Protocol)
     ));
@@ -1180,7 +1191,11 @@ async fn dropping_download_future_cancels_the_operation_and_allows_retry() {
     let path = parent.path().to_owned();
     let running = tokio::spawn({
         let client = client.clone();
-        async move { client.download("space", "base", "game", "Mac", &path).await }
+        async move {
+            client
+                .download("space", "base", "game", Platform::Mac, &path)
+                .await
+        }
     });
     for _ in 0..100 {
         if !mock.requests().is_empty() {
@@ -1193,7 +1208,7 @@ async fn dropping_download_future_cancels_the_operation_and_allows_retry() {
     assert_eq!(client.progress().unwrap().state, TransferState::Cancelled);
     assert!(matches!(
         client
-            .download("space", "base", "game", "Unsupported", parent.path())
+            .download("space", "base", "", Platform::Mac, parent.path())
             .await,
         Err(EpicError::Protocol)
     ));
@@ -1246,7 +1261,7 @@ async fn manifest_cache_survives_client_restart_but_rechecks_ownership_metadata_
     let parent = tempfile::tempdir().unwrap();
     let first = mock
         .client(false)
-        .download("space", "base", "game", "Mac", parent.path())
+        .download("space", "base", "game", Platform::Mac, parent.path())
         .await
         .unwrap();
     let caches = files_containing(parent.path(), &manifest_bytes);
@@ -1263,7 +1278,7 @@ async fn manifest_cache_survives_client_restart_but_rechecks_ownership_metadata_
 
     let client = mock.client(false);
     let installed = client
-        .download("space", "base", "game", "Mac", parent.path())
+        .download("space", "base", "game", Platform::Mac, parent.path())
         .await
         .unwrap();
     assert_eq!(installed.directory, first.directory);
@@ -1303,11 +1318,11 @@ async fn manifest_cache_uses_current_hash_to_fetch_and_install_new_build() {
     let client = mock.client(false);
     let parent = tempfile::tempdir().unwrap();
     let first = client
-        .download("space", "base", "game", "Mac", parent.path())
+        .download("space", "base", "game", Platform::Mac, parent.path())
         .await
         .unwrap();
     let second = client
-        .download("space", "base", "game", "Mac", parent.path())
+        .download("space", "base", "game", Platform::Mac, parent.path())
         .await
         .unwrap();
     assert_eq!(first.build_version, "1.0");
@@ -1336,7 +1351,7 @@ async fn manifest_cache_corruption_refetches_and_replaces_the_archive() {
     let client = mock.client(false);
     let parent = tempfile::tempdir().unwrap();
     client
-        .download("space", "base", "game", "Mac", parent.path())
+        .download("space", "base", "game", Platform::Mac, parent.path())
         .await
         .unwrap();
     let cache = files_containing(parent.path(), &manifest_bytes)
@@ -1346,7 +1361,7 @@ async fn manifest_cache_corruption_refetches_and_replaces_the_archive() {
     corrupt[0] ^= 1;
     std::fs::write(&cache, corrupt).unwrap();
     client
-        .download("space", "base", "game", "Mac", parent.path())
+        .download("space", "base", "game", Platform::Mac, parent.path())
         .await
         .unwrap();
     assert_eq!(std::fs::read(cache).unwrap(), manifest_bytes);
@@ -1370,7 +1385,7 @@ async fn manifest_cache_without_server_hash_always_fetches_current_manifest() {
     let parent = tempfile::tempdir().unwrap();
     for _ in 0..2 {
         client
-            .download("space", "base", "game", "Mac", parent.path())
+            .download("space", "base", "game", Platform::Mac, parent.path())
             .await
             .unwrap();
         assert!(client.progress().unwrap().network_bytes > 0);
@@ -1396,13 +1411,13 @@ async fn manifest_cache_never_bypasses_current_ownership_or_authentication() {
         let client = mock.client(false);
         let parent = tempfile::tempdir().unwrap();
         let installed = client
-            .download("space", "base", "game", "Mac", parent.path())
+            .download("space", "base", "game", Platform::Mac, parent.path())
             .await
             .unwrap();
         let receipt = std::path::Path::new(&installed.directory).join(".obelisk-install.json");
         let before = std::fs::read(&receipt).unwrap();
         let result = client
-            .download("space", "base", "game", "Mac", parent.path())
+            .download("space", "base", "game", Platform::Mac, parent.path())
             .await;
         match status {
             200 => assert!(
@@ -1444,7 +1459,7 @@ fn launch_installation(directory: &std::path::Path) -> Installation {
         catalog_item_id: "base".into(),
         account_id: "account-a".into(),
         directory: directory.to_str().unwrap().into(),
-        platform: "Mac".into(),
+        platform: Platform::Mac,
         total_bytes: 29,
         build_version: "1.0".into(),
         launch_executable: executable.into(),
@@ -1509,7 +1524,7 @@ async fn launch_plan_with_catalog(
     catalog.body = body.to_string();
     let mock = Mock::new(replies);
     mock.client(false)
-        .launch_plan("space", "base", "game", "Mac", directory, "en")
+        .launch_plan("space", "base", "game", Platform::Mac, directory, "en")
         .await
         .unwrap()
 }
@@ -1585,7 +1600,14 @@ async fn launch_builds_authenticated_literal_arguments_from_verified_installatio
     let mock = Mock::new(launch_replies(false));
     let plan = mock
         .client(false)
-        .launch_plan("space", "base", "game", "Mac", temporary.path(), "fr-FR")
+        .launch_plan(
+            "space",
+            "base",
+            "game",
+            Platform::Mac,
+            temporary.path(),
+            "fr-FR",
+        )
         .await
         .unwrap();
     assert_eq!(plan.app_name, "game");
@@ -1596,7 +1618,7 @@ async fn launch_builds_authenticated_literal_arguments_from_verified_installatio
             name: Some("A fixture game".into())
         })
     );
-    assert_eq!(plan.platform, "Mac");
+    assert_eq!(plan.platform, Platform::Mac);
     assert!(plan.ownership_token.is_none());
     assert!(!plan.target.is_application_bundle);
     assert_eq!(
@@ -1674,7 +1696,14 @@ async fn launch_fetches_required_ownership_token_as_raw_bytes_and_never_swallows
         let mock = Mock::new(replies);
         let result = mock
             .client(false)
-            .launch_plan("space", "base", "game", "Mac", temporary.path(), "en")
+            .launch_plan(
+                "space",
+                "base",
+                "game",
+                Platform::Mac,
+                temporary.path(),
+                "en",
+            )
             .await;
         if status == 200 {
             let plan = result.unwrap();
@@ -1711,10 +1740,10 @@ fn an_installation_names_its_game_and_prerequisite_from_its_own_receipt_only() {
     let temp = tempfile::tempdir().unwrap();
     let mut installation = launch_installation(temp.path());
     let directory = std::path::PathBuf::from(&installation.directory);
-    let read = |app: &str, platform: &str| {
+    let read = |app: &str, platform: Platform| {
         super::installed_launch("space", "base", app, platform, &directory)
     };
-    let installed = read("game", "Mac").unwrap();
+    let installed = read("game", Platform::Mac).unwrap();
     assert_eq!(installed.prerequisite, None);
     assert_eq!(
         std::path::Path::new(&installed.target.executable),
@@ -1728,11 +1757,11 @@ fn an_installation_names_its_game_and_prerequisite_from_its_own_receipt_only() {
     });
     write_launch_receipt(&installation);
     assert_eq!(
-        read("game", "Mac").unwrap().prerequisite,
+        read("game", Platform::Mac).unwrap().prerequisite,
         installation.prerequisite
     );
-    assert!(read("other", "Mac").is_err());
-    assert!(read("game", "Windows").is_err());
+    assert!(read("other", Platform::Mac).is_err());
+    assert!(read("game", Platform::Windows).is_err());
 }
 
 #[test]
@@ -1753,7 +1782,14 @@ async fn launch_rejects_missing_mismatched_and_escaping_receipts_before_network(
     let temporary = tempfile::tempdir().unwrap();
     assert!(
         client
-            .launch_plan("space", "base", "game", "Mac", temporary.path(), "en")
+            .launch_plan(
+                "space",
+                "base",
+                "game",
+                Platform::Mac,
+                temporary.path(),
+                "en"
+            )
             .await
             .is_err()
     );
@@ -1777,7 +1813,14 @@ async fn launch_rejects_missing_mismatched_and_escaping_receipts_before_network(
         .unwrap();
         assert!(
             client
-                .launch_plan("space", "base", "game", "Mac", temporary.path(), "en")
+                .launch_plan(
+                    "space",
+                    "base",
+                    "game",
+                    Platform::Mac,
+                    temporary.path(),
+                    "en"
+                )
                 .await
                 .is_err(),
             "accepted mismatched {field}"
@@ -1797,7 +1840,14 @@ async fn launch_rechecks_ownership_before_issuing_an_exchange_code() {
     )]);
     assert!(
         mock.client(false)
-            .launch_plan("space", "base", "game", "Mac", temporary.path(), "en")
+            .launch_plan(
+                "space",
+                "base",
+                "game",
+                Platform::Mac,
+                temporary.path(),
+                "en"
+            )
             .await
             .is_err()
     );
@@ -1829,7 +1879,14 @@ async fn launch_retries_rejected_exchange_once_and_keeps_rotated_credentials() {
         let mock = Mock::new(replies);
         let client = mock.client(false);
         let result = client
-            .launch_plan("space", "base", "game", "Mac", temporary.path(), "en")
+            .launch_plan(
+                "space",
+                "base",
+                "game",
+                Platform::Mac,
+                temporary.path(),
+                "en",
+            )
             .await;
         if retry_status == 200 {
             assert!(result.is_ok());
@@ -1879,7 +1936,7 @@ async fn launch_discards_exchange_code_when_user_disconnects_during_http() {
     let launcher = client.clone();
     let running = tokio::spawn(async move {
         launcher
-            .launch_plan("space", "base", "game", "Mac", &directory, "en")
+            .launch_plan("space", "base", "game", Platform::Mac, &directory, "en")
             .await
     });
     tokio::time::timeout(Duration::from_secs(2), async {
@@ -1908,7 +1965,14 @@ async fn launch_cannot_read_installation_while_download_holds_its_lock() {
     let mock = Mock::new(Vec::new());
     let result = mock
         .client(false)
-        .launch_plan("space", "base", "game", "Mac", temporary.path(), "en")
+        .launch_plan(
+            "space",
+            "base",
+            "game",
+            Platform::Mac,
+            temporary.path(),
+            "en",
+        )
         .await;
     assert!(matches!(result, Err(EpicError::AlreadyDownloading)));
     assert!(mock.requests().is_empty());
@@ -2066,7 +2130,22 @@ async fn achievements_retry_unauthorized_with_refreshed_credentials() {
 #[test]
 fn an_installation_folder_is_named_after_its_identity_hash() {
     assert_eq!(
-        super::installation_directory_name("namespace", "catalog", "app/name", "Mac"),
+        super::installation_directory_name("namespace", "catalog", "app/name", Platform::Mac),
         "epic-c5d3f0bff0a8491d3095fdd858bc870fe8416f60-Mac"
     );
+    assert_eq!(
+        super::installation_directory_name("namespace", "catalog", "app/name", Platform::Windows),
+        "epic-c5d3f0bff0a8491d3095fdd858bc870fe8416f60-Windows"
+    );
+}
+
+#[test]
+fn an_installation_receipt_keeps_epic_s_spelling() {
+    let temp = tempfile::tempdir().unwrap();
+    let installation = launch_installation(temp.path());
+    let mut written = serde_json::to_value(&installation).unwrap();
+    assert_eq!(written["platform"], "Mac");
+    written["platform"] = json!("Windows");
+    let read: Installation = serde_json::from_value(written).unwrap();
+    assert_eq!(read.platform, Platform::Windows);
 }

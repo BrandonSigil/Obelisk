@@ -10,7 +10,7 @@ use crate::{
     sessions::Failure,
 };
 use obelisk_core::{
-    installation::TransferProgress, launch::LaunchTarget, transfer::CancelToken,
+    Platform, installation::TransferProgress, launch::LaunchTarget, transfer::CancelToken,
     watch::next_matching,
 };
 use std::{
@@ -387,7 +387,7 @@ impl<T: Transport> Network for AccountSession<T> {
         &'a self,
         app_id: u32,
         language: &'a str,
-    ) -> BoxFuture<'a, Result<String, Failure>> {
+    ) -> BoxFuture<'a, Result<Platform, Failure>> {
         Box::pin(async move { self.serving().await?.platform(app_id, language).await })
     }
     fn download<'a>(
@@ -428,7 +428,7 @@ impl<T: Transport> Network for AccountSession<T> {
     fn launch_target<'a>(
         &'a self,
         app_id: u32,
-        platform: &'a str,
+        platform: Platform,
         install: &'a Path,
     ) -> BoxFuture<'a, Result<LaunchTarget, Failure>> {
         Box::pin(async move {

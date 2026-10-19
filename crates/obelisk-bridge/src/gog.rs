@@ -3,7 +3,7 @@
 use std::{collections::HashMap, sync::Arc};
 
 use crate::{
-    LibraryCache,
+    GamePlatform, LibraryCache,
     library_cache::{self, GameAchievements, GogLibrary, LibraryAchievement},
 };
 use gog_kit::{auth, client};
@@ -169,8 +169,8 @@ impl From<client::Achievement> for LibraryAchievement {
 /// any download, and its size.
 #[derive(Clone, Debug, uniffi::Record)]
 pub struct GogGameDetails {
-    /// `macos` or `windows`; unknown when GOG could not tell.
-    pub platform: Option<String>,
+    /// Unknown when GOG could not tell.
+    pub platform: Option<GamePlatform>,
     /// Unknown when GOG serves no build for the platform.
     pub installation_bytes: Option<u64>,
 }
@@ -178,7 +178,7 @@ pub struct GogGameDetails {
 impl From<client::GameDetails> for GogGameDetails {
     fn from(details: client::GameDetails) -> Self {
         Self {
-            platform: details.platform,
+            platform: details.platform.map(Into::into),
             installation_bytes: details.installation_bytes,
         }
     }

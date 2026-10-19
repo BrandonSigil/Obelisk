@@ -8,7 +8,7 @@ use crate::{
     runtimes::{self, Runtime, Runtimes},
     supervisor::{self, FailureReason, Phase, Provider, Record},
 };
-use obelisk_core::transfer::CancelToken;
+use obelisk_core::{Platform, transfer::CancelToken};
 use std::{
     fmt,
     sync::{
@@ -156,7 +156,7 @@ pub trait Handover<P: Storefront>: Send + Sync + 'static {
     type Prepared: Send + 'static;
     /// The platform of the build it starts, which decides the runtimes it
     /// needs before it is prepared.
-    fn platform(&self) -> &str;
+    fn platform(&self) -> Platform;
     /// Readies the game, such as its Wine prefix, which may take minutes, and
     /// then the short-lived credentials it starts with. A failure is definite.
     fn prepare(&self) -> BoxFuture<'_, Result<Self::Prepared, Failure>>;
