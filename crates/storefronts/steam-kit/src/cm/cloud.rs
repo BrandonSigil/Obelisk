@@ -188,9 +188,9 @@ struct UploadTransport<'a, F> {
     authorized: &'a F,
 }
 
-impl<F: Fn() -> bool> crate::cloud::upload::Transport for UploadTransport<'_, F> {
-    async fn commit(
-        &mut self,
+impl<F: Fn() -> bool> UploadTransport<'_, F> {
+    async fn send_commit(
+        &self,
         request: &wire::CommitUploadRequest,
     ) -> Result<wire::CommitUploadResponse, CloudError> {
         if !(self.authorized)() {
@@ -209,6 +209,49 @@ impl<F: Fn() -> bool> crate::cloud::upload::Transport for UploadTransport<'_, F>
             .next()
             .await?;
         commit_response(packet.header.result, &packet.body, request.succeeded)
+    }
+
+    async fn send_block(&self, block: &wire::UploadBlock, bytes: &[u8]) -> Result<(), CloudError> {
+        let request = crate::cloud::upload::block_request(block, bytes)?;
+        if !(self.authorized)() {
+            return Err(CloudError::Revoked);
+        }
+        let response = self
+            .http
+            .execute(request)
+            .await
+            .map_err(|_| CloudError::Network)?;
+        if !response.status().is_success() {
+            return Err(CloudError::Network);
+        }
+        crate::client::read_bounded(response, 1024 * 1024)
+            .await
+            .map_err(|_| CloudError::Network)?;
+        Ok(())
+    }
+}
+
+impl<F: Fn() -> bool> crate::cloud::upload::Transport for UploadTransport<'_, F> {
+    async fn commit(
+        &mut self,
+        request: &wire::CommitUploadRequest,
+    ) -> Result<wire::CommitUploadResponse, CloudError> {
+        self.send_commit(request).await
+    }
+    async fn commits(
+        &mut self,
+        requests: &[wire::CommitUploadRequest],
+    ) -> Result<Vec<wire::CommitUploadResponse>, CloudError> {
+        let this = &*self;
+        // Collected first, as in `calls`.
+        let commits: Vec<_> = requests
+            .iter()
+            .map(|request| this.send_commit(request))
+            .collect();
+        futures_util::stream::iter(commits)
+            .buffered(upload::PARALLEL_FILES)
+            .try_collect()
+            .await
     }
     async fn call<R: Message + Default>(
         &mut self,
@@ -243,21 +286,24 @@ impl<F: Fn() -> bool> crate::cloud::upload::Transport for UploadTransport<'_, F>
             .await
     }
     async fn block(&mut self, block: &wire::UploadBlock, bytes: &[u8]) -> Result<(), CloudError> {
-        let request = crate::cloud::upload::block_request(block, bytes)?;
-        if !(self.authorized)() {
-            return Err(CloudError::Revoked);
-        }
-        let response = self
-            .http
-            .execute(request)
-            .await
-            .map_err(|_| CloudError::Network)?;
-        if !response.status().is_success() {
-            return Err(CloudError::Network);
-        }
-        crate::client::read_bounded(response, 1024 * 1024)
-            .await
-            .map_err(|_| CloudError::Network)?;
+        self.send_block(block, bytes).await
+    }
+    async fn bodies(&mut self, files: &[(&[wire::UploadBlock], &[u8])]) -> Result<(), CloudError> {
+        let this = &*self;
+        // Collected first, as in `calls`.
+        let files: Vec<_> = files
+            .iter()
+            .map(|(blocks, bytes)| async move {
+                for block in *blocks {
+                    this.send_block(block, bytes).await?;
+                }
+                Ok::<_, CloudError>(())
+            })
+            .collect();
+        futures_util::stream::iter(files)
+            .buffer_unordered(upload::PARALLEL_FILES)
+            .try_collect::<Vec<()>>()
+            .await?;
         Ok(())
     }
     async fn listing(&mut self, app: u32) -> Result<CloudListing, CloudError> {
@@ -357,6 +403,48 @@ mod parallel_tests {
         let names: Vec<_> = answers.unwrap().into_iter().map(|a| a.name).collect();
         let sent: Vec<_> = deletes.into_iter().map(|d| d.name).collect();
         assert_eq!(names, sent);
+    }
+}
+
+#[cfg(test)]
+mod parallel_commit_tests {
+    use super::*;
+    use crate::cloud::upload::Transport;
+
+    #[tokio::test]
+    async fn commits_keep_ten_in_flight() {
+        let (connection, mut server) = super::super::test_server::connection(1, true).await;
+        let http = reqwest::Client::new();
+        let mut transport = UploadTransport {
+            connection: &connection,
+            http: &http,
+            authorized: &|| true,
+        };
+        let commits: Vec<_> = (0..11)
+            .map(|index| wire::CommitUploadRequest {
+                succeeded: true,
+                app_id: 7,
+                sha: vec![index; 20],
+                name: format!("save-{index}"),
+            })
+            .collect();
+        let receipt = wire::CommitUploadResponse {
+            committed: Some(true),
+        };
+        let answer = async {
+            let mut sent = Vec::new();
+            for _ in 0..upload::PARALLEL_FILES {
+                sent.push(server.request(SERVICE_REQUEST).await);
+            }
+            assert!(server.quiet().await, "an eleventh commit waits");
+            for packet in &sent {
+                server.reply(packet, SERVICE_RESPONSE, &receipt).await;
+            }
+            let last = server.request(SERVICE_REQUEST).await;
+            server.reply(&last, SERVICE_RESPONSE, &receipt).await;
+        };
+        let (receipts, ()) = tokio::join!(transport.commits(&commits), answer);
+        assert_eq!(receipts.unwrap(), vec![receipt; 11]);
     }
 }
 

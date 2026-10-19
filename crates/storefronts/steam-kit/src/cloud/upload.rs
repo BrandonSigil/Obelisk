@@ -16,6 +16,10 @@ const MAX_FILE: usize = 256 * 1024 * 1024;
 const MAX_JOURNAL: u64 = 64 * 1024 * 1024;
 /// How many file requests of one batch Steam's client keeps in flight.
 pub(crate) const PARALLEL_FILES: usize = 10;
+/// How many bytes Steam's client uploads at once, unless one file is larger.
+const PARALLEL_BYTES: u64 = 64 * 1024 * 1024;
+/// The journal's format. Schema 3 journals still open.
+const SCHEMA: u32 = 4;
 
 /// Bytes must come from the coordinator's immutable archive, not a running game.
 pub struct CloudUpload {
@@ -59,8 +63,24 @@ struct State {
     phase: UploadPhase,
     unanswered_mutation: bool,
     // Begin-file replied; no positive commit has been sent while unanswered is
-    // false. Retain the exact file needed to report an interrupted HTTP upload.
-    staged_upload: Option<usize>,
+    // false. Retain the exact files needed to report interrupted HTTP uploads.
+    // Schema 3 kept at most one, as `staged_upload`.
+    #[serde(alias = "staged_upload", deserialize_with = "staged")]
+    staged_uploads: Vec<usize>,
+}
+
+/// The staged uploads as either schema wrote them.
+fn staged<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Vec<usize>, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Staged {
+        One(Option<usize>),
+        Many(Vec<usize>),
+    }
+    Ok(match Staged::deserialize(deserializer)? {
+        Staged::One(one) => one.into_iter().collect(),
+        Staged::Many(many) => many,
+    })
 }
 
 /// Private, locked journal and immutable file bodies. No signed URL, header or
@@ -115,13 +135,13 @@ impl UploadTransaction {
             files.push(file);
         }
         let state = State {
-            schema: 3,
+            schema: SCHEMA,
             before,
             uploads: files,
             deletes,
             phase: UploadPhase::Prepared,
             unanswered_mutation: false,
-            staged_upload: None,
+            staged_uploads: Vec::new(),
         };
         expected(&state)?;
         let lock = lock(directory.path())?;
@@ -142,23 +162,29 @@ impl UploadTransaction {
         let lock = lock(directory)?;
         let path = directory.join("state.json");
         regular(&path, MAX_JOURNAL)?;
-        let state: State =
+        let mut state: State =
             serde_json::from_slice(&fs::read(&path).map_err(|_| CloudError::Storage)?)
                 .map_err(|_| CloudError::Storage)?;
-        if state.schema != 3 || state.before.app_id == 0 || state.before.steam_id == 0 {
+        if !(3..=SCHEMA).contains(&state.schema)
+            || state.before.app_id == 0
+            || state.before.steam_id == 0
+        {
             return Err(CloudError::Invalid("upload journal"));
         }
+        state.schema = SCHEMA;
         expected(&state)?;
-        if state
-            .staged_upload
-            .is_some_and(|i| i >= state.uploads.len())
+        let mut staged = state.staged_uploads.clone();
+        staged.sort_unstable();
+        staged.dedup();
+        if staged.len() != state.staged_uploads.len()
+            || staged.last().is_some_and(|i| *i >= state.uploads.len())
             || matches!(
                 state.phase,
                 UploadPhase::Prepared
                     | UploadPhase::Completing { .. }
                     | UploadPhase::Acknowledged
                     | UploadPhase::Verified
-            ) && (state.staged_upload.is_some() || state.unanswered_mutation)
+            ) && (!state.staged_uploads.is_empty() || state.unanswered_mutation)
         {
             return Err(CloudError::Invalid("upload progress"));
         }
@@ -212,7 +238,7 @@ impl UploadTransaction {
             && match self.phase() {
                 UploadPhase::Prepared | UploadPhase::Acknowledged | UploadPhase::Verified => true,
                 UploadPhase::Closed { .. } => {
-                    !self.state.unanswered_mutation && self.state.staged_upload.is_none()
+                    !self.state.unanswered_mutation && self.state.staged_uploads.is_empty()
                 }
                 _ => false,
             }
@@ -236,11 +262,11 @@ impl UploadTransaction {
     fn save_file_progress(
         &mut self,
         unanswered: bool,
-        staged: Option<usize>,
+        staged: Vec<usize>,
     ) -> Result<(), CloudError> {
         let mut next = self.state.clone();
         next.unanswered_mutation = unanswered;
-        next.staged_upload = staged;
+        next.staged_uploads = staged;
         self.persist(next)
     }
 
@@ -402,6 +428,27 @@ pub(crate) trait Transport {
         Ok(answers)
     }
     async fn block(&mut self, block: &wire::UploadBlock, bytes: &[u8]) -> Result<(), CloudError>;
+    /// Sends each file's blocks in sequence. A transport may send up to
+    /// `PARALLEL_FILES` files at once; the first failure ends the set.
+    async fn bodies(&mut self, files: &[(&[wire::UploadBlock], &[u8])]) -> Result<(), CloudError> {
+        for (blocks, bytes) in files {
+            for block in *blocks {
+                self.block(block, bytes).await?;
+            }
+        }
+        Ok(())
+    }
+    /// Commits each file, as `calls` answers requests.
+    async fn commits(
+        &mut self,
+        requests: &[wire::CommitUploadRequest],
+    ) -> Result<Vec<wire::CommitUploadResponse>, CloudError> {
+        let mut receipts = Vec::with_capacity(requests.len());
+        for request in requests {
+            receipts.push(self.commit(request).await?);
+        }
+        Ok(receipts)
+    }
     async fn listing(&mut self, app_id: u32) -> Result<CloudListing, CloudError>;
 }
 
@@ -466,7 +513,7 @@ pub(crate) async fn execute(
                 if authorize() {
                     // A failed HTTP transfer still needs its negative file
                     // receipt. Never negate an unanswered positive commit.
-                    let _ = abort_staged_upload(transport, job, authorize).await;
+                    let _ = abort_staged_uploads(transport, job, authorize).await;
                     if job.poisoned {
                         return Err(CloudError::Storage);
                     }
@@ -532,59 +579,8 @@ async fn upload_files(
     batch_id: u64,
     authorize: &impl Fn() -> bool,
 ) -> Result<(), CloudError> {
-    for index in 0..job.state.uploads.len() {
-        let file = job.state.uploads[index].clone();
-        check(authorize)?;
-        let bytes = job.content(index, &file)?;
-        let sha = Sha1::digest(&bytes).to_vec();
-        job.save_progress(job.phase().clone(), true)?;
-        let plan: wire::BeginUploadResponse = transport
-            .call(
-                "Cloud.ClientBeginFileUpload#1",
-                &wire::BeginUploadRequest {
-                    app_id: job.app_id(),
-                    file_size: file.size,
-                    raw_size: file.size,
-                    sha: sha.clone(),
-                    timestamp: file.timestamp,
-                    name: file.name.clone(),
-                    platforms: file.platforms,
-                    can_encrypt: false,
-                    batch_id,
-                },
-            )
-            .await?;
-        job.save_file_progress(false, Some(index))?;
-        if plan.encrypted || plan.blocks.len() > 4096 {
-            return Err(CloudError::Invalid("upload format"));
-        }
-        // Validate every block before sending the first. Execute sequentially,
-        // preserving control requests around multipart data blocks.
-        for block in &plan.blocks {
-            block_request(block, &bytes)?;
-        }
-        for block in &plan.blocks {
-            check(authorize)?;
-            transport.block(block, &bytes).await?;
-        }
-        check(authorize)?;
-        job.save_progress(job.phase().clone(), true)?;
-        let committed: wire::CommitUploadResponse = transport
-            .commit(&wire::CommitUploadRequest {
-                succeeded: true,
-                app_id: job.app_id(),
-                sha,
-                name: file.name.clone(),
-            })
-            .await?;
-        // A missing result is malformed, not a negative acknowledgement.
-        if committed.committed.is_none() {
-            return Err(CloudError::Invalid("file commit result"));
-        }
-        job.save_file_progress(false, None)?;
-        if committed.committed != Some(true) {
-            return Err(CloudError::NotCommitted);
-        }
+    for wave in waves(&job.state.uploads) {
+        upload_wave(transport, job, batch_id, &wave, authorize).await?;
     }
     if job.state.deletes.is_empty() {
         return Ok(());
@@ -610,6 +606,107 @@ async fn upload_files(
     job.save_progress(job.phase().clone(), false)
 }
 
+/// The uploads' indexes in order, grouped as Steam's client bounds its
+/// parallel uploads: at most `PARALLEL_FILES` files and `PARALLEL_BYTES`.
+fn waves(uploads: &[CloudFile]) -> Vec<Vec<usize>> {
+    let mut waves: Vec<Vec<usize>> = Vec::new();
+    let mut bytes = 0;
+    for (index, file) in uploads.iter().enumerate() {
+        let size = u64::from(file.size);
+        match waves.last_mut() {
+            Some(wave) if wave.len() < PARALLEL_FILES && bytes + size <= PARALLEL_BYTES => {
+                wave.push(index);
+                bytes += size;
+            }
+            _ => {
+                waves.push(vec![index]);
+                bytes = size;
+            }
+        }
+    }
+    waves
+}
+
+/// Uploads the files at `wave` together, as Steam's client does: their
+/// begins, then their bodies, then their commits. Between the begin replies
+/// and the commits, the journal lists the wave as staged.
+async fn upload_wave(
+    transport: &mut impl Transport,
+    job: &mut UploadTransaction,
+    batch_id: u64,
+    wave: &[usize],
+    authorize: &impl Fn() -> bool,
+) -> Result<(), CloudError> {
+    let mut files = Vec::with_capacity(wave.len());
+    for &index in wave {
+        let file = job.state.uploads[index].clone();
+        let bytes = job.content(index, &file)?;
+        let sha = Sha1::digest(&bytes).to_vec();
+        files.push((file, bytes, sha));
+    }
+    let begins: Vec<_> = files
+        .iter()
+        .map(|(file, _, sha)| wire::BeginUploadRequest {
+            app_id: job.app_id(),
+            file_size: file.size,
+            raw_size: file.size,
+            sha: sha.clone(),
+            timestamp: file.timestamp,
+            name: file.name.clone(),
+            platforms: file.platforms,
+            can_encrypt: false,
+            batch_id,
+        })
+        .collect();
+    check(authorize)?;
+    job.save_progress(job.phase().clone(), true)?;
+    let plans: Vec<wire::BeginUploadResponse> = transport
+        .calls("Cloud.ClientBeginFileUpload#1", &begins)
+        .await?;
+    job.save_file_progress(false, wave.to_vec())?;
+    // Validate every block before sending the first. Each file's blocks go
+    // in sequence, preserving control requests around multipart data blocks.
+    for (plan, (_, bytes, _)) in plans.iter().zip(&files) {
+        if plan.encrypted || plan.blocks.len() > 4096 {
+            return Err(CloudError::Invalid("upload format"));
+        }
+        for block in &plan.blocks {
+            block_request(block, bytes)?;
+        }
+    }
+    let bodies: Vec<_> = plans
+        .iter()
+        .zip(&files)
+        .map(|(plan, (_, bytes, _))| (plan.blocks.as_slice(), bytes.as_slice()))
+        .collect();
+    check(authorize)?;
+    transport.bodies(&bodies).await?;
+    let commits: Vec<_> = files
+        .iter()
+        .map(|(file, _, sha)| wire::CommitUploadRequest {
+            succeeded: true,
+            app_id: job.app_id(),
+            sha: sha.clone(),
+            name: file.name.clone(),
+        })
+        .collect();
+    check(authorize)?;
+    job.save_progress(job.phase().clone(), true)?;
+    let receipts = transport.commits(&commits).await?;
+    // A missing result is malformed, not a negative acknowledgement.
+    if receipts.iter().any(|receipt| receipt.committed.is_none()) {
+        return Err(CloudError::Invalid("file commit result"));
+    }
+    job.save_file_progress(false, Vec::new())?;
+    if receipts
+        .iter()
+        .any(|receipt| receipt.committed != Some(true))
+    {
+        return Err(CloudError::NotCommitted);
+    }
+    Ok(())
+}
+
 async fn close_batch(
     transport: &mut impl Transport,
     job: &mut UploadTransaction,
@@ -628,9 +725,10 @@ async fn close_batch(
     job.save(UploadPhase::Closed { batch_id })
 }
 
-/// Report a failed transfer only when the durable journal proves that its file
-/// commit was never sent. A lost abort reply is uncertain and is never replayed.
-async fn abort_staged_upload(
+/// Report failed transfers only when the durable journal proves that their
+/// file commits were never sent. A lost abort reply is uncertain and is never
+/// replayed.
+async fn abort_staged_uploads(
     transport: &mut impl Transport,
     job: &mut UploadTransaction,
     authorize: &impl Fn() -> bool,
@@ -638,28 +736,32 @@ async fn abort_staged_upload(
     if job.state.unanswered_mutation {
         return Err(CloudError::Uncertain);
     }
-    let Some(index) = job.state.staged_upload else {
+    if job.state.staged_uploads.is_empty() {
         return Ok(());
-    };
+    }
     check(authorize)?;
-    let file = job.state.uploads[index].clone();
-    let sha = Sha1::digest(job.content(index, &file)?).to_vec();
-    job.save_file_progress(true, Some(index))?;
-    let response: wire::CommitUploadResponse = transport
-        .commit(&wire::CommitUploadRequest {
+    let mut aborts = Vec::with_capacity(job.state.staged_uploads.len());
+    for &index in &job.state.staged_uploads {
+        let file = &job.state.uploads[index];
+        aborts.push(wire::CommitUploadRequest {
             succeeded: false,
             app_id: job.app_id(),
-            sha,
-            name: file.name,
-        })
-        .await?;
-    if response.committed != Some(false) {
+            sha: Sha1::digest(job.content(index, file)?).to_vec(),
+            name: file.name.clone(),
+        });
+    }
+    job.save_progress(job.phase().clone(), true)?;
+    let receipts = transport.commits(&aborts).await?;
+    if receipts
+        .iter()
+        .any(|receipt| receipt.committed != Some(false))
+    {
         return Err(CloudError::Invalid("failed transfer receipt"));
     }
-    job.save_file_progress(false, None)
+    job.save_file_progress(false, Vec::new())
 }
 
-/// Reports an unfinished HTTP file as failed, then closes the known batch. No
+/// Reports unfinished HTTP files as failed, then closes the known batch. No
 /// file request is resent. A lost Begin reply or an unanswered commit/deletion
 /// remains blocked, even if Steam previously acknowledged batch closure.
 pub(crate) async fn settle(
@@ -685,7 +787,7 @@ pub(crate) async fn settle(
         } => *batch_id,
         _ => return Err(CloudError::Uncertain),
     };
-    abort_staged_upload(transport, job, authorize).await?;
+    abort_staged_uploads(transport, job, authorize).await?;
     check(authorize)?;
     job.save(UploadPhase::Interrupted {
         batch_id: Some(batch_id),

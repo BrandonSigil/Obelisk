@@ -1,5 +1,4 @@
 use super::*;
-use std::collections::VecDeque;
 
 #[test]
 fn upload_platform_wire_defaults_do_not_turn_none_into_all() {
@@ -69,8 +68,9 @@ fn fixture() -> (tempfile::TempDir, UploadTransaction, Fake) {
             calls: vec![],
             fault: None,
             commit: true,
-            blocks: VecDeque::new(),
-            pending: None,
+            blocks: BTreeMap::new(),
+            pending: BTreeMap::new(),
+            batch: (vec!["new".into()], vec!["delete".into()]),
             concurrent_edit: false,
             pause_block: false,
             move_journal: None,
@@ -110,8 +110,11 @@ struct Fake {
     calls: Vec<String>,
     fault: Option<&'static str>,
     commit: bool,
-    blocks: VecDeque<Vec<u8>>,
-    pending: Option<wire::BeginUploadRequest>,
+    /// The bytes each file's blocks carried, by file name.
+    blocks: BTreeMap<String, Vec<u8>>,
+    pending: BTreeMap<String, wire::BeginUploadRequest>,
+    /// The uploads and deletions the batch must announce.
+    batch: (Vec<String>, Vec<String>),
     /// Someone else's file appears once the batch completed.
     concurrent_edit: bool,
     pause_block: bool,
@@ -142,8 +145,8 @@ impl Transport for Fake {
         match name {
             "Cloud.BeginAppUploadBatch#1" => {
                 let req = wire::BeginBatchRequest::decode(data.as_slice()).unwrap();
-                assert_eq!(req.uploads, ["new"]);
-                assert_eq!(req.deletes, ["delete"]);
+                assert_eq!(req.uploads, self.batch.0);
+                assert_eq!(req.deletes, self.batch.1);
                 if let Some((from, to)) = self.move_journal.take() {
                     fs::rename(from, to).unwrap();
                 }
@@ -156,52 +159,46 @@ impl Transport for Fake {
                 )
             }
             "Cloud.ClientBeginFileUpload#1" => {
-                if self.pending.is_some() {
+                let req = wire::BeginUploadRequest::decode(data.as_slice()).unwrap();
+                if self.pending.contains_key(&req.name) {
                     return Err(CloudError::Cm(crate::cm::CmError::Rejected {
                         action: "fixture file busy",
                         result: 10,
                     }));
                 }
-                let req = wire::BeginUploadRequest::decode(data.as_slice()).unwrap();
                 assert!(!req.can_encrypt);
                 assert_eq!(req.file_size, req.raw_size);
-                self.pending = Some(req);
+                // Two parts, each block's path naming its file.
+                let split = req.file_size.min(3);
+                let block = |path: String, offset: u32, length: u32| wire::UploadBlock {
+                    https: true,
+                    host: "steamcloud-test.storage.googleapis.com".into(),
+                    path,
+                    method: 4,
+                    offset: offset.into(),
+                    length,
+                    ..Default::default()
+                };
                 let plan = wire::BeginUploadResponse {
                     encrypted: false,
                     blocks: vec![
-                        wire::UploadBlock {
-                            https: true,
-                            host: "steamcloud-test.storage.googleapis.com".into(),
-                            path: "/part1?secret=never-log".into(),
-                            method: 4,
-                            offset: 0,
-                            length: 3,
-                            ..Default::default()
-                        },
-                        wire::UploadBlock {
-                            https: true,
-                            host: "steamcloud-test.storage.googleapis.com".into(),
-                            path: "/part2".into(),
-                            method: 4,
-                            offset: 3,
-                            length: 5,
-                            ..Default::default()
-                        },
+                        block(format!("/{}/part1?secret=never-log", req.name), 0, split),
+                        block(format!("/{}/part2", req.name), split, req.file_size - split),
                     ],
                 };
+                self.pending.insert(req.name.clone(), req);
                 self.response(name, &plan)
             }
             "Cloud.ClientCommitFileUpload#1" => {
                 let req = wire::CommitUploadRequest::decode(data.as_slice()).unwrap();
-                let pending = self.pending.take().unwrap();
+                let pending = self.pending.remove(&req.name).unwrap();
                 assert_eq!(req.sha, pending.sha);
-                assert_eq!(req.name, pending.name);
+                let sent = self.blocks.remove(&req.name).unwrap_or_default();
                 if !req.succeeded {
                     self.calls.push("abort-file".into());
-                    self.blocks.clear();
                 }
                 if self.commit && req.succeeded {
-                    let bytes: Vec<_> = self.blocks.drain(..).flatten().collect();
+                    let bytes = sent;
                     assert_eq!(
                         crate::content::hex(&Sha1::digest(&bytes)),
                         crate::content::hex(&req.sha)
@@ -245,8 +242,11 @@ impl Transport for Fake {
             return Err(CloudError::Network);
         }
         let request = block_request(block, bytes)?;
+        let name = block.path.split('/').nth(1).unwrap().to_owned();
         self.blocks
-            .push_back(request.body().unwrap().as_bytes().unwrap().into());
+            .entry(name)
+            .or_default()
+            .extend_from_slice(request.body().unwrap().as_bytes().unwrap());
         if self.pause_block {
             std::future::pending::<()>().await;
         }
@@ -320,7 +320,7 @@ async fn http_failure_reports_failed_file_before_batch_closure() {
         Err(CloudError::Network)
     ));
     assert!(job.is_settled());
-    assert!(server.pending.is_none());
+    assert!(server.pending.is_empty());
     assert_eq!(
         &server.calls[server.calls.len() - 4..],
         [
@@ -744,4 +744,154 @@ fn journal_lock_and_immutable_content_survive_reopen_and_reject_links() {
     drop(reopened);
     fs::hard_link(directory.join("file-0.bin"), directory.join("alias.bin")).unwrap();
     assert!(UploadTransaction::open(&directory).is_err());
+}
+
+/// A batch of `uploads` new files and `deletes` deletions, beside a kept file.
+fn batch_fixture(uploads: usize, deletes: usize) -> (tempfile::TempDir, UploadTransaction, Fake) {
+    let (root, job, mut server) = fixture();
+    drop(job);
+    let parent = root.path().canonicalize().unwrap();
+    let doomed: Vec<String> = (0..deletes).map(|i| format!("old-{i:02}")).collect();
+    let mut before = listing(vec![file("keep", b"same")]);
+    before
+        .files
+        .extend(doomed.iter().map(|name| file(name, name.as_bytes())));
+    let new: Vec<_> = (0..uploads)
+        .map(|i| CloudUpload {
+            name: format!("file-{i:02}"),
+            bytes: format!("data-{i}").into_bytes(),
+            timestamp: 4,
+            platforms: 7,
+        })
+        .collect();
+    server.batch = (new.iter().map(|u| u.name.clone()).collect(), doomed.clone());
+    server.remote = before.clone();
+    server.bodies = doomed
+        .iter()
+        .map(|name| (name.clone(), name.as_bytes().to_vec()))
+        .chain([("keep".to_owned(), b"same".to_vec())])
+        .collect();
+    let job = UploadTransaction::create(&parent, before, new, doomed).unwrap();
+    (root, job, server)
+}
+
+#[tokio::test]
+async fn files_go_in_waves_of_ten_before_the_deletions() {
+    let (_root, mut job, mut server) = batch_fixture(12, 3);
+    execute(&mut server, &mut job, &|| true).await.unwrap();
+    assert_eq!(job.phase(), &UploadPhase::Verified);
+    for i in 0..12 {
+        assert_eq!(
+            server.bodies[&format!("file-{i:02}")],
+            format!("data-{i}").as_bytes()
+        );
+    }
+    assert!(!server.bodies.keys().any(|name| name.starts_with("old-")));
+    let wave = |files: usize| {
+        [
+            vec!["Cloud.ClientBeginFileUpload#1"; files],
+            vec!["block"; 2 * files],
+            vec!["Cloud.ClientCommitFileUpload#1"; files],
+        ]
+        .concat()
+    };
+    let expected = [
+        vec!["listing", "Cloud.BeginAppUploadBatch#1"],
+        wave(PARALLEL_FILES),
+        wave(2),
+        vec!["Cloud.ClientDeleteFile#1"; 3],
+        vec![
+            "Cloud.CompleteAppUploadBatchBlocking#1",
+            "complete-result-1",
+            "listing",
+        ],
+    ]
+    .concat();
+    assert_eq!(server.calls, expected);
+}
+
+#[tokio::test]
+async fn a_failed_body_reports_every_file_of_its_wave_before_closing() {
+    let (_root, mut job, mut server) = batch_fixture(3, 1);
+    server.fault = Some("block");
+    assert!(matches!(
+        execute(&mut server, &mut job, &|| true).await,
+        Err(CloudError::Network)
+    ));
+    assert!(job.is_settled());
+    assert!(server.pending.is_empty());
+    assert!(!server.bodies.contains_key("file-00"));
+    assert_eq!(
+        &server.calls[server.calls.len() - 8..],
+        [
+            "Cloud.ClientCommitFileUpload#1",
+            "abort-file",
+            "Cloud.ClientCommitFileUpload#1",
+            "abort-file",
+            "Cloud.ClientCommitFileUpload#1",
+            "abort-file",
+            "Cloud.CompleteAppUploadBatchBlocking#1",
+            "complete-result-2"
+        ]
+    );
+}
+
+#[test]
+fn a_schema_3_journal_opens_with_its_one_staged_upload() {
+    let (_root, job, _server) = fixture();
+    let directory = job.directory().to_owned();
+    let path = directory.join("state.json");
+    let mut current = serde_json::to_value(&job.state).unwrap();
+    drop(job);
+    let object = current.as_object_mut().unwrap();
+    object.remove("staged_uploads");
+    object.insert("schema".into(), 3.into());
+    object.insert(
+        "phase".into(),
+        serde_json::json!({"Open": {"batch_id": 123}}),
+    );
+    for (staged, opens) in [
+        (serde_json::json!(0), true),
+        (serde_json::Value::Null, true),
+        (serde_json::json!(1), false),
+        (serde_json::json!([0, 0]), false),
+    ] {
+        let mut old = current.clone();
+        old["staged_upload"] = staged.clone();
+        fs::write(&path, serde_json::to_vec(&old).unwrap()).unwrap();
+        let opened = UploadTransaction::open(&directory);
+        assert_eq!(opened.is_ok(), opens, "{staged}");
+        if let Ok(job) = opened {
+            assert_eq!(
+                job.state.staged_uploads.len(),
+                usize::from(!staged.is_null())
+            );
+            assert_eq!(job.state.schema, SCHEMA);
+            assert!(!job.is_settled());
+        }
+    }
+}
+
+#[test]
+fn a_wave_holds_ten_files_or_64_megabytes() {
+    let sized = |sizes: &[u32]| -> Vec<CloudFile> {
+        sizes
+            .iter()
+            .enumerate()
+            .map(|(i, size)| CloudFile {
+                size: *size,
+                ..file(&format!("file-{i}"), b"")
+            })
+            .collect()
+    };
+    const MB: u32 = 1024 * 1024;
+    assert_eq!(
+        waves(&sized(&[1; 12])),
+        [(0..10).collect::<Vec<_>>(), vec![10, 11]]
+    );
+    assert_eq!(
+        waves(&sized(&[40 * MB, 24 * MB, 1, 100 * MB, 2])),
+        [vec![0, 1], vec![2], vec![3], vec![4]]
+    );
+    assert!(waves(&[]).is_empty());
 }
