@@ -2,6 +2,7 @@
 //! that writes them takes their names here, and a bug report finds them
 //! here, so the two cannot drift apart.
 use crate::queue::Storefront;
+use obelisk_core::Platform;
 use std::{
     fmt::Display,
     fs::{self, File},
@@ -52,22 +53,15 @@ impl Game<'_> {
     }
 }
 
-/// Which build of a game a log is of.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Build {
-    /// Run by Wine.
-    Windows,
-    /// Run as itself.
-    Mac,
-}
-impl Build {
-    /// Every build, in the order that wins a tie between their logs.
-    const ALL: [Self; 2] = [Self::Windows, Self::Mac];
-    fn word(self) -> &'static str {
-        match self {
-            Self::Windows => "wine",
-            Self::Mac => "game",
-        }
+/// Every build, in the order that wins a tie between their logs.
+const BUILDS: [Platform; 2] = [Platform::Windows, Platform::Mac];
+
+/// How a build's log starts: Wine runs a Windows build, a Mac build runs as
+/// itself.
+fn word(build: Platform) -> &'static str {
+    match build {
+        Platform::Windows => "wine",
+        Platform::Mac => "game",
     }
 }
 
@@ -81,8 +75,8 @@ pub fn folder(home: &Path, store: Storefront) -> PathBuf {
 }
 
 /// The file a `build` of `game` writes its standard error to while it runs.
-pub fn game_log(home: &Path, game: Game<'_>, build: Build) -> PathBuf {
-    folder(home, game.store()).join(format!("{}-{}.log", build.word(), game.id()))
+pub fn game_log(home: &Path, game: Game<'_>, build: Platform) -> PathBuf {
+    folder(home, game.store()).join(format!("{}-{}.log", word(build), game.id()))
 }
 
 /// Opens `log` empty for a new launch. The last launch's log stays beside it
@@ -147,8 +141,8 @@ pub fn files(home: &Path, game: Option<Game<'_>>, now: SystemTime) -> Vec<PathBu
 fn game_files(home: &Path, game: Game<'_>) -> Vec<PathBuf> {
     let mut files = Vec::new();
     // A build's logs are dated by its last launch; the input log is not.
-    let mut played: Option<(Build, SystemTime)> = None;
-    for build in Build::ALL {
+    let mut played: Option<(Platform, SystemTime)> = None;
+    for build in BUILDS {
         let log = game_log(home, game, build);
         let Some(modified) = [modified(&log), modified(&previous_log(&log))]
             .into_iter()

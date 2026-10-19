@@ -1,5 +1,4 @@
 //! Every path Obelisk uses, named once.
-use crate::{diagnostics, queue::Storefront};
 use std::path::{Path, PathBuf};
 
 /// Where Obelisk keeps everything, derived from its library directory, its
@@ -21,12 +20,6 @@ pub struct Locations {
     /// download, or a launch that misses them, gets from Valve's CDN.
     pub steam_runtime_package: PathBuf,
     pub steam_runtime_cache: PathBuf,
-    /// Where Steam games log, and the Steam host leaves its launch reports.
-    pub steam_diagnostics: PathBuf,
-    /// Where Epic games log, whichever build runs.
-    pub epic_diagnostics: PathBuf,
-    /// Where GOG games log, whichever build runs.
-    pub gog_diagnostics: PathBuf,
     /// The Voile runtimes that run Windows games: the pinned release and a
     /// development runtime.
     pub voile: PathBuf,
@@ -47,9 +40,6 @@ impl Locations {
             helpers,
             steam_runtime_package: crate::valve::payload(&steam_runtime_cache),
             steam_runtime_cache,
-            steam_diagnostics: diagnostics::folder(home, Storefront::Steam),
-            epic_diagnostics: diagnostics::folder(home, Storefront::Epic),
-            gog_diagnostics: diagnostics::folder(home, Storefront::Gog),
             voile: library.join("Voile"),
             wine_prefixes: library.join("Prefixes"),
             library: library.to_owned(),

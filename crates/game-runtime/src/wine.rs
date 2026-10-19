@@ -566,11 +566,7 @@ impl Installation {
 
 /// Where Wine logs `game`: in its storefront's diagnostics folder.
 fn log(locations: &crate::Locations, game: crate::profile::Game<'_>) -> PathBuf {
-    crate::diagnostics::game_log(
-        &locations.home,
-        game.into(),
-        crate::diagnostics::Build::Windows,
-    )
+    crate::diagnostics::game_log(&locations.home, game.into(), Platform::Windows)
 }
 
 /// Deletes `folder`. A missing one is already gone; a link in its place is

@@ -1,5 +1,4 @@
 //! Every path Obelisk uses, named once, and the removal of an installation.
-use game_runtime::{diagnostics, queue::Storefront};
 use std::path::{Path, PathBuf};
 
 /// Where Obelisk keeps everything, derived from its library directory, its
@@ -65,7 +64,6 @@ pub fn installed_voile_release(locations: ObeliskLocations) -> Option<String> {
 
 impl From<&ObeliskLocations> for game_runtime::Locations {
     fn from(locations: &ObeliskLocations) -> Self {
-        let home = Path::new(&locations.home);
         Self {
             library: (&locations.library).into(),
             home: (&locations.home).into(),
@@ -77,10 +75,6 @@ impl From<&ObeliskLocations> for game_runtime::Locations {
             helpers: (&locations.helpers).into(),
             steam_runtime_package: (&locations.steam_runtime_package).into(),
             steam_runtime_cache: (&locations.steam_runtime_cache).into(),
-            // Swift never needs the diagnostics folders; Rust derives them from home.
-            steam_diagnostics: diagnostics::folder(home, Storefront::Steam),
-            epic_diagnostics: diagnostics::folder(home, Storefront::Epic),
-            gog_diagnostics: diagnostics::folder(home, Storefront::Gog),
             voile: (&locations.voile).into(),
             wine_prefixes: (&locations.wine_prefixes).into(),
         }
@@ -120,18 +114,7 @@ mod tests {
         assert_eq!(locations.voile, "/library/Voile");
         assert_eq!(locations.wine_prefixes, "/library/Prefixes");
         let runtime = game_runtime::Locations::from(&locations);
-        assert_eq!(
-            runtime.steam_diagnostics,
-            Path::new("/home/Library/Logs/Obelisk/Steam")
-        );
-        assert_eq!(
-            runtime.epic_diagnostics,
-            Path::new("/home/Library/Logs/Obelisk/Epic")
-        );
-        assert_eq!(
-            runtime.gog_diagnostics,
-            Path::new("/home/Library/Logs/Obelisk/GOG")
-        );
+        assert_eq!(runtime.home, Path::new("/home"));
         assert_eq!(
             game_runtime::wine::prefix(
                 &runtime.wine_prefixes,

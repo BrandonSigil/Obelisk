@@ -127,7 +127,7 @@ fn native_target(
         crate::diagnostics::game_log(
             &config.home,
             config.profile_game().into(),
-            crate::diagnostics::Build::Mac,
+            obelisk_core::Platform::Mac,
         ),
     )?)
 }

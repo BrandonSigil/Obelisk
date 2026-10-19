@@ -57,7 +57,7 @@ pub fn without_metal_hud_frames(text: String) -> String {
 mod tests {
     use super::*;
     use crate::obelisk_locations;
-    use game_runtime::diagnostics::Build;
+    use obelisk_core::Platform;
     use std::fs;
 
     #[test]
@@ -76,7 +76,7 @@ mod tests {
             (SessionStorefront::Gog, Game::Gog("7")),
         ];
         for (_, game) in games {
-            let log = diagnostics::game_log(home.path(), game, Build::Mac);
+            let log = diagnostics::game_log(home.path(), game, Platform::Mac);
             fs::create_dir_all(log.parent().unwrap()).unwrap();
             fs::write(&log, "log\n").unwrap();
         }
@@ -85,7 +85,7 @@ mod tests {
                 storefront,
                 id: "7".into(),
             };
-            let log = diagnostics::game_log(home.path(), game, Build::Mac);
+            let log = diagnostics::game_log(home.path(), game, Platform::Mac);
             assert_eq!(
                 diagnostic_files(locations.clone(), subject, SystemTime::now()),
                 [log.to_string_lossy().into_owned()],

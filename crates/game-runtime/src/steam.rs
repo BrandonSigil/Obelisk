@@ -157,7 +157,10 @@ pub fn prepare(
             helpers: locations.helpers.clone(),
             package: locations.steam_runtime_package.clone(),
             cache: locations.steam_runtime_cache.clone(),
-            diagnostics: locations.steam_diagnostics.clone(),
+            diagnostics: crate::diagnostics::folder(
+                &locations.home,
+                crate::queue::Storefront::Steam,
+            ),
             steam_api,
             home: home.clone(),
             wine,
@@ -180,11 +183,7 @@ fn native_target(
         target,
         target.arguments.clone(),
         crate::native::environment(home),
-        crate::diagnostics::game_log(
-            home,
-            crate::diagnostics::Game::Steam(app_id),
-            crate::diagnostics::Build::Mac,
-        ),
+        crate::diagnostics::game_log(home, crate::diagnostics::Game::Steam(app_id), Platform::Mac),
     )?;
     Ok((target, steam_api))
 }

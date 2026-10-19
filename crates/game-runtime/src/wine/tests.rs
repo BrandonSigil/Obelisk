@@ -501,17 +501,15 @@ fn a_private_file_is_read_through_the_z_drive_on_rosetta_and_from_the_c_drive_on
     }
 }
 
-/// Where Wine logs a storefront's games.
-type Diagnostics = fn(&crate::Locations) -> &PathBuf;
-
 #[test]
 fn each_storefront_s_game_is_readied_in_its_prefix_and_logs_into_its_store_s_diagnostics_folder() {
     use crate::profile::Game::{Epic, Gog, Steam};
-    let rows: [(crate::profile::Game, &str, Diagnostics, &str); 3] = [
+    use crate::queue::Storefront;
+    let rows: [(crate::profile::Game, &str, Storefront, &str); 3] = [
         (
             Steam { app_id: 42 },
             "Steam/steam-42-windows",
-            |locations| &locations.steam_diagnostics,
+            Storefront::Steam,
             "wine-42.log",
         ),
         (
@@ -520,7 +518,7 @@ fn each_storefront_s_game_is_readied_in_its_prefix_and_logs_into_its_store_s_dia
                 app_name: "game",
             },
             "Epic/epic-hash-Windows",
-            |locations| &locations.epic_diagnostics,
+            Storefront::Epic,
             "wine-game.log",
         ),
         (
@@ -528,11 +526,11 @@ fn each_storefront_s_game_is_readied_in_its_prefix_and_logs_into_its_store_s_dia
                 product_id: "1207658924",
             },
             "GOG/gog-1207658924-windows",
-            |locations| &locations.gog_diagnostics,
+            Storefront::Gog,
             "wine-1207658924.log",
         ),
     ];
-    for (game, folder, diagnostics, log) in rows {
+    for (game, folder, store, log) in rows {
         let (_directory, root) = installation();
         let locations = locations(&root);
         record_calls(&locations.voile.join("current"));
@@ -561,8 +559,9 @@ fn each_storefront_s_game_is_readied_in_its_prefix_and_logs_into_its_store_s_dia
         let prefix = locations.wine_prefixes.join(install.file_name().unwrap());
         assert_eq!(windows.prefix(), prefix);
         assert_eq!(config.prefix, prefix);
-        assert_eq!(config.log, diagnostics(&locations).join(log));
-        assert!(diagnostics(&locations).is_dir(), "{game:?}");
+        let diagnostics = crate::diagnostics::folder(&locations.home, store);
+        assert_eq!(config.log, diagnostics.join(log));
+        assert!(diagnostics.is_dir(), "{game:?}");
         assert_eq!(
             calls(&locations.wine_prefixes),
             [
