@@ -226,15 +226,21 @@ impl<F: Fn() -> bool> crate::cloud::upload::Transport for UploadTransport<'_, F>
         requests: &[impl Message],
     ) -> Result<Vec<R>, CloudError> {
         let (connection, authorized) = (self.connection, self.authorized);
-        futures_util::stream::iter(requests.iter().map(|request| async move {
-            if !authorized() {
-                return Err(CloudError::Revoked);
-            }
-            Ok(connection.service(name, request).await?)
-        }))
-        .buffered(upload::PARALLEL_FILES)
-        .try_collect()
-        .await
+        // Collected first: a stream mapping through a closure leaves the
+        // future without a provable Send, which UniFFI's exports need.
+        let requests: Vec<_> = requests
+            .iter()
+            .map(|request| async move {
+                if !authorized() {
+                    return Err(CloudError::Revoked);
+                }
+                Ok(connection.service(name, request).await?)
+            })
+            .collect();
+        futures_util::stream::iter(requests)
+            .buffered(upload::PARALLEL_FILES)
+            .try_collect()
+            .await
     }
     async fn block(&mut self, block: &wire::UploadBlock, bytes: &[u8]) -> Result<(), CloudError> {
         let request = crate::cloud::upload::block_request(block, bytes)?;
