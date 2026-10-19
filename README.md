@@ -294,10 +294,6 @@ Obelisk is not affiliated with or endorsed by Valve, Epic Games, GOG or Apple. S
 
 Want to build Obelisk from source or help with its development? Read the [contributing guide](CONTRIBUTING.md).
 
-## License
-
-Obelisk is free software under the [GNU General Public License v3.0](LICENSE): you may share and change it, and anything you distribute that is built from it must be under the same license, with its source code. Voile and the other runtimes Obelisk downloads keep their own licenses.
-
 <div align="right">
 
 [Back to top](#readme-top)
