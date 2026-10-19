@@ -132,18 +132,7 @@ impl SteamConnection {
         app_id: u32,
         file: &CloudFile,
     ) -> Result<Vec<u8>, CloudError> {
-        if file.persist_state != 0 {
-            return Err(CloudError::Invalid("persist state"));
-        }
-        let response: wire::DownloadResponse = self
-            .service(
-                "Cloud.ClientFileDownload#1",
-                &wire::DownloadRequest {
-                    app_id,
-                    name: file.name.clone(),
-                },
-            )
-            .await?;
+        let response = self.download_request(app_id, file).await?;
         crate::cloud::download(http, app_id, file, response).await
     }
 
@@ -160,10 +149,7 @@ impl SteamConnection {
         self.ensure_logged_on()?;
         crate::cloud::downloads::download_files(
             files,
-            &DownloadPlans {
-                connection: self,
-                app_id,
-            },
+            |file| async move { self.download_request(app_id, &file).await },
             |file, response| {
                 let http = http.clone();
                 async move { crate::cloud::download(&http, app_id, &file, response).await }
@@ -173,27 +159,22 @@ impl SteamConnection {
         )
         .await
     }
-}
 
-struct DownloadPlans<'a> {
-    connection: &'a SteamConnection,
-    app_id: u32,
-}
-
-impl crate::cloud::downloads::DownloadPlans for DownloadPlans<'_> {
-    type Plan = wire::DownloadResponse;
-
-    async fn prepare(&self, file: CloudFile) -> Result<Self::Plan, CloudError> {
+    /// The CM's answer for one file's body. Persist-state files are never read.
+    async fn download_request(
+        &self,
+        app_id: u32,
+        file: &CloudFile,
+    ) -> Result<wire::DownloadResponse, CloudError> {
         if file.persist_state != 0 {
             return Err(CloudError::Invalid("persist state"));
         }
         Ok(self
-            .connection
             .service(
                 "Cloud.ClientFileDownload#1",
                 &wire::DownloadRequest {
-                    app_id: self.app_id,
-                    name: file.name,
+                    app_id,
+                    name: file.name.clone(),
                 },
             )
             .await?)
@@ -304,5 +285,41 @@ mod upload_receipt_tests {
         ] {
             assert!(commit_response(result, &body, succeeded).is_err());
         }
+    }
+}
+
+#[cfg(test)]
+mod download_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn single_and_windowed_reads_share_the_persist_state_refusal() {
+        let (connection, _server) = super::super::test_server::connection(1, true).await;
+        let http = reqwest::Client::new();
+        let file = CloudFile {
+            name: "state.vdf".into(),
+            sha1: "0".repeat(40),
+            size: 4,
+            timestamp: 1,
+            persist_state: 1,
+            platforms: 7,
+            reupload_requested: false,
+        };
+        assert!(matches!(
+            connection.cloud_download(&http, 7, &file).await,
+            Err(CloudError::Invalid("persist state"))
+        ));
+        assert!(matches!(
+            connection
+                .cloud_download_files(
+                    &http,
+                    7,
+                    &[file],
+                    || true,
+                    |_, _| { panic!("a persist-state file is never read") }
+                )
+                .await,
+            Err(CloudError::Invalid("persist state"))
+        ));
     }
 }

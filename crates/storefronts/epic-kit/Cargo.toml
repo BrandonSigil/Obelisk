@@ -22,6 +22,10 @@ uuid.workspace = true
 unicode-normalization.workspace = true
 tokio-tungstenite = { version = "0.28", default-features = false, features = ["connect", "rustls-tls-webpki-roots"] }
 
+[features]
+# `CloudListing::of`, for tests that play an in-memory Epic Cloud.
+testing = []
+
 [lints]
 workspace = true
 

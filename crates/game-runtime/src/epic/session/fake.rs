@@ -1,7 +1,12 @@
-//! An in-memory Epic Cloud for session tests. It keeps one complete snapshot,
-//! bumps the revision on every upload and can fail the next calls.
+//! An in-memory Epic Cloud for session tests. It keeps one complete set,
+//! bumps the revision on every upload, counts the files it is asked to read,
+//! can fail the next calls and can change between a listing and its check.
 use super::*;
-use std::{collections::VecDeque, sync::Mutex};
+use epic_kit::cloud::CloudListing;
+use std::{
+    collections::{BTreeSet, VecDeque},
+    sync::Mutex,
+};
 
 pub(crate) struct FakeCloud {
     account: String,
@@ -10,16 +15,26 @@ pub(crate) struct FakeCloud {
 }
 
 struct FakeState {
-    snapshot: CloudSnapshot,
+    files: BTreeMap<String, Vec<u8>>,
     uploads: usize,
     revision: u64,
+    fetched: Vec<String>,
     failures: VecDeque<(Call, EpicError)>,
+    /// Another device publishes this set before the next revision check.
+    race: Option<BTreeMap<String, Vec<u8>>>,
+}
+
+impl FakeState {
+    fn listing(&self, account: &str) -> CloudListing {
+        CloudListing::of(format!("r{}", self.revision), account.into(), &self.files)
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Call {
     Configuration,
-    Download,
+    List,
+    Fetch,
     Upload,
 }
 
@@ -29,13 +44,12 @@ impl FakeCloud {
             account: account.into(),
             rules: Mutex::new(rules),
             state: Mutex::new(FakeState {
-                snapshot: CloudSnapshot {
-                    revision: "r0".into(),
-                    files: BTreeMap::new(),
-                },
+                files: BTreeMap::new(),
                 uploads: 0,
                 revision: 0,
+                fetched: Vec::new(),
                 failures: VecDeque::new(),
+                race: None,
             }),
         })
     }
@@ -44,13 +58,20 @@ impl FakeCloud {
     pub(crate) fn publish(&self, files: &[(&str, &[u8])]) {
         let mut state = self.state.lock().unwrap();
         state.revision += 1;
-        state.snapshot = CloudSnapshot {
-            revision: format!("r{}", state.revision),
-            files: files
+        state.files = files
+            .iter()
+            .map(|(name, bytes)| ((*name).to_owned(), bytes.to_vec()))
+            .collect();
+    }
+
+    /// Another device publishes this complete set while a read is under way.
+    pub(crate) fn publish_during_read(&self, files: &[(&str, &[u8])]) {
+        self.state.lock().unwrap().race = Some(
+            files
                 .iter()
                 .map(|(name, bytes)| ((*name).to_owned(), bytes.to_vec()))
                 .collect(),
-        };
+        );
     }
 
     pub(crate) fn set_rules(&self, rules: Option<CloudRules>) {
@@ -62,11 +83,16 @@ impl FakeCloud {
     }
 
     pub(crate) fn files(&self) -> BTreeMap<String, Vec<u8>> {
-        self.state.lock().unwrap().snapshot.files.clone()
+        self.state.lock().unwrap().files.clone()
     }
 
     pub(crate) fn uploads(&self) -> usize {
         self.state.lock().unwrap().uploads
+    }
+
+    /// Every file read so far, in the order it was asked for.
+    pub(crate) fn fetched(&self) -> Vec<String> {
+        self.state.lock().unwrap().fetched.clone()
     }
 
     fn failure(&self, call: Call) -> std::result::Result<(), EpicError> {
@@ -94,13 +120,49 @@ impl CloudRemote for FakeCloud {
         Ok(self.rules.lock().unwrap().clone())
     }
 
-    async fn cloud_download(
+    async fn cloud_list(
         &self,
         _game: CloudGame<'_>,
         _cancel: &CancelToken,
-    ) -> std::result::Result<CloudSnapshot, EpicError> {
-        self.failure(Call::Download)?;
-        Ok(self.state.lock().unwrap().snapshot.clone())
+    ) -> std::result::Result<CloudListing, EpicError> {
+        self.failure(Call::List)?;
+        Ok(self.state.lock().unwrap().listing(&self.account))
+    }
+
+    async fn cloud_revision(
+        &self,
+        _game: CloudGame<'_>,
+        _listing: &CloudListing,
+        _cancel: &CancelToken,
+    ) -> std::result::Result<String, EpicError> {
+        let mut state = self.state.lock().unwrap();
+        if let Some(files) = state.race.take() {
+            state.files = files;
+            state.revision += 1;
+        }
+        Ok(format!("r{}", state.revision))
+    }
+
+    async fn cloud_fetch(
+        &self,
+        _game: CloudGame<'_>,
+        listing: &CloudListing,
+        names: &BTreeSet<String>,
+        _cancel: &CancelToken,
+    ) -> std::result::Result<BTreeMap<String, Vec<u8>>, EpicError> {
+        self.failure(Call::Fetch)?;
+        let mut state = self.state.lock().unwrap();
+        state.fetched.extend(names.iter().cloned());
+        names
+            .iter()
+            .map(|name| {
+                let bytes = state.files.get(name).ok_or(EpicError::Protocol)?;
+                if !listing.holds(name, bytes) {
+                    return Err(EpicError::Integrity);
+                }
+                Ok((name.clone(), bytes.clone()))
+            })
+            .collect()
     }
 
     async fn cloud_upload(
@@ -110,18 +172,15 @@ impl CloudRemote for FakeCloud {
         files: &BTreeMap<String, Vec<u8>>,
         expected_revision: &str,
         _cancel: &CancelToken,
-    ) -> std::result::Result<CloudSnapshot, EpicError> {
+    ) -> std::result::Result<CloudListing, EpicError> {
         self.failure(Call::Upload)?;
         let mut state = self.state.lock().unwrap();
-        if state.snapshot.revision != expected_revision {
+        if format!("r{}", state.revision) != expected_revision {
             return Err(EpicError::CloudConflict);
         }
         state.revision += 1;
         state.uploads += 1;
-        state.snapshot = CloudSnapshot {
-            revision: format!("r{}", state.revision),
-            files: files.clone(),
-        };
-        Ok(state.snapshot.clone())
+        state.files = files.clone();
+        Ok(state.listing(&self.account))
     }
 }

@@ -214,7 +214,7 @@ fn buildpatch_roundtrip_preserves_unicode_empty_files_and_chunk_boundaries() {
         })
         .collect();
     assert_eq!(
-        codec::reconstruct(&manifest, &chunks, &cancel).unwrap(),
+        codec::reconstruct(&manifest, &chunks, None, &cancel).unwrap(),
         files
     );
     assert!(codec::parse(&package.manifest, game(), "wrong-account").is_err());
@@ -227,7 +227,7 @@ fn buildpatch_roundtrip_preserves_unicode_empty_files_and_chunk_boundaries() {
     assert!(content::decode_chunk(&damaged, chunk).is_err());
     let mut damaged = chunks;
     damaged.get_mut(&chunk.guid).unwrap()[0] ^= 1;
-    assert!(codec::reconstruct(&manifest, &damaged, &cancel).is_err());
+    assert!(codec::reconstruct(&manifest, &damaged, None, &cancel).is_err());
 }
 
 #[test]
@@ -239,7 +239,7 @@ fn valid_empty_generation_and_unsafe_names_are_distinct() {
     assert!(manifest.files.is_empty());
     assert!(manifest.chunks.is_empty());
     assert!(
-        codec::reconstruct(&manifest, &BTreeMap::new(), &cancel)
+        codec::reconstruct(&manifest, &BTreeMap::new(), None, &cancel)
             .unwrap()
             .is_empty()
     );
@@ -288,7 +288,7 @@ fn encodes_preserved_remote_files_outside_local_filters() {
         })
         .collect();
     assert_eq!(
-        codec::reconstruct(&manifest, &chunks, &cancel).unwrap(),
+        codec::reconstruct(&manifest, &chunks, None, &cancel).unwrap(),
         files
     );
 }
@@ -326,7 +326,7 @@ fn decodes_independently_generated_legendary_cloud_fixture() {
         chunk.guid,
         content::decode_chunk(chunk_bytes, chunk).unwrap(),
     )]);
-    let files = codec::reconstruct(&manifest, &chunks, &CancelToken::new()).unwrap();
+    let files = codec::reconstruct(&manifest, &chunks, None, &CancelToken::new()).unwrap();
     assert_eq!(
         files,
         BTreeMap::from([

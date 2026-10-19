@@ -6,12 +6,14 @@ use std::{
     collections::BTreeMap,
     fs,
     path::{Component, Path, PathBuf},
+    sync::Arc,
 };
 
 use serde::{Deserialize, Serialize};
+use sha1::{Digest, Sha1};
 use unicode_normalization::UnicodeNormalization;
 
-use crate::EpicError;
+use crate::{EpicError, content_manifest::Manifest};
 
 pub(crate) mod codec;
 
@@ -76,11 +78,78 @@ pub struct ResolvedCloudRules {
     anchor: PathBuf,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Snapshot {
+/// One generation of a game's Cloud: the inventory's revision and, from its
+/// latest manifest, each file's name, size and SHA-1.
+#[derive(Clone, Debug)]
+pub struct CloudListing {
+    revision: String,
+    /// The account it was read for; later reads of it are fenced to it.
+    pub(crate) account: String,
+    files: BTreeMap<String, (u64, [u8; 20])>,
+    /// The parsed latest manifest, `None` for an empty inventory or a listing
+    /// built in memory.
+    pub(crate) manifest: Option<Arc<Manifest>>,
+}
+
+impl CloudListing {
+    /// What a Cloud holding exactly `files` lists. An in-memory Cloud builds
+    /// its listings with it.
+    #[cfg(any(test, feature = "testing"))]
+    pub fn of(revision: String, account: String, files: &BTreeMap<String, Vec<u8>>) -> Self {
+        Self {
+            revision,
+            account,
+            files: files
+                .iter()
+                .map(|(name, bytes)| {
+                    (
+                        name.clone(),
+                        (bytes.len() as u64, Sha1::digest(bytes).into()),
+                    )
+                })
+                .collect(),
+            manifest: None,
+        }
+    }
+
+    /// The generation `manifest` describes, `None` for an empty inventory.
+    pub(crate) fn read(revision: String, account: String, manifest: Option<Manifest>) -> Self {
+        let files = manifest
+            .iter()
+            .flat_map(|manifest| &manifest.files)
+            .map(|file| (file.filename.clone(), (file.size(), file.hash)))
+            .collect();
+        Self {
+            revision,
+            account,
+            files,
+            manifest: manifest.map(Arc::new),
+        }
+    }
+
     /// Fingerprint of the complete manifest inventory. Not an atomic CAS token.
-    pub revision: String,
-    pub files: BTreeMap<String, Vec<u8>>,
+    pub fn revision(&self) -> &str {
+        &self.revision
+    }
+
+    /// Each file's name and size.
+    pub fn files(&self) -> impl Iterator<Item = (&str, u64)> {
+        self.files
+            .iter()
+            .map(|(name, (size, _))| (name.as_str(), *size))
+    }
+
+    pub(crate) fn lists(&self, name: &str) -> bool {
+        self.files.contains_key(name)
+    }
+
+    /// Whether `bytes` are exactly the listed file `name`: its size and the
+    /// SHA-1 its manifest gives, the check a download passes.
+    pub fn holds(&self, name: &str, bytes: &[u8]) -> bool {
+        self.files.get(name).is_some_and(|(size, sha1)| {
+            *size == bytes.len() as u64 && Sha1::digest(bytes).as_slice() == sha1
+        })
+    }
 }
 
 impl CloudRules {

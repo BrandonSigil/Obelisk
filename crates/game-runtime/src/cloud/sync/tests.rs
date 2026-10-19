@@ -809,8 +809,12 @@ pub(crate) async fn an_interrupted_cloud_choice_never_resends_the_discarded_save
             .await
             .unwrap();
         let remote = sync
-            .store
-            .view(&mut link, &mut sync.vault, &sync.control)
+            .views
+            .read(
+                &mut sync.store.remote(&mut link, &sync.control).unwrap(),
+                &sync.vault,
+                &sync.control,
+            )
             .await
             .unwrap();
         drop(link);

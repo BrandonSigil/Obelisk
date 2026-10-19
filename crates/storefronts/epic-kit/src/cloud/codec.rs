@@ -91,14 +91,20 @@ pub(crate) fn parse(
     Ok(manifest)
 }
 
+/// Rebuilds `names` of `manifest`, or every file when `None`, each checked
+/// against its SHA-1.
 pub(crate) fn reconstruct(
     manifest: &Manifest,
     chunks: &BTreeMap<ChunkGuid, Vec<u8>>,
+    names: Option<&BTreeSet<String>>,
     cancel: &CancelToken,
 ) -> Result<BTreeMap<String, Vec<u8>>, EpicError> {
     let mut result = BTreeMap::new();
     for file in &manifest.files {
         cancel.check()?;
+        if names.is_some_and(|names| !names.contains(&file.filename)) {
+            continue;
+        }
         let mut data = Vec::with_capacity(file.size() as usize);
         for part in &file.parts {
             let chunk = chunks.get(&part.guid).ok_or(EpicError::Integrity)?;

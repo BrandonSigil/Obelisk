@@ -11,9 +11,9 @@ use crate::{
     protocol::Credentials,
     supervisor::client::SessionAlive,
 };
-use cloud_vault::{Manifest, Preferences, RemoteView, Vault};
+use cloud_vault::{Manifest, Preferences, Vault};
 use steam_kit::{
-    cloud::{CloudListing, CloudPreferencesCache, CloudUpload, UploadTransaction},
+    cloud::{CloudListing, CloudPreferencesCache, UploadTransaction},
     cm::SteamConnection,
 };
 
@@ -23,7 +23,8 @@ mod remote;
 #[cfg(test)]
 mod tests;
 pub(crate) use remote::SteamCm;
-pub(crate) use remote::{CloudConnection, CloudRemote, RemoteSource};
+use remote::SteamRemote;
+pub(crate) use remote::{CloudConnection, CloudRemote};
 
 /// One Steam game's Cloud sync.
 pub(crate) type Session<R = SteamCm> = CloudSync<Adapter<R>>;
@@ -50,7 +51,6 @@ pub(crate) fn open_with<R: CloudRemote>(
         credentials,
         remote,
         preferences: CloudPreferencesCache::default(),
-        downloaded: Manifest::default(),
         context: None,
     };
     CloudSync::open(adapter, control, session_id)
@@ -62,8 +62,6 @@ pub(crate) struct Adapter<R: CloudRemote = SteamCm> {
     credentials: Credentials,
     remote: R,
     preferences: CloudPreferencesCache,
-    /// Files this operation staged, reused by later reads in it.
-    downloaded: Manifest,
     context: Option<Context>,
 }
 
@@ -81,18 +79,6 @@ impl<R: CloudRemote> Adapter<R> {
     }
     fn context_mut(&mut self) -> Result<&mut Context, Failure> {
         self.context.as_mut().ok_or(Failure::Storage)
-    }
-    fn set_listing(
-        &mut self,
-        listing: CloudListing,
-        remote: RemoteView,
-        vault: &Vault,
-    ) -> Result<(), Failure> {
-        let context = self.context_mut()?;
-        context.listing = listing;
-        context.remote = remote;
-        context.refresh_bindings(vault.local())?;
-        context.save()
     }
     /// Unknown preferences never authorize a transfer, and an explicitly
     /// disabled one is not an error.
@@ -147,12 +133,19 @@ impl sync::Failure for Failure {
     fn unsupported() -> Self {
         Self::Unsupported
     }
+    fn changed() -> Self {
+        Self::Changed
+    }
 }
 
 impl<R: CloudRemote> Storefront for Adapter<R> {
     type Failure = Failure;
     type Record = Context;
     type Link = R::Connection;
+    type Remote<'a>
+        = SteamRemote<'a, R::Connection>
+    where
+        Self: 'a;
 
     fn configuration(&self) -> &Config {
         &self.config
@@ -171,7 +164,6 @@ impl<R: CloudRemote> Storefront for Adapter<R> {
         true
     }
     fn retained(&mut self) -> Option<Vec<Manifest>> {
-        self.downloaded = Manifest::default();
         // A failed context save can leave newer in-memory values alongside an
         // older durable decision. Keep both until a later save commits.
         let saved = match Context::load(&self.config, &self.credentials.steam_id) {
@@ -278,90 +270,18 @@ impl<R: CloudRemote> Storefront for Adapter<R> {
         context.transaction = None;
         context.save()
     }
-    async fn view(
-        &mut self,
-        cm: &mut R::Connection,
-        vault: &mut Vault,
-        control: &Control,
-    ) -> Result<RemoteView, Failure> {
-        let listing = cm.listing().await?;
-        let remote = self.read_remote(cm, vault, control, &listing).await?;
-        self.set_listing(listing, remote.clone(), vault)?;
-        Ok(remote)
-    }
-    async fn publish(
-        &mut self,
-        cm: &mut R::Connection,
-        vault: &mut Vault,
-        control: &Control,
-        local: &Manifest,
-        remote: &RemoteView,
-    ) -> Result<(), Failure> {
-        let mut uploads = Vec::new();
-        for (name, file) in &local.0 {
-            if remote.files.0.get(name) != Some(file) {
-                uploads.push(CloudUpload {
-                    name: name.clone(),
-                    bytes: vault.read_content(file)?,
-                    timestamp: crate::unix_now(),
-                    platforms: file.platforms,
-                });
-            }
-        }
-        let deletes = remote
-            .files
-            .0
-            .keys()
-            .filter(|name| !local.0.contains_key(*name))
-            .cloned()
-            .collect();
-        // Full listing preserves foreign-platform entries. Only the managed
-        // Mac subset supplies upload/deletion operations and the Vault baseline.
-        let mut transaction = UploadTransaction::create(
-            &store::directory(&self.config, self.credentials.steam_id)?,
-            self.context()?.listing.clone(),
-            uploads,
-            deletes,
-        )?;
-        let paths = self.context()?.paths()?;
-        let directory = transaction.directory().to_path_buf();
-        let steam_id = self.credentials.steam_id;
-        let record = || {
-            // Settling a lost receipt later needs this transaction.
-            let context = self.context_mut()?;
-            context.transaction = Some(directory);
-            context.save()
-        };
-        let (listing, verified) = vault
-            .upload(
-                steam_id,
-                local,
-                remote,
-                "steam-cm-autocloud",
-                record,
-                async |_| {
-                    let listing = cm.upload(&mut transaction).await?;
-                    // Every remote file carries the identity the batch gave it,
-                    // so the managed ones are the local versions just sent or
-                    // kept. Like Steam's client, nothing is downloaded again.
-                    let mut files = Manifest::default();
-                    for file in listing.files.iter().filter(|f| f.persist_state == 0) {
-                        if paths.existing_file(file)?.is_some() {
-                            let version = local.0.get(&file.name).ok_or(Failure::Changed)?;
-                            files.0.insert(file.name.clone(), version.clone());
-                        }
-                    }
-                    let verified = RemoteView {
-                        revision: listing.change_number.to_string(),
-                        files,
-                    };
-                    control.check()?;
-                    Ok((verified.clone(), (listing, verified)))
-                },
-            )
-            .await?;
-        self.context_mut()?.transaction = None;
-        self.set_listing(listing, verified, vault)
+    fn remote<'a>(
+        &'a mut self,
+        cm: &'a mut R::Connection,
+        // The CM connection already stops with the sync's control.
+        _: &'a Control,
+    ) -> Result<SteamRemote<'a, R::Connection>, Failure> {
+        Ok(SteamRemote {
+            cm,
+            context: self.context.as_mut().ok_or(Failure::Storage)?,
+            config: &self.config,
+            steam_id: self.credentials.steam_id,
+        })
     }
 }
 

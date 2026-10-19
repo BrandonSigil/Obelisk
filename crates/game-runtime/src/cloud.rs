@@ -1,9 +1,11 @@
 //! What a Cloud sync publishes and asks, shared by every storefront. A Game
 //! session journals its status; Cloud maintenance keeps it in Obelisk's memory.
-//! Only the publication differs. `sync` runs one Cloud sync, and `record`
-//! keeps each game's Cloud record between syncs.
+//! Only the publication differs. `sync` runs one Cloud sync, `view` reads and
+//! confirms the Cloud view it compares against, and `record` keeps each
+//! game's Cloud record between syncs.
 pub(crate) mod record;
 pub(crate) mod sync;
+pub(crate) mod view;
 
 use crate::supervisor::session::Questions;
 use obelisk_core::transfer::CancelToken;

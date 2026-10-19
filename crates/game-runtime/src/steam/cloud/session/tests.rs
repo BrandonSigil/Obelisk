@@ -11,12 +11,12 @@ use crate::cloud::sync::{
 use crate::cloud::{Choice, Phase};
 use crate::cloud_status;
 use crate::supervisor::client::no_other_session;
-use cloud_vault::{AccountIdentity, StoreScope};
+use cloud_vault::{AccountIdentity, RemoteView, StoreScope};
 use std::{
     fs,
     path::{Path, PathBuf},
 };
-use steam_kit::cloud::CloudMetadata;
+use steam_kit::cloud::{CloudMetadata, CloudUpload};
 
 pub(crate) const ACCOUNT: u64 = 0x0110_0001_0000_002a;
 
@@ -53,7 +53,6 @@ impl SteamGame {
             credentials: credentials(),
             remote: self.cloud.handle(),
             preferences: CloudPreferencesCache::default(),
-            downloaded: Manifest::default(),
             context,
         };
         (adapter, vault)

@@ -78,6 +78,10 @@ _Avoid_: Cloud check, sync cycle
 What the Cloud archive keeps of one game for one account besides its saves: the Cloud rules and the configuration that place its saves, the work a Cloud sync left pending, and whether an uninstall may have removed some of them. From an uninstall on, or once a Windows game's engine moves it to another Wine prefix, a save missing locally keeps its archived version and is never sent as deleted, until a Cloud sync finds both sides agreeing. An uninstalled game keeps its record, so its Cloud indicator and Cloud maintenance still find its pending work.
 _Avoid_: Cloud context (the storefront's file that holds it), work journal
 
+**Cloud view**:
+The complete set of an account's Cloud saves for one game that a Cloud sync compares against: read from the storefront and trusted only while the storefront still lists the same saves afterwards, or what an upload just confirmed. An archived save stands in for a listed one when its size and the storefront's hash for it match, so an unchanged save is not downloaded again.
+_Avoid_: remote snapshot, readback, remote listing
+
 **Cloud question**:
 A choice a Cloud sync asks the player: which saves to keep after a conflict, or whether to retry, cancel or launch anyway after a failed launch check. It takes one answer and closes with it; it closes unanswered when the sync is cancelled, the account is revoked, or nobody answers in time. An account asks at most one at a time, whichever sync asks it.
 _Avoid_: prompt, Cloud decision

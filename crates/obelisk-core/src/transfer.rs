@@ -2,9 +2,11 @@
 mod body;
 mod engine;
 mod lifecycle;
+mod window;
 pub use body::{BodyError, BodySize, read_body};
 pub use engine::{Chunks, Delivery, Interrupted, Pipeline, run_engine};
 pub use lifecycle::{TransferBusy, TransferContext, TransferStatus, Transfers};
+pub use window::Window;
 
 use std::{
     future::Future,

@@ -1,14 +1,16 @@
 //! EGS Cloud behind the Cloud sync: the shared suites over an in-memory Epic
-//! Cloud, and what only Epic has: its snapshot filters, size limits and
-//! changed Cloud rules.
+//! Cloud, and what only Epic has: its listing filters, size limits, the files
+//! it republishes and changed Cloud rules.
 use super::fake::{Call, FakeCloud};
+use super::remote::EpicListing;
 use super::store::Pending;
 use super::*;
 use crate::cloud::record::tests::record_suite;
 use crate::cloud::sync::{
     Work,
-    tests::{Harness, cloud_suite},
+    tests::{Harness, cloud_suite, synced},
 };
+use crate::cloud::view::{Listing as _, Views};
 use crate::supervisor::client::no_other_session;
 use cloud_vault::{AccountIdentity, StoreScope};
 use std::{
@@ -107,7 +109,7 @@ impl Harness for EpicGame {
     }
     fn fail_next(&self, transient: bool) {
         self.cloud.fail_next(
-            Call::Download,
+            Call::List,
             if transient {
                 EpicError::Network
             } else {
@@ -209,28 +211,99 @@ fn staged(vault: &Vault, name: &str, bytes: &[u8]) -> Manifest {
 #[test]
 fn uploads_preserve_excluded_remote_bytes_and_apply_managed_deletions() {
     let (_temporary, vault, context) = fixture();
-    let full = CloudSnapshot {
-        revision: "original".into(),
-        files: [
-            ("deleted.sav".into(), b"old save".to_vec()),
-            ("excluded.sav".into(), b"other platform".to_vec()),
-            ("settings.ini".into(), b"foreign config".to_vec()),
-        ]
-        .into(),
-    };
-    let managed = stage_remote(&vault, &context.rules, &full).unwrap();
-    assert_eq!(managed.files.0.keys().collect::<Vec<_>>(), ["deleted.sav"]);
+    let remote: BTreeMap<String, Vec<u8>> = [
+        ("deleted.sav".into(), b"old save".to_vec()),
+        ("excluded.sav".into(), b"other platform".to_vec()),
+        ("settings.ini".into(), b"foreign config".to_vec()),
+    ]
+    .into();
+    let listing = epic_kit::cloud::CloudListing::of("original".into(), ACCOUNT.into(), &remote);
+    let managed = EpicListing::new(listing, &context.rules).unwrap();
+    let saves: Vec<_> = managed.saves().into_iter().map(|save| save.name).collect();
+    assert_eq!(saves, ["deleted.sav"]);
     let local = staged(&vault, "new.sav", b"new bytes");
-    let upload = upload_files(&vault, &context.rules, full.files.clone(), &local).unwrap();
+    let upload = upload_files(&vault, &context.rules, remote.clone(), &local).unwrap();
     assert_eq!(upload["excluded.sav"], b"other platform");
     assert_eq!(upload["settings.ini"], b"foreign config");
     assert_eq!(upload["new.sav"], b"new bytes");
     assert!(!upload.contains_key("deleted.sav"));
     let excluded = staged(&vault, "excluded.sav", b"wrong local selection");
     assert!(matches!(
-        upload_files(&vault, &context.rules, full.files.clone(), &excluded),
+        upload_files(&vault, &context.rules, remote, &excluded),
         Err(Error::Unsupported)
     ));
+}
+
+#[tokio::test]
+async fn a_second_sync_with_equal_saves_fetches_nothing() {
+    let game = EpicGame::game();
+    synced(&game, b"progress").await;
+    let first = game.cloud.fetched();
+    game.open().prepare(&no_other_session).await.unwrap();
+    assert_eq!(game.cloud.fetched(), first);
+
+    // A newer Cloud save is read once, then stands in from the archive.
+    game.cloud.publish(&[("slot.sav", b"cloud progress")]);
+    game.open().prepare(&no_other_session).await.unwrap();
+    game.open().prepare(&no_other_session).await.unwrap();
+
+    assert_eq!(game.cloud.fetched()[first.len()..], ["slot.sav"]);
+    assert_eq!(fs::read(Harness::save(&game)).unwrap(), b"cloud progress");
+}
+
+#[tokio::test]
+async fn a_cloud_that_changes_during_a_read_refuses_the_view_as_a_conflict() {
+    let game = EpicGame::game();
+    game.cloud.publish(&[("slot.sav", b"progress")]);
+    game.cloud
+        .publish_during_read(&[("slot.sav", b"other device")]);
+    let mut adapter = Adapter {
+        config: game.config.clone(),
+        account: ACCOUNT.into(),
+        api: Arc::clone(&game.cloud),
+        context: None,
+        kept: None,
+    };
+    let (mut vault, _) = record::locked::<Context>(&game.config, ACCOUNT).unwrap();
+    adapter.connect(&game.control).await.unwrap();
+    adapter.rules(&mut (), &mut vault, true).await.unwrap();
+
+    let read = Views::default()
+        .read(
+            &mut adapter.remote(&mut (), &game.control).unwrap(),
+            &vault,
+            &game.control,
+        )
+        .await;
+
+    assert!(matches!(read, Err(Error::Epic(EpicError::CloudConflict))));
+    assert!(adapter.kept.is_none());
+}
+
+#[tokio::test]
+async fn unmanaged_cloud_files_are_read_with_the_view_and_republished() {
+    let game = EpicGame::game();
+    fs::write(Harness::save(&game), b"progress").unwrap();
+    game.cloud
+        .publish(&[("slot.sav", b"progress"), ("settings.ini", b"other device")]);
+    let mut sync = game.open();
+    sync.prepare(&no_other_session).await.unwrap();
+    let first = game.cloud.fetched();
+    assert!(first.iter().any(|name| name == "settings.ini"));
+    sync.started().unwrap();
+    fs::write(Harness::save(&game), b"new progress").unwrap();
+    sync.finished(true).await;
+
+    assert_eq!(game.cloud.uploads(), 1);
+    assert_eq!(
+        game.cloud.files(),
+        BTreeMap::from([
+            ("settings.ini".into(), b"other device".to_vec()),
+            ("slot.sav".into(), b"new progress".to_vec()),
+        ])
+    );
+    // The exit sync read them again under its own listing.
+    assert_eq!(game.cloud.fetched()[first.len()..], ["settings.ini"]);
 }
 
 #[tokio::test]

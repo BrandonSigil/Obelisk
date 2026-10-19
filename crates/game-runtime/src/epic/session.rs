@@ -1,5 +1,5 @@
 //! EGS Cloud as a Cloud sync uses it: the game's Cloud rules, where its saves
-//! live, the complete remote snapshot and its republication.
+//! live, its listing, fetches and the republication of a complete set.
 use super::*;
 use crate::cloud::record::{self, Record as _};
 use crate::cloud::sync::{self, Availability, CloudSync, Kind, Storefront};
@@ -9,12 +9,13 @@ use cloud_vault::{Manifest, Preferences, RemoteView, Vault};
 use epic_kit::{
     EpicError,
     client::Client as EpicClient,
-    cloud::{CloudGame, CloudRules, ResolvedCloudRules, Snapshot as CloudSnapshot},
+    cloud::{CloudGame, CloudRules, ResolvedCloudRules},
 };
 use std::collections::BTreeMap;
 mod remote;
 mod store;
 pub(crate) use remote::CloudRemote;
+use remote::{EpicRemote, Kept};
 pub(crate) use store::Context;
 #[cfg(test)]
 mod fake;
@@ -38,7 +39,7 @@ pub(crate) fn open<R: CloudRemote>(
         account,
         api,
         context: None,
-        snapshot: None,
+        kept: None,
     };
     CloudSync::open(adapter, control, session_id)
 }
@@ -49,22 +50,8 @@ pub(crate) struct Adapter<R: CloudRemote> {
     account: String,
     api: Arc<R>,
     context: Option<Context>,
-    /// The complete snapshot the last view verified. An upload republishes
-    /// its files that Obelisk does not manage.
-    snapshot: Option<CloudSnapshot>,
-}
-
-impl<R: CloudRemote> Adapter<R> {
-    fn context(&self) -> Result<&Context> {
-        self.context.as_ref().ok_or(Error::Recovery)
-    }
-    fn cloud_game(&self) -> CloudGame<'_> {
-        CloudGame {
-            namespace: &self.config.namespace,
-            catalog_item_id: &self.config.catalog_item_id,
-            app_name: &self.config.app_name,
-        }
-    }
+    /// Set by each read view, taken by the next upload.
+    kept: Option<Kept>,
 }
 
 impl sync::Failure for Error {
@@ -95,12 +82,19 @@ impl sync::Failure for Error {
     fn unsupported() -> Self {
         Self::Unsupported
     }
+    fn changed() -> Self {
+        Self::Epic(EpicError::CloudConflict)
+    }
 }
 
 impl<R: CloudRemote> Storefront for Adapter<R> {
     type Failure = Error;
     type Record = Context;
     type Link = ();
+    type Remote<'a>
+        = EpicRemote<'a, R>
+    where
+        Self: 'a;
 
     fn configuration(&self) -> &Configuration {
         &self.config
@@ -119,7 +113,7 @@ impl<R: CloudRemote> Storefront for Adapter<R> {
         self.context.is_some()
     }
     fn retained(&mut self) -> Option<Vec<Manifest>> {
-        self.snapshot = None;
+        self.kept = None;
         // A failed save can leave newer values in memory than on disk.
         let saved = match Context::load(&self.config, &self.account) {
             Ok(saved) => saved,
@@ -207,73 +201,21 @@ impl<R: CloudRemote> Storefront for Adapter<R> {
     fn reconciled(&mut self) -> Result<()> {
         Ok(())
     }
-    async fn view(
-        &mut self,
-        _: &mut (),
-        vault: &mut Vault,
-        control: &Control,
-    ) -> Result<RemoteView> {
-        let full = self
-            .api
-            .cloud_download(self.cloud_game(), control.cancellation())
-            .await?;
-        let remote = stage_remote(vault, &self.context()?.rules, &full)?;
-        self.snapshot = Some(full);
-        Ok(remote)
+    fn remote<'a>(&'a mut self, _: &'a mut (), control: &'a Control) -> Result<EpicRemote<'a, R>> {
+        let context = self.context.as_ref().ok_or(Error::Recovery)?;
+        Ok(EpicRemote {
+            api: &self.api,
+            game: CloudGame {
+                namespace: &self.config.namespace,
+                catalog_item_id: &self.config.catalog_item_id,
+                app_name: &self.config.app_name,
+            },
+            rules: &context.rules,
+            kept: &mut self.kept,
+            unmanaged: None,
+            control,
+        })
     }
-    async fn publish(
-        &mut self,
-        _: &mut (),
-        vault: &mut Vault,
-        control: &Control,
-        local: &Manifest,
-        remote: &RemoteView,
-    ) -> Result<()> {
-        let full = self
-            .snapshot
-            .take()
-            .filter(|full| full.revision == remote.revision)
-            .ok_or(Error::Recovery)?;
-        let rules = self.context()?.rules.clone();
-        // Retained remote bytes move into the upload set; the snapshot's copy
-        // would otherwise stay live alongside the packaged one.
-        let revision = full.revision;
-        let files = upload_files(vault, &rules, full.files, local)?;
-        control.check()?;
-        let (api, game) = (&self.api, self.cloud_game());
-        vault
-            .upload(
-                self.account.as_str(),
-                local,
-                remote,
-                "epic-egs-cloud",
-                || Ok(()),
-                async |vault| {
-                    let verified = api
-                        .cloud_upload(game, &rules, &files, &revision, control.cancellation())
-                        .await?;
-                    control.check()?;
-                    Ok((stage_remote(vault, &rules, &verified)?, ()))
-                },
-            )
-            .await
-    }
-}
-
-fn stage_remote(vault: &Vault, rules: &CloudRules, full: &CloudSnapshot) -> Result<RemoteView> {
-    let filters = rules.filters()?;
-    let mut files = BTreeMap::new();
-    for (name, bytes) in &full.files {
-        if filters.accepts(name)? {
-            files.insert(name.clone(), vault.stage(bytes, 2)?);
-        }
-    }
-    let view = RemoteView {
-        revision: full.revision.clone(),
-        files: Manifest(files),
-    };
-    view.validate()?;
-    Ok(view)
 }
 
 fn upload_files(

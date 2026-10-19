@@ -1,19 +1,20 @@
+use super::super::paths::Paths;
 use super::*;
-use cloud_vault::FileVersion;
-use steam_kit::cloud::{CloudError, CloudFile, CloudMetadata, CloudPreferences};
+use crate::cloud::view::{self, Listed};
+use cloud_vault::RemoteView;
+use std::collections::BTreeSet;
+use steam_kit::cloud::{CloudError, CloudFile, CloudMetadata, CloudPreferences, CloudUpload};
 
-/// Remote file reads, the part of a connection that builds a verified view.
-pub(crate) trait RemoteSource {
+/// One authenticated Steam Cloud connection, bound to one app.
+pub(crate) trait CloudConnection {
+    async fn listing(&mut self) -> Result<CloudListing, Failure>;
+    /// Reads `files` in one bounded window, each verified against its listed
+    /// hash before `receive` gets it.
     async fn download_files(
         &mut self,
         files: &[CloudFile],
         receive: impl FnMut(&CloudFile, Vec<u8>) -> Result<(), CloudError>,
     ) -> Result<(), Failure>;
-    async fn listing(&mut self) -> Result<CloudListing, Failure>;
-}
-
-/// One authenticated Steam Cloud connection, bound to one app.
-pub(crate) trait CloudConnection: RemoteSource {
     /// The app's Cloud rules, or `None` when the game has no Steam Cloud.
     async fn cloud_metadata(&mut self) -> Result<Option<CloudMetadata>, Failure>;
     async fn preferences(
@@ -88,30 +89,30 @@ pub(crate) struct CmConnection {
     control: Arc<Control>,
 }
 
-impl RemoteSource for CmConnection {
+impl CmConnection {
+    /// steam-kit's guard, checked before each Cloud request: a cancelled or
+    /// revoked sync sends nothing more. Its journaled uploads take this guard
+    /// rather than a token, so every call here stops the same way.
+    fn authorized(&self) -> impl Fn() -> bool + '_ {
+        let control = &self.control;
+        move || control.check().is_ok()
+    }
+}
+
+impl CloudConnection for CmConnection {
     async fn download_files(
         &mut self,
         files: &[CloudFile],
         receive: impl FnMut(&CloudFile, Vec<u8>) -> Result<(), CloudError>,
     ) -> Result<(), Failure> {
-        let control = &self.control;
         Ok(self
             .cm
-            .cloud_download_files(
-                &self.http,
-                self.app_id,
-                files,
-                || control.check().is_ok(),
-                receive,
-            )
+            .cloud_download_files(&self.http, self.app_id, files, self.authorized(), receive)
             .await?)
     }
     async fn listing(&mut self) -> Result<CloudListing, Failure> {
         Ok(self.cm.cloud_listing(self.app_id).await?)
     }
-}
-
-impl CloudConnection for CmConnection {
     async fn cloud_metadata(&mut self) -> Result<Option<CloudMetadata>, Failure> {
         Ok(self.cm.app_info(self.app_id).await?.cloud)
     }
@@ -127,94 +128,158 @@ impl CloudConnection for CmConnection {
         &mut self,
         transaction: &mut UploadTransaction,
     ) -> Result<(), CloudError> {
-        let control = &self.control;
         self.cm
-            .cloud_settle_upload(&self.http, transaction, || control.check().is_ok())
+            .cloud_settle_upload(&self.http, transaction, self.authorized())
             .await
     }
     async fn upload(
         &mut self,
         transaction: &mut UploadTransaction,
     ) -> Result<CloudListing, CloudError> {
-        let control = &self.control;
         self.cm
-            .cloud_upload(&self.http, transaction, || control.check().is_ok())
+            .cloud_upload(&self.http, transaction, self.authorized())
             .await
     }
 }
 
-impl<R: CloudRemote> Adapter<R> {
-    fn cached_file(&self, vault: &Vault, file: &CloudFile) -> Option<FileVersion> {
-        // Context survives restart. Its listing can have been refreshed before
-        // remote bytes, so never trust that pairing: verify the actual blob
-        // against the newly listed Steam hash and size on every cache hit.
-        let mut checked = std::collections::BTreeSet::new();
-        [
-            Some(&self.downloaded),
-            self.context.as_ref().map(|c| &c.remote.files),
-            vault.baseline().map(|b| &b.files),
-            vault.local(),
-        ]
-        .into_iter()
-        .flatten()
-        .filter_map(|files| files.0.get(&file.name))
-        .filter(|cached| cached.size == u64::from(file.size))
-        .filter(|cached| checked.insert((&cached.hash, cached.size)))
-        .find_map(|cached| {
-            let bytes = vault.read_content(cached).ok()?;
-            file.verify(&bytes).ok()?;
-            Some(FileVersion {
-                platforms: file.platforms,
-                ..cached.clone()
-            })
-        })
+/// A Steam Cloud listing, and which of its files Obelisk manages.
+pub(crate) struct SteamListing {
+    listing: CloudListing,
+    /// Indices of the files Obelisk manages.
+    managed: Vec<usize>,
+}
+
+impl SteamListing {
+    /// `paths.existing_file` decides which files Obelisk manages; it also
+    /// leaves out persist-state files.
+    pub(super) fn managed(listing: CloudListing, paths: &Paths) -> Result<Self, Failure> {
+        let mut managed = Vec::new();
+        for (index, file) in listing.files.iter().enumerate() {
+            if paths.existing_file(file)?.is_some() {
+                managed.push(index);
+            }
+        }
+        Ok(Self { listing, managed })
     }
 
-    pub(super) async fn read_remote(
-        &mut self,
-        source: &mut impl RemoteSource,
-        vault: &Vault,
-        control: &Control,
-        listing: &CloudListing,
-    ) -> Result<RemoteView, Failure> {
-        if listing.steam_id != self.credentials.steam_id || listing.app_id != self.config.app_id {
+    fn managed_files(&self) -> impl Iterator<Item = &CloudFile> {
+        self.managed.iter().map(|&index| &self.listing.files[index])
+    }
+}
+
+impl view::Listing for SteamListing {
+    fn revision(&self) -> String {
+        self.listing.change_number.to_string()
+    }
+    fn saves(&self) -> Vec<Listed<'_>> {
+        self.managed_files()
+            .map(|file| Listed {
+                name: &file.name,
+                size: u64::from(file.size),
+                platforms: file.platforms,
+            })
+            .collect()
+    }
+    fn holds(&self, name: &str, bytes: &[u8]) -> bool {
+        self.managed_files()
+            .find(|file| file.name == name)
+            .is_some_and(|file| file.verify(bytes).is_ok())
+    }
+}
+
+/// Steam Cloud for one app and account, over one CM connection: the game's
+/// Cloud record keeps the listing and view it adopts.
+pub(crate) struct SteamRemote<'a, C> {
+    pub(super) cm: &'a mut C,
+    pub(super) context: &'a mut Context,
+    pub(super) config: &'a Config,
+    pub(super) steam_id: u64,
+}
+
+impl<C: CloudConnection> view::Remote for SteamRemote<'_, C> {
+    type Failure = Failure;
+    type Listing = SteamListing;
+    const JOURNAL: &'static str = "steam-cm-autocloud";
+
+    async fn list(&mut self) -> Result<SteamListing, Failure> {
+        let listing = self.cm.listing().await?;
+        if listing.steam_id != self.steam_id || listing.app_id != self.config.app_id {
             return Err(Failure::Authentication);
         }
-        let paths = self.context()?.paths()?;
-        let mut files = Manifest::default();
-        let mut missing = Vec::new();
-        for file in &listing.files {
-            control.check()?;
-            if paths.existing_file(file)?.is_none() {
-                continue;
-            }
-            if let Some(version) = self.cached_file(vault, file) {
-                files.0.insert(file.name.clone(), version);
-            } else {
-                missing.push(file.clone());
-            }
-        }
-        source
-            .download_files(&missing, |file, bytes| {
-                let version = vault
-                    .stage(&bytes, file.platforms)
-                    .map_err(|_| CloudError::Storage)?;
-                self.downloaded.0.insert(file.name.clone(), version.clone());
-                files.0.insert(file.name.clone(), version);
-                Ok(())
+        SteamListing::managed(listing, &self.context.paths()?)
+    }
+    async fn unchanged(&mut self, listing: &SteamListing) -> Result<bool, Failure> {
+        Ok(self.cm.listing().await? == listing.listing)
+    }
+    async fn fetch(
+        &mut self,
+        listing: &SteamListing,
+        names: &[&str],
+        mut receive: impl FnMut(&str, Vec<u8>) -> Result<(), cloud_vault::Error>,
+    ) -> Result<(), Failure> {
+        let names: BTreeSet<&str> = names.iter().copied().collect();
+        let files: Vec<_> = listing
+            .managed_files()
+            .filter(|file| names.contains(file.name.as_str()))
+            .cloned()
+            .collect();
+        self.cm
+            .download_files(&files, |file, bytes| {
+                receive(&file.name, bytes).map_err(|_| CloudError::Storage)
             })
-            .await?;
-        // Even an entirely cached view is valid only while the remote listing
-        // stays unchanged. No cache may authorize a stale conflict decision.
-        if source.listing().await? != *listing {
-            return Err(Failure::Changed);
+            .await
+    }
+    fn adopt(
+        &mut self,
+        listing: SteamListing,
+        view: &RemoteView,
+        vault: &Vault,
+    ) -> Result<(), Failure> {
+        self.context.listing = listing.listing;
+        self.context.remote = view.clone();
+        self.context.refresh_bindings(vault.local())?;
+        self.context.save()
+    }
+    fn adopted(&self) -> Option<&Manifest> {
+        Some(&self.context.remote.files)
+    }
+    async fn commit(
+        &mut self,
+        change: view::Change<'_, Failure>,
+    ) -> Result<view::Committed<SteamListing>, Failure> {
+        let mut uploads = Vec::new();
+        for (name, file) in change.uploads() {
+            uploads.push(CloudUpload {
+                name: name.to_owned(),
+                bytes: change.vault().read_content(file)?,
+                timestamp: crate::unix_now(),
+                platforms: file.platforms,
+            });
         }
-        control.check()?;
-        self.downloaded = files.clone();
-        Ok(RemoteView {
-            revision: listing.change_number.to_string(),
-            files,
-        })
+        let deletes = change.deletes().map(str::to_owned).collect();
+        // Full listing preserves foreign-platform entries. Only the managed
+        // Mac subset supplies upload/deletion operations and the Vault baseline.
+        let mut transaction = UploadTransaction::create(
+            &store::directory(self.config, self.steam_id)?,
+            self.context.listing.clone(),
+            uploads,
+            deletes,
+        )?;
+        let paths = self.context.paths()?;
+        let directory = transaction.directory().to_path_buf();
+        let (context, cm) = (&mut *self.context, &mut *self.cm);
+        let committed = change
+            .send(
+                || {
+                    // Settling a lost receipt later needs this transaction.
+                    context.transaction = Some(directory);
+                    context.save()
+                },
+                async || SteamListing::managed(cm.upload(&mut transaction).await?, &paths),
+            )
+            .await?;
+        self.context.transaction = None;
+        Ok(committed)
     }
 }
 

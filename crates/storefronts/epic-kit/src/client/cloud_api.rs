@@ -5,8 +5,10 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use futures_util::{StreamExt, stream};
-use obelisk_core::{install::hex, transfer::CancelToken};
+use obelisk_core::{
+    install::hex,
+    transfer::{CancelToken, Window},
+};
 use reqwest::Url;
 use serde::Deserialize;
 use sha1::{Digest, Sha1};
@@ -15,9 +17,9 @@ use super::{Client, endpoint, validate_identity};
 use crate::{
     EpicError,
     auth::{bounded_bytes, check_status, credential_free},
-    cloud::{CloudGame, CloudRules, Snapshot, codec, identity, relative_path},
+    cloud::{CloudGame, CloudListing, CloudRules, codec, identity, relative_path},
     content,
-    content_manifest::ChunkGuid,
+    content_manifest::{Chunk, ChunkGuid},
 };
 
 const MAX_METADATA_BYTES: usize = 16 * 1024 * 1024;
@@ -28,7 +30,10 @@ const INVENTORY_LIMIT: usize = 1000;
 const LINK_BATCH: usize = 100;
 // Chunks are 1 MiB, so a large save is hundreds of round trips. Signed-link
 // transfers carry no Authorization and no ordering, so they overlap freely.
-const TRANSFER_CONCURRENCY: usize = 8;
+const TRANSFERS: Window = Window {
+    width: 8,
+    bytes: u64::MAX,
+};
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -130,13 +135,14 @@ impl Client {
         .await
     }
 
-    /// Downloads an entire verified generation. An empty inventory and a valid
-    /// empty manifest are supported; malformed or incomplete data is an error.
-    pub async fn cloud_download(
+    /// Lists the inventory and reads its latest manifest. An empty inventory
+    /// and a valid empty manifest are supported; malformed or incomplete data
+    /// is an error.
+    pub async fn cloud_list(
         &self,
         game: CloudGame<'_>,
         cancel: &CancelToken,
-    ) -> Result<Snapshot, EpicError> {
+    ) -> Result<CloudListing, EpicError> {
         let account = self.credentials().await?.account_id;
         let cloud = Cloud {
             client: self,
@@ -145,18 +151,52 @@ impl Client {
             cancel,
         };
         cloud.authorize().await?;
-        let listing = cloud.list().await?;
-        let snapshot = cloud.download_from(&listing).await?;
-        if cloud.revision(&cloud.list().await?) != snapshot.revision {
-            return Err(EpicError::CloudConflict);
-        }
+        let inventory = cloud.list().await?;
+        cloud.listing(&inventory).await
+    }
+
+    /// The inventory's revision now, for the account `listing` was read for.
+    pub async fn cloud_revision(
+        &self,
+        game: CloudGame<'_>,
+        listing: &CloudListing,
+        cancel: &CancelToken,
+    ) -> Result<String, EpicError> {
+        let cloud = Cloud {
+            client: self,
+            game,
+            account: &listing.account,
+            cancel,
+        };
+        cloud.validate()?;
+        let revision = cloud.revision(&cloud.list().await?);
         cloud.fence().await?;
-        Ok(snapshot)
+        Ok(revision)
+    }
+
+    /// Reads `names` of `listing`'s generation: only the chunks they use, in
+    /// one window across link batches, each file checked against its SHA-1.
+    pub async fn cloud_fetch(
+        &self,
+        game: CloudGame<'_>,
+        listing: &CloudListing,
+        names: &BTreeSet<String>,
+        cancel: &CancelToken,
+    ) -> Result<BTreeMap<String, Vec<u8>>, EpicError> {
+        let cloud = Cloud {
+            client: self,
+            game,
+            account: &listing.account,
+            cancel,
+        };
+        cloud.validate()?;
+        cloud.fetch(listing, Some(names)).await
     }
 
     /// Optimistic publication: unchanged baseline, complete chunk upload,
     /// manifest last, full readback, then stable inventory. EGS exposes no proven
     /// atomic compare-and-swap: another client can still race between checks.
+    /// Returns the complete listing that confirmed it.
     pub async fn cloud_upload(
         &self,
         game: CloudGame<'_>,
@@ -164,7 +204,7 @@ impl Client {
         files: &BTreeMap<String, Vec<u8>>,
         expected_revision: &str,
         cancel: &CancelToken,
-    ) -> Result<Snapshot, EpicError> {
+    ) -> Result<CloudListing, EpicError> {
         let account = self.credentials().await?.account_id;
         let cloud = Cloud {
             client: self,
@@ -196,23 +236,28 @@ impl Client {
         let seconds = now.max(latest.saturating_add(1));
         cancel.check()?;
         let mut package = codec::package(game, &account, rules, files, seconds, cancel)?;
-        let names: Vec<_> = package.chunks.keys().cloned().collect();
-        for batch in names.chunks(LINK_BATCH) {
-            let links = cloud.links(batch).await?;
-            let mut puts = Vec::with_capacity(batch.len());
-            for name in batch {
-                let link = links
-                    .get(name)
-                    .and_then(|entry| entry.write_link.as_deref())
-                    .ok_or(EpicError::Protocol)?;
-                let chunk = package.chunks.remove(name).ok_or(EpicError::Protocol)?;
-                puts.push(cloud.put(link, chunk));
-            }
-            let mut puts = stream::iter(puts).buffer_unordered(TRANSFER_CONCURRENCY);
-            while let Some(result) = puts.next().await {
-                result?;
-            }
-        }
+        let chunks = std::mem::take(&mut package.chunks);
+        let batches = Batch::split(chunks.keys().cloned().collect());
+        TRANSFERS
+            .run(
+                chunks.into_iter().enumerate(),
+                |(_, (_, chunk))| chunk.len() as u64,
+                || cancel.check().map_err(EpicError::from),
+                |(index, (name, chunk))| {
+                    let batch = &batches[index / LINK_BATCH];
+                    let cloud = &cloud;
+                    async move {
+                        let links = batch.links(cloud).await?;
+                        let link = links
+                            .get(&name)
+                            .and_then(|entry| entry.write_link.as_deref())
+                            .ok_or(EpicError::Protocol)?;
+                        cloud.put(link, chunk).await
+                    }
+                },
+                |()| Ok(()),
+            )
+            .await?;
         // Request the manifest link only after every chunk PUT succeeds.
         // Content integrity is established by the complete readback below.
         if cloud.revision(&cloud.list().await?) != expected_revision {
@@ -237,15 +282,15 @@ impl Client {
         if latest_manifest(&after)?.map(|(name, _)| name) != Some(package.manifest_path.as_str()) {
             return Err(EpicError::CloudConflict);
         }
-        let snapshot = cloud.download_from(&after).await?;
-        if snapshot.files != *files {
+        let listing = cloud.listing(&after).await?;
+        if cloud.fetch(&listing, None).await? != *files {
             return Err(EpicError::Integrity);
         }
-        if cloud.revision(&cloud.list().await?) != snapshot.revision {
+        if cloud.revision(&cloud.list().await?) != listing.revision() {
             return Err(EpicError::CloudConflict);
         }
         cloud.fence().await?;
-        Ok(snapshot)
+        Ok(listing)
     }
 }
 
@@ -437,16 +482,14 @@ impl Cloud<'_> {
         self.fence().await
     }
 
-    async fn download_from(
+    /// The generation `inventory` names: its latest manifest, read and parsed.
+    async fn listing(
         &self,
-        listing: &BTreeMap<String, Entry>,
-    ) -> Result<Snapshot, EpicError> {
-        let revision = self.revision(listing);
-        let Some((_, entry)) = latest_manifest(listing)? else {
-            return Ok(Snapshot {
-                revision,
-                files: BTreeMap::new(),
-            });
+        inventory: &BTreeMap<String, Entry>,
+    ) -> Result<CloudListing, EpicError> {
+        let revision = self.revision(inventory);
+        let Some((_, entry)) = latest_manifest(inventory)? else {
+            return Ok(CloudListing::read(revision, self.account.into(), None));
         };
         let bytes = self
             .get(
@@ -455,50 +498,112 @@ impl Cloud<'_> {
             )
             .await?;
         let manifest = codec::parse(&bytes, self.game, self.account)?;
-        let entries: Vec<_> = manifest
+        Ok(CloudListing::read(
+            revision,
+            self.account.into(),
+            Some(manifest),
+        ))
+    }
+
+    /// Reads `names` of `listing`'s generation, or every file when `None`.
+    /// Only the chunks those files use are downloaded; every chunk when `None`.
+    async fn fetch(
+        &self,
+        listing: &CloudListing,
+        names: Option<&BTreeSet<String>>,
+    ) -> Result<BTreeMap<String, Vec<u8>>, EpicError> {
+        if names.is_some_and(|names| names.iter().any(|name| !listing.lists(name))) {
+            return Err(EpicError::Protocol);
+        }
+        let Some(manifest) = listing.manifest.clone() else {
+            // Only an empty inventory has no manifest to read chunks from.
+            return match listing.files().next() {
+                None => Ok(BTreeMap::new()),
+                Some(_) => Err(EpicError::Protocol),
+            };
+        };
+        let used: Option<BTreeSet<ChunkGuid>> = names.map(|names| {
+            manifest
+                .files
+                .iter()
+                .filter(|file| names.contains(&file.filename))
+                .flat_map(|file| file.parts.iter().map(|part| part.guid))
+                .collect()
+        });
+        let chunks: Vec<(String, &Chunk)> = manifest
             .chunks
             .values()
+            .filter(|chunk| used.as_ref().is_none_or(|used| used.contains(&chunk.guid)))
             .map(|chunk| (chunk.relative_path(manifest.feature_level), chunk))
             .collect();
+        let batches = Batch::split(chunks.iter().map(|(name, _)| name.clone()).collect());
         let mut decoded = BTreeMap::<ChunkGuid, Vec<u8>>::new();
-        for batch in entries.chunks(LINK_BATCH) {
-            let names: Vec<_> = batch.iter().map(|(name, _)| name.clone()).collect();
-            let links = self.links(&names).await?;
-            let mut gets = Vec::with_capacity(batch.len());
-            for (name, chunk) in batch {
-                let link = links
-                    .get(name)
-                    .and_then(|entry| entry.read_link.as_deref())
-                    .ok_or(EpicError::Protocol)?;
-                let chunk = *chunk;
-                gets.push(async move {
-                    let bytes = self
-                        .get(link, MAX_CHUNK_BYTES.min(chunk.file_size as usize))
-                        .await?;
-                    Ok::<_, EpicError>((chunk, bytes))
-                });
-            }
-            let mut gets = stream::iter(gets).buffer_unordered(TRANSFER_CONCURRENCY);
-            while let Some(result) = gets.next().await {
-                let (chunk, bytes) = result?;
-                self.cancel.check()?;
-                let guid = chunk.guid;
-                let chunk = chunk.clone();
-                let bytes = self
-                    .cancel
-                    .spawn_blocking(move || content::decode_chunk(&bytes, &chunk))
-                    .await
-                    .map_err(|_| EpicError::Protocol)??;
-                decoded.insert(guid, bytes);
-            }
-        }
+        TRANSFERS
+            .run(
+                chunks.iter().enumerate(),
+                |(_, (_, chunk))| chunk.file_size,
+                || self.cancel.check().map_err(EpicError::from),
+                |(index, (name, chunk))| {
+                    let batch = &batches[index / LINK_BATCH];
+                    async move {
+                        let links = batch.links(self).await?;
+                        let link = links
+                            .get(name)
+                            .and_then(|entry| entry.read_link.as_deref())
+                            .ok_or(EpicError::Protocol)?;
+                        let bytes = self
+                            .get(link, MAX_CHUNK_BYTES.min(chunk.file_size as usize))
+                            .await?;
+                        self.cancel.check()?;
+                        let guid = chunk.guid;
+                        let chunk = (*chunk).clone();
+                        let bytes = self
+                            .cancel
+                            .spawn_blocking(move || content::decode_chunk(&bytes, &chunk))
+                            .await
+                            .map_err(|_| EpicError::Protocol)??;
+                        Ok((guid, bytes))
+                    }
+                },
+                |(guid, bytes)| {
+                    decoded.insert(guid, bytes);
+                    Ok(())
+                },
+            )
+            .await?;
+        let names = names.cloned();
         let cancel = self.cancel.clone();
-        let files = self
-            .cancel
-            .spawn_blocking(move || codec::reconstruct(&manifest, &decoded, &cancel))
+        self.cancel
+            .spawn_blocking(move || {
+                codec::reconstruct(&manifest, &decoded, names.as_ref(), &cancel)
+            })
             .await
-            .map_err(|_| EpicError::Protocol)??;
-        Ok(Snapshot { revision, files })
+            .map_err(|_| EpicError::Protocol)?
+    }
+}
+
+/// One link request's worth of objects. Its signed links are requested by the
+/// first transfer that needs them, so the window refills across batches.
+struct Batch {
+    names: Vec<String>,
+    links: tokio::sync::OnceCell<BTreeMap<String, Entry>>,
+}
+
+impl Batch {
+    fn split(names: Vec<String>) -> Vec<Self> {
+        names
+            .chunks(LINK_BATCH)
+            .map(|names| Self {
+                names: names.to_vec(),
+                links: tokio::sync::OnceCell::new(),
+            })
+            .collect()
+    }
+
+    async fn links(&self, cloud: &Cloud<'_>) -> Result<&BTreeMap<String, Entry>, EpicError> {
+        self.links
+            .get_or_try_init(|| cloud.links(&self.names))
+            .await
     }
 }
 

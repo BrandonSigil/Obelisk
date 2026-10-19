@@ -1,163 +1,166 @@
-//! Verified remote reads: cached bytes are reused only while Steam still lists
-//! them unchanged.
+//! Steam's listing as a Cloud view reads it: only this account's app, and of
+//! it only the files Obelisk manages, each held to Steam's own hash. The
+//! game's Cloud record keeps the view, so a restart reads nothing again.
 use super::*;
-use crate::cloud::sync::tests::Harness;
-use crate::steam::cloud::session::fake::{FakeSteamCloud, save_rule};
+use crate::cloud::sync::tests::Harness as _;
+use crate::cloud::view::{Listing as _, Remote as _, Views};
+use crate::steam::cloud::session::fake::{SLOT, save_rule};
 use crate::steam::cloud::session::tests::{ACCOUNT, SteamGame};
+use sha1::{Digest, Sha1};
 
-const FIRST: &[u8] = b"cloud v1";
-const SECOND: &[u8] = b"cloud v2";
 const NAME: &str = "%GameInstall%slot.sav";
 
-struct Source {
-    listing: CloudListing,
-    bytes: Vec<u8>,
-    downloads: usize,
-    listings: usize,
-}
-impl Source {
-    fn new() -> Self {
-        Self {
-            listing: CloudListing {
-                steam_id: ACCOUNT,
-                app_id: 42,
-                change_number: 1,
-                files: vec![CloudFile {
-                    name: NAME.into(),
-                    sha1: "15db5ca03437f87f7c50e14f09d72ea5e04f39a0".into(),
-                    size: FIRST.len() as u32,
-                    timestamp: 1,
-                    persist_state: 0,
-                    platforms: 7,
-                    reupload_requested: false,
-                }],
-            },
-            bytes: FIRST.into(),
-            downloads: 0,
-            listings: 0,
-        }
+fn file(name: &str, bytes: &[u8], platforms: u32) -> CloudFile {
+    CloudFile {
+        name: name.into(),
+        sha1: Sha1::digest(bytes)
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect(),
+        size: bytes.len() as u32,
+        timestamp: 1,
+        persist_state: 0,
+        platforms,
+        reupload_requested: false,
     }
 }
-impl RemoteSource for Source {
+
+fn listing(files: Vec<CloudFile>) -> CloudListing {
+    CloudListing {
+        steam_id: ACCOUNT,
+        app_id: 42,
+        change_number: 7,
+        files,
+    }
+}
+
+/// A connection that only lists.
+struct ListingOnly(CloudListing);
+impl CloudConnection for ListingOnly {
+    async fn listing(&mut self) -> Result<CloudListing, Failure> {
+        Ok(self.0.clone())
+    }
     async fn download_files(
         &mut self,
-        files: &[CloudFile],
-        mut receive: impl FnMut(&CloudFile, Vec<u8>) -> Result<(), CloudError>,
+        _: &[CloudFile],
+        _: impl FnMut(&CloudFile, Vec<u8>) -> Result<(), CloudError>,
     ) -> Result<(), Failure> {
-        for file in files {
-            self.downloads += 1;
-            file.verify(&self.bytes)?;
-            receive(file, self.bytes.clone())?;
-        }
-        Ok(())
+        unreachable!("a listing reads no file")
     }
-    async fn listing(&mut self) -> Result<CloudListing, Failure> {
-        self.listings += 1;
-        Ok(self.listing.clone())
+    async fn cloud_metadata(&mut self) -> Result<Option<CloudMetadata>, Failure> {
+        unreachable!("a listing reads no rules")
+    }
+    async fn preferences(
+        &mut self,
+        _: &mut CloudPreferencesCache,
+    ) -> Result<CloudPreferences, CloudError> {
+        unreachable!("a listing reads no preferences")
+    }
+    async fn settle_upload(&mut self, _: &mut UploadTransaction) -> Result<(), CloudError> {
+        unreachable!("a listing settles nothing")
+    }
+    async fn upload(&mut self, _: &mut UploadTransaction) -> Result<CloudListing, CloudError> {
+        unreachable!("a listing uploads nothing")
     }
 }
 
-/// A game whose AutoCloud rules bind `slot.sav` in the installation.
-fn fixture() -> (SteamGame, Adapter<FakeSteamCloud>, Vault, Control) {
+/// The game's listing as its Cloud view reads it.
+async fn list(game: &SteamGame, listing: CloudListing) -> Result<SteamListing, Failure> {
+    let mut context = Context::new(&game.config, ACCOUNT, save_rule());
+    let mut cm = ListingOnly(listing);
+    let mut remote = SteamRemote {
+        cm: &mut cm,
+        context: &mut context,
+        config: &game.config,
+        steam_id: ACCOUNT,
+    };
+    remote.list().await
+}
+
+#[tokio::test]
+async fn a_listing_for_another_account_or_app_is_refused() {
     let game = SteamGame::game();
-    let mut context = super::Context::new(&game.config, ACCOUNT, save_rule());
-    context.listing = Source::new().listing;
-    context.save().unwrap();
-    let (adapter, vault) = game.adapter();
-    (game, adapter, vault, Control::new(|_| {}))
-}
-
-#[tokio::test]
-async fn unchanged_files_reuse_verified_bytes_across_retry_and_restart() {
-    let (game, mut adapter, vault, control) = fixture();
-    let mut source = Source::new();
-    let listing = source.listing.clone();
-
-    let remote = adapter
-        .read_remote(&mut source, &vault, &control, &listing)
-        .await
-        .unwrap();
-    adapter
-        .read_remote(&mut source, &vault, &control, &listing)
-        .await
-        .unwrap();
-
-    assert_eq!(source.downloads, 1);
-    assert_eq!(source.listings, 2);
-    adapter
-        .set_listing(listing.clone(), remote, &vault)
-        .unwrap();
-    drop((adapter, vault));
-    let (mut adapter, vault) = game.adapter();
-    adapter
-        .read_remote(&mut source, &vault, &control, &listing)
-        .await
-        .unwrap();
-    assert_eq!(source.downloads, 1);
-    assert_eq!(source.listings, 3);
-}
-
-#[tokio::test]
-async fn changed_content_missing_blob_and_remote_races_never_use_stale_cache() {
-    let (game, mut adapter, vault, control) = fixture();
-    let mut source = Source::new();
-    let first = source.listing.clone();
-    let remote = adapter
-        .read_remote(&mut source, &vault, &control, &first)
-        .await
-        .unwrap();
-    let blob = Harness::scope(&game)
-        .directory(&game.config.root)
-        .unwrap()
-        .join("blobs")
-        .join(remote.files.0[NAME].hash.as_str());
-    std::fs::remove_file(&blob).unwrap();
-    adapter
-        .read_remote(&mut source, &vault, &control, &first)
-        .await
-        .unwrap();
-    assert_eq!(source.downloads, 2);
-
-    source.listing.change_number = 2;
-    source.listing.files[0].sha1 = "2df584286a54a4b83b7fc9161069b37d61cf8e07".into();
-    source.bytes = SECOND.into();
-    let second = source.listing.clone();
-    let remote = adapter
-        .read_remote(&mut source, &vault, &control, &second)
-        .await
-        .unwrap();
-    assert_eq!(source.downloads, 3);
-    assert_eq!(vault.read_content(&remote.files.0[NAME]).unwrap(), SECOND);
-
-    source.listing.change_number = 3;
-    assert!(matches!(
-        adapter
-            .read_remote(&mut source, &vault, &control, &second)
-            .await,
-        Err(Failure::Changed)
-    ));
-    assert_eq!(source.downloads, 3);
-    let mut foreign = second.clone();
+    let mut foreign = listing(vec![file(NAME, b"save", 2)]);
     foreign.steam_id += 1;
     assert!(matches!(
-        adapter
-            .read_remote(&mut source, &vault, &control, &foreign)
-            .await,
+        list(&game, foreign).await,
         Err(Failure::Authentication)
     ));
-    source.listing.files.clear();
-    let deleted = source.listing.clone();
-    let remote = adapter
-        .read_remote(&mut source, &vault, &control, &deleted)
+    let mut foreign = listing(vec![file(NAME, b"save", 2)]);
+    foreign.app_id += 1;
+    assert!(matches!(
+        list(&game, foreign).await,
+        Err(Failure::Authentication)
+    ));
+}
+
+#[tokio::test]
+async fn persist_state_and_foreign_platform_files_are_left_out_of_the_saves() {
+    let game = SteamGame::game();
+    let mut state = file("%GameInstall%state.sav", b"state", 2);
+    state.persist_state = 1;
+    let listed = list(
+        &game,
+        listing(vec![
+            file(NAME, b"save", 2),
+            state,
+            file("%GameInstall%windows.sav", b"windows", 1),
+        ]),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(listed.revision(), "7");
+    let saves: Vec<_> = listed
+        .saves()
+        .into_iter()
+        .map(|save| (save.name, save.size, save.platforms))
+        .collect();
+    assert_eq!(saves, [(NAME, 4, 2)]);
+}
+
+#[tokio::test]
+async fn a_listed_save_holds_only_the_bytes_its_hash_names() {
+    let game = SteamGame::game();
+    let mut state = file("%GameInstall%state.sav", b"state", 2);
+    state.persist_state = 1;
+    let listed = list(&game, listing(vec![file(NAME, b"save", 2), state]))
         .await
         .unwrap();
-    assert!(remote.files.0.is_empty());
-    assert!(adapter.downloaded.0.is_empty());
-    control.cancel();
-    assert!(matches!(
-        adapter
-            .read_remote(&mut source, &vault, &control, &second)
-            .await,
-        Err(Failure::Cancelled)
-    ));
+
+    assert!(listed.holds(NAME, b"save"));
+    assert!(!listed.holds(NAME, b"sav!"));
+    assert!(!listed.holds(NAME, b"saves"));
+    assert!(!listed.holds("%GameInstall%state.sav", b"state"));
+    assert!(!listed.holds("%GameInstall%other.sav", b"save"));
+}
+
+#[tokio::test]
+async fn unchanged_saves_are_read_once_across_a_restart_through_the_cloud_record() {
+    let game = SteamGame::game();
+    game.cloud.publish_for(SLOT, b"cloud v1", 7);
+    Context::new(&game.config, ACCOUNT, save_rule())
+        .save()
+        .unwrap();
+    let read = async || {
+        let (mut adapter, vault) = game.adapter();
+        // No baseline: only the record can stand in after a restart.
+        assert!(vault.baseline().is_none());
+        let mut cm = adapter.connect(&game.control).await.unwrap();
+        Views::default()
+            .read(
+                &mut adapter.remote(&mut cm, &game.control).unwrap(),
+                &vault,
+                &game.control,
+            )
+            .await
+            .unwrap()
+    };
+
+    let first = read().await;
+    let again = read().await;
+
+    assert_eq!(game.cloud.downloads(), 1);
+    assert_eq!(again, first);
+    assert_eq!(again.files.0[SLOT].platforms, 7);
 }

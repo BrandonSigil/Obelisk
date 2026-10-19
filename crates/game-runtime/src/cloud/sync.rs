@@ -2,10 +2,10 @@
 //! exits, or as Cloud maintenance. This module owns the order of the steps,
 //! the retries and Cloud questions, the choice between local and Cloud saves
 //! and the work left pending in the game's Cloud record. A storefront plugs in
-//! as a `Storefront`: the record it holds, its Cloud rules, a verified remote
-//! view and publication.
+//! as a `Storefront`: the record it holds, its Cloud rules and its Cloud's
+//! protocol, `view::Remote`.
 use super::record::{self, Configuration as _, Record as _};
-use super::{Choice, Control, Phase, Question, Stop};
+use super::{Choice, Control, Phase, Question, Stop, view};
 use crate::cloud_status::{self, ProblemKind, UnavailableReason};
 use crate::supervisor::client::SessionAlive;
 use cloud_vault::{Bindings, Decision, Manifest, RemoteView, Retry, RetryBudget, Vault};
@@ -56,6 +56,9 @@ pub(crate) trait Failure:
     /// The storefront has no Cloud rules Obelisk can follow for a game whose
     /// saves Obelisk already holds.
     fn unsupported() -> Self;
+    /// The Cloud changed while a view was read, or a commit's listing names a
+    /// save it did not send.
+    fn changed() -> Self;
 }
 
 /// The work a Cloud sync leaves durable for a later sync.
@@ -101,12 +104,16 @@ pub(crate) enum Availability {
 
 /// What a storefront adds to a Cloud sync. It holds the game's Cloud record,
 /// which the sync reads and writes. Steps that talk to the storefront take
-/// the attempt's `Link`, which the sync drops after each attempt.
+/// the attempt's `Link`, which the sync drops after each attempt; its Cloud's
+/// protocol is a `view::Remote` over that link.
 #[allow(async_fn_in_trait)]
 pub(crate) trait Storefront {
     type Failure: Failure;
     type Record: record::Record<Failure = Self::Failure>;
     type Link;
+    type Remote<'a>: view::Remote<Failure = Self::Failure>
+    where
+        Self: 'a;
 
     /// Where the game is installed and keeps its saves now.
     fn configuration(&self) -> &<Self::Record as record::Record>::Configuration;
@@ -137,23 +144,13 @@ pub(crate) trait Storefront {
     -> Result<bool, Self::Failure>;
     /// The earlier upload is reconciled: forget what settling it needed.
     fn reconciled(&mut self) -> Result<(), Self::Failure>;
-    /// A verified complete view of the game's Cloud saves.
-    async fn view(
-        &mut self,
-        link: &mut Self::Link,
-        vault: &mut Vault,
-        control: &Control,
-    ) -> Result<RemoteView, Self::Failure>;
-    /// Sends `local` over `remote`, then completes the vault's upload with a
-    /// verified readback.
-    async fn publish(
-        &mut self,
-        link: &mut Self::Link,
-        vault: &mut Vault,
-        control: &Control,
-        local: &Manifest,
-        remote: &RemoteView,
-    ) -> Result<(), Self::Failure>;
+    /// The storefront's Cloud for this attempt, over its link, stopping
+    /// with `control`.
+    fn remote<'a>(
+        &'a mut self,
+        link: &'a mut Self::Link,
+        control: &'a Control,
+    ) -> Result<Self::Remote<'a>, Self::Failure>;
 }
 
 /// The game's record, which every step after its Cloud rules needs.
@@ -181,6 +178,7 @@ impl Purpose {
 pub(crate) struct CloudSync<S: Storefront> {
     store: S,
     vault: Vault,
+    views: view::Views,
     control: Arc<Control>,
     /// The Game session whose game guard this sync takes.
     session_id: String,
@@ -202,6 +200,7 @@ impl<S: Storefront> CloudSync<S> {
         Ok(Self {
             store,
             vault,
+            views: view::Views::default(),
             control,
             session_id,
             shown: None,
@@ -592,8 +591,12 @@ impl<S: Storefront> CloudSync<S> {
             None => None,
         };
         let remote = self
-            .store
-            .view(&mut link, &mut self.vault, &self.control)
+            .views
+            .read(
+                &mut self.store.remote(&mut link, &self.control)?,
+                &self.vault,
+                &self.control,
+            )
             .await?;
         if let Some(settled) = previous {
             self.reconcile_previous(&remote, settled)?;
@@ -861,14 +864,22 @@ impl<S: Storefront> CloudSync<S> {
             self.save(work.clone())?;
         }
         self.control.check()?;
-        self.store
-            .publish(link, &mut self.vault, &self.control, local, remote)
-            .await
+        let account = S::Record::identity(self.store.account());
+        view::send(
+            &mut self.store.remote(link, &self.control)?,
+            &mut self.vault,
+            account,
+            local,
+            remote,
+            &self.control,
+        )
+        .await
     }
 
     /// Only between operations: staged bytes must first be referenced by the
     /// vault or the storefront's durable state.
     fn collect_garbage(&mut self) {
+        self.views.forget();
         let Some(mut retained) = self.store.retained() else {
             return;
         };

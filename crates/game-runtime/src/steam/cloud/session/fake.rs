@@ -20,6 +20,7 @@ struct FakeState {
     change_number: u64,
     files: BTreeMap<String, (Vec<u8>, u32)>,
     uploads: usize,
+    downloads: usize,
     failures: VecDeque<Failure>,
 }
 
@@ -56,6 +57,7 @@ impl FakeSteamCloud {
                 change_number: 1,
                 files: BTreeMap::new(),
                 uploads: 0,
+                downloads: 0,
                 failures: VecDeque::new(),
             })),
         }
@@ -98,6 +100,11 @@ impl FakeSteamCloud {
 
     pub(crate) fn uploads(&self) -> usize {
         self.state.lock().unwrap().uploads
+    }
+
+    /// Files read from this Cloud so far.
+    pub(crate) fn downloads(&self) -> usize {
+        self.state.lock().unwrap().downloads
     }
 
     /// The Cloud rules and listing Steam gives an uninstall archive, `None`
@@ -158,21 +165,22 @@ pub(crate) struct FakeConnection {
     state: Arc<Mutex<FakeState>>,
 }
 
-impl RemoteSource for FakeConnection {
+impl CloudConnection for FakeConnection {
     async fn download_files(
         &mut self,
         files: &[CloudFile],
         mut receive: impl FnMut(&CloudFile, Vec<u8>) -> Result<(), CloudError>,
     ) -> Result<(), Failure> {
         for file in files {
-            let bytes = self
-                .state
-                .lock()
-                .unwrap()
-                .files
-                .get(&file.name)
-                .map(|(bytes, _)| bytes.clone())
-                .ok_or(Failure::Changed)?;
+            let bytes = {
+                let mut state = self.state.lock().unwrap();
+                state.downloads += 1;
+                state
+                    .files
+                    .get(&file.name)
+                    .map(|(bytes, _)| bytes.clone())
+                    .ok_or(Failure::Changed)?
+            };
             file.verify(&bytes)?;
             receive(file, bytes)?;
         }
@@ -181,9 +189,6 @@ impl RemoteSource for FakeConnection {
     async fn listing(&mut self) -> Result<CloudListing, Failure> {
         Ok(self.state.lock().unwrap().listing())
     }
-}
-
-impl CloudConnection for FakeConnection {
     async fn cloud_metadata(&mut self) -> Result<Option<CloudMetadata>, Failure> {
         Ok(self.state.lock().unwrap().metadata.clone())
     }
