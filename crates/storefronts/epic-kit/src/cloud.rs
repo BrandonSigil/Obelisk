@@ -319,11 +319,15 @@ impl CloudRules {
                 _ => return Err(EpicError::UnsafePath(expanded)),
             }
         }
-        if !directory.starts_with(anchor)
-            || directory == *anchor
+        if !directory.starts_with(anchor) {
+            return Err(EpicError::UnsafePath(directory.display().to_string()));
+        }
+        let directory = spelled_on_disk(anchor, &directory)?;
+        let lowercase = |path: &Path| path.to_string_lossy().to_lowercase();
+        if directory == *anchor
             || protected
                 .iter()
-                .any(|folder| directory == base.join(folder))
+                .any(|folder| lowercase(&directory) == lowercase(&base.join(folder)))
         {
             return Err(EpicError::UnsafePath(directory.display().to_string()));
         }
@@ -393,6 +397,41 @@ impl ResolvedCloudRules {
         }
         Ok(())
     }
+}
+
+/// `directory` below `anchor` with each existing folder named as on disk.
+/// Save folder names ignore case, as Windows and macOS volumes do: a launcher
+/// path such as `{AppData}/../locallow` is the prefix's `LocalLow`, and only
+/// that spelling matches the canonical path the folder is checked against.
+fn spelled_on_disk(anchor: &Path, directory: &Path) -> Result<PathBuf, EpicError> {
+    let relative = directory
+        .strip_prefix(anchor)
+        .map_err(|_| EpicError::UnsafePath(directory.display().to_string()))?;
+    let mut spelled = anchor.to_owned();
+    let mut exists = true;
+    for name in relative.iter() {
+        let on_disk = match exists.then(|| fs::read_dir(&spelled)) {
+            Some(Ok(entries)) => {
+                let mut matches = entries
+                    .filter_map(|entry| entry.ok().map(|entry| entry.file_name()))
+                    .filter(|entry| {
+                        entry
+                            .to_str()
+                            .zip(name.to_str())
+                            .is_some_and(|(entry, name)| entry.eq_ignore_ascii_case(name))
+                    })
+                    .collect::<Vec<_>>();
+                matches.sort_by_key(|entry| entry != name);
+                matches.into_iter().next()
+            }
+            Some(Err(error)) if error.kind() == std::io::ErrorKind::NotFound => None,
+            Some(Err(error)) => return Err(error.into()),
+            None => None,
+        };
+        exists = on_disk.is_some();
+        spelled.push(on_disk.as_deref().unwrap_or(name));
+    }
+    Ok(spelled)
 }
 
 // An uninstall can remove the installation while its Cloud recovery records

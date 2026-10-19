@@ -152,6 +152,25 @@ fn windows_rules_resolve_like_the_launcher_inside_the_prefix_profile() {
         .resolve(&windows, &install, "account", "game")
         .unwrap();
     assert!(resolved.directory.ends_with("game/Saved"));
+    // Wine created the prefix's folders; the launcher's path names them in
+    // another case, as Kingdom New Lands' `{appdata}/../locallow` does.
+    fs::create_dir_all(profile.join("AppData/LocalLow/noio")).unwrap();
+    let resolved = windows_rules("{appdata}/../locallow/noio/Kingdom/")
+        .resolve(&windows, &install, "account", "game")
+        .unwrap();
+    assert_eq!(
+        resolved.directory,
+        profile.join("AppData/LocalLow/noio/Kingdom")
+    );
+    resolved.check_directory().unwrap();
+    for path in ["{appdata}/../locallow", "{AppData}/../ROAMING"] {
+        assert!(
+            windows_rules(path)
+                .resolve(&windows, &install, "account", "game")
+                .is_err(),
+            "{path}"
+        );
+    }
     // A Mac build's rules name no Windows folder, and the reverse.
     let mut mac_only = rules("{Home}/Game");
     mac_only.cloud_save_folder = None;
