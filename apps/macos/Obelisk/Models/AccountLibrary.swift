@@ -36,7 +36,8 @@ final class AccountLibrary<Store: InstallationStorefront, Game: LibraryGame> whe
     }
     var searchText = ""
     var filter: StorefrontLibraryFilter = .all
-    var sort: StorefrontLibrarySort
+    /// Every storefront opens on its most recently played games.
+    var sort: StorefrontLibrarySort = .lastPlayed
     /// The Library cache of an account whose session has not connected yet.
     private(set) var isCached = false
 
@@ -91,9 +92,7 @@ final class AccountLibrary<Store: InstallationStorefront, Game: LibraryGame> whe
     @ObservationIgnored private var tasks: [StorefrontLibrarySort: Task<Void, Never>] = [:]
     @ObservationIgnored private var playtimeTask: Task<Void, Never>?
 
-    init(sort: StorefrontLibrarySort, history: LaunchHistory, cache: LibraryCache?,
-         installations: GameInstallations<Store>) {
-        self.sort = sort
+    init(history: LaunchHistory, cache: LibraryCache?, installations: GameInstallations<Store>) {
         self.history = history
         self.cache = cache
         self.installations = installations

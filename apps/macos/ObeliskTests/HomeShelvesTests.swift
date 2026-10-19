@@ -111,7 +111,7 @@ final class HomeShelvesTests: XCTestCase {
         let installations = GameInstallations(sessions: sessions, cloud: CloudModel(sessions: sessions))
         installations.connect(account: 42, backend: FakeInstallations(receipts: receipts),
                               port: InstallationPort(report: { _ in }, warn: { _ in }))
-        let library = AccountLibrary<SteamGames, SteamGame>(sort: .lastPlayed, history: history, cache: nil,
+        let library = AccountLibrary<SteamGames, SteamGame>(history: history, cache: nil,
                                                             installations: installations)
         library.connect(42)
         library.show(games)

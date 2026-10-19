@@ -220,7 +220,7 @@ final class WebAccountModel<Store: WebStorefront> {
         rosetta = RosettaModel(sessions: gameSessions)
         cloud = CloudModel(sessions: gameSessions)
         installations = GameInstallations(sessions: gameSessions, cloud: cloud)
-        library = AccountLibrary(sort: .name, history: gameSessions.history, cache: libraryCache,
+        library = AccountLibrary(history: gameSessions.history, cache: libraryCache,
                                  installations: installations)
         presence = Store.Presence()
         installations.selection = { [weak self] in self?.installationSelection }

@@ -158,7 +158,7 @@ final class SteamModel {
         self.cloud = SteamCloudModel(sessions: gameSessions)
         self.rosetta = SteamRosettaModel(sessions: gameSessions)
         self.installations = SteamInstallations(sessions: gameSessions, cloud: cloud)
-        self.library = AccountLibrary(sort: .lastPlayed, history: gameSessions.history, cache: libraryCache,
+        self.library = AccountLibrary(history: gameSessions.history, cache: libraryCache,
                                       installations: installations)
         self.chat = chat ?? SteamChatModel()
         self.invitations = SteamReceivedInvitations(sessions: gameSessions, installations: installations)

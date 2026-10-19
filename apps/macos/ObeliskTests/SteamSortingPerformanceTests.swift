@@ -20,7 +20,7 @@ final class SteamSortingPerformanceTests: XCTestCase {
             let history = LaunchHistory(cache: LibraryCache(directory: root.path))
             let sessions = SteamGameSessions(FakeSessions(), history: history)
             let installations = SteamInstallations(sessions: sessions, cloud: SteamCloudModel(sessions: sessions))
-            let library = AccountLibrary<SteamGames, SteamGame>(sort: .lastPlayed, history: history, cache: nil,
+            let library = AccountLibrary<SteamGames, SteamGame>(history: history, cache: nil,
                                                                 installations: installations)
             library.connect(42)
 

@@ -446,7 +446,7 @@ final class AccountLibraryTests: XCTestCase {
                               installations fake: FakeInstallations<SteamGames> = FakeInstallations())
         -> AccountLibrary<SteamGames, SteamGame> {
         let history = history ?? LaunchHistory(cache: LibraryCache(directory: root.path))
-        return AccountLibrary(sort: .lastPlayed, history: history, cache: cache ?? LibraryCache(directory: root.path),
+        return AccountLibrary(history: history, cache: cache ?? LibraryCache(directory: root.path),
                               installations: installations(of: 42, fake, history: history))
     }
 
@@ -454,7 +454,7 @@ final class AccountLibraryTests: XCTestCase {
                              installations fake: FakeInstallations<EpicGames> = FakeInstallations())
         -> AccountLibrary<EpicGames, EpicGame> {
         let history = history ?? LaunchHistory(cache: LibraryCache(directory: root.path))
-        return AccountLibrary(sort: .name, history: history, cache: LibraryCache(directory: root.path),
+        return AccountLibrary(history: history, cache: LibraryCache(directory: root.path),
                               installations: installations(of: EpicGames.fixtureAccount, fake, history: history))
     }
 
