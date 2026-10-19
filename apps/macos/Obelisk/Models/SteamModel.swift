@@ -19,11 +19,6 @@ final class SteamModel {
     var isFriendsPresented = false
     /// Shows the game's invite picker over the running game.
     @ObservationIgnored weak var overlay: GameOverlayController?
-    private(set) var games: [SteamGame] = [] {
-        didSet { libraryChanges &+= 1 }
-    }
-    /// Changes with the games and the account whose launches they read.
-    private var libraryChanges = 0
     private(set) var isRestoring = false
     private(set) var isConnecting = false
     private(set) var isLoadingGames = false
@@ -36,11 +31,6 @@ final class SteamModel {
     var errorMessage: String?
     var storageWarning: String?
     var rememberSession = true
-    var searchText = ""
-    var sort: StorefrontLibrarySort = .lastPlayed
-    var availableSorts: [StorefrontLibrarySort] { StorefrontLibrarySort.allCases }
-    var filter: StorefrontLibraryFilter = .all
-    var availableFilters: [StorefrontLibraryFilter] { StorefrontLibraryFilter.allCases }
     var guardKind: SteamGuardKind = .deviceConfirmation
 
     private(set) var selectedGame: SteamGame? {
@@ -64,6 +54,10 @@ final class SteamModel {
     }
     private(set) var language: String
     let installations: SteamInstallations
+    /// The account's games, from the Library cache while the session
+    /// connects. When the account got each game and its achievements'
+    /// progress load after them.
+    let library: AccountLibrary<SteamGames, SteamGame>
 
     @ObservationIgnored private let directory: URL
     @ObservationIgnored private let keychain: any CredentialStore<SteamCredentials>
@@ -83,9 +77,6 @@ final class SteamModel {
     let cloud: SteamCloudModel
     let rosetta: SteamRosettaModel
     let libraryArtwork = SteamLibraryArtwork()
-    /// When the account got each game and its achievements' progress, by app
-    /// ID, which load after the library.
-    let libraryRecords = LibraryRecords<UInt32>()
     /// Chat and game invitations, through the session the friends list follows.
     let chat: SteamChatModel
     /// Friends' invitations, into the running game or another.
@@ -96,13 +87,6 @@ final class SteamModel {
     }
     /// The in-game purchase the running game waits on.
     let purchase: SteamPurchaseAuthorization
-    /// Where the account's last library is kept between launches. The
-    /// account's session keeps every library it loads there.
-    @ObservationIgnored private let libraryCache: LibraryCache?
-    /// The account whose cached library shows while its session connects.
-    private var cachedAccount: UInt64? {
-        didSet { if cachedAccount != oldValue { libraryChanges &+= 1 } }
-    }
     @ObservationIgnored private var session: (any SteamSessionProtocol)?
     /// The session's CM connection of the moment, as it last published it;
     /// nil while it reconnects, after it gave up, or once Steam asked to sign
@@ -122,9 +106,7 @@ final class SteamModel {
     @ObservationIgnored private var profileTask: Task<Void, Never>?
     @ObservationIgnored private var friendsTask: Task<Void, Never>?
     /// The connected account; observed because `isConnected` derives from it.
-    private var sessionCredentials: SteamCredentials? {
-        didSet { if sessionCredentials?.steamId != oldValue?.steamId { libraryChanges &+= 1 } }
-    }
+    private var sessionCredentials: SteamCredentials?
     @ObservationIgnored private var wakeObserver: SystemWakeObservation?
     @ObservationIgnored private var connectionTask: Task<any SteamSessionProtocol, Error>?
     @ObservationIgnored private var pollingActive = false
@@ -132,7 +114,6 @@ final class SteamModel {
     @ObservationIgnored private var observedGameSession: SteamGameSessions.Session?
     /// The running game's session and the last overlay request it showed.
     @ObservationIgnored private var followedOverlay = SessionSequence()
-    @ObservationIgnored let libraryOrdering = LibraryOrdering<SteamGame>()
 
     init(
         directory: URL,
@@ -164,7 +145,6 @@ final class SteamModel {
         self.beginLogin = beginLogin
         self.language = steamLanguage(locale: localeIdentifier)
         self.gameSessions = gameSessions
-        self.libraryCache = libraryCache
         let locations = ObeliskLocations.of(library: directory)
         self.makeInstallations = makeInstallations ?? { session, credentials, sessions, receipts in
             guard let session = session as? SteamSession, let sessions = sessions as? StorefrontSessions else {
@@ -178,6 +158,8 @@ final class SteamModel {
         self.cloud = SteamCloudModel(sessions: gameSessions)
         self.rosetta = SteamRosettaModel(sessions: gameSessions)
         self.installations = SteamInstallations(sessions: gameSessions, cloud: cloud)
+        self.library = AccountLibrary(sort: .lastPlayed, history: gameSessions.history, cache: libraryCache,
+                                      installations: installations)
         self.chat = chat ?? SteamChatModel()
         self.invitations = SteamReceivedInvitations(sessions: gameSessions, installations: installations)
         self.purchase = SteamPurchaseAuthorization(sessions: gameSessions)
@@ -206,7 +188,7 @@ final class SteamModel {
 
     /// Whether the library shows: once connected, or from the cache while the
     /// saved session restores.
-    var showsLibrary: Bool { isConnected || (cachedAccount != nil && isRestoring) }
+    var showsLibrary: Bool { library.shows(connected: isConnected, restoring: isRestoring) }
 
     /// The game on screen, for its installation actions. Only remote details
     /// tell which builds the account can install.
@@ -236,50 +218,20 @@ final class SteamModel {
         }
     }
 
-    func title(of game: SteamGame) -> String { game.name }
-
-    func playtime(of game: SteamGame) -> Duration? { game.playtime }
-
-    /// When the game was last played: on Steam, or later from Obelisk.
-    func lastPlayed(of game: SteamGame) -> Date? {
-        // The cached library's account, while its session connects.
-        let launched = (steamId ?? cachedAccount).flatMap {
-            gameSessions.history.lastLaunch(of: game.appId, account: $0, in: SteamGames.self)
-        }
-        return [game.lastPlayedOnSteam, launched].compactMap { $0 }.max()
-    }
-
-    /// Nil until Steam told it: the library date and achievements load
-    /// after the library.
-    func libraryValue(of game: SteamGame, for sort: StorefrontLibrarySort) -> Double? {
-        libraryRecords.value(for: sort, of: game.appId)
-    }
-
-    func valuesRevision(for sort: StorefrontLibrarySort) -> Int {
-        libraryRecords.revision(for: sort)
-    }
-
-    var libraryRevision: Int { libraryChanges &+ gameSessions.history.revision }
-
-    /// Steam's orders show what loaded so far: a game whose value Steam did
-    /// not tell goes after the others, as one without it.
-    var pendingMetadata: String? { nil }
-    var missingMetadata: String? { nil }
-
     /// Loads what Steam tells apart from the library, once it loaded through
     /// a connection: when the account got each game, from its licenses, and
     /// the share of each game's achievements it unlocked. The session keeps
     /// both in the Library cache, and reads again only the achievements of
     /// the games played since.
     private func loadLibraryRecords() {
-        guard let session, transport != nil, !games.isEmpty else { return }
-        let appIds = games.map(\.appId), language = language
+        guard let session, transport != nil, !library.games.isEmpty else { return }
+        let appIds = library.games.map(\.appId), language = language
         // The licenses also grant DLC and tools, which the library leaves out.
-        let library = Set(appIds)
-        libraryRecords.load(.dateAdded) {
-            try await session.acquisitions().filter { library.contains($0.key) }.mapValues { Double($0) }
+        let owned = Set(appIds)
+        library.load(.dateAdded) {
+            try await session.acquisitions().filter { owned.contains($0.key) }.mapValues { Double($0) }
         }
-        libraryRecords.load(.achievements) { try await session.achievementShares(appIds: appIds, language: language) }
+        library.load(.achievements) { try await session.achievementShares(appIds: appIds, language: language) }
     }
 
     /// Restores the saved session once, then offers the QR sign-in when none
@@ -310,33 +262,27 @@ final class SteamModel {
         }
         guard current == generation else { return false }
         isRestoring = false
-        if !isConnected { dropCachedLibrary() }
+        // Another account may sign in next; the cache keeps the library for a
+        // later restoration.
+        if !isConnected, library.dropCache() { libraryArtwork.reset() }
         return true
     }
 
     /// Shows the account's last library at once, while its session connects.
     private func showCachedLibrary(of account: UInt64) {
-        guard games.isEmpty, let cached = libraryCache?.steamLibrary(steamId: account, language: language),
-              !cached.isEmpty else { return }
-        cachedAccount = account
-        games = cached.map(\.game)
-        func byApp<Value>(_ value: (CachedSteamGame) -> Value?) -> [UInt32: Value] {
-            Dictionary(cached.compactMap { entry in value(entry).map { (entry.game.appId, $0) } },
-                       uniquingKeysWith: { first, _ in first })
+        let language = language
+        var artwork: [UInt32: SteamGameArtwork] = [:]
+        let shown = library.showCache(of: account) { cache in
+            let cached = cache.steamLibrary(steamId: account, language: language)
+            artwork = Dictionary(cached.compactMap { entry in entry.artwork.map { (entry.game.appId, $0) } },
+                                 uniquingKeysWith: { first, _ in first })
+            return cached.map { entry in
+                CachedLibraryGame(game: entry.game, values: [
+                    .dateAdded: entry.addedAt.map { Double($0) }, .achievements: entry.achievementShare,
+                ].compactMapValues { $0 })
+            }
         }
-        libraryArtwork.show(byApp(\.artwork))
-        libraryRecords.show(byApp { $0.addedAt.map { Double($0) } }, for: .dateAdded)
-        libraryRecords.show(byApp(\.achievementShare), for: .achievements)
-    }
-
-    /// Hides a cached library whose session did not restore: another account
-    /// may sign in next. The cache keeps it for a later restoration.
-    private func dropCachedLibrary() {
-        guard cachedAccount != nil else { return }
-        cachedAccount = nil
-        games = []
-        libraryArtwork.reset()
-        libraryRecords.reset()
+        if shown { libraryArtwork.show(artwork) }
     }
 
     func beginQR() {
@@ -470,13 +416,11 @@ final class SteamModel {
             stopFriends()
             session?.shutdown()
             // The cached library's platforms show until the reload replaces them.
-            if cachedAccount == credentials.steamId {
+            if library.connect(credentials.steamId) {
                 libraryArtwork.cancel()
             } else {
                 libraryArtwork.reset()
-                libraryRecords.reset()
             }
-            cachedAccount = nil
             session = connected
             transport = 0
             sessionCredentials = credentials
@@ -599,7 +543,7 @@ final class SteamModel {
         do {
             let loaded = try await session.games()
             guard current == generation && self.transport == transport else { return }
-            if games != loaded { games = loaded }
+            library.show(loaded)
             if let selected = selectedGame, let updated = loaded.first(where: { $0.appId == selected.appId }) {
                 selectedGame = updated
             }
@@ -632,7 +576,7 @@ final class SteamModel {
 
     /// The game's name in the library, or as a friend playing it shows it.
     func gameName(appId: UInt32) -> String? {
-        if let game = games.first(where: { $0.appId == appId }) { return game.name }
+        if let game = library.game(appId) { return game.name }
         return friends?.friends.lazy.compactMap(\.activity).first { $0.id == String(appId) }?.name
     }
 
@@ -849,13 +793,8 @@ final class SteamModel {
     }
 
     func signOut() {
-        if let account = steamId ?? cachedAccount {
-            libraryCache?.forget(account: .steam(steamId: account))
-            gameSessions.history.forget(account: account, in: SteamGames.self)
-        }
-        cachedAccount = nil
+        library.forget()
         libraryArtwork.reset()
-        libraryRecords.reset()
         rosetta.connect(accountId: nil)
         installations.signedOut()
         cloud.signedOut()
@@ -881,13 +820,10 @@ final class SteamModel {
         login = nil
         displayName = nil
         avatarURL = nil
-        games = []
         selectedGame = nil
         details = nil
         news = []
         challenge = nil
-        searchText = ""
-        filter = .all
         errorMessage = nil
         storageWarning = nil
         isConnecting = false
@@ -1060,6 +996,15 @@ extension SteamGame: Identifiable {
 
     /// When Steam last saw the game played; nil when it never did.
     var lastPlayedOnSteam: Date? { lastPlayed > 0 ? Date(timeIntervalSince1970: TimeInterval(lastPlayed)) : nil }
+}
+
+extension SteamGame: LibraryGame {
+    var title: String { name }
+    var lastPlayedOnStorefront: Date? { lastPlayedOnSteam }
+
+    /// Steam tells when the account got each game and its achievements apart
+    /// from the library.
+    func libraryValue(for sort: StorefrontLibrarySort) -> Double? { nil }
 }
 
 extension SteamGameDetails {

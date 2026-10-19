@@ -180,7 +180,11 @@ fn native_target(
         target,
         target.arguments.clone(),
         crate::native::environment(home),
-        crate::locations::game_log(home, crate::profile::Game::Steam { app_id }, "game"),
+        crate::diagnostics::game_log(
+            home,
+            crate::diagnostics::Game::Steam(app_id),
+            crate::diagnostics::Build::Mac,
+        ),
     )?;
     Ok((target, steam_api))
 }

@@ -25,10 +25,9 @@ final class GogModelTests: XCTestCase {
         let model = await connectedModel(session)
         defer { model.signOut() }
 
-        try await eventually { !model.isLoadingPlaytimes }
+        try await eventually { model.library.playtime(of: games[1]) == .seconds(36_000) }
         let asked = await session.playtimeRequests
         XCTAssertEqual(asked, [["1", "2", "3"]], "One request names every product")
-        XCTAssertEqual(model.playtime(of: games[1]), .seconds(36_000))
     }
 
     func testTheLibraryOrdersByWhenGalaxyTellsEachGameJoinedIt() async throws {
@@ -40,9 +39,9 @@ final class GogModelTests: XCTestCase {
                                                         games: [unknown, classic, recent]))
         defer { model.signOut() }
 
-        XCTAssertEqual(model.libraryValue(of: classic, for: .dateAdded), 1_700_000_000, "Seconds, not their bits")
-        model.sort = .dateAdded
-        XCTAssertEqual(model.filteredGames.map(\.title), ["Classic", "Recent", "Unknown"])
+        XCTAssertEqual(model.library.value(of: classic, for: .dateAdded), 1_700_000_000, "Seconds, not their bits")
+        model.library.sort = .dateAdded
+        XCTAssertEqual(model.library.shown.map(\.title), ["Classic", "Recent", "Unknown"])
     }
 
     func testTheAchievementsLoadAfterThePlaytimesWithoutTheirOrder() async throws {
@@ -53,18 +52,18 @@ final class GogModelTests: XCTestCase {
         let model = await connectedModel(session)
         defer { model.signOut() }
 
-        try await eventually { model.libraryRecords.value(for: .achievements, of: "1") != nil }
+        try await eventually { model.library.value(of: games[0], for: .achievements) != nil }
         let asked = await session.achievementReads
         XCTAssertEqual(asked, [AchievementRead(ids: ["1", "2", "3", "4", "5"], locale: "en-US", fresh: false)],
                        "One read names every game, with no order picked, in the player's language")
-        model.sort = .achievements
-        XCTAssertEqual(model.filteredGames.map(\.productId), ["2", "1", "4", "3", "5"],
+        model.library.sort = .achievements
+        XCTAssertEqual(model.library.shown.map(\.productId), ["2", "1", "4", "3", "5"],
                        "Games without achievements, or whose request failed, follow by name")
-        XCTAssertNil(model.pendingMetadata)
-        XCTAssertNil(model.missingMetadata, "A game whose request failed counts as one without achievements")
+        XCTAssertNil(model.library.pendingMetadata)
+        XCTAssertNil(model.library.missingMetadata, "A game whose request failed counts as one without achievements")
 
-        model.sort = .name
-        model.sort = .achievements
+        model.library.sort = .name
+        model.library.sort = .achievements
         let again = await session.achievementReads
         XCTAssertEqual(again.count, 1, "Picking the order asks nothing")
     }

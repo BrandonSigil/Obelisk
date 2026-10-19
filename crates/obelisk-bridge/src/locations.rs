@@ -1,4 +1,5 @@
 //! Every path Obelisk uses, named once, and the removal of an installation.
+use game_runtime::{diagnostics, queue::Storefront};
 use std::path::{Path, PathBuf};
 
 /// Where Obelisk keeps everything, derived from its library directory, its
@@ -20,11 +21,6 @@ pub struct ObeliskLocations {
     /// download, or a launch that misses them, gets from Valve's CDN.
     pub steam_runtime_package: String,
     pub steam_runtime_cache: String,
-    pub steam_diagnostics: String,
-    /// Where Wine logs the Windows builds of Epic games.
-    pub epic_diagnostics: String,
-    /// Where Wine logs the Windows builds of GOG games.
-    pub gog_diagnostics: String,
     /// The Voile runtimes that run Windows games: the pinned release and a
     /// development runtime.
     pub voile: String,
@@ -48,9 +44,6 @@ pub fn obelisk_locations(library: String, bundle: String, home: String) -> Obeli
         helpers: path(locations.helpers),
         steam_runtime_package: path(locations.steam_runtime_package),
         steam_runtime_cache: path(locations.steam_runtime_cache),
-        steam_diagnostics: path(locations.steam_diagnostics),
-        epic_diagnostics: path(locations.epic_diagnostics),
-        gog_diagnostics: path(locations.gog_diagnostics),
         voile: path(locations.voile),
         wine_prefixes: path(locations.wine_prefixes),
     }
@@ -72,6 +65,7 @@ pub fn installed_voile_release(locations: ObeliskLocations) -> Option<String> {
 
 impl From<&ObeliskLocations> for game_runtime::Locations {
     fn from(locations: &ObeliskLocations) -> Self {
+        let home = Path::new(&locations.home);
         Self {
             library: (&locations.library).into(),
             home: (&locations.home).into(),
@@ -83,9 +77,10 @@ impl From<&ObeliskLocations> for game_runtime::Locations {
             helpers: (&locations.helpers).into(),
             steam_runtime_package: (&locations.steam_runtime_package).into(),
             steam_runtime_cache: (&locations.steam_runtime_cache).into(),
-            steam_diagnostics: (&locations.steam_diagnostics).into(),
-            epic_diagnostics: (&locations.epic_diagnostics).into(),
-            gog_diagnostics: (&locations.gog_diagnostics).into(),
+            // Swift never needs the diagnostics folders; Rust derives them from home.
+            steam_diagnostics: diagnostics::folder(home, Storefront::Steam),
+            epic_diagnostics: diagnostics::folder(home, Storefront::Epic),
+            gog_diagnostics: diagnostics::folder(home, Storefront::Gog),
             voile: (&locations.voile).into(),
             wine_prefixes: (&locations.wine_prefixes).into(),
         }
@@ -122,20 +117,24 @@ mod tests {
             locations.steam_runtime_cache,
             "/home/Library/Caches/com.zagrios.obelisk/SteamRuntime"
         );
-        assert_eq!(
-            locations.steam_diagnostics,
-            "/home/Library/Logs/Obelisk/Steam"
-        );
-        assert_eq!(
-            locations.epic_diagnostics,
-            "/home/Library/Logs/Obelisk/Epic"
-        );
-        assert_eq!(locations.gog_diagnostics, "/home/Library/Logs/Obelisk/GOG");
         assert_eq!(locations.voile, "/library/Voile");
         assert_eq!(locations.wine_prefixes, "/library/Prefixes");
+        let runtime = game_runtime::Locations::from(&locations);
+        assert_eq!(
+            runtime.steam_diagnostics,
+            Path::new("/home/Library/Logs/Obelisk/Steam")
+        );
+        assert_eq!(
+            runtime.epic_diagnostics,
+            Path::new("/home/Library/Logs/Obelisk/Epic")
+        );
+        assert_eq!(
+            runtime.gog_diagnostics,
+            Path::new("/home/Library/Logs/Obelisk/GOG")
+        );
         assert_eq!(
             game_runtime::wine::prefix(
-                &game_runtime::Locations::from(&locations).wine_prefixes,
+                &runtime.wine_prefixes,
                 Path::new("/library/Games/Steam/steam-42-windows")
             )
             .unwrap(),

@@ -572,7 +572,11 @@ pub(crate) fn windows_build(platform: &str) -> bool {
 
 /// Where Wine logs `game`: in its storefront's diagnostics folder.
 fn log(locations: &crate::Locations, game: crate::profile::Game<'_>) -> PathBuf {
-    crate::locations::game_log(&locations.home, game, "wine")
+    crate::diagnostics::game_log(
+        &locations.home,
+        game.into(),
+        crate::diagnostics::Build::Windows,
+    )
 }
 
 /// Deletes `folder`. A missing one is already gone; a link in its place is

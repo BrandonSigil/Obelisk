@@ -199,18 +199,24 @@ final class DeveloperModals {
         present { close in BugReportSheet(model: model, close: close) }
     }
 
-    /// A Steam diagnostics folder with a game's logs and launch report, which
-    /// the report lists. Nothing reads Obelisk's own log or crash reports.
+    /// A few made-up diagnostics, which the report lists: a game's logs and
+    /// launch report, and for Obelisk the report alone. Nothing reads
+    /// Obelisk's own log or crash reports.
     private static func bugReportSources() -> BugReportSources {
         let folder = FileManager.default.temporaryDirectory.appending(path: "obelisk-developer-modals",
                                                                        directoryHint: .isDirectory)
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        for name in ["wine-\(gameID).log", "wine-\(gameID).previous.log", "wine-\(gameID).input.log",
-                     "launch-\(gameID)-1760700000.json"] {
-            try? Data("Made up for the modal gallery.\n".utf8).write(to: folder.appending(path: name))
+        let logs = ["game.log", "game.previous.log", "input.log"].map { folder.appending(path: $0) }
+        let report = folder.appending(path: "launch-report.json")
+        for url in logs + [report] {
+            try? Data("Made up for the modal gallery.\n".utf8).write(to: url)
         }
-        return BugReportSources(diagnostics: [.steam: folder], crashReports: folder, process: "obelisk-developer-modals",
-                                home: NSHomeDirectory(), unifiedLog: { "" }, voile: { nil })
+        let diagnostics: @Sendable (BugReportSubject, Date) -> [URL] = { subject, _ in
+            if case .app = subject { [report] } else { logs + [report] }
+        }
+        return BugReportSources(diagnostics: diagnostics, crashReports: folder,
+                                process: "obelisk-developer-modals", home: NSHomeDirectory(), unifiedLog: { "" },
+                                voile: { nil })
     }
 
     func launchSettings(_ load: @escaping () async throws -> LaunchSettings?) {

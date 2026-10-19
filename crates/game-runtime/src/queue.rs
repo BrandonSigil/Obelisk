@@ -11,7 +11,7 @@
 use std::sync::{Arc, Mutex, Weak};
 use tokio::sync::{oneshot, watch};
 
-/// The storefront a queued Transfer belongs to.
+/// The storefront a queued Transfer, or a game's diagnostics, belong to.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Storefront {
     Steam,

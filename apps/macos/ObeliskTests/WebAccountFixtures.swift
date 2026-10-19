@@ -153,10 +153,7 @@ actor WebTestSession<Store: WebStoreFixture> {
     private var gameContinuation: CheckedContinuation<[Store.Game], Never>?
     private(set) var waitingForGames = false
     private(set) var gameCalls = 0
-    private var shouldHoldPlaytimes = false
     private var failNextPlaytimeRequest = false
-    private var playtimeContinuation: CheckedContinuation<Void, Never>?
-    private(set) var waitingForPlaytimes = false
     private(set) var playtimeCalls = 0
     /// The product ids of each of GOG's playtime requests.
     private(set) var playtimeRequests: [[String]] = []
@@ -228,8 +225,6 @@ actor WebTestSession<Store: WebStoreFixture> {
     func expireNextGames() { expireNext = true }
     func failNextGames(rotated: Store.Credentials) { failNext = true; self.rotated = rotated }
 
-    func holdNextPlaytimes() { shouldHoldPlaytimes = true }
-    func completePlaytimes() { playtimeContinuation?.resume(); playtimeContinuation = nil }
     func failNextPlaytimes() { failNextPlaytimeRequest = true }
 
     func holdNextDetails() { shouldHoldDetails = true }
@@ -267,12 +262,6 @@ actor WebTestSession<Store: WebStoreFixture> {
     private func answerPlaytimes() async throws -> [Store.Playtime] {
         playtimeCalls += 1
         if failNextPlaytimeRequest { failNextPlaytimeRequest = false; throw Store.network }
-        if shouldHoldPlaytimes {
-            shouldHoldPlaytimes = false
-            waitingForPlaytimes = true
-            await withCheckedContinuation { playtimeContinuation = $0 }
-            waitingForPlaytimes = false
-        }
         return ownedPlaytimes
     }
 

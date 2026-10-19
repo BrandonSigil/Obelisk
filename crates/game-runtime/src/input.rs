@@ -35,7 +35,7 @@ impl Service {
         }
         let directory = directory(&config.prefix);
         let socket = directory.join("input.sock");
-        let log = File::create(config.log.with_extension("input.log")).ok()?;
+        let log = File::create(crate::diagnostics::input_log(&config.log)).ok()?;
         let child = Command::new(program)
             .arg("--dir")
             .arg(&directory)

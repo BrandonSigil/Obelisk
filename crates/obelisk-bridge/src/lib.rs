@@ -26,6 +26,8 @@ mod game_session;
 pub use game_session::*;
 mod locations;
 pub use locations::*;
+mod diagnostics;
+pub use diagnostics::*;
 mod installations;
 pub use installations::*;
 mod launch_settings;

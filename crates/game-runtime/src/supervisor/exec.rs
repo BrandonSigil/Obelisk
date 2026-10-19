@@ -4,10 +4,9 @@
 //! message: losing the supervisor first closes the pipe and prevents exec.
 use serde::{Deserialize, Serialize};
 use std::{
-    fs::File,
     io::{self, BufRead, Read, Write},
     os::unix::process::CommandExt,
-    path::{Path, PathBuf},
+    path::PathBuf,
     process::{Command, Stdio},
 };
 
@@ -63,25 +62,11 @@ pub fn standard_error(admission: &Admission) -> io::Result<Stdio> {
     let Some(log) = &admission.log else {
         return Ok(Stdio::null());
     };
-    let mut log = open_log(log)?;
+    let mut log = crate::diagnostics::open_log(log)?;
     if let Some(header) = &admission.log_header {
         log.write_all(header.as_bytes())?;
     }
     Ok(log.into())
-}
-
-/// Opens `log` empty for a new launch. The last launch's log stays beside it
-/// as `<name>.previous.log`: a player who relaunches a game that crashed
-/// still has the crash's log to send.
-pub fn open_log(log: &Path) -> io::Result<File> {
-    use std::os::unix::fs::OpenOptionsExt;
-    let _ = std::fs::rename(log, log.with_extension("previous.log"));
-    std::fs::OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .mode(0o600)
-        .open(log)
 }
 
 /// The arm64 helper. `std` exec restores the default SIGPIPE disposition

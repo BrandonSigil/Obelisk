@@ -187,7 +187,7 @@ final class GameOverlayTests: XCTestCase {
         let fixture = OverlayFixture(steam: model, showsPanel: true)
         await model.start()
         defer { model.signOut() }
-        try await eventually { model.friends?.connection == .connected && !model.games.isEmpty }
+        try await eventually { model.friends?.connection == .connected && !model.library.games.isEmpty }
         var state = GameSessionState.steam(appID: 620, accountID: FriendsWireFixture.accountID, id: "portal")
         state.startedAt = UInt64(Date().timeIntervalSince1970) - 3_900
         sessions.fake.show(state)

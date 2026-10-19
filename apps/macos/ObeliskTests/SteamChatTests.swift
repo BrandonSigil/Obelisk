@@ -118,7 +118,7 @@ final class SteamChatIntegrationTests: XCTestCase {
         await model.start()
         defer { model.signOut() }
         let chat = model.chat
-        try await eventually { model.friends?.connection == .connected && !model.games.isEmpty }
+        try await eventually { model.friends?.connection == .connected && !model.library.games.isEmpty }
         let alice = try XCTUnwrap(model.friends?.friends.first)
         XCTAssertEqual(alice.steamID, friend)
         let offline = FriendPresentation(id: alice.id, name: alice.name, avatarURL: nil, presence: .offline, activity: nil)
@@ -181,7 +181,7 @@ final class SteamChatIntegrationTests: XCTestCase {
         await model.start()
         defer { model.signOut() }
         let chat = model.chat
-        try await eventually { model.friends?.connection == .connected && !model.games.isEmpty && chat.ownGame != nil }
+        try await eventually { model.friends?.connection == .connected && !model.library.games.isEmpty && chat.ownGame != nil }
         let alice = try XCTUnwrap(model.friends?.friends.first)
         let offline = FriendPresentation(id: alice.id, name: alice.name, avatarURL: nil, presence: .offline, activity: nil)
 
@@ -245,7 +245,7 @@ final class SteamChatIntegrationTests: XCTestCase {
         await model.start()
         defer { model.signOut() }
         let chat = model.chat
-        try await eventually { model.friends?.connection == .connected && !model.games.isEmpty && chat.ownGame != nil }
+        try await eventually { model.friends?.connection == .connected && !model.library.games.isEmpty && chat.ownGame != nil }
         let alice = try XCTUnwrap(model.friends?.friends.first)
         let offline = FriendPresentation(id: alice.id, name: alice.name, avatarURL: nil, presence: .offline, activity: nil)
 
@@ -295,7 +295,7 @@ final class SteamChatIntegrationTests: XCTestCase {
         let fixture = OverlayFixture(steam: model)
         await model.start()
         defer { model.signOut() }
-        try await eventually { model.friends?.connection == .connected && !model.games.isEmpty }
+        try await eventually { model.friends?.connection == .connected && !model.library.games.isEmpty }
         let alice = try XCTUnwrap(model.friends?.friends.first)
         try await eventually { model.chat.inviteOffer(for: alice) != nil }
         XCTAssertEqual(model.chat.inviteOffer(for: alice)?.invite, .lobby(lobbyId: Self.peakLobby))
@@ -312,7 +312,7 @@ final class SteamChatIntegrationTests: XCTestCase {
         let model = friendsTestModel(connect: { _ in session }, gameSessions: sessions)
         await model.start()
         defer { model.signOut() }
-        try await eventually { model.friends?.connection == .connected && !model.games.isEmpty }
+        try await eventually { model.friends?.connection == .connected && !model.library.games.isEmpty }
         sessions.fake.show(peakSession(requests: 0))
         try await eventually { model.chat.gameLobby == nil && sessions.active != nil }
         sessions.fake.show(peakSession(requests: 1, lobby: Self.peakLobby))
@@ -331,7 +331,7 @@ final class SteamChatIntegrationTests: XCTestCase {
         await model.start()
         defer { model.signOut() }
         let chat = model.chat
-        try await eventually { model.friends?.connection == .connected && !model.games.isEmpty }
+        try await eventually { model.friends?.connection == .connected && !model.library.games.isEmpty }
         let state = try XCTUnwrap(model.friends)
         let alice = try XCTUnwrap(state.friends.first)
         sessions.fake.show(peakSession(requests: 0))
@@ -638,7 +638,7 @@ final class SteamChatIntegrationTests: XCTestCase {
         let model = friendsTestModel(connect: { _ in session }, gameSessions: sessions)
         await model.start()
         defer { model.signOut() }
-        try await eventually { model.friends?.connection == .connected && !model.games.isEmpty }
+        try await eventually { model.friends?.connection == .connected && !model.library.games.isEmpty }
         let game = GameSessionState.steam(appID: 620, accountID: FriendsWireFixture.accountID, id: "portal")
         sessions.fake.show(game)
         session.chat.ownGame(appId: 620, lobbyId: 1, connect: nil)

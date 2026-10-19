@@ -206,7 +206,7 @@ final class SteamFriendsIntegrationTests: XCTestCase {
         session.loadGames = { [recoveredGame] }
         let libraryRecovered = expectation(description: "The new connection reloads the library")
         withObservationTracking {
-            _ = model.games
+            _ = model.library.games
         } onChange: { libraryRecovered.fulfill() }
         session.fixture.reconnect()
         await fulfillment(of: [libraryRecovered], timeout: 3)
@@ -214,12 +214,12 @@ final class SteamFriendsIntegrationTests: XCTestCase {
         session.fixture.receive(kind: 766, body: FriendsWireFixture.initialPersona)
         await session.settle()
 
-        XCTAssertEqual(model.games.map(\.appId), [620])
+        XCTAssertEqual(model.library.games.map(\.appId), [620])
         XCTAssertFalse(model.isLoadingGames)
         XCTAssertEqual(model.friends?.connection, .connected)
         await initialGames.reject()
         await start.value
-        XCTAssertEqual(model.games.map(\.appId), [620])
+        XCTAssertEqual(model.library.games.map(\.appId), [620])
         XCTAssertFalse(model.isLoadingGames)
         XCTAssertNil(model.errorMessage, "A failure through the dropped connection must not overwrite recovery")
     }

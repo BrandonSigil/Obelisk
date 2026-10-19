@@ -9,6 +9,16 @@ enum BugReportSubject: Hashable {
     case game(store: SessionStorefront, id: String, name: String)
 }
 
+private extension BugReportSubject {
+    /// The subject as Rust finds its diagnostics.
+    var diagnostics: DiagnosticsSubject {
+        switch self {
+        case .app: .app
+        case let .game(store, id, _): .game(storefront: store, id: id)
+        }
+    }
+}
+
 /// The `report` part of a bug report. The site's docs/contracts.md describes
 /// every field.
 struct BugReport: Encodable, Equatable {
@@ -99,8 +109,8 @@ struct BugReportLog: Equatable, Sendable {
 
 /// Where a bug report's files come from.
 struct BugReportSources: Sendable {
-    /// Each storefront's diagnostics folder: its games' logs and launch reports.
-    var diagnostics: [SessionStorefront: URL]
+    /// A game's or Obelisk's diagnostics, as Rust names and finds them, most telling first.
+    var diagnostics: @Sendable (BugReportSubject, Date) -> [URL]
     /// Where macOS writes crash reports.
     var crashReports: URL
     /// The process whose crash reports, and its children's, a report attaches.
@@ -120,10 +130,11 @@ struct BugReportSources: Sendable {
 
     @MainActor static var live: BugReportSources {
         let locations = ObeliskLocations.live
-        let folder = { URL(fileURLWithPath: $0, isDirectory: true) }
         return BugReportSources(
-            diagnostics: [.steam: folder(locations.steamDiagnostics), .epic: folder(locations.epicDiagnostics),
-                          .gog: folder(locations.gogDiagnostics)],
+            diagnostics: { subject, now in
+                diagnosticFiles(locations: locations, subject: subject.diagnostics, now: now)
+                    .map { URL(fileURLWithPath: $0) }
+            },
             crashReports: URL.libraryDirectory.appending(path: "Logs/DiagnosticReports", directoryHint: .isDirectory),
             process: ProcessInfo.processInfo.processName, home: NSHomeDirectory(),
             unifiedLog: { await Self.unifiedLog(process: ProcessInfo.processInfo.processName) },
@@ -131,34 +142,22 @@ struct BugReportSources: Sendable {
         )
     }
 
-    /// What a report on `subject` attaches, most telling first: a game's own
-    /// logs and launch reports, Obelisk's log, then crash reports of Obelisk
+    /// What a report on `subject` attaches, most telling first: a game's
+    /// diagnostics, Obelisk's log, then crash reports of Obelisk
     /// and what it ran; for Obelisk, its log, its crash reports and the
     /// launch reports of the last day.
     func files(for subject: BugReportSubject, now: Date) -> [BugReportFile] {
         var files: [BugReportFile] = []
         let unified = BugReportFile(name: Self.unifiedLogName, url: nil)
         switch subject {
-        case let .game(store, id, _):
-            if let folder = diagnostics[store] {
-                files += Self.gameLogs(id, in: folder)
-                for kind in ["launch", "failed"] {
-                    files += Self.newest(in: folder) { $0.hasPrefix("\(kind)-\(id)-") && $0.hasSuffix(".json") }
-                        .prefix(1).map(Self.file)
-                }
-            }
+        case .game:
+            files += diagnostics(subject, now).map(Self.file)
             files.append(unified)
             files += crashes(since: now - 24 * 3600).prefix(Self.maxCrashReports).map(Self.file)
         case .app:
             files.append(unified)
             files += crashes(since: now - 7 * 24 * 3600).prefix(Self.maxCrashReports).map(Self.file)
-            let launches = diagnostics.values.flatMap { folder in
-                Self.listing(of: folder).filter {
-                    ($0.name.hasPrefix("launch-") || $0.name.hasPrefix("failed-")) && $0.name.hasSuffix(".json")
-                        && $0.modified >= now - 24 * 3600
-                }
-            }
-            files += launches.sorted { $0.modified > $1.modified }.map { Self.file($0.url) }
+            files += diagnostics(subject, now).map(Self.file)
         }
         return Array(files.prefix(Self.maxFiles))
     }
@@ -177,20 +176,6 @@ struct BugReportSources: Sendable {
             logs.append(BugReportLog(name: file.name, data: Data(BugReportPayload.redacted(text, home: home).utf8)))
         }
         return logs
-    }
-
-    /// A game's current, previous and input logs, of the build it last
-    /// launched: `wine-` for a Windows one, `game-` for a Mac one.
-    private static func gameLogs(_ id: String, in folder: URL) -> [BugReportFile] {
-        let builds = ["wine", "game"].compactMap { kind -> (kind: String, modified: Date)? in
-            [".log", ".previous.log"].compactMap { modified(folder.appending(path: "\(kind)-\(id)\($0)")) }.max()
-                .map { (kind, $0) }
-        }
-        guard let kind = builds.max(by: { $0.modified < $1.modified })?.kind else { return [] }
-        return [".log", ".previous.log", ".input.log"]
-            .map { folder.appending(path: "\(kind)-\(id)\($0)") }
-            .filter { modified($0) != nil }
-            .map(file)
     }
 
     /// Crash reports since `date` of this process, or of a process it started
@@ -266,9 +251,7 @@ enum BugReportPayload {
     /// folder as `~`, as Unix or Wine writes it, and without the identifiers
     /// macOS writes in crash reports.
     static func redacted(_ text: String, home: String) -> String {
-        var result = text.split(separator: "\n", omittingEmptySubsequences: false)
-            .filter { !$0.contains("metal-HUD:") }
-            .joined(separator: "\n")
+        var result = withoutMetalHudFrames(text: text)
         let user = URL(fileURLWithPath: home).lastPathComponent
         let homePattern = home.hasPrefix("/Users/")
             ? #"(?i)[/\\]users[/\\]\#(NSRegularExpression.escapedPattern(for: user))(?![\w.-])"#

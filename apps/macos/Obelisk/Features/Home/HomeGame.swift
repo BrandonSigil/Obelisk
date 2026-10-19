@@ -21,51 +21,95 @@ struct HomeGame: Identifiable {
     let title: String
     let lastPlayed: Date?
     let playtime: Duration?
-    let isInstalled: Bool
     /// What the game's card and hero buttons show and do.
     let action: GameAction
     let cover: () -> AnyView
     let hero: Hero
     /// Opens the game's page in its storefront.
     let open: () -> Void
+}
 
-    /// The last played first, then the never played, each by name.
-    static func lastPlayedFirst(_ left: HomeGame, _ right: HomeGame) -> Bool {
-        switch (left.lastPlayed, right.lastPlayed) {
-        case let (left?, right?) where left != right: return left > right
-        case (.some, nil): return true
-        case (nil, .some): return false
-        default: return byName(left, right)
-        }
+/// One account's library as Home shows it, built only for the games Home lists.
+@MainActor
+struct HomeLibrary {
+    let featured: HomeGame?
+    /// Its played games, the last played first: one more than a shelf holds,
+    /// as the hero may be one of them.
+    let recent: [HomeGame]
+    /// Its installed games, the last played first.
+    let installed: [HomeGame]
+    /// The first games of its last played order, as its tile shows them.
+    let covers: [HomeGame]
+    let count: Int
+}
+
+extension HomeGame {
+    /// `game` of `library`, named, dated and timed as the library knows it.
+    init<Store, Game>(_ game: Game, of library: AccountLibrary<Store, Game>, in section: LibrarySection,
+                      action: GameAction, cover: @escaping () -> AnyView, hero: Hero, open: @escaping () -> Void) {
+        self.init(id: ID(section: section, game: "\(game.id)"), title: game.title,
+                  lastPlayed: library.lastPlayed(of: game), playtime: library.playtime(of: game),
+                  action: action, cover: cover, hero: hero, open: open)
     }
+}
 
-    static func byName(_ left: HomeGame, _ right: HomeGame) -> Bool {
-        left.title.localizedStandardCompare(right.title) == .orderedAscending
+extension HomeLibrary {
+    /// `library` as Home shows it; `home` makes each game Home lists.
+    init<Store, Game>(_ library: AccountLibrary<Store, Game>, home: (Game) -> HomeGame) {
+        let order = library.games(by: .lastPlayed)
+        self.init(
+            featured: library.featured.map(home),
+            recent: order.prefix { library.lastPlayed(of: $0) != nil }.prefix(HomeShelves.shelfLimit + 1).map(home),
+            installed: library.games(by: .lastPlayed, filter: .installed).map(home),
+            covers: order.prefix(3).map(home),
+            count: library.games.count
+        )
     }
 }
 
 extension LibraryStorefront {
-    /// The account's games as Home shows them, in the storefront's own artwork.
-    func homeGames<Cover: View, Artwork: View, Logo: View>(
+    /// The account's library as Home shows it, in the storefront's own artwork.
+    func homeLibrary<Cover: View, Artwork: View, Logo: View>(
+        in section: LibrarySection,
+        cover: @escaping (Game) -> Cover,
+        heroArtwork: @escaping (Game) -> Artwork,
+        heroLogo: @escaping (Game) -> Logo
+    ) -> HomeLibrary {
+        let actions = GameActions(installations, in: .library)
+        return HomeLibrary(library) { game in
+            homeGame(game, in: section, actions: actions, cover: cover, heroArtwork: heroArtwork, heroLogo: heroLogo)
+        }
+    }
+
+    /// The account's games whose title matches `query`, by name.
+    func homeResults<Cover: View, Artwork: View, Logo: View>(
+        matching query: String,
         in section: LibrarySection,
         cover: @escaping (Game) -> Cover,
         heroArtwork: @escaping (Game) -> Artwork,
         heroLogo: @escaping (Game) -> Logo
     ) -> [HomeGame] {
         let actions = GameActions(installations, in: .library)
-        return games.map { game in
-            HomeGame(
-                id: HomeGame.ID(section: section, game: "\(game.id)"),
-                title: title(of: game),
-                lastPlayed: lastPlayed(of: game),
-                playtime: playtime(of: game),
-                isInstalled: actions.isInstalled(game.id),
-                action: actions(librarySelection(game)),
-                cover: { AnyView(cover(game)) },
-                hero: HomeGame.Hero(artwork: { AnyView(heroArtwork(game)) }, logo: { AnyView(heroLogo(game)) }),
-                open: { self.open(game) }
-            )
+        return library.games(by: .name, matching: query).map { game in
+            homeGame(game, in: section, actions: actions, cover: cover, heroArtwork: heroArtwork, heroLogo: heroLogo)
         }
+    }
+
+    private func homeGame<Cover: View, Artwork: View, Logo: View>(
+        _ game: Game,
+        in section: LibrarySection,
+        actions: GameActions<Store>,
+        cover: @escaping (Game) -> Cover,
+        heroArtwork: @escaping (Game) -> Artwork,
+        heroLogo: @escaping (Game) -> Logo
+    ) -> HomeGame {
+        HomeGame(
+            game, of: library, in: section,
+            action: actions(librarySelection(game)),
+            cover: { AnyView(cover(game)) },
+            hero: HomeGame.Hero(artwork: { AnyView(heroArtwork(game)) }, logo: { AnyView(heroLogo(game)) }),
+            open: { self.open(game) }
+        )
     }
 }
 
@@ -82,14 +126,19 @@ struct HomeShelves {
 
     static let shelfLimit = 20
 
-    init(_ games: [HomeGame]) {
-        let played = games.filter { $0.lastPlayed != nil }.sorted(by: HomeGame.lastPlayedFirst)
-        let hero = played.first ?? games.min { left, right in
-            let (leftPlaytime, rightPlaytime) = (left.playtime ?? .zero, right.playtime ?? .zero)
-            return leftPlaytime == rightPlaytime ? HomeGame.byName(left, right) : leftPlaytime > rightPlaytime
-        }
+    /// `libraries` in Home's order, which equal games across libraries keep.
+    init(_ libraries: [HomeLibrary]) {
+        let featured = Array(libraries.compactMap(\.featured).enumerated())
+        let hero = LibraryOrder.featured(featured, title: { $0.element.title }, id: { $0.offset },
+                                         lastPlayed: { $0.element.lastPlayed }, playtime: { $0.element.playtime })?.element
         self.hero = hero
-        recent = Array(played.filter { $0.id != hero?.id }.prefix(Self.shelfLimit))
-        installed = games.filter(\.isInstalled).sorted(by: HomeGame.lastPlayedFirst)
+        let recent = Self.lastPlayedFirst(libraries.map(\.recent))
+        self.recent = Array(recent.filter { $0.id != hero?.id }.prefix(Self.shelfLimit))
+        installed = Self.lastPlayedFirst(libraries.map(\.installed))
+    }
+
+    /// Merges each library's games, each in its last played order.
+    private static func lastPlayedFirst(_ games: [[HomeGame]]) -> [HomeGame] {
+        LibraryOrder.merge(games, title: \.title, rank: { $0.lastPlayed?.timeIntervalSince1970 })
     }
 }

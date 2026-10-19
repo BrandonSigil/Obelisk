@@ -364,7 +364,7 @@ final class GameOverlaySteamTests: XCTestCase {
         let fixture = OverlayFixture(steam: model)
         fixture.frontmost = Self.game
         await model.start()
-        try await eventually { model.friends?.connection == .connected && !model.games.isEmpty }
+        try await eventually { model.friends?.connection == .connected && !model.library.games.isEmpty }
         return (fixture, model, sessions)
     }
 

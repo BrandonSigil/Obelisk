@@ -136,11 +136,11 @@ private struct StorefrontBrowserBar<Model: LibraryStorefront, AccountMenu: View>
 
     var body: some View {
         LibraryGlassBar(
-            searchText: $model.searchText,
+            searchText: Bindable(model.library).searchText,
             searchLabel: L10n.string("ui.search.store_library", storeTitle),
             showsBackdrop: bar.showsBackdrop,
             game: model.selectedGame.map { game in
-                LibraryGlassBar.GameBar(title: model.title(of: game), libraryTitle: libraryTitle,
+                LibraryGlassBar.GameBar(title: game.title, libraryTitle: libraryTitle,
                                         showsTitle: bar.showsGameTitle, back: back)
             }
         ) {

@@ -4,9 +4,9 @@ import XCTest
 
 final class SteamSortingPerformanceTests: XCTestCase {
     @MainActor
-    func testProfileModelSortingWhenRequested() async throws {
+    func testProfileLibrarySortingWhenRequested() async throws {
         guard ProcessInfo.processInfo.environment["OBELISK_PROFILE_SORTING"] == "1" else {
-            throw XCTSkip("Set OBELISK_PROFILE_SORTING=1 to profile the sorting algorithm and model cache")
+            throw XCTSkip("Set OBELISK_PROFILE_SORTING=1 to profile the library's orders and their cache")
         }
         var samples: [SortingSample] = []
 
@@ -15,43 +15,32 @@ final class SteamSortingPerformanceTests: XCTestCase {
             XCTAssertGreaterThan(games.filter { $0.lastPlayed == 0 }.count, count / 2)
             XCTAssertEqual(Set(games.map(\.appId)).count, count)
 
-            // Measure only the synchronous production order. Validation
-            // and JSON logging remain outside the timed section.
-            for iteration in 0..<5 {
-                for sort in [StorefrontLibrarySort.lastPlayed, .name, .playtime] {
-                    let began = ContinuousClock.now
-                    let result = LibraryOrdering.order(games, by: sort)
-                    let elapsed = milliseconds(since: began)
-                    assertOrder(result, count: count, sort: sort)
-                    samples.append(SortingSample(phase: "order", games: count, sort: sort.rawValue, iteration: iteration, milliseconds: elapsed))
-                }
-            }
-
             let root = FileManager.default.temporaryDirectory.appending(path: "ObeliskSorting-\(UUID().uuidString)")
             defer { try? FileManager.default.removeItem(at: root) }
-            let session = SortingSteamSession(games: games)
-            let model = SteamModel(directory: root, keychain: SortingCredentials(), connect: { _ in session }, news: { _ in [] }, localeIdentifier: "fr-FR")
-            await model.start()
-            XCTAssertTrue(model.isConnected)
-            XCTAssertEqual(model.games.count, count)
+            let history = LaunchHistory(cache: LibraryCache(directory: root.path))
+            let sessions = SteamGameSessions(FakeSessions(), history: history)
+            let installations = SteamInstallations(sessions: sessions, cloud: SteamCloudModel(sessions: sessions))
+            let library = AccountLibrary<SteamGames, SteamGame>(sort: .lastPlayed, history: history, cache: nil,
+                                                                installations: installations)
+            library.connect(42)
 
-            // Profile the model path separately from the standalone algorithm:
-            // repeated sorting can reuse cached results even though the pure
-            // order implementation remains unchanged.
+            // Measure only the synchronous order. Validation and JSON logging
+            // remain outside the timed sections.
             for iteration in 0..<5 {
+                library.show(iteration.isMultiple(of: 2) ? games : games.reversed())
                 for sort in [StorefrontLibrarySort.lastPlayed, .name, .playtime] {
                     let began = ContinuousClock.now
-                    model.sort = sort
-                    let result = model.filteredGames
+                    library.sort = sort
+                    let result = library.shown
                     let elapsed = milliseconds(since: began)
-                    assertOrder(result, count: count, sort: sort)
-                    samples.append(SortingSample(phase: "model-sort+filteredGames", games: count, sort: sort.rawValue, iteration: iteration, milliseconds: elapsed))
+                    assertOrder(result, of: library, count: count, sort: sort)
+                    samples.append(SortingSample(phase: "order", games: count, sort: sort.rawValue, iteration: iteration, milliseconds: elapsed))
 
                     let rereadBegan = ContinuousClock.now
-                    let reread = model.filteredGames
+                    let reread = library.shown
                     let rereadElapsed = milliseconds(since: rereadBegan)
                     XCTAssertEqual(reread.map(\.appId), result.map(\.appId))
-                    samples.append(SortingSample(phase: "model-filteredGames-same-sort", games: count, sort: sort.rawValue, iteration: iteration, milliseconds: rereadElapsed))
+                    samples.append(SortingSample(phase: "kept-order", games: count, sort: sort.rawValue, iteration: iteration, milliseconds: rereadElapsed))
                 }
             }
         }
@@ -72,15 +61,20 @@ final class SteamSortingPerformanceTests: XCTestCase {
         return Double(components.seconds) * 1_000 + Double(components.attoseconds) / 1_000_000_000_000_000
     }
 
-    private func assertOrder(_ games: [SteamGame], count: Int, sort: StorefrontLibrarySort, file: StaticString = #filePath, line: UInt = #line) {
+    @MainActor
+    private func assertOrder(_ games: [SteamGame], of library: AccountLibrary<SteamGames, SteamGame>, count: Int,
+                             sort: StorefrontLibrarySort, file: StaticString = #filePath, line: UInt = #line) {
         XCTAssertEqual(games.count, count, file: file, line: line)
         for (left, right) in zip(games, games.dropFirst()) {
-            switch sort {
-            case .lastPlayed where left.lastPlayed != right.lastPlayed:
-                XCTAssertGreaterThan(left.lastPlayed, right.lastPlayed, file: file, line: line)
-            case .playtime where left.playtimeMinutes != right.playtimeMinutes:
-                XCTAssertGreaterThan(left.playtimeMinutes, right.playtimeMinutes, file: file, line: line)
-            default:
+            let (leftRank, rightRank): (Double?, Double?) = switch sort {
+            case .lastPlayed: (library.lastPlayed(of: left)?.timeIntervalSince1970, library.lastPlayed(of: right)?.timeIntervalSince1970)
+            case .playtime: (library.playtime(of: left).map { Double($0.components.seconds) },
+                             library.playtime(of: right).map { Double($0.components.seconds) })
+            default: (nil, nil)
+            }
+            if leftRank != rightRank {
+                XCTAssertGreaterThan(leftRank ?? -.infinity, rightRank ?? -.infinity, file: file, line: line)
+            } else {
                 let comparison = left.name.localizedStandardCompare(right.name)
                 XCTAssertNotEqual(comparison, .orderedDescending, file: file, line: line)
                 if comparison == .orderedSame { XCTAssertLessThan(left.appId, right.appId, file: file, line: line) }
@@ -110,19 +104,3 @@ private func sortingLibrary(count: Int) -> [SteamGame] {
         )
     }
 }
-
-private actor SortingCredentials: CredentialStore {
-    func load() -> SteamCredentials? { SteamCredentials(accountName: "Benchmark account", steamId: 42, refreshToken: "fixture-only-never-sent") }
-    func save(_ credentials: SteamCredentials) {}
-    func remove() {}
-}
-
-private final class SortingSteamSession: SteamSessionProtocol, Sendable {
-    let library: [SteamGame]
-    init(games: [SteamGame]) { library = games }
-    func games() async throws -> [SteamGame] { library }
-    func profile() async throws -> SteamProfile { SteamProfile(displayName: nil, avatarUrl: nil) }
-    func details(appId: UInt32, language: String) async throws -> SteamGameDetails { throw SortingFailure.unexpectedOperation }
-}
-
-private enum SortingFailure: Error { case unexpectedOperation }

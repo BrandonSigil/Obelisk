@@ -392,8 +392,8 @@ final class GameOverlayController {
     var gameTitle: String {
         let title: String? = switch session?.game {
         case .steam(let appId)?: steam.gameName(appId: appId)
-        case .epic(let id)?: epic.games.first { $0.id == id }?.title
-        case .gog(let id)?: gog.games.first { $0.id == id }?.title
+        case .epic(let id)?: epic.library.game(id)?.title
+        case .gog(let id)?: gog.library.game(id)?.title
         case nil: nil
         }
         return title ?? L10n.string("ui.overlay.unknownGame")
@@ -402,8 +402,8 @@ final class GameOverlayController {
     /// The game's wide artwork, which Steam publishes by app.
     var gameArtwork: String? {
         switch session?.game {
-        case .epic(let id)?: epic.games.first { $0.id == id }.flatMap { $0.headerImageUrl ?? $0.imageUrl }
-        case .gog(let id)?: gog.games.first { $0.id == id }.flatMap { $0.headerImageUrl ?? $0.imageUrl }
+        case .epic(let id)?: epic.library.game(id).flatMap { $0.headerImageUrl ?? $0.imageUrl }
+        case .gog(let id)?: gog.library.game(id).flatMap { $0.headerImageUrl ?? $0.imageUrl }
         case .steam?, nil: nil
         }
     }

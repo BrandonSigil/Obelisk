@@ -46,7 +46,7 @@ struct GameDetailPage<Model: LibraryStorefront, HeroArtwork: View, Cover: View, 
     }
 
     private var installations: GameInstallations<Model.Store> { model.installations }
-    private var name: String { model.title(of: game) }
+    private var name: String { game.title }
 
     /// Whether the page shows whole: at once, unless it opened with motion.
     private var isRevealed: Bool { appeared || transition?.source == nil }
@@ -185,12 +185,12 @@ struct GameDetailPage<Model: LibraryStorefront, HeroArtwork: View, Cover: View, 
     }
 
     private var lastPlayed: String? {
-        let date = model.lastPlayed(of: game)
+        let date = model.library.lastPlayed(of: game)
         return showsUnplayed ? GameFormatting.lastPlayed(date) : date.map(GameFormatting.lastPlayed)
     }
 
     private var playtime: String? {
-        let playtime = model.playtime(of: game)
+        let playtime = model.library.playtime(of: game)
         return showsUnplayed ? GameFormatting.playtime(playtime ?? .zero) : playtime.map(GameFormatting.playtime)
     }
     private var metrics: GameMetrics {

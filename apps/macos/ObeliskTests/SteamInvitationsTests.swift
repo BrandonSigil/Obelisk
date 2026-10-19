@@ -170,7 +170,7 @@ final class SteamInvitationsTests: XCTestCase {
                                      gameSessions: SteamGameSessions())
         model.notifier = notifier
         await model.start()
-        try await eventually { model.friends?.connection == .connected && !model.games.isEmpty }
+        try await eventually { model.friends?.connection == .connected && !model.library.games.isEmpty }
         return (model, session, backend, notifier)
     }
 }

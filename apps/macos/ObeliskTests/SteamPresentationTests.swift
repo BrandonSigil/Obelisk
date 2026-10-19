@@ -109,7 +109,7 @@ final class SteamPresentationTests: XCTestCase {
 
         await model.start()
         XCTAssertTrue(model.isConnected)
-        XCTAssertEqual(model.filteredGames.map(\.appId), [620, 570, 440])
+        XCTAssertEqual(model.library.shown.map(\.appId), [620, 570, 440])
         XCTAssertFalse(model.isLoadingGames)
         XCTAssertNil(model.qrURL)
         XCTAssertFalse(FileManager.default.fileExists(atPath: root.path))
@@ -141,7 +141,7 @@ final class SteamPresentationTests: XCTestCase {
         XCTAssertNil(model.selectedGame)
         XCTAssertNil(model.details)
         XCTAssertTrue(model.news.isEmpty)
-        XCTAssertEqual(model.games.count, 3)
+        XCTAssertEqual(model.library.games.count, 3)
     }
 
     @MainActor
@@ -158,7 +158,7 @@ final class SteamPresentationTests: XCTestCase {
         await model.start()
         let appIDs = fixtureGames.map(\.appId).sorted()
         try await eventually { await platforms.wasRequested(appIDs) }
-        XCTAssertEqual(model.filteredGames.map(\.appId), fixtureGames.map(\.appId))
+        XCTAssertEqual(model.library.shown.map(\.appId), fixtureGames.map(\.appId))
         XCTAssertFalse(model.isLoadingGames, "App info must not block the library")
         XCTAssertTrue(model.libraryArtwork.games.isEmpty)
         XCTAssertNil(model.selectedGame)
@@ -222,7 +222,7 @@ final class SteamPresentationTests: XCTestCase {
         let librarySearchFrame = try XCTUnwrap(accessibilityFrame(in: host, label: L10n.string("ui.search.store_library", L10n.string("ui.store.steam"))), "The search field must be accessible for the layout regression")
         try scrolling.assertKept(in: host, during: "the library")
 
-        model.searchText = "Portal 2"
+        model.library.searchText = "Portal 2"
         try await eventually {
             host.layoutSubtreeIfNeeded()
             window.displayIfNeeded()
@@ -233,7 +233,7 @@ final class SteamPresentationTests: XCTestCase {
         let filteredSearchFrame = try XCTUnwrap(accessibilityFrame(in: host, label: L10n.string("ui.search.store_library", L10n.string("ui.store.steam"))))
         // The clear button takes space at the field's right edge once text exists.
         XCTAssertEqual(filteredSearchFrame.minX, librarySearchFrame.minX, accuracy: 0.5, "The search field shifted horizontally when filtering the library")
-        model.searchText = ""
+        model.library.searchText = ""
         try await eventually {
             host.layoutSubtreeIfNeeded()
             window.displayIfNeeded()
@@ -389,7 +389,7 @@ final class SteamPresentationTests: XCTestCase {
     }
 
     @MainActor
-    func testTheLastPlayedGameIsTheLatestLaunchOnSteamOrFromObeliskForTheHeroTheOrderAndTheFilter() async throws {
+    func testALaunchFromObeliskOrdersTheLibraryAgain() async throws {
         let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
         let history = LaunchHistory(cache: LibraryCache(directory: root.path))
@@ -399,20 +399,9 @@ final class SteamPresentationTests: XCTestCase {
                                localeIdentifier: "fr-FR", gameSessions: SteamGameSessions(FakeSessions(), history: history))
         await model.start()
 
-        XCTAssertEqual(model.featuredGame?.appId, 620, "Steam's last played game")
-        XCTAssertEqual(model.filteredGames.map(\.appId), [620, 570, 440])
-        let launched = Date(timeIntervalSince1970: 1_789_500_000)
-        history.record(570, account: 42, in: SteamGames.self, at: launched)
-        XCTAssertEqual(model.featuredGame?.appId, 570, "A later launch from Obelisk")
-        XCTAssertEqual(model.filteredGames.map(\.appId), [570, 620, 440], "The library orders again")
-        XCTAssertEqual(model.lastPlayed(of: fixtureGames[1]), launched)
-        XCTAssertEqual(model.lastPlayed(of: fixtureGames[0]), Date(timeIntervalSince1970: 1_789_430_000))
-        XCTAssertNil(model.lastPlayed(of: fixtureGames[2]))
-
-        model.filter = .played
-        XCTAssertEqual(model.filteredGames.map(\.appId), [570, 620])
-        history.record(440, account: 42, in: SteamGames.self, at: launched + 60)
-        XCTAssertEqual(model.filteredGames.map(\.appId), [440, 570, 620], "Launched from Obelisk, never on Steam")
+        XCTAssertEqual(model.library.shown.map(\.appId), [620, 570, 440])
+        history.record(570, account: 42, in: SteamGames.self, at: Date(timeIntervalSince1970: 1_789_500_000))
+        XCTAssertEqual(model.library.shown.map(\.appId), [570, 620, 440], "The connected account's launch is its last play")
     }
 
     @MainActor
@@ -434,14 +423,14 @@ final class SteamPresentationTests: XCTestCase {
 
         try await eventually { model.showsLibrary }
         XCTAssertFalse(model.isConnected, "The cached library shows before Steam answers")
-        XCTAssertEqual(model.games, [cached])
-        XCTAssertEqual(model.libraryValue(of: cached, for: .dateAdded), 1_300_000_000)
-        XCTAssertEqual(model.libraryValue(of: cached, for: .achievements), 0.5)
-        model.sort = .achievements
-        XCTAssertNil(model.pendingMetadata, "What the cache knew orders the library before Steam answers")
+        XCTAssertEqual(model.library.games, [cached])
+        XCTAssertEqual(model.library.value(of: cached, for: .dateAdded), 1_300_000_000)
+        XCTAssertEqual(model.library.value(of: cached, for: .achievements), 0.5)
+        model.library.sort = .achievements
+        XCTAssertNil(model.library.pendingMetadata, "What the cache knew orders the library before Steam answers")
         await connection.resolve(fixture)
         await start.value
-        try await eventually { model.games == fixtureGames && model.libraryArtwork.games[620] == freshArtwork }
+        try await eventually { model.library.games == fixtureGames && model.libraryArtwork.games[620] == freshArtwork }
         XCTAssertTrue(model.showsLibrary)
 
         model.signOut()
@@ -461,7 +450,7 @@ final class SteamPresentationTests: XCTestCase {
         await model.start()
 
         XCTAssertFalse(model.showsLibrary)
-        XCTAssertTrue(model.games.isEmpty, "Another account may sign in next")
+        XCTAssertTrue(model.library.games.isEmpty, "Another account may sign in next")
         XCTAssertFalse(cache.steamLibrary(steamId: 42, language: "english").isEmpty, "The account may restore later")
     }
 
@@ -930,7 +919,7 @@ final class SteamPresentationTests: XCTestCase {
         XCTAssertFalse(model.isCredentialChallenge)
 
         // The library loads once the account connects.
-        try await eventually(timeout: .seconds(10)) { model.isConnected && model.games.count == fixtureGames.count }
+        try await eventually(timeout: .seconds(10)) { model.isConnected && model.library.games.count == fixtureGames.count }
         let recorded = await starts.all
         XCTAssertEqual(recorded, [.qr], "Sign-in must start exactly once, through the port")
     }

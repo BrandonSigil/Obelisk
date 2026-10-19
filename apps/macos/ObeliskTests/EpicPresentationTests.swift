@@ -174,9 +174,9 @@ final class EpicPresentationTests: XCTestCase {
         fixture.layout()
         XCTAssertTrue(model.isConnected)
         XCTAssertTrue(model.isLoadingGames)
-        XCTAssertTrue(model.games.isEmpty)
+        XCTAssertTrue(model.library.games.isEmpty)
         await session.releaseGames()
-        try await eventually { !model.isLoadingGames && model.games.count == epicPresentationLibrary.count }
+        try await eventually { !model.isLoadingGames && model.library.games.count == epicPresentationLibrary.count }
 
         // This second host is a control for the reported workaround: mounting a
         // new tab after data arrived shows the grid even if the old host is stale.
@@ -208,7 +208,7 @@ final class EpicPresentationTests: XCTestCase {
         if !libraryVisible {
             XCTContext.runActivity(named: restoring ? "Stale view after Epic restoration" : "Stale view after Epic sign-in") { activity in
                 let actualHeight = firstScrollView(in: fixture.host)?.documentView?.frame.height
-                activity.add(XCTAttachment(string: "games=\(model.games.count), connected=\(model.isConnected), loading=\(model.isLoadingGames), mountedDocumentHeight=\(String(describing: actualHeight)), remountedDocumentHeight=\(expectedHeight), mountedSearch=\(String(describing: searchFrame(in: fixture.host)))"))
+                activity.add(XCTAttachment(string: "games=\(model.library.games.count), connected=\(model.isConnected), loading=\(model.isLoadingGames), mountedDocumentHeight=\(String(describing: actualHeight)), remountedDocumentHeight=\(expectedHeight), mountedSearch=\(String(describing: searchFrame(in: fixture.host)))"))
                 if let bitmap = fixture.host.bitmapImageRepForCachingDisplay(in: fixture.host.bounds) {
                     fixture.host.cacheDisplay(in: fixture.host.bounds, to: bitmap)
                     let image = NSImage(size: fixture.host.bounds.size)
@@ -221,7 +221,7 @@ final class EpicPresentationTests: XCTestCase {
             }
         }
         XCTAssertTrue(libraryVisible, "The mounted Epic tab must render the arriving games without changing tabs or the search query")
-        XCTAssertEqual(model.searchText, "")
+        XCTAssertEqual(model.library.searchText, "")
         XCTAssertNil(model.selectedGame)
         XCTAssertNil(model.errorMessage)
         let gameCalls = await session.gameCalls
@@ -250,7 +250,7 @@ final class EpicPresentationTests: XCTestCase {
 
             try library.assertKept(in: fixture.host, during: "the full library")
 
-            model.searchText = epicPresentationLibrary[0].title
+            model.library.searchText = epicPresentationLibrary[0].title
             try await eventually {
                 fixture.layout()
                 guard let document = library.scroll.documentView else { return false }
@@ -272,7 +272,7 @@ final class EpicPresentationTests: XCTestCase {
             XCTAssertNil(searchFrame(in: fixture.host), "A game's page has no search")
 
             model.closeGame()
-            model.searchText = ""
+            model.library.searchText = ""
             try await eventually {
                 fixture.layout()
                 guard let current = firstScrollView(in: fixture.host), let document = current.documentView else { return false }
@@ -334,7 +334,7 @@ final class EpicPresentationTests: XCTestCase {
         XCTAssertTrue(firstScrollView(in: fixture.host) === scroll)
         XCTAssertTrue(scroll.verticalScroller === scroller, "Scrolling must keep the same scrollbar")
         XCTAssertEqual(scroll.scrollerStyle, .overlay, "The library's scrollbar floats over its covers")
-        XCTAssertEqual(model.searchText, "")
+        XCTAssertEqual(model.library.searchText, "")
         let gameCalls = await session.gameCalls
         XCTAssertEqual(gameCalls, 1)
     }

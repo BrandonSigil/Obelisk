@@ -16,24 +16,7 @@ class WebAccountModelTests: XCTestCase {
 
     // MARK: Library
 
-    func testLibrarySearchIgnoresAccentsAndSortsNamesWithStableIdentifiers() async throws {
-        try await librarySearch(Self.store!)
-    }
-    private func librarySearch<S: WebStoreFixture>(_: S.Type) async throws {
-        let games = [S.game("z", title: "Portal"), S.game("b", title: "Étoiles"), S.game("a", title: "Portal")]
-        let stored = S.credentials("current")
-        let session = WebTestSession<S>(credentials: stored, games: games)
-        let model = await connectedModel(session)
-        defer { model.signOut() }
-
-        XCTAssertEqual(model.filteredGames.map(\.id), [games[1].id, games[2].id, games[0].id])
-        model.searchText = "  etoile  "
-        XCTAssertEqual(model.filteredGames.map(\.id), [games[1].id])
-        model.searchText = "absent"
-        XCTAssertTrue(model.filteredGames.isEmpty)
-    }
-
-    func testPlaytimeSortsAndFiltersTheLibraryFromOneRequest() async throws {
+    func testPlaytimesLoadFromOneRequestAndOrderTheLibrary() async throws {
         try await playtimeOrder(Self.store!)
     }
     private func playtimeOrder<S: WebStoreFixture>(_: S.Type) async throws {
@@ -44,26 +27,20 @@ class WebAccountModelTests: XCTestCase {
             S.playtime("c", minutes: 600), S.playtime("b", minutes: 10), S.playtime("a", minutes: 0),
         ])
         let model = webModel(S.self, MemoryStore(stored), restore: { _ in S.session(session) })
-        XCTAssertEqual(model.availableSorts, StorefrontLibrarySort.allCases)
-        XCTAssertTrue(model.availableFilters.contains(.played))
         await model.start()
         defer { model.signOut() }
-        try await eventually { !model.isLoadingPlaytimes && model.playtime(of: games[2]) == .seconds(36_000) }
+        try await eventually { model.library.playtime(of: games[2]) == .seconds(36_000) }
 
-        XCTAssertEqual(model.filteredGames.map(\.title), ["Alpha", "Beta", "Delta", "Gamma"])
-        XCTAssertEqual(model.featuredGame, games[2], "The most played game leads before any launch")
-        model.sort = .playtime
-        XCTAssertEqual(model.filteredGames.map(\.title), ["Gamma", "Beta", "Alpha", "Delta"],
-                       "Equal playtimes keep the name order")
-        model.filter = .played
-        XCTAssertEqual(model.filteredGames.map(\.title), ["Gamma", "Beta"])
-        XCTAssertNil(model.pendingMetadata)
-        XCTAssertNil(model.missingMetadata)
+        XCTAssertEqual(model.library.shown.map(\.title), ["Alpha", "Beta", "Delta", "Gamma"], "By name at first")
+        model.library.sort = .playtime
+        XCTAssertEqual(model.library.shown.map(\.title), ["Gamma", "Beta", "Alpha", "Delta"])
+        XCTAssertNil(model.library.pendingMetadata)
+        XCTAssertNil(model.library.missingMetadata)
         let calls = await session.playtimeCalls
         XCTAssertEqual(calls, 1, "One request reads every game's playtime")
 
         model.signOut()
-        XCTAssertNil(model.playtime(of: games[2]))
+        XCTAssertNil(model.library.playtime(of: games[2]))
     }
 
     func testAFailedPlaytimeRequestKeepsTheLibraryAndOffersARetry() async throws {
@@ -76,28 +53,31 @@ class WebAccountModelTests: XCTestCase {
         await session.failNextPlaytimes()
         let model = await connectedModel(session)
         defer { model.signOut() }
-        try await eventually { !model.isLoadingPlaytimes }
+        model.library.sort = .playtime
+        try await eventually { model.library.missingMetadata != nil }
 
-        XCTAssertEqual(model.filteredGames.count, 2)
-        XCTAssertNil(model.missingMetadata, "The name order needs no playtime")
+        model.library.sort = .name
+        XCTAssertEqual(model.library.shown.count, 2)
+        XCTAssertNil(model.library.missingMetadata, "The name order needs no playtime")
         XCTAssertNil(model.errorMessage)
-        model.sort = .playtime
-        XCTAssertNotNil(model.missingMetadata)
+        model.library.sort = .playtime
+        XCTAssertNotNil(model.library.missingMetadata)
 
         await session.holdNextGames()
         model.refresh()
         try await eventually { await session.waitingForGames }
-        XCTAssertNil(model.missingMetadata, "The retry clears the failure before the games answer")
-        XCTAssertNotNil(model.pendingMetadata)
+        XCTAssertNil(model.library.missingMetadata, "The retry clears the failure before the games answer")
+        XCTAssertNotNil(model.library.pendingMetadata)
         await session.completeGames(games)
         try await eventually {
-            !model.isLoadingGames && !model.isLoadingPlaytimes && model.playtime(of: games[1]) == .seconds(60)
+            !model.isLoadingGames && model.library.pendingMetadata == nil
+                && model.library.playtime(of: games[1]) == .seconds(60)
         }
-        XCTAssertNil(model.missingMetadata)
-        XCTAssertEqual(model.filteredGames.map(\.title), ["Beta", "Alpha"])
+        XCTAssertNil(model.library.missingMetadata)
+        XCTAssertEqual(model.library.shown.map(\.title), ["Beta", "Alpha"])
     }
 
-    func testTheLastLaunchFromObeliskLeadsTheHeroTheOrderAndThePlayedFilter() async throws {
+    func testTheAccountsLaunchesDateItsGamesUntilItSignsOut() async throws {
         try await lastLaunch(Self.store!)
     }
     private func lastLaunch<S: WebStoreFixture>(_: S.Type) async throws {
@@ -106,57 +86,18 @@ class WebAccountModelTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: directory) }
         let history = LaunchHistory(cache: LibraryCache(directory: directory.path))
         let stored = S.credentials("current")
-        let session = WebTestSession<S>(credentials: stored, games: games, playtimes: [
-            S.playtime("b", minutes: 10), S.playtime("c", minutes: 600),
-        ])
+        let session = WebTestSession<S>(credentials: stored, games: games)
         let model = webModel(S.self, MemoryStore(stored), restore: { _ in S.session(session) },
                              gameSessions: GameSessions(FakeSessions(), history: history))
         await model.start()
-        try await eventually { !model.isLoadingPlaytimes && model.playtime(of: games[2]) != nil }
 
-        XCTAssertEqual(model.featuredGame, games[2], "Without a launch from Obelisk, the most played game")
-        model.sort = .lastPlayed
-        model.filter = .played
-        XCTAssertEqual(model.filteredGames.map(\.title), ["Beta", "Gamma"], "Played, never launched: by name")
         history.record(games[0].id, account: S.fixtureAccount, in: S.self)
-        XCTAssertEqual(model.featuredGame, games[0])
-        XCTAssertNotNil(model.lastPlayed(of: games[0]))
-        XCTAssertEqual(model.filteredGames.map(\.title), ["Alpha", "Beta", "Gamma"],
-                       "Launched from Obelisk, never played on the storefront")
-        history.record(games[1].id, account: "another-account", in: S.self, at: .now + 60)
-        XCTAssertEqual(model.featuredGame, games[0], "Only this account's launches count")
+        XCTAssertNotNil(model.library.lastPlayed(of: games[0]))
+        XCTAssertEqual(model.library.featured, games[0], "The last game launched from Obelisk leads the library")
 
         model.signOut()
         XCTAssertNil(history.lastLaunch(of: games[0].id, account: S.fixtureAccount, in: S.self),
                      "Signing out forgets the account's launches with its library")
-    }
-
-    func testANeverPlayedLibraryFeaturesItsFirstGameByName() async throws {
-        try await neverPlayed(Self.store!)
-    }
-    private func neverPlayed<S: WebStoreFixture>(_: S.Type) async throws {
-        let games = [S.game("b", title: "Beta"), S.game("a", title: "Alpha")]
-        let stored = S.credentials("current")
-        let session = WebTestSession<S>(credentials: stored, games: games, playtimes: [S.playtime("a", minutes: 0)])
-        let model = await connectedModel(session)
-        defer { model.signOut() }
-        try await eventually { !model.isLoadingPlaytimes }
-        XCTAssertEqual(model.featuredGame, games[1], "Every game at zero hours: the first by name")
-    }
-
-    func testEqualPlaytimesFeatureTheFirstGameByName() async throws {
-        try await equalPlaytimes(Self.store!)
-    }
-    private func equalPlaytimes<S: WebStoreFixture>(_: S.Type) async throws {
-        let games = [S.game("1", title: "Zeta"), S.game("2", title: "beta"), S.game("3", title: "Alpha")]
-        let stored = S.credentials("current")
-        let session = WebTestSession<S>(credentials: stored, games: games, playtimes: [
-            S.playtime("1", minutes: 30), S.playtime("2", minutes: 30),
-        ])
-        let model = await connectedModel(session)
-        defer { model.signOut() }
-        try await eventually { !model.isLoadingPlaytimes }
-        XCTAssertEqual(model.featuredGame, games[1], "Equal playtimes: the first by name, whatever its case")
     }
 
     func testTheCachedLibraryShowsWhileRestoringAndSigningOutForgetsIt() async throws {
@@ -180,18 +121,43 @@ class WebAccountModelTests: XCTestCase {
 
         try await eventually { model.showsLibrary }
         XCTAssertFalse(model.isConnected, "The cached library shows before the storefront answers")
-        XCTAssertEqual(model.games, [cached])
-        XCTAssertEqual(model.playtime(of: cached), .seconds(7200), "The cached playtime shows too")
-        XCTAssertEqual(model.lastPlayed(of: cached), launched, "The cached account's launches already count")
-        XCTAssertEqual(model.featuredGame, cached, "The last game launched from Obelisk leads the library")
+        XCTAssertEqual(model.library.games, [cached])
+        XCTAssertEqual(model.library.playtime(of: cached), .seconds(7200), "The cached playtime shows too")
+        XCTAssertEqual(model.library.lastPlayed(of: cached), launched, "The cached account's launches already count")
+        XCTAssertEqual(model.library.featured, cached, "The last game launched from Obelisk leads the library")
         await restoration.resolve(S.session(session))
         await start.value
-        try await eventually { model.games.map(\.title) == ["Alpha"] && !model.isLoadingPlaytimes }
-        XCTAssertEqual(model.playtime(of: model.games[0]), .seconds(60))
+        try await eventually {
+            model.library.games.map(\.title) == ["Alpha"] && model.library.playtime(of: model.library.games[0]) == .seconds(60)
+        }
 
         model.signOut()
         XCTAssertTrue(S.cachedLibrary(in: cache, account: S.fixtureAccount).isEmpty,
                       "Signing out forgets the account's library")
+    }
+
+    func testAFailedRestoreHidesTheCachedLibraryButKeepsItOnDisk() async throws {
+        try await failedRestoreCache(Self.store!)
+    }
+    private func failedRestoreCache<S: WebStoreFixture>(_: S.Type) async throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: "ObeliskWebCache-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let cached = S.game("7", title: "Cached game")
+        let cache = try S.cache([(cached, 120)], account: S.fixtureAccount, in: directory)
+        let restoration = GameSessionGate<S.Session>()
+        let model = webModel(S.self, MemoryStore(S.credentials("current")),
+                             restore: { _ in try await restoration.wait() }, libraryCache: cache)
+        let start = Task { await model.start() }
+
+        try await eventually { model.showsLibrary }
+        XCTAssertEqual(model.library.games, [cached])
+        await restoration.fail(S.network)
+        await start.value
+        XCTAssertTrue(model.library.games.isEmpty, "A failed restore hides the cached library")
+        XCTAssertFalse(model.showsLibrary)
+        XCTAssertTrue(model.canRetryRestore)
+        XCTAssertEqual(S.cachedLibrary(in: cache, account: S.fixtureAccount).map(\.game), [cached],
+                       "The retry can show it again")
     }
 
     func testARestoredAccountOtherThanTheCachedOneStartsEmpty() async throws {
@@ -211,17 +177,17 @@ class WebAccountModelTests: XCTestCase {
         let start = Task { await model.start() }
 
         try await eventually { model.showsLibrary }
-        XCTAssertEqual(model.games, [cached])
-        XCTAssertEqual(model.playtime(of: cached), .seconds(30 * 60))
+        XCTAssertEqual(model.library.games, [cached])
+        XCTAssertEqual(model.library.playtime(of: cached), .seconds(30 * 60))
         await restoration.resolve(S.session(session))
         try await eventually { model.isConnected }
-        XCTAssertTrue(model.games.isEmpty, "Another account's cached games never show as this one's")
+        XCTAssertTrue(model.library.games.isEmpty, "Another account's cached games never show as this one's")
         XCTAssertEqual(model.accountName, "Name of B")
-        XCTAssertNil(model.playtime(of: cached), "Nor do its playtimes")
+        XCTAssertNil(model.library.playtime(of: cached), "Nor do its playtimes")
 
         await session.completeGames([restored])
         await start.value
-        XCTAssertEqual(model.games, [restored])
+        XCTAssertEqual(model.library.games, [restored])
         model.signOut()
     }
 
@@ -252,56 +218,6 @@ class WebAccountModelTests: XCTestCase {
         XCTAssertNil(model.selectedGame, "A game the library lost closes")
     }
 
-    func testEveryLibraryChangeMovesTheRevision() async throws {
-        try await libraryRevision(Self.store!)
-    }
-    private func libraryRevision<S: WebStoreFixture>(_: S.Type) async throws {
-        let directory = FileManager.default.temporaryDirectory.appending(path: "ObeliskWebRevision-\(UUID().uuidString)")
-        defer { try? FileManager.default.removeItem(at: directory) }
-        let cache = try S.cache([(S.game("7", title: "Cached game"), 30)], account: S.fixtureAccount, in: directory)
-        let other = S.game("1", title: "Other account's game")
-        let session = WebTestSession<S>(credentials: S.credentials("t", account: "other"), games: [other],
-                                        playtimes: [S.playtime("1", minutes: 5)])
-        await session.holdNextGames()
-        await session.holdNextPlaytimes()
-        let failed = GameSessionGate<S.Session>()
-        let retried = GameSessionGate<S.Session>()
-        let model = webModel(S.self, MemoryStore(S.credentials("t")), restore: { _ in
-            if await failed.requests == 0 { return try await failed.wait() }
-            return try await retried.wait()
-        }, libraryCache: cache)
-        var revision = model.libraryRevision
-        func moved(_ change: String, file: StaticString = #filePath, line: UInt = #line) {
-            XCTAssertNotEqual(model.libraryRevision, revision, change, file: file, line: line)
-            revision = model.libraryRevision
-        }
-
-        let start = Task { await model.start() }
-        try await eventually { model.showsLibrary }
-        moved("The cache shown on restore")
-        await failed.fail(S.network)
-        await start.value
-        XCTAssertTrue(model.games.isEmpty)
-        moved("The cache dropped on a failed restore")
-
-        model.retryRestore()
-        try await eventually { await retried.requests == 1 }
-        revision = model.libraryRevision
-        await retried.resolve(S.session(session))
-        try await eventually { model.isConnected }
-        moved("Accepting another account")
-        try await eventually { await session.waitingForGames }
-        await session.completeGames([other])
-        try await eventually { await session.waitingForPlaytimes }
-        XCTAssertEqual(model.games, [other])
-        moved("The games loaded")
-        await session.completePlaytimes()
-        try await eventually { model.playtime(of: other) != nil }
-        moved("The playtimes loaded")
-        model.signOut()
-        moved("Signing out")
-    }
-
     // MARK: Account
 
     func testRestoreRunsOnceAndSavesRotatedRefreshToken() async throws {
@@ -320,7 +236,7 @@ class WebAccountModelTests: XCTestCase {
         XCTAssertTrue(model.isConnected)
         XCTAssertFalse(model.isRestoring)
         XCTAssertEqual(model.accountName, S.fixtureName)
-        XCTAssertEqual(model.games.map(\.title), ["One"])
+        XCTAssertEqual(model.library.games.map(\.title), ["One"])
         try await eventually { await store.value == rotated }
         let loads = await store.loads
         XCTAssertEqual(loads, 1)
@@ -343,7 +259,7 @@ class WebAccountModelTests: XCTestCase {
         await model.start()
 
         XCTAssertTrue(model.isConnected)
-        XCTAssertEqual(model.games.count, 1)
+        XCTAssertEqual(model.library.games.count, 1)
         await fulfillment(of: [changed], timeout: 0.2)
     }
 
@@ -364,7 +280,7 @@ class WebAccountModelTests: XCTestCase {
         model.signIn()
         try await eventually { model.isConnected && !model.isLoadingGames }
 
-        XCTAssertEqual(model.games.count, 1)
+        XCTAssertEqual(model.library.games.count, 1)
         await fulfillment(of: [changed], timeout: 0.2)
     }
 
@@ -385,7 +301,7 @@ class WebAccountModelTests: XCTestCase {
         XCTAssertEqual(retained, original)
         model.retryRestore()
         try await eventually { model.isConnected && !model.isLoadingGames }
-        XCTAssertEqual(model.games.map(\.title), ["One"])
+        XCTAssertEqual(model.library.games.map(\.title), ["One"])
         XCTAssertNil(model.errorMessage)
     }
 
@@ -436,7 +352,7 @@ class WebAccountModelTests: XCTestCase {
 
         model.refresh()
         try await eventually { !model.isLoadingGames }
-        XCTAssertEqual(model.games.map(\.title), ["One"])
+        XCTAssertEqual(model.library.games.map(\.title), ["One"])
         XCTAssertNotNil(model.errorMessage)
         try await eventually { await store.value == rotated }
 
@@ -469,7 +385,7 @@ class WebAccountModelTests: XCTestCase {
             return !model.isSigningOut && disconnections == 1
         }
         XCTAssertFalse(model.isConnected)
-        XCTAssertTrue(model.games.isEmpty)
+        XCTAssertTrue(model.library.games.isEmpty)
         XCTAssertFalse(model.isLoadingGames)
         let saved = await store.value
         XCTAssertNil(saved)
@@ -486,14 +402,14 @@ class WebAccountModelTests: XCTestCase {
         let model = webModel(S.self, store, restore: { _ in S.session(session) })
         await model.start()
         model.open(owned)
-        model.searchText = "one"
+        model.library.searchText = "one"
         await session.expireNextGames()
 
         model.refresh()
         try await eventually { !model.isConnected && !model.isSigningOut }
-        XCTAssertTrue(model.games.isEmpty)
+        XCTAssertTrue(model.library.games.isEmpty)
         XCTAssertNil(model.selectedGame)
-        XCTAssertEqual(model.searchText, "")
+        XCTAssertEqual(model.library.searchText, "")
         XCTAssertEqual(model.errorMessage, S.unauthorizedMessage)
         let saved = await store.value
         XCTAssertNil(saved)
@@ -514,7 +430,7 @@ class WebAccountModelTests: XCTestCase {
         try await eventually { await session.disconnections == 1 }
         XCTAssertFalse(model.isConnected)
         XCTAssertFalse(model.isConnecting)
-        XCTAssertTrue(model.games.isEmpty)
+        XCTAssertTrue(model.library.games.isEmpty)
         let saved = await store.value
         XCTAssertNil(saved)
     }
@@ -583,7 +499,7 @@ class WebAccountModelTests: XCTestCase {
         XCTAssertEqual(saved, current, "The account is remembered as it signs in")
         XCTAssertEqual(model.accountName, S.fixtureName)
         XCTAssertEqual(model.avatarURL, S.expectedAvatar)
-        XCTAssertEqual(model.games.map(\.title), ["One"])
+        XCTAssertEqual(model.library.games.map(\.title), ["One"])
         XCTAssertNil(model.errorMessage)
     }
 
@@ -696,7 +612,7 @@ class WebAccountModelTests: XCTestCase {
         try await eventually { await store.value == original }
         let disconnections = await session.disconnections
         XCTAssertEqual(disconnections, 0)
-        XCTAssertEqual(model.games.map(\.title), ["One"])
+        XCTAssertEqual(model.library.games.map(\.title), ["One"])
     }
 
     func testUnrememberedLoginRemovesPreviousSavedToken() async throws {
@@ -733,7 +649,7 @@ class WebAccountModelTests: XCTestCase {
         XCTAssertFalse(model.isConnected)
         await store.completeSave()
         try await eventually { !model.isSigningOut }
-        XCTAssertTrue(model.games.isEmpty)
+        XCTAssertTrue(model.library.games.isEmpty)
     }
 
     func testStorageFailureLeavesConnectedSessionUsableWithWarning() async throws {
@@ -747,7 +663,7 @@ class WebAccountModelTests: XCTestCase {
         model.signIn()
         try await eventually { model.isConnected && !model.isLoadingGames }
         XCTAssertNotNil(model.storageWarning)
-        XCTAssertEqual(model.games.map(\.title), ["One"])
+        XCTAssertEqual(model.library.games.map(\.title), ["One"])
     }
 
     func testSignOutWarnsWhenRevocationIsUnconfirmed() async throws {
@@ -813,11 +729,12 @@ class WebAccountModelTests: XCTestCase {
         try await eventually { await session.waitingForGames }
         let callsWhileLoading = await session.playtimeCalls
         XCTAssertEqual(callsWhileLoading, 0, "The playtimes wait for the games")
-        XCTAssertTrue(model.isLoadingPlaytimes)
+        model.library.sort = .playtime
+        XCTAssertNotNil(model.library.pendingMetadata, "They show as loading before the games answer")
 
         await session.completeGames(games)
-        try await eventually { await session.playtimeCalls == 1 && !model.isLoadingPlaytimes }
-        XCTAssertEqual(model.playtime(of: games[0]), .seconds(5 * 60))
+        try await eventually { await session.playtimeCalls == 1 && model.library.pendingMetadata == nil }
+        XCTAssertEqual(model.library.playtime(of: games[0]), .seconds(5 * 60))
     }
 
     // MARK: Game page
@@ -968,7 +885,7 @@ class WebAccountModelTests: XCTestCase {
         XCTAssertNil(model.selectedGameDetails)
         XCTAssertNil(model.errorMessage)
         XCTAssertTrue(model.isConnected)
-        XCTAssertEqual(model.games, [owned])
+        XCTAssertEqual(model.library.games, [owned])
         try await eventually { await store.value == rotation }
 
         model.open(owned)
@@ -990,7 +907,7 @@ class WebAccountModelTests: XCTestCase {
         model.signIn()
         defer { model.signOut() }
         try await eventually { model.isConnected && !model.isLoadingGames }
-        model.open(model.games[0])
+        model.open(model.library.games[0])
         try await eventually { model.achievements.items != nil }
         XCTAssertEqual(model.achievements.countText, "1/2")
         model.closeGame()

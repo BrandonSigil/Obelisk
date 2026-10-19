@@ -68,6 +68,17 @@ pub fn read(log: &Path) -> Frames {
         .unwrap_or_default()
 }
 
+/// `text` without the lines Metal writes the frames in: a bug report
+/// carries the game's messages, not a line per second of frame times.
+pub fn without_frame_lines(text: &str) -> String {
+    // Reports have always dropped the marker without its trailing space too.
+    let marker = MARKER.trim_ascii_end();
+    text.split('\n')
+        .filter(|line| !line.as_bytes().windows(marker.len()).any(|w| w == marker))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 fn parse(log: impl BufRead) -> io::Result<Frames> {
     // Present intervals in ms, per process: a game's launcher may present too.
     let mut intervals: HashMap<u32, Vec<f32>> = HashMap::new();

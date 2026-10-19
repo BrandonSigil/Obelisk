@@ -3,145 +3,7 @@ import Observation
 import XCTest
 @testable import Obelisk
 
-extension LibraryOrdering where Game == SteamGame {
-    /// `games` in `sort` order, as the Steam library ranks them by name,
-    /// playtime or last played.
-    static func order(_ games: [SteamGame], by sort: StorefrontLibrarySort) -> [SteamGame] {
-        let rank: (SteamGame) -> Double? = switch sort {
-        case .lastPlayed: { $0.lastPlayedOnSteam?.timeIntervalSince1970 }
-        case .playtime: { $0.playtime.map { Double($0.components.seconds) } }
-        default: { _ in nil }
-        }
-        return order(games, title: \.name, rank: rank)
-    }
-}
-
 final class SteamIntegrationTests: XCTestCase {
-    @MainActor
-    func testOwnedLibraryDefaultsToMostRecentlyPlayedWithStableUnplayedOrder() {
-        let games = [
-            SteamGame(appId: 1, name: "Étoiles", iconHash: "", lastPlayed: 100, playtimeMinutes: 800),
-            SteamGame(appId: 2, name: "Portal", iconHash: "", lastPlayed: 200, playtimeMinutes: 100),
-            SteamGame(appId: 4, name: "Zéro", iconHash: "", lastPlayed: 0, playtimeMinutes: 0),
-            SteamGame(appId: 3, name: "Alpha", iconHash: "", lastPlayed: 0, playtimeMinutes: 0),
-        ]
-        func order(_ sort: StorefrontLibrarySort) -> [UInt32] { LibraryOrdering.order(games, by: sort).map(\.appId) }
-        XCTAssertEqual(order(.lastPlayed), [2, 1, 3, 4])
-        XCTAssertEqual(order(.name), [3, 1, 2, 4])
-        XCTAssertEqual(order(.playtime), [1, 2, 3, 4])
-    }
-
-    @MainActor
-    func testCachedLibraryKeepsSortTiesAndSearchResultsWhenSwitchingOrders() async {
-        let session = CachedSteamSession(games: cachedSteamGames)
-        let model = cachedSteamModel(session: session)
-        await model.start()
-
-        for _ in 0..<2 {
-            for (sort, expected) in cachedSteamOrders {
-                model.sort = sort
-                XCTAssertEqual(model.filteredGames.map(\.appId), expected)
-                XCTAssertEqual(model.filteredGames.map(\.appId), expected)
-            }
-        }
-        model.searchText = "  etoile  "
-        for sort in StorefrontLibrarySort.allCases {
-            model.sort = sort
-            XCTAssertEqual(model.filteredGames.map(\.appId), [1])
-        }
-        model.searchText = "portal"
-        XCTAssertEqual(model.filteredGames.map(\.appId), [2, 4])
-        model.searchText = "absent"
-        XCTAssertTrue(model.filteredGames.isEmpty)
-        model.searchText = ""
-        for (sort, expected) in cachedSteamOrders {
-            model.sort = sort
-            XCTAssertEqual(model.filteredGames.map(\.appId), expected)
-        }
-    }
-
-    @MainActor
-    func testRefreshInvalidatesEveryCachedOrderForChangedGamesWithSameIdentifiers() async throws {
-        let session = CachedSteamSession(games: cachedSteamGames)
-        let model = cachedSteamModel(session: session)
-        await model.start()
-        for sort in StorefrontLibrarySort.allCases {
-            model.sort = sort
-            _ = model.filteredGames
-        }
-        let refreshed = [
-            SteamGame(appId: 1, name: "Zèbre", iconHash: "", lastPlayed: 300, playtimeMinutes: 1),
-            SteamGame(appId: 2, name: "Alpha", iconHash: "", lastPlayed: 0, playtimeMinutes: 50),
-            SteamGame(appId: 3, name: "Portal", iconHash: "", lastPlayed: 400, playtimeMinutes: 900),
-            SteamGame(appId: 4, name: "Beta", iconHash: "", lastPlayed: 0, playtimeMinutes: 0),
-            SteamGame(appId: 5, name: "Étoiles", iconHash: "", lastPlayed: 0, playtimeMinutes: 0),
-        ]
-        await session.replaceGames(refreshed)
-        model.refresh()
-        try await waitForCachedLibrary { model.games.first?.name == "Zèbre" && !model.isLoadingGames }
-
-        let expected: [(StorefrontLibrarySort, [UInt32])] = [
-            (.lastPlayed, [3, 1, 2, 4, 5]),
-            (.name, [2, 4, 5, 3, 1]),
-            (.playtime, [3, 2, 1, 4, 5]),
-        ]
-        for (sort, identifiers) in expected {
-            model.sort = sort
-            XCTAssertEqual(model.filteredGames.map(\.appId), identifiers)
-        }
-        model.searchText = "etoile"
-        XCTAssertEqual(model.filteredGames.map(\.appId), [5])
-    }
-
-    @MainActor
-    func testSignOutClearsCachedGamesForEveryOrder() async {
-        let session = CachedSteamSession(games: cachedSteamGames)
-        let model = cachedSteamModel(session: session)
-        await model.start()
-        for sort in StorefrontLibrarySort.allCases {
-            model.sort = sort
-            XCTAssertFalse(model.filteredGames.isEmpty)
-        }
-        model.searchText = "portal"
-        XCTAssertFalse(model.filteredGames.isEmpty)
-
-        model.signOut()
-
-        XCTAssertFalse(model.isConnected)
-        XCTAssertEqual(model.searchText, "")
-        for sort in StorefrontLibrarySort.allCases {
-            model.sort = sort
-            XCTAssertTrue(model.filteredGames.isEmpty)
-        }
-    }
-
-    @MainActor
-    func testCachedLibraryStillObservesSearchSortAndRefreshedGames() async throws {
-        let session = CachedSteamSession(games: cachedSteamGames)
-        let model = cachedSteamModel(session: session)
-        await model.start()
-        _ = model.filteredGames
-        let sortChanged = expectation(description: "A cached library observes the selected sort")
-        withObservationTracking { _ = model.filteredGames } onChange: { sortChanged.fulfill() }
-        model.sort = .name
-        XCTAssertEqual(model.filteredGames.map(\.appId), [3, 1, 2, 4, 5])
-        await fulfillment(of: [sortChanged], timeout: 0.2)
-
-        let searchChanged = expectation(description: "A cached library observes the search text")
-        withObservationTracking { _ = model.filteredGames } onChange: { searchChanged.fulfill() }
-        model.searchText = "portal"
-        XCTAssertEqual(model.filteredGames.map(\.appId), [2, 4])
-        await fulfillment(of: [searchChanged], timeout: 0.2)
-
-        let gamesChanged = expectation(description: "A cached library observes the refreshed games")
-        withObservationTracking { _ = model.filteredGames } onChange: { gamesChanged.fulfill() }
-        await session.replaceGames([])
-        model.refresh()
-        try await waitForCachedLibrary { model.games.isEmpty && !model.isLoadingGames }
-        XCTAssertTrue(model.filteredGames.isEmpty)
-        await fulfillment(of: [gamesChanged], timeout: 0.2)
-    }
-
     @MainActor
     func testDelayedPublicProfileDoesNotBlockRestoredLibraryOrConnection() async throws {
         let profiles = CachedSteamProfiles()
@@ -157,7 +19,7 @@ final class SteamIntegrationTests: XCTestCase {
         XCTAssertTrue(model.isConnected)
         XCTAssertFalse(model.isRestoring)
         XCTAssertFalse(model.isLoadingGames)
-        XCTAssertEqual(model.games.map(\.appId), cachedSteamGames.map(\.appId))
+        XCTAssertEqual(model.library.games.map(\.appId), cachedSteamGames.map(\.appId))
         XCTAssertNil(model.avatarURL)
         XCTAssertNil(model.displayName, "The private login must not serve as the public display name")
 
@@ -185,7 +47,7 @@ final class SteamIntegrationTests: XCTestCase {
         try await waitForProfile { model.avatarURL == nil }
         XCTAssertEqual(model.displayName, "Public name")
         XCTAssertTrue(model.isConnected)
-        XCTAssertEqual(model.games.count, cachedSteamGames.count)
+        XCTAssertEqual(model.library.games.count, cachedSteamGames.count)
         XCTAssertNil(model.errorMessage)
     }
 
@@ -241,7 +103,7 @@ final class SteamIntegrationTests: XCTestCase {
             XCTAssertNil(model.errorMessage)
             XCTAssertTrue(model.isConnected)
             XCTAssertFalse(model.isLoadingGames)
-            XCTAssertEqual(model.games.count, cachedSteamGames.count)
+            XCTAssertEqual(model.library.games.count, cachedSteamGames.count)
         }
     }
 
@@ -266,7 +128,7 @@ final class SteamIntegrationTests: XCTestCase {
         XCTAssertNil(model.avatarURL)
         XCTAssertNil(model.displayName)
         XCTAssertFalse(model.isConnected)
-        XCTAssertTrue(model.games.isEmpty)
+        XCTAssertTrue(model.library.games.isEmpty)
     }
 
     @MainActor
@@ -332,15 +194,6 @@ final class SteamIntegrationTests: XCTestCase {
         )
     }
 
-    @MainActor
-    private func waitForCachedLibrary(_ predicate: @MainActor () -> Bool) async throws {
-        let deadline = ContinuousClock.now + .seconds(2)
-        while !predicate() {
-            if ContinuousClock.now >= deadline { throw CachedSteamFailure.timeout }
-            try await Task.sleep(for: .milliseconds(5))
-        }
-    }
-
     func testMalformedSavedSessionIsRejectedAcrossAsyncRustBridge() async {
         do {
             _ = try await SteamSession.connect(credentials: SteamCredentials(accountName: "fixture", steamId: 1, refreshToken: "invalid-token"), library: nil)
@@ -385,11 +238,6 @@ private let cachedSteamGames = [
     SteamGame(appId: 4, name: "Portal", iconHash: "", lastPlayed: 200, playtimeMinutes: 100),
     SteamGame(appId: 5, name: "Zéro", iconHash: "", lastPlayed: 0, playtimeMinutes: 0),
 ]
-private let cachedSteamOrders: [(StorefrontLibrarySort, [UInt32])] = [
-    (.lastPlayed, [2, 4, 1, 3, 5]),
-    (.name, [3, 1, 2, 4, 5]),
-    (.playtime, [1, 2, 4, 3, 5]),
-]
 
 private actor CachedSteamCredentials: CredentialStore {
     func load() -> SteamCredentials? {
@@ -406,13 +254,12 @@ private let offlineLogin: @Sendable (SteamLoginStart) async throws -> any SteamL
 }
 
 private actor CachedSteamSession: SteamSessionProtocol {
-    private var library: [SteamGame]
+    private let library: [SteamGame]
     private let loadProfile: @Sendable () async throws -> SteamProfile
     init(games: [SteamGame], profile: @escaping @Sendable () async throws -> SteamProfile = { SteamProfile(displayName: nil, avatarUrl: nil) }) {
         library = games
         loadProfile = profile
     }
-    func replaceGames(_ games: [SteamGame]) { library = games }
     func games() -> [SteamGame] { library }
     func profile() async throws -> SteamProfile { try await loadProfile() }
     func details(appId: UInt32, language: String) async throws -> SteamGameDetails { throw CachedSteamFailure.unexpectedOperation }

@@ -10,9 +10,8 @@ final class BugReportsTests: XCTestCase {
     override func setUp() async throws {
         directory = FileManager.default.temporaryDirectory
             .appending(path: "ObeliskBugReports-\(UUID().uuidString)", directoryHint: .isDirectory)
-        for folder in ["Steam", "Epic", "GOG", "DiagnosticReports"] {
-            try FileManager.default.createDirectory(at: directory.appending(path: folder), withIntermediateDirectories: true)
-        }
+        try FileManager.default.createDirectory(at: directory.appending(path: "DiagnosticReports"),
+                                                withIntermediateDirectories: true)
     }
 
     override func tearDown() async throws {
@@ -23,10 +22,11 @@ final class BugReportsTests: XCTestCase {
                                          macOSVersion: "27.0")
     private static let eldenRing = BugReportSubject.game(store: .steam, id: "1245620", name: "ELDEN RING")
 
-    private var sources: BugReportSources {
+    /// Sources whose diagnostics, for any subject, are `diagnostics`: Rust
+    /// names and finds them, and its own tests check which.
+    private func sources(diagnostics: [URL] = []) -> BugReportSources {
         BugReportSources(
-            diagnostics: [.steam: directory.appending(path: "Steam"), .epic: directory.appending(path: "Epic"),
-                          .gog: directory.appending(path: "GOG")],
+            diagnostics: { _, _ in diagnostics },
             crashReports: directory.appending(path: "DiagnosticReports"), process: "Obelisk",
             home: "/Users/player", unifiedLog: { "unified\n" }, voile: { "v26.3.0-13" }
         )
@@ -192,73 +192,53 @@ final class BugReportsTests: XCTestCase {
 
     // MARK: Which files
 
-    func testAGameReportAttachesItsLogsItsLaunchReportsObelisksLogAndRecentCrashes() throws {
-        try write("Steam/wine-1245620.log", age: 60)
-        try write("Steam/wine-1245620.previous.log", age: 600)
-        try write("Steam/wine-1245620.input.log", age: 60)
-        try write("Steam/game-1245620.log", age: 3600 * 24 * 3)
-        try write("Steam/launch-1245620-a.json", age: 7200)
-        try write("Steam/launch-1245620-b.json", age: 60)
-        try write("Steam/failed-1245620-a.json", age: 300)
-        try write("Steam/launch-12456201-c.json", age: 10)
-        try write("Steam/wine-774801.log", age: 10)
+    func testAGameReportAttachesItsDiagnosticsThenObelisksLogThenRecentCrashes() throws {
+        let diagnostics = [try write("first.log"), try write("second.json")]
         try crash("wine-2026-10-13-090609", process: "wine", responsible: "Obelisk", age: 60)
         try crash("Obelisk-2026-10-12-195338", process: "Obelisk", responsible: "Obelisk", age: 3600 * 48)
         try crash("Safari-2026-10-13-090609", process: "Safari", responsible: "Safari", age: 60)
 
-        let names = sources.files(for: Self.eldenRing, now: .now).map(\.name)
+        let names = sources(diagnostics: diagnostics).files(for: Self.eldenRing, now: .now).map(\.name)
         XCTAssertEqual(names, [
-            "wine-1245620.log", "wine-1245620.previous.log", "wine-1245620.input.log", "launch-1245620-b.json",
-            "failed-1245620-a.json", BugReportSources.unifiedLogName, "wine-2026-10-13-090609.ips",
+            "first.log", "second.json", BugReportSources.unifiedLogName, "wine-2026-10-13-090609.ips",
         ])
     }
 
-    func testANativeGamePlayedLastAttachesItsOwnLog() throws {
-        try write("GOG/wine-1207658924.log", age: 3600)
-        try write("GOG/game-1207658924.log", age: 60)
-        try write("GOG/game-1207658924.previous.log", age: 600)
-        let subject = BugReportSubject.game(store: .gog, id: "1207658924", name: "Unrailed!")
-        XCTAssertEqual(sources.files(for: subject, now: .now).map(\.name),
-                       ["game-1207658924.log", "game-1207658924.previous.log", BugReportSources.unifiedLogName])
-    }
-
-    func testAnAppReportAttachesObelisksLogItsCrashesAndRecentLaunchReports() throws {
-        try write("Steam/launch-1245620-b.json", age: 60)
-        try write("Steam/failed-3527290-a.json", age: 300)
-        try write("Steam/launch-1245620-a.json", age: 3600 * 30)
-        try write("Steam/wine-1245620.log", age: 60)
+    func testAnAppReportAttachesObelisksLogItsCrashesThenItsDiagnostics() throws {
+        let diagnostics = [try write("first.json"), try write("second.json")]
         try crash("Obelisk-2026-10-12-195338", process: "Obelisk", responsible: "Obelisk", age: 3600 * 48)
         try crash("obelisk-steam-host-2026-10-10-232516", process: "obelisk-steam-host", responsible: "Obelisk",
                   age: 3600 * 24 * 8)
 
-        XCTAssertEqual(sources.files(for: .app, now: .now).map(\.name), [
-            BugReportSources.unifiedLogName, "Obelisk-2026-10-12-195338.ips", "launch-1245620-b.json",
-            "failed-3527290-a.json",
+        XCTAssertEqual(sources(diagnostics: diagnostics).files(for: .app, now: .now).map(\.name), [
+            BugReportSources.unifiedLogName, "Obelisk-2026-10-12-195338.ips", "first.json", "second.json",
         ])
     }
 
     func testAReportAttachesAtMostTenFiles() throws {
+        var diagnostics: [URL] = []
         for index in 0..<12 {
             try crash("wine-\(index)", process: "wine", responsible: "Obelisk", age: TimeInterval(index))
-            try write("Steam/launch-\(index)-a.json", age: TimeInterval(index))
+            diagnostics.append(try write("diagnostic-\(index).json"))
         }
-        XCTAssertEqual(sources.files(for: .app, now: .now).count, BugReportSources.maxFiles)
-        XCTAssertEqual(sources.files(for: Self.eldenRing, now: .now).count, 5, "Obelisk's log and 4 crashes")
+        XCTAssertEqual(sources(diagnostics: diagnostics).files(for: .app, now: .now).count, BugReportSources.maxFiles)
+        XCTAssertEqual(sources().files(for: Self.eldenRing, now: .now).count, 5, "Obelisk's log and 4 crashes")
     }
 
     func testTheContentsAreRedacted() async throws {
-        let log = try write("Steam/wine-1245620.log", "metal-HUD: 1\n/Users/player/x\n")
-        let contents = await sources.contents(of: [BugReportFile(name: "wine-1245620.log", url: log),
-                                                   BugReportFile(name: BugReportSources.unifiedLogName, url: nil)])
-        XCTAssertEqual(contents, [BugReportLog(name: "wine-1245620.log", data: Data("~/x\n".utf8)),
+        let log = try write("game.log", "metal-HUD: 1\n/Users/player/x\n")
+        let contents = await sources().contents(of: [BugReportFile(name: "game.log", url: log),
+                                                     BugReportFile(name: BugReportSources.unifiedLogName, url: nil)])
+        XCTAssertEqual(contents, [BugReportLog(name: "game.log", data: Data("~/x\n".utf8)),
                                   BugReportLog(name: BugReportSources.unifiedLogName, data: Data("unified\n".utf8))])
     }
 
     // MARK: Sending
 
     func testASentReportShowsItsCode() async throws {
-        try write("Steam/wine-1245620.log", "boom\n")
+        let log = try write("game.log", "boom\n")
         let requests = Requests()
+        let sources = self.sources(diagnostics: [log])
         let model = BugReportModel(subject: Self.eldenRing, sources: sources, mac: Self.mac) { request in
             await requests.add(request)
             let response = HTTPURLResponse(url: request.url!, statusCode: 201, httpVersion: nil, headerFields: nil)!
@@ -277,13 +257,14 @@ final class BugReportsTests: XCTestCase {
         XCTAssertEqual(request.url, BugReportPayload.endpoint)
         XCTAssertEqual(request.httpMethod, "POST")
         let body = String(decoding: try XCTUnwrap(request.httpBody), as: UTF8.self)
-        XCTAssertTrue(body.contains(#"filename="wine-1245620.log.gz""#))
+        XCTAssertTrue(body.contains(#"filename="game.log.gz""#))
         XCTAssertTrue(body.contains(#""voile_version":"v26.3.0-13""#))
     }
 
     func testAReportWithoutLogsSendsOnlyTheReportAndAFailureCanBeRetried() async throws {
-        try write("Steam/wine-1245620.log")
+        let log = try write("game.log")
         let requests = Requests()
+        let sources = self.sources(diagnostics: [log])
         let model = BugReportModel(subject: Self.eldenRing, sources: sources, mac: Self.mac) { request in
             await requests.add(request)
             let response = HTTPURLResponse(url: request.url!, statusCode: 502, httpVersion: nil, headerFields: nil)!
@@ -301,7 +282,7 @@ final class BugReportsTests: XCTestCase {
     }
 
     func testAReportRefusedForTooManyFromThisNetworkSaysSo() async throws {
-        let model = BugReportModel(subject: .app, sources: sources, mac: Self.mac) { request in
+        let model = BugReportModel(subject: .app, sources: sources(), mac: Self.mac) { request in
             (Data("Too Many Requests".utf8),
              HTTPURLResponse(url: request.url!, statusCode: 429, httpVersion: nil, headerFields: nil)!)
         }

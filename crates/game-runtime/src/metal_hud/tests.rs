@@ -92,3 +92,14 @@ fn the_hud_shows_over_the_game_only_when_asked() {
     assert_eq!(opacity(true), Some("1"));
     assert!(environment(true).contains(&("MTL_HUD_LOG_ENABLED", "1")));
 }
+
+#[test]
+fn a_report_drops_every_line_the_frames_come_from() {
+    let probe = include_str!("probe-60fps.log");
+    assert!(parsed(probe).count > 0);
+    assert_eq!(parsed(&without_frame_lines(probe)), Frames::default());
+    assert_eq!(
+        without_frame_lines("a\n\nmetal-HUD:x\nb\r\nmetal-HUD: 1\n"),
+        "a\n\nb\r\n"
+    );
+}

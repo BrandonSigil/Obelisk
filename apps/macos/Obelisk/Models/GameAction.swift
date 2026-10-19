@@ -145,9 +145,6 @@ struct GameActions<Store: InstallationStorefront> {
         cancellableSync = syncGame.flatMap { cloud.canCancelSynchronization(for: $0) ? $0 : nil }
     }
 
-    /// Whether a build of `game` is installed.
-    func isInstalled(_ game: Store.GameID) -> Bool { receipts[game] != nil }
-
     func callAsFunction(_ selection: InstallationSelection<Store>) -> GameAction {
         let game = selection.game
         let receipt = Receipt.preferred(among: receipts[game] ?? [], platform: selection.platform)

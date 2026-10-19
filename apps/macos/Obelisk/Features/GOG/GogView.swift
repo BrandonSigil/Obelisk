@@ -61,7 +61,7 @@ struct GogView: View {
 
     @ViewBuilder private var accountMenu: some View {
         Text(model.accountName ?? L10n.string("ui.gog.account"))
-        Text(L10n.string("ui.library.account_game_count", Int64(model.games.count)))
+        Text(L10n.string("ui.library.account_game_count", Int64(model.library.games.count)))
         Divider()
         Button(L10n.string("ui.library.refresh"), systemImage: "arrow.clockwise", action: model.refresh)
             .disabled(model.isLoadingGames)

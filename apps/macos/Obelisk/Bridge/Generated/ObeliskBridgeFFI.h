@@ -1108,6 +1108,16 @@ RustBuffer uniffi_obelisk_bridge_fn_func_storefronts(RustCallStatus *_Nonnull ou
     
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_OBELISK_BRIDGE_FN_FUNC_DIAGNOSTIC_FILES
+#define UNIFFI_FFIDEF_UNIFFI_OBELISK_BRIDGE_FN_FUNC_DIAGNOSTIC_FILES
+RustBuffer uniffi_obelisk_bridge_fn_func_diagnostic_files(RustBuffer locations, RustBuffer subject, RustBuffer now, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_OBELISK_BRIDGE_FN_FUNC_WITHOUT_METAL_HUD_FRAMES
+#define UNIFFI_FFIDEF_UNIFFI_OBELISK_BRIDGE_FN_FUNC_WITHOUT_METAL_HUD_FRAMES
+RustBuffer uniffi_obelisk_bridge_fn_func_without_metal_hud_frames(RustBuffer text, RustCallStatus *_Nonnull out_status
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_OBELISK_BRIDGE_FN_FUNC_EPIC_AUTHORIZATION_CODE
 #define UNIFFI_FFIDEF_UNIFFI_OBELISK_BRIDGE_FN_FUNC_EPIC_AUTHORIZATION_CODE
 RustBuffer uniffi_obelisk_bridge_fn_func_epic_authorization_code(RustBuffer input, RustCallStatus *_Nonnull out_status
@@ -1428,6 +1438,18 @@ void ffi_obelisk_bridge_rust_future_complete_void(uint64_t handle, RustCallStatu
 #ifndef UNIFFI_FFIDEF_UNIFFI_OBELISK_BRIDGE_CHECKSUM_FUNC_STOREFRONTS
 #define UNIFFI_FFIDEF_UNIFFI_OBELISK_BRIDGE_CHECKSUM_FUNC_STOREFRONTS
 uint16_t uniffi_obelisk_bridge_checksum_func_storefronts(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_OBELISK_BRIDGE_CHECKSUM_FUNC_DIAGNOSTIC_FILES
+#define UNIFFI_FFIDEF_UNIFFI_OBELISK_BRIDGE_CHECKSUM_FUNC_DIAGNOSTIC_FILES
+uint16_t uniffi_obelisk_bridge_checksum_func_diagnostic_files(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_OBELISK_BRIDGE_CHECKSUM_FUNC_WITHOUT_METAL_HUD_FRAMES
+#define UNIFFI_FFIDEF_UNIFFI_OBELISK_BRIDGE_CHECKSUM_FUNC_WITHOUT_METAL_HUD_FRAMES
+uint16_t uniffi_obelisk_bridge_checksum_func_without_metal_hud_frames(void
     
 );
 #endif

@@ -620,6 +620,49 @@ fileprivate struct FfiConverterData: FfiConverterRustBuffer {
     }
 }
 
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterTimestamp: FfiConverterRustBuffer {
+    typealias SwiftType = Date
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> Date {
+        let seconds: Int64 = try readInt(&buf)
+        let nanoseconds: UInt32 = try readInt(&buf)
+        // Build the Date from whole seconds first, then add the nanoseconds as a
+        // separate TimeInterval.  Date stores CFAbsoluteTime (seconds since 2001),
+        // so adding a small fraction to the ~7.8e8 base is twice as precise as
+        // adding it to the ~1.76e9 Unix-epoch value, because the smaller magnitude
+        // leaves more mantissa bits for the sub-second part.
+        if seconds >= 0 {
+            return Date(timeIntervalSince1970: Double(seconds))
+                .addingTimeInterval(Double(nanoseconds) / 1.0e9)
+        } else {
+            return Date(timeIntervalSince1970: Double(seconds))
+                .addingTimeInterval(-Double(nanoseconds) / 1.0e9)
+        }
+    }
+
+    public static func write(_ value: Date, into buf: inout [UInt8]) {
+        var delta = value.timeIntervalSince1970
+        var sign: Int64 = 1
+        if delta < 0 {
+            // The nanoseconds portion of the epoch offset must always be
+            // positive, to simplify the calculation we will use the absolute
+            // value of the offset.
+            sign = -1
+            delta = -delta
+        }
+        if delta.rounded(.down) > Double(Int64.max) {
+            fatalError("Timestamp overflow, exceeds max bounds supported by Uniffi")
+        }
+        let seconds = Int64(delta)
+        let nanoseconds = UInt32((delta - Double(seconds)) * 1.0e9)
+        writeInt(&buf, sign * seconds)
+        writeInt(&buf, nanoseconds)
+    }
+}
+
 
 
 
@@ -7872,15 +7915,6 @@ public struct ObeliskLocations: Equatable, Hashable {
      */
     public var steamRuntimePackage: String
     public var steamRuntimeCache: String
-    public var steamDiagnostics: String
-    /**
-     * Where Wine logs the Windows builds of Epic games.
-     */
-    public var epicDiagnostics: String
-    /**
-     * Where Wine logs the Windows builds of GOG games.
-     */
-    public var gogDiagnostics: String
     /**
      * The Voile runtimes that run Windows games: the pinned release and a
      * development runtime.
@@ -7904,13 +7938,7 @@ public struct ObeliskLocations: Equatable, Hashable {
         /**
          * Valve's Steam components the Steam host loads, which a Steam game's
          * download, or a launch that misses them, gets from Valve's CDN.
-         */steamRuntimePackage: String, steamRuntimeCache: String, steamDiagnostics: String, 
-        /**
-         * Where Wine logs the Windows builds of Epic games.
-         */epicDiagnostics: String, 
-        /**
-         * Where Wine logs the Windows builds of GOG games.
-         */gogDiagnostics: String, 
+         */steamRuntimePackage: String, steamRuntimeCache: String, 
         /**
          * The Voile runtimes that run Windows games: the pinned release and a
          * development runtime.
@@ -7928,9 +7956,6 @@ public struct ObeliskLocations: Equatable, Hashable {
         self.helpers = helpers
         self.steamRuntimePackage = steamRuntimePackage
         self.steamRuntimeCache = steamRuntimeCache
-        self.steamDiagnostics = steamDiagnostics
-        self.epicDiagnostics = epicDiagnostics
-        self.gogDiagnostics = gogDiagnostics
         self.voile = voile
         self.winePrefixes = winePrefixes
     }
@@ -7961,9 +7986,6 @@ public struct FfiConverterTypeObeliskLocations: FfiConverterRustBuffer {
                 helpers: FfiConverterString.read(from: &buf), 
                 steamRuntimePackage: FfiConverterString.read(from: &buf), 
                 steamRuntimeCache: FfiConverterString.read(from: &buf), 
-                steamDiagnostics: FfiConverterString.read(from: &buf), 
-                epicDiagnostics: FfiConverterString.read(from: &buf), 
-                gogDiagnostics: FfiConverterString.read(from: &buf), 
                 voile: FfiConverterString.read(from: &buf), 
                 winePrefixes: FfiConverterString.read(from: &buf)
         )
@@ -7980,9 +8002,6 @@ public struct FfiConverterTypeObeliskLocations: FfiConverterRustBuffer {
         FfiConverterString.write(value.helpers, into: &buf)
         FfiConverterString.write(value.steamRuntimePackage, into: &buf)
         FfiConverterString.write(value.steamRuntimeCache, into: &buf)
-        FfiConverterString.write(value.steamDiagnostics, into: &buf)
-        FfiConverterString.write(value.epicDiagnostics, into: &buf)
-        FfiConverterString.write(value.gogDiagnostics, into: &buf)
         FfiConverterString.write(value.voile, into: &buf)
         FfiConverterString.write(value.winePrefixes, into: &buf)
     }
@@ -10606,6 +10625,80 @@ public func FfiConverterTypeCoreError_lift(_ buf: RustBuffer) throws -> CoreErro
 public func FfiConverterTypeCoreError_lower(_ value: CoreError) -> RustBuffer {
     return FfiConverterTypeCoreError.lower(value)
 }
+
+
+/**
+ * What a bug report is about, as far as its diagnostics go: Obelisk, or one
+ * game as its storefront names it.
+ */
+
+public enum DiagnosticsSubject: Equatable, Hashable {
+    
+    case app
+    case game(storefront: SessionStorefront, id: String
+    )
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension DiagnosticsSubject: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeDiagnosticsSubject: FfiConverterRustBuffer {
+    typealias SwiftType = DiagnosticsSubject
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> DiagnosticsSubject {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .app
+        
+        case 2: return .game(storefront: try FfiConverterTypeSessionStorefront.read(from: &buf), id: try FfiConverterString.read(from: &buf)
+        )
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: DiagnosticsSubject, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case .app:
+            writeInt(&buf, Int32(1))
+        
+        
+        case let .game(storefront,id):
+            writeInt(&buf, Int32(2))
+            FfiConverterTypeSessionStorefront.write(storefront, into: &buf)
+            FfiConverterString.write(id, into: &buf)
+            
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeDiagnosticsSubject_lift(_ buf: RustBuffer) throws -> DiagnosticsSubject {
+    return try FfiConverterTypeDiagnosticsSubject.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeDiagnosticsSubject_lower(_ value: DiagnosticsSubject) -> RustBuffer {
+    return FfiConverterTypeDiagnosticsSubject.lower(value)
+}
+
 
 
 /**
@@ -14949,6 +15042,30 @@ public func storefronts() -> [StorefrontInfo]  {
     )
 })
 }
+/**
+ * The diagnostics a bug report on `subject` attaches, most telling first.
+ */
+public func diagnosticFiles(locations: ObeliskLocations, subject: DiagnosticsSubject, now: Date) -> [String]  {
+    return try!  FfiConverterSequenceString.lift(try! rustCall() {
+        uniffiCallStatus in
+    uniffi_obelisk_bridge_fn_func_diagnostic_files(
+        FfiConverterTypeObeliskLocations_lower(locations),
+        FfiConverterTypeDiagnosticsSubject_lower(subject),
+        FfiConverterTimestamp.lower(now),uniffiCallStatus
+    )
+})
+}
+/**
+ * `text` without the Metal HUD's frame lines, which bug reports leave out.
+ */
+public func withoutMetalHudFrames(text: String) -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+        uniffiCallStatus in
+    uniffi_obelisk_bridge_fn_func_without_metal_hud_frames(
+        FfiConverterString.lower(text),uniffiCallStatus
+    )
+})
+}
 public func epicAuthorizationCode(input: String)throws  -> String  {
     return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeEpicError_lift) {
         uniffiCallStatus in
@@ -15075,6 +15192,12 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.contractVersionMismatch
     }
     if (uniffi_obelisk_bridge_checksum_func_storefronts() != 5932) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_obelisk_bridge_checksum_func_diagnostic_files() != 60320) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_obelisk_bridge_checksum_func_without_metal_hud_frames() != 20665) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_obelisk_bridge_checksum_func_epic_authorization_code() != 42633) {

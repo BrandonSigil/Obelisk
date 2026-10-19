@@ -236,16 +236,42 @@ private struct HomePage: View {
         _position = State(initialValue: offset > 0 ? ScrollPosition(y: offset) : ScrollPosition())
     }
 
+    /// Every library as Home shows it, in Home's order.
+    private struct Libraries {
+        let steam: HomeLibrary
+        let epic: HomeLibrary
+        let gog: HomeLibrary
+
+        var all: [HomeLibrary] { [steam, epic, gog] }
+    }
+
+    private var homeLibraries: Libraries {
+        Libraries(
+            steam: model.steam.homeLibrary(in: .steam, cover: SteamView.cover, heroArtwork: SteamView.heroArtwork,
+                                           heroLogo: SteamView.heroLogo),
+            epic: model.epic.homeLibrary(in: .epic, cover: EpicView.cover, heroArtwork: EpicView.heroArtwork,
+                                         heroLogo: EpicView.heroLogo),
+            gog: model.gog.homeLibrary(in: .gog, cover: GogView.cover, heroArtwork: GogView.heroArtwork,
+                                       heroLogo: GogView.heroLogo)
+        )
+    }
+
+    /// What every library finds for `query`, by name.
+    private func homeResults(matching query: String) -> [HomeGame] {
+        LibraryOrder.merge([
+            model.steam.homeResults(matching: query, in: .steam, cover: SteamView.cover,
+                                    heroArtwork: SteamView.heroArtwork, heroLogo: SteamView.heroLogo),
+            model.epic.homeResults(matching: query, in: .epic, cover: EpicView.cover,
+                                   heroArtwork: EpicView.heroArtwork, heroLogo: EpicView.heroLogo),
+            model.gog.homeResults(matching: query, in: .gog, cover: GogView.cover,
+                                  heroArtwork: GogView.heroArtwork, heroLogo: GogView.heroLogo),
+        ], title: \.title, rank: { _ in nil })
+    }
+
     var body: some View {
-        let steam = model.steam.homeGames(in: .steam, cover: SteamView.cover, heroArtwork: SteamView.heroArtwork,
-                                          heroLogo: SteamView.heroLogo)
-        let epic = model.epic.homeGames(in: .epic, cover: EpicView.cover, heroArtwork: EpicView.heroArtwork,
-                                        heroLogo: EpicView.heroLogo)
-        let gog = model.gog.homeGames(in: .gog, cover: GogView.cover, heroArtwork: GogView.heroArtwork,
-                                      heroLogo: GogView.heroLogo)
-        let games = steam + epic + gog
         let query = model.searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-        let shelves = query.isEmpty ? HomeShelves(games) : nil
+        let libraries = query.isEmpty ? homeLibraries : nil
+        let shelves = libraries.map { HomeShelves($0.all) }
         let heroGame = shelves?.hero
         let backdropOffset = heroGame == nil ? 0 : ObeliskStyle.libraryHeroHeight
         return StorefrontScrollView {
@@ -254,7 +280,7 @@ private struct HomePage: View {
                     hero(heroGame)
                 }
                 VStack(alignment: .leading, spacing: 30) {
-                    if let shelves {
+                    if let shelves, let libraries {
                         if !shelves.recent.isEmpty {
                             CoverShelf(title: L10n.string("ui.home.recent"), items: shelves.recent, id: "recent",
                                        memory: shelfMemory) { card($0, on: "recent") }
@@ -263,9 +289,9 @@ private struct HomePage: View {
                             CoverShelf(title: L10n.string("ui.home.installed"), items: shelves.installed, id: "installed",
                                        memory: shelfMemory) { card($0, on: "installed") }
                         }
-                        libraries(steam: steam, epic: epic, gog: gog)
+                        self.libraries(libraries)
                     } else {
-                        results(games.filter { $0.title.localizedStandardContains(query) }.sorted(by: HomeGame.byName))
+                        results(homeResults(matching: query))
                     }
                 }
                 .padding(.top, heroGame == nil ? 12 : 24)
@@ -323,7 +349,7 @@ private struct HomePage: View {
         }
     }
 
-    private func libraries(steam: [HomeGame], epic: [HomeGame], gog: [HomeGame]) -> some View {
+    private func libraries(_ libraries: Libraries) -> some View {
         VStack(alignment: .leading, spacing: 14) {
             Text(L10n.string("ui.library.your_libraries"))
                 .font(.system(size: 22, weight: .bold))
@@ -332,15 +358,15 @@ private struct HomePage: View {
             StorefrontRows(inOneRow: tilesInOneRow) { section, _ in
                 switch section {
                 case .steam:
-                    tile(.steam, games: steam, showsLibrary: model.steam.showsLibrary,
+                    tile(.steam, library: libraries.steam, showsLibrary: model.steam.showsLibrary,
                          isRestoring: model.steam.isRestoring, account: model.steam.displayName,
                          avatarURL: model.steam.avatarURL)
                 case .epic:
-                    tile(.epic, games: epic, showsLibrary: model.epic.showsLibrary,
+                    tile(.epic, library: libraries.epic, showsLibrary: model.epic.showsLibrary,
                          isRestoring: model.epic.isRestoring, account: model.epic.accountName,
                          avatarURL: model.epic.avatarURL)
                 default:
-                    tile(.gog, games: gog, showsLibrary: model.gog.showsLibrary,
+                    tile(.gog, library: libraries.gog, showsLibrary: model.gog.showsLibrary,
                          isRestoring: model.gog.isRestoring, account: model.gog.accountName,
                          avatarURL: model.gog.avatarURL)
                 }
@@ -350,11 +376,10 @@ private struct HomePage: View {
         .padding(.horizontal, ObeliskStyle.contentPadding)
     }
 
-    private func tile(_ section: LibrarySection, games: [HomeGame], showsLibrary: Bool, isRestoring: Bool,
+    private func tile(_ section: LibrarySection, library: HomeLibrary, showsLibrary: Bool, isRestoring: Bool,
                       account: String?, avatarURL: URL?) -> some View {
         let status: LibraryTile.Status = if showsLibrary {
-            .signedIn(account: account, avatarURL: avatarURL, games: games.count,
-                      installed: games.count(where: \.isInstalled))
+            .signedIn(account: account, avatarURL: avatarURL, games: library.count, installed: library.installed.count)
         } else if isRestoring || model.restoringStorefronts.contains(section) {
             .restoring
         } else {
@@ -364,7 +389,7 @@ private struct HomePage: View {
             section: section,
             title: section.storeName ?? section.title,
             status: status,
-            covers: games.sorted(by: HomeGame.lastPlayedFirst).prefix(3).map { $0.cover() },
+            covers: library.covers.map { $0.cover() },
             open: { model.selection = section }
         )
     }

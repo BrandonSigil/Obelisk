@@ -1,6 +1,7 @@
 //! Safe launcher-side supervision. Native ABI code lives in the separate helper.
 pub mod cloud;
 pub mod cloud_status;
+pub mod diagnostics;
 pub mod epic;
 mod files;
 pub mod gog;

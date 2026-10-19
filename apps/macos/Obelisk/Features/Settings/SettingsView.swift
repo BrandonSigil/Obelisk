@@ -258,7 +258,7 @@ struct SettingsView: View {
         avatarURL: URL?
     ) -> LibraryTile.Status {
         if showsLibrary {
-            .signedIn(account: account, avatarURL: avatarURL, games: store.games.count,
+            .signedIn(account: account, avatarURL: avatarURL, games: store.library.games.count,
                       installed: Set(store.installations.receipts.map(\.gameID)).count)
         } else if isRestoring || model.restoringStorefronts.contains(section) {
             .restoring

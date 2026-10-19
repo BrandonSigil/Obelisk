@@ -119,8 +119,8 @@ final class AppModel {
     /// title its library knows them by.
     private func reportPerformance() {
         report(steam.gameSessions) { [steam] in steam.gameName(appId: $0) }
-        report(epic.gameSessions) { [epic] id in epic.games.first { $0.id == id }?.title }
-        report(gog.gameSessions) { [gog] id in gog.games.first { $0.id == id }?.title }
+        report(epic.gameSessions) { [epic] id in epic.library.game(id)?.title }
+        report(gog.gameSessions) { [gog] id in gog.library.game(id)?.title }
     }
 
     private func report<Store: GameStorefront>(_ sessions: GameSessions<Store>,
@@ -166,7 +166,7 @@ final class AppModel {
     }
 
     private func open<Model: LibraryStorefront>(_ item: DownloadItem, in model: Model) {
-        guard let id = Model.Store.game(item.game), let game = model.games.first(where: { $0.id == id }) else { return }
+        guard let id = Model.Store.game(item.game), let game = model.library.game(id) else { return }
         selection = item.storefront.section
         model.open(game)
     }

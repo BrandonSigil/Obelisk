@@ -142,9 +142,7 @@ pub(crate) fn prepare(
         storage: None,
         directory,
         profile: run_directory.join("host.sb"),
-        report: config
-            .diagnostics
-            .join(format!("launch-{}-{id}.json", config.app_id)),
+        report: crate::diagnostics::launch_report(&config.diagnostics, config.app_id, id),
         run_directory,
         endpoints: [
             (
@@ -223,11 +221,11 @@ pub(crate) fn failure_report(
     events: &[crate::protocol::Event],
 ) -> Result<(), Error> {
     private_directory(&config.diagnostics)?;
-    let path = config.diagnostics.join(format!(
-        "failed-{}-{}.json",
+    let path = crate::diagnostics::failure_report(
+        &config.diagnostics,
         config.app_id,
-        uuid::Uuid::new_v4()
-    ));
+        uuid::Uuid::new_v4(),
+    );
     let report =
         serde_json::json!({"app_id": config.app_id, "error": error.to_string(), "events": events});
     fs::write(

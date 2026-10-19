@@ -14,11 +14,11 @@ extension LibraryStorefront {
     func downloadGame<Cover: View, Artwork: View>(
         _ item: DownloadItem, cover: @escaping (Game) -> Cover, artwork: @escaping (Game) -> Artwork
     ) -> DownloadGame {
-        guard let game = Store.game(item.game).flatMap({ id in games.first { $0.id == id } }) else {
+        guard let game = Store.game(item.game).flatMap({ library.game($0) }) else {
             return DownloadGame(title: item.name, cover: nil, artwork: nil)
         }
         return DownloadGame(
-            title: title(of: game),
+            title: game.title,
             cover: { AnyView(cover(game)) },
             artwork: { AnyView(artwork(game)) }
         )

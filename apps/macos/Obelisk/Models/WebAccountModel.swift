@@ -3,8 +3,7 @@ import Observation
 
 /// A game of a storefront whose account signs in on the storefront's web
 /// page. Its id names it in receipts, Game sessions and the Library cache.
-protocol WebGame: Identifiable, Equatable, Sendable where ID == String {
-    var title: String { get }
+protocol WebGame: LibraryGame, Sendable where ID == String {
     var macos: Bool { get }
     var windows: Bool { get }
     /// How the storefront names the build the game shows before its page's
@@ -12,9 +11,13 @@ protocol WebGame: Identifiable, Equatable, Sendable where ID == String {
     var preferredPlatform: String { get }
     /// What the storefront can install of the game; nil when it ships no build.
     var offer: GameOffer? { get }
-    /// What the game tells that `sort` orders it by; nil when it tells
-    /// nothing.
-    func libraryValue(for sort: StorefrontLibrarySort) -> Double?
+}
+
+extension WebGame {
+    /// Neither web storefront tells a playtime in its library entry, nor a
+    /// last played date: the playtimes load after the games.
+    var playtime: Duration? { nil }
+    var lastPlayedOnStorefront: Date? { nil }
 }
 
 /// What a game's page reads besides its library entry, starting with the
@@ -143,30 +146,17 @@ final class WebAccountModel<Store: WebStorefront> {
 
     private(set) var accountName: String?
     private(set) var avatarURL: URL?
-    var games: [Game] { library.games }
-    private(set) var isLoadingPlaytimes = false
-    private var playtimesFailed = false
-
-    /// What the library shows and whose launches date it.
-    private struct Library: Equatable {
-        var games: [Game] = []
-        /// Each played game's playtime, by id, once the storefront answered.
-        var playtimes: [String: Duration] = [:]
-        /// The account whose cached library shows while its session restores.
-        var cachedAccount: String?
-        /// Its launches are the games' last played dates.
-        var accountID: String?
-    }
-    /// Every change moves `libraryRevision`, so the library's orders never go stale.
-    private var library = Library() {
-        didSet { libraryChanges &+= 1 }
-    }
-    private var libraryChanges = 0
+    /// The connected account.
+    private var accountID: String?
 
     let gameSessions: GameSessions<Store>
     let cloud: CloudModel<Store>
     let rosetta: RosettaModel<GameSessions<Store>>
     let installations: GameInstallations<Store>
+    /// The account's games, from the Library cache while the session
+    /// restores. The share of each game's achievements the account unlocked
+    /// loads after the playtimes.
+    let library: AccountLibrary<Store, Game>
     let achievements = GameAchievementsModel(storeID: Store.storeID, describe: Store.describe)
     /// What lives with the connection, such as Epic's friends.
     let presence: Store.Presence
@@ -184,23 +174,12 @@ final class WebAccountModel<Store: WebStorefront> {
         get { rememberedSession.storageWarning }
         set { rememberedSession.storageWarning = newValue }
     }
-    var searchText = ""
-    var filter: StorefrontLibraryFilter = .all
-    var availableFilters: [StorefrontLibraryFilter] { StorefrontLibraryFilter.allCases }
-    var sort: StorefrontLibrarySort = .name
-    var availableSorts: [StorefrontLibrarySort] { StorefrontLibrarySort.allCases }
-    /// The share of each game's achievements the account unlocked, by game
-    /// id, which loads after the playtimes.
-    let libraryRecords = LibraryRecords<String>()
     var rememberSession: Bool {
         get { rememberedSession.rememberSession }
         set { rememberedSession.rememberSession = newValue }
     }
 
     @ObservationIgnored private let rememberedSession: RememberedSession<Store.Credentials>
-    /// Where the account's last library is kept between launches. The
-    /// account's session keeps every library it loads there.
-    @ObservationIgnored private let libraryCache: LibraryCache?
     @ObservationIgnored private let directory: URL
     @ObservationIgnored private let language: String
     @ObservationIgnored private let authorize: @MainActor () async throws -> String
@@ -212,9 +191,7 @@ final class WebAccountModel<Store: WebStorefront> {
     @ObservationIgnored private var generation = 0
     @ObservationIgnored private var authenticationTask: Task<Void, Never>?
     @ObservationIgnored private var libraryTask: Task<Void, Never>?
-    @ObservationIgnored private var playtimeTask: Task<Void, Never>?
     @ObservationIgnored private var detailsTask: Task<Void, Never>?
-    @ObservationIgnored let libraryOrdering = LibraryOrdering<Game>()
 
     init(
         directory: URL = AppIdentity.libraryDirectory,
@@ -228,7 +205,6 @@ final class WebAccountModel<Store: WebStorefront> {
         installations makeInstallations: MakeInstallations? = nil
     ) {
         self.directory = directory
-        self.libraryCache = libraryCache
         rememberedSession = RememberedSession(keychain: keychain, accountID: Store.accountID,
                                               notSaved: Store.sessionNotSaved)
         self.authorize = authorize
@@ -244,6 +220,8 @@ final class WebAccountModel<Store: WebStorefront> {
         rosetta = RosettaModel(sessions: gameSessions)
         cloud = CloudModel(sessions: gameSessions)
         installations = GameInstallations(sessions: gameSessions, cloud: cloud)
+        library = AccountLibrary(sort: .name, history: gameSessions.history, cache: libraryCache,
+                                 installations: installations)
         presence = Store.Presence()
         installations.selection = { [weak self] in self?.installationSelection }
     }
@@ -253,51 +231,13 @@ final class WebAccountModel<Store: WebStorefront> {
 
     /// Whether the library shows: once connected, or from the cache while the
     /// saved session restores.
-    var showsLibrary: Bool { isConnected || (library.cachedAccount != nil && isRestoring) }
-
-    var libraryRevision: Int { libraryChanges &+ gameSessions.history.revision }
+    var showsLibrary: Bool { library.shows(connected: isConnected, restoring: isRestoring) }
 
     /// No authentication or sign-out runs, and no account is connected.
     private var isIdle: Bool { !isConnected && !isRestoring && !isConnecting && !isSigningOut }
 
-    /// Whether the filter or the order reads the games' playtimes.
-    private var usesPlaytime: Bool { filter == .played || sort == .playtime }
-
-    var pendingMetadata: String? {
-        usesPlaytime && isLoadingPlaytimes ? L10n.string("ui.library.loading_playtime") : nil
-    }
-
-    var missingMetadata: String? {
-        usesPlaytime && playtimesFailed ? L10n.string("ui.library.playtime_unavailable") : nil
-    }
-
     var gameSessionMessage: String? {
-        gameSessions.message(for: selectedGame?.id, of: library.accountID, otherGameRunning: Store.otherGameRunning)
-    }
-
-    func title(of game: Game) -> String { game.title }
-
-    /// Nil until the storefront answered, or when the game was never played.
-    func playtime(of game: Game) -> Duration? {
-        library.playtimes[game.id].flatMap { $0 > .zero ? $0 : nil }
-    }
-
-    /// When this account last launched the game from Obelisk: neither
-    /// storefront records a last played date of its own.
-    func lastPlayed(of game: Game) -> Date? {
-        // The cached library's account, while its session restores.
-        (library.accountID ?? library.cachedAccount).flatMap {
-            gameSessions.history.lastLaunch(of: game.id, account: $0, in: Store.self)
-        }
-    }
-
-    func libraryValue(of game: Game, for sort: StorefrontLibrarySort) -> Double? {
-        sort == .achievements ? libraryRecords.value(for: sort, of: game.id) : game.libraryValue(for: sort)
-    }
-
-    /// The other orders read only the games.
-    func valuesRevision(for sort: StorefrontLibrarySort) -> Int {
-        sort == .achievements ? libraryRecords.revision(for: sort) : 0
+        gameSessions.message(for: selectedGame?.id, of: accountID, otherGameRunning: Store.otherGameRunning)
     }
 
     // MARK: Account
@@ -375,10 +315,7 @@ final class WebAccountModel<Store: WebStorefront> {
     func signOut() {
         guard !isSigningOut else { return }
         Store.webSignIn.store.forgetSite()
-        if let account = library.accountID ?? library.cachedAccount {
-            libraryCache?.forget(account: Store.account(account))
-            gameSessions.history.forget(account: account, in: Store.self)
-        }
+        library.forget()
         generation += 1
         let current = generation
         let disconnected = session
@@ -391,18 +328,11 @@ final class WebAccountModel<Store: WebStorefront> {
         authenticationTask = nil
         libraryTask?.cancel()
         libraryTask = nil
-        playtimeTask?.cancel()
-        playtimeTask = nil
         session = nil
-        library = Library()
-        libraryRecords.reset()
+        accountID = nil
         accountName = nil
         avatarURL = nil
-        isLoadingPlaytimes = false
-        playtimesFailed = false
         closeGame()
-        searchText = ""
-        filter = .all
         errorMessage = nil
         storageWarning = nil
         isConnecting = false
@@ -446,13 +376,19 @@ final class WebAccountModel<Store: WebStorefront> {
             return
         }
         guard isCurrent(current), let credentials else { return }
-        showCachedLibrary(of: Store.accountID(credentials))
+        let account = Store.accountID(credentials)
+        library.showCache(of: account) { cache in
+            Store.cachedLibrary(in: cache, account: account).map { entry in
+                CachedLibraryGame(game: entry.game, playtime: entry.playtime,
+                                  values: entry.achievements.map { [.achievements: $0] } ?? [:])
+            }
+        }
         do {
             let connected = try await restoreSession(credentials)
             await accept(connected, generation: current)
         } catch {
             guard isCurrent(current) else { return }
-            dropCachedLibrary()
+            library.dropCache()
             errorMessage = Store.describe(error)
             if Store.isUnauthorized(error) {
                 await rememberedSession.forget().value
@@ -476,11 +412,8 @@ final class WebAccountModel<Store: WebStorefront> {
             }
             let account = Store.accountID(credentials)
             let name = Store.accountName(credentials)
-            var accepted = library.cachedAccount == account ? library : Library()
-            if library.cachedAccount != account { libraryRecords.reset() }
-            accepted.cachedAccount = nil
-            accepted.accountID = account
-            if library != accepted { library = accepted }
+            library.connect(account)
+            accountID = account
             session = connected
             accountName = name.isEmpty ? account : name
             avatarURL = Store.avatar(of: connected)
@@ -511,73 +444,39 @@ final class WebAccountModel<Store: WebStorefront> {
 
     // MARK: Library
 
-    /// Shows the account's last library at once, while its session restores.
-    private func showCachedLibrary(of account: String) {
-        guard library.games.isEmpty, let libraryCache else { return }
-        let cached = Store.cachedLibrary(in: libraryCache, account: account)
-        guard !cached.isEmpty else { return }
-        library.cachedAccount = account
-        library.games = cached.map { $0.game }
-        library.playtimes = Dictionary(cached.compactMap { entry in entry.playtime.map { (entry.game.id, $0) } },
-                                       uniquingKeysWith: max)
-        libraryRecords.show(Dictionary(cached.compactMap { entry in entry.achievements.map { (entry.game.id, $0) } },
-                                       uniquingKeysWith: max), for: .achievements)
-    }
-
-    /// Hides a cached library whose session did not restore: another account
-    /// may sign in next. The cache keeps it for a later restoration.
-    private func dropCachedLibrary() {
-        guard library.cachedAccount != nil else { return }
-        library = Library()
-        libraryRecords.reset()
-    }
-
     private func reloadGames(_ connected: Store.Session, generation current: Int) async {
         defer { if current == generation { isLoadingGames = false } }
-        // The playtimes reload with the games: a refresh shows them loading at once.
-        playtimeTask?.cancel()
-        playtimeTask = nil
-        isLoadingPlaytimes = true
-        playtimesFailed = false
+        // The playtimes reload with the games: a refresh shows them loading at
+        // once. GOG asks each listed game's playtime, so they wait for the games.
+        let listing = Task { try await Store.games(of: connected) }
+        let language = language
+        library.loadPlaytimes({
+            let games = try await listing.value
+            // Nothing asks the storefront once the account signed out.
+            try Task.checkCancellation()
+            return try await Store.playtimes(of: connected, games: games)
+        }, then: { [weak self] in
+            // The session reads again the achievements of the games played since.
+            self?.library.load(.achievements) {
+                try await Store.achievementShares(of: listing.value, session: connected, language: language)
+            }
+        })
         do {
-            let loaded = try await Store.games(of: connected)
+            let loaded = try await withTaskCancellationHandler {
+                try await listing.value
+            } onCancel: {
+                listing.cancel()
+            }
             guard isCurrent(current) else { return }
-            if library.games != loaded { library.games = loaded }
-            reloadPlaytimes(connected, of: loaded, generation: current)
+            library.show(loaded)
             if let selectedGame {
                 if let updated = loaded.first(where: { $0.id == selectedGame.id }) { open(updated) }
                 else { closeGame() }
             }
         } catch {
             guard isCurrent(current) else { return }
-            // Without the games, no playtime was asked: offer the retry.
-            isLoadingPlaytimes = false
-            playtimesFailed = true
+            // Without the games, the playtimes failed too: the library offers the retry.
             report(error)
-        }
-    }
-
-    /// Asked once the games are known, which GOG's per-game requests need.
-    /// Playtimes only order and filter the library, so the library never
-    /// waits for them. The achievements follow: the session reads again
-    /// those of the games played since.
-    private func reloadPlaytimes(_ connected: Store.Session, of games: [Game], generation current: Int) {
-        playtimeTask = Task {
-            do {
-                let loaded = try await Store.playtimes(of: connected, games: games)
-                guard isCurrent(current) else { return }
-                library.playtimes = loaded
-            } catch {
-                guard isCurrent(current) else { return }
-                playtimesFailed = true
-            }
-            isLoadingPlaytimes = false
-            // A refresh cancelled this load: its own reads the new games.
-            guard !Task.isCancelled else { return }
-            let language = language
-            libraryRecords.load(.achievements) {
-                try await Store.achievementShares(of: games, session: connected, language: language)
-            }
         }
     }
 
@@ -616,7 +515,7 @@ final class WebAccountModel<Store: WebStorefront> {
     /// Reads the achievements of the library's game `id` from the storefront
     /// into `model`, as the overlay asks for the running game.
     func loadAchievements(of id: Game.ID, into model: GameAchievementsModel) {
-        guard let game = games.first(where: { $0.id == id }) else { return }
+        guard let game = library.game(id) else { return }
         load(achievementsOf: game, into: model, fresh: true)
     }
 

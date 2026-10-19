@@ -26,7 +26,7 @@ pub fn exec_game() -> std::io::Result<()> {
             return Err(std::io::Error::last_os_error());
         }
         if let Some(log) = &admission.log {
-            let log = game_runtime::supervisor::exec::open_log(log)?;
+            let log = game_runtime::diagnostics::open_log(log)?;
             // SAFETY: valid writable descriptor, replacing only standard error,
             // which the supervisor left discarded.
             if unsafe { libc::dup2(log.as_raw_fd(), 2) } < 0 {

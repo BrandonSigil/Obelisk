@@ -5,38 +5,6 @@ import XCTest
 
 @MainActor
 final class StorefrontLibraryFilterTests: XCTestCase {
-    func testSteamFiltersCombineWithSearchAndEverySort() async throws {
-        let root = try temporaryDirectory()
-        let games = [
-            steamGame(1, name: "Portal Z", lastPlayed: 300, playtime: 0),
-            steamGame(2, name: "Portal A", lastPlayed: 0, playtime: 60),
-            steamGame(3, name: "Portal Never"),
-            steamGame(4, name: "Other", lastPlayed: 900, playtime: 120)
-        ]
-        let model = steamModel(root: root, games: games, receipts: steamReceipts([(1, "windows"), (2, "macos")], root: root))
-        await model.start()
-        defer { model.signOut() }
-
-        XCTAssertEqual(model.availableFilters, [.all, .installed, .played])
-        XCTAssertEqual(model.filteredGames.map(\.appId), [4, 1, 2, 3])
-        model.searchText = "  portal  "
-        model.filter = .played
-        XCTAssertEqual(model.filteredGames.map(\.appId), [1, 2])
-        model.sort = .name
-        XCTAssertEqual(model.filteredGames.map(\.appId), [2, 1])
-        model.sort = .playtime
-        XCTAssertEqual(model.filteredGames.map(\.appId), [2, 1])
-
-        model.filter = .installed
-        model.searchText = ""
-        XCTAssertEqual(model.filteredGames.map(\.appId), [2, 1])
-        model.searchText = "Portal Z"
-        XCTAssertEqual(model.filteredGames.map(\.appId), [1])
-        model.filter = .all
-        model.searchText = "Portal Never"
-        XCTAssertEqual(model.filteredGames.map(\.appId), [3])
-    }
-
     func testSteamLoadsDatesAndAchievementsWithTheLibrary() async throws {
         let root = try temporaryDirectory()
         let games = [steamGame(1, name: "Alpha"), steamGame(2, name: "Beta"), steamGame(3, name: "Gamma")]
@@ -45,91 +13,35 @@ final class StorefrontLibraryFilterTests: XCTestCase {
         await model.start()
         defer { model.signOut() }
         try await eventually {
-            model.libraryRecords.value(for: .dateAdded, of: 3) != nil
-                && model.libraryRecords.value(for: .achievements, of: 3) != nil
+            model.library.value(of: games[2], for: .dateAdded) != nil
+                && model.library.value(of: games[2], for: .achievements) != nil
         }
         var asked = await records.counts
         XCTAssertEqual(asked.acquisitions, 1, "The library dates load with the library, before any order asks")
         XCTAssertEqual(asked.achievements, 1)
         XCTAssertEqual(asked.achievementApps, [1, 2, 3], "One request names every game")
 
-        model.sort = .dateAdded
-        XCTAssertEqual(model.filteredGames.map(\.appId), [3, 1, 2])
-        model.sort = .achievements
-        XCTAssertEqual(model.filteredGames.map(\.appId), [3, 2, 1])
-        XCTAssertNil(model.pendingMetadata)
+        model.library.sort = .dateAdded
+        XCTAssertEqual(model.library.shown.map(\.appId), [3, 1, 2])
+        model.library.sort = .achievements
+        XCTAssertEqual(model.library.shown.map(\.appId), [3, 2, 1])
+        XCTAssertNil(model.library.pendingMetadata)
         asked = await records.counts
         XCTAssertEqual(asked.acquisitions + asked.achievements, 2, "Picking an order asks nothing")
-    }
-
-    func testSizeOrderPutsTheLargestInstallationFirstAndFollowsInstallations() async throws {
-        let root = try temporaryDirectory()
-        let small = epicGame("small", title: "Small"), large = epicGame("large", title: "Large")
-        let absent = epicGame("absent", title: "Absent")
-        let fake = FakeInstallations<EpicGames>(receipts: epicReceipts([(small, "windows"), (large, "windows"), (large, "macos")],
-                                                                       root: root, bytes: [small.appName: 10, large.appName: 400]))
-        let model = epicModel(root: root, games: [small, absent, large], installations: fake)
-        await model.start()
-        defer { model.signOut() }
-
-        model.sort = .size
-        XCTAssertEqual(model.filteredGames.map(\.appName), ["large", "small", "absent"],
-                       "Both of a game's installations count, and a game not installed comes last")
-        fake.publish { $0.receipts += self.epicReceipts([(absent, "windows")], root: root, bytes: [absent.appName: 5_000]) }
-        try await eventually { model.filteredGames.map(\.appName) == ["absent", "large", "small"] }
-    }
-
-    func testEpicOrdersByTheDateEachGameJoinedTheLibrary() async throws {
-        var older = epicGame("older", title: "Older"), newer = epicGame("newer", title: "Newer")
-        older.addedAt = 1_590_000_000
-        newer.addedAt = 1_700_000_000
-        let undated = epicGame("undated", title: "Undated")
-        let model = epicModel(root: try temporaryDirectory(), games: [older, undated, newer])
-        await model.start()
-        defer { model.signOut() }
-
-        model.sort = .dateAdded
-        XCTAssertEqual(model.filteredGames.map(\.appName), ["newer", "older", "undated"])
     }
 
     func testSteamSignOutResetsFilterAndCachedLibrary() async throws {
         let model = steamModel(root: try temporaryDirectory(), games: [steamGame(1, name: "Played", playtime: 1)])
         await model.start()
-        model.filter = .played
-        XCTAssertEqual(model.filteredGames.map(\.appId), [1])
+        model.library.filter = .played
+        XCTAssertEqual(model.library.shown.map(\.appId), [1])
 
         model.signOut()
 
-        XCTAssertEqual(model.filter, .all)
-        XCTAssertTrue(model.filteredGames.isEmpty)
+        XCTAssertEqual(model.library.filter, .all)
+        XCTAssertTrue(model.library.shown.isEmpty)
         XCTAssertFalse(model.isConnected)
         try await eventually { !model.isRestoring && !model.isConnecting }
-    }
-
-    func testEpicFiltersUseNamespaceIdentityAndInstallationsOnEitherPlatform() async throws {
-        let root = try temporaryDirectory()
-        let installedWindows = epicGame("shared", namespace: "first", title: "Étoiles Z", macOS: true)
-        let otherNamespace = epicGame("shared", namespace: "second", title: "Étoiles A")
-        let installedMac = epicGame("native", title: "Étoiles B", macOS: true)
-        let availableMac = epicGame("available", title: "Étoiles C", macOS: true)
-        let unknown = EpicGame(appName: "unknown", namespace: "first", catalogItemId: "unknown", title: "Unknown",
-                               description: "", imageUrl: nil, headerImageUrl: nil, developer: "", windows: false, macos: false)
-        let model = epicModel(root: root, games: [installedWindows, unknown, availableMac, otherNamespace, installedMac],
-                              receipts: epicReceipts([(installedWindows, "windows"), (installedMac, "macos")], root: root))
-        await model.start()
-        defer { model.signOut() }
-
-        XCTAssertEqual(model.availableFilters, [.all, .installed, .played], "Epic's playtimes tell which games were played")
-        XCTAssertEqual(model.filteredGames.count, 5)
-        model.searchText = "  etoiles  "
-        XCTAssertEqual(model.filteredGames.map(\.libraryID), [otherNamespace, installedMac, availableMac, installedWindows].map(\.libraryID))
-
-        model.filter = .installed
-        XCTAssertEqual(model.filteredGames.map(\.libraryID), [installedMac, installedWindows].map(\.libraryID))
-        model.searchText = "Unknown"
-        XCTAssertTrue(model.filteredGames.isEmpty)
-        model.filter = .all
-        XCTAssertEqual(model.filteredGames.map(\.libraryID), [unknown.libraryID])
     }
 
     func testEpicSignOutResetsFilterAndCachedLibrary() async throws {
@@ -137,13 +49,13 @@ final class StorefrontLibraryFilterTests: XCTestCase {
         let native = epicGame("native", title: "Native", macOS: true)
         let model = epicModel(root: root, games: [native], receipts: epicReceipts([(native, "macos")], root: root))
         await model.start()
-        model.filter = .installed
-        XCTAssertEqual(model.filteredGames.map(\.appName), ["native"])
+        model.library.filter = .installed
+        XCTAssertEqual(model.library.shown.map(\.appName), ["native"])
 
         model.signOut()
 
-        XCTAssertEqual(model.filter, .all)
-        XCTAssertTrue(model.filteredGames.isEmpty)
+        XCTAssertEqual(model.library.filter, .all)
+        XCTAssertTrue(model.library.shown.isEmpty)
         XCTAssertFalse(model.isConnected)
         try await eventually { !model.isSigningOut }
     }
@@ -155,17 +67,17 @@ final class StorefrontLibraryFilterTests: XCTestCase {
         return root
     }
 
-    private func steamGame(_ appID: UInt32, name: String, lastPlayed: UInt64 = 0, playtime: UInt32 = 0) -> SteamGame {
-        SteamGame(appId: appID, name: name, iconHash: "", lastPlayed: lastPlayed, playtimeMinutes: playtime)
+    private func steamGame(_ appID: UInt32, name: String, playtime: UInt32 = 0) -> SteamGame {
+        SteamGame(appId: appID, name: name, iconHash: "", lastPlayed: 0, playtimeMinutes: playtime)
     }
 
-    private func steamModel(root: URL, games: [SteamGame], receipts: [InstallationReceipt<UInt32>] = [],
+    private func steamModel(root: URL, games: [SteamGame],
                             records: FilterRecordRequests = FilterRecordRequests()) -> SteamModel {
         let session = FilterSteamSession(games: games, platforms: { _ in [] }, records: records)
         return SteamModel(directory: root, keychain: FilterSteamCredentials(), connect: { _ in session }, news: { _ in [] },
                           beginLogin: { _ in throw FilterFixtureFailure.unexpectedOperation },
                           gameSessions: SteamGameSessions(),
-                          installations: SteamModel.installations(FakeInstallations(receipts: receipts)))
+                          installations: SteamModel.installations(FakeInstallations()))
     }
 
     private func epicGame(_ appName: String, namespace: String = "first", title: String, macOS: Bool = false) -> EpicGame {
@@ -173,27 +85,18 @@ final class StorefrontLibraryFilterTests: XCTestCase {
                  description: "", imageUrl: nil, headerImageUrl: nil, developer: "", windows: true, macos: macOS)
     }
 
-    private func epicModel(root: URL, games: [EpicGame], receipts: [InstallationReceipt<String>] = [],
-                           installations: FakeInstallations<EpicGames>? = nil) -> EpicModel {
+    private func epicModel(root: URL, games: [EpicGame], receipts: [InstallationReceipt<String>]) -> EpicModel {
         let credentials = EpicCredentials(accountId: "filters", displayName: "Filter fixture", refreshToken: "fixture-only-never-sent")
         let session = EpicTestSession(credentials: credentials, games: games)
         return EpicModel(directory: root, keychain: EpicMemoryStore(credentials), restore: { _ in session },
-                         installations: EpicModel.installations(installations ?? FakeInstallations(receipts: receipts)))
+                         installations: EpicModel.installations(FakeInstallations(receipts: receipts)))
     }
 
-    private func steamReceipts(_ entries: [(UInt32, String)], root: URL) -> [InstallationReceipt<UInt32>] {
-        entries.map { appID, platform in
-            .steam(appId: appID, name: "Game \(appID)", directory: root.appending(path: "steam-\(appID)-\(platform)").path,
-                   platform: platform, totalBytes: 1)
-        }
-    }
-
-    private func epicReceipts(_ entries: [(EpicGame, String)], root: URL,
-                              bytes: [String: UInt64] = [:]) -> [InstallationReceipt<String>] {
+    private func epicReceipts(_ entries: [(EpicGame, String)], root: URL) -> [InstallationReceipt<String>] {
         entries.map { game, platform in
             InstallationReceipt.epic(namespace: game.namespace, appName: game.appName, name: game.title,
                                directory: root.appending(path: "epic-\(game.namespace)-\(game.appName)-\(platform)").path,
-                               platform: platform, totalBytes: bytes[game.appName] ?? 1)
+                               platform: platform, totalBytes: 1)
         }
     }
 

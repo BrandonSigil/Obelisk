@@ -30,9 +30,8 @@ final class EpicModelTests: XCTestCase {
         let model = await connectedModel(session)
         defer { model.signOut() }
 
-        try await eventually { !model.isLoadingPlaytimes }
-        XCTAssertEqual(model.playtime(of: first), .seconds(600))
-        XCTAssertEqual(model.playtime(of: second), .seconds(600), "Epic counts an app name's time for each of its entries")
+        try await eventually { model.library.playtime(of: first) == .seconds(600) }
+        XCTAssertEqual(model.library.playtime(of: second), .seconds(600), "Epic counts an app name's time for each of its entries")
     }
 
     func testAchievementsAskEpicForTheNamespaceAndBareLanguage() async throws {

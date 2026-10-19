@@ -1,4 +1,5 @@
 //! Every path Obelisk uses, named once.
+use crate::{diagnostics, queue::Storefront};
 use std::path::{Path, PathBuf};
 
 /// Where Obelisk keeps everything, derived from its library directory, its
@@ -20,10 +21,11 @@ pub struct Locations {
     /// download, or a launch that misses them, gets from Valve's CDN.
     pub steam_runtime_package: PathBuf,
     pub steam_runtime_cache: PathBuf,
+    /// Where Steam games log, and the Steam host leaves its launch reports.
     pub steam_diagnostics: PathBuf,
-    /// Where Wine logs the Windows builds of Epic games.
+    /// Where Epic games log, whichever build runs.
     pub epic_diagnostics: PathBuf,
-    /// Where Wine logs the Windows builds of GOG games.
+    /// Where GOG games log, whichever build runs.
     pub gog_diagnostics: PathBuf,
     /// The Voile runtimes that run Windows games: the pinned release and a
     /// development runtime.
@@ -45,29 +47,13 @@ impl Locations {
             helpers,
             steam_runtime_package: crate::valve::payload(&steam_runtime_cache),
             steam_runtime_cache,
-            steam_diagnostics: home.join(LOGS).join("Steam"),
-            epic_diagnostics: home.join(LOGS).join("Epic"),
-            gog_diagnostics: home.join(LOGS).join("GOG"),
+            steam_diagnostics: diagnostics::folder(home, Storefront::Steam),
+            epic_diagnostics: diagnostics::folder(home, Storefront::Epic),
+            gog_diagnostics: diagnostics::folder(home, Storefront::Gog),
             voile: library.join("Voile"),
             wine_prefixes: library.join("Prefixes"),
             library: library.to_owned(),
             home: home.to_owned(),
         }
     }
-}
-
-/// Obelisk's logs, in the user's home.
-const LOGS: &str = "Library/Logs/Obelisk";
-
-/// The file `game`'s standard error goes to while it runs, in its
-/// storefront's diagnostics folder under `home`. `kind` starts its name:
-/// `wine` for a Windows build, `game` for a Mac one.
-pub(crate) fn game_log(home: &Path, game: crate::profile::Game<'_>, kind: &str) -> PathBuf {
-    use crate::profile::Game::{Epic, Gog, Steam};
-    let (store, id) = match game {
-        Steam { app_id } => ("Steam", app_id.to_string()),
-        Epic { app_name, .. } => ("Epic", app_name.to_owned()),
-        Gog { product_id } => ("GOG", product_id.to_owned()),
-    };
-    home.join(LOGS).join(store).join(format!("{kind}-{id}.log"))
 }

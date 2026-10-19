@@ -22,6 +22,10 @@ _Avoid_: login, CM connection (one connection of an account session)
 The last library each storefront account loaded, with everything the storefront returned for each game and the game's last launch from Obelisk. The library shows from it while the account's session connects; the session keeps it as it loads, and signing the account out forgets it. It is not the catalog of games added by hand.
 _Avoid_: library.json (the catalog's file), launch history file
 
+**Account library**:
+One storefront account's games as Obelisk shows them, with what orders and narrows each: its name, playtime, last played (on its storefront or from Obelisk, whichever is later), date added, achievements unlocked and size installed. It shows from the Library cache while the account's session connects, becomes live once the session lists the games, and signing the account out forgets it. Every storefront searches, filters and orders it the same six ways, and its featured game, its hero, is the last one played, else the most played, equal ones by name.
+_Avoid_: catalog (the games added by hand), filtered games, Library cache (its saved copy)
+
 **Cloud archive**:
 Obelisk's own local store of each account's save versions, together with the record of which account currently owns each physical save location. One archive serves every storefront, so two storefront copies of a game that share a save location cannot silently adopt each other's saves.
 _Avoid_: vault root, SteamCloud folder
@@ -65,6 +69,10 @@ _Avoid_: launch start, pending launch
 **Game session**:
 One account-scoped launch of a game, holding a Reservation from admission until the game has really exited and its Cloud saves are settled. Obelisk keeps running in the background while it lasts; really quitting Obelisk stops its game first, and if Obelisk dies, its game stops with it.
 _Avoid_: launch, supervisor session
+
+**Diagnostics**:
+The files Obelisk writes about how a game ran, in its storefront's folder under ~/Library/Logs/Obelisk: the log of the game's last launch, the one before it and its input service's, and a Steam launch's launch or failure report. A bug report attaches them. macOS's crash reports and Obelisk's unified log are not diagnostics.
+_Avoid_: logs folder, launch logs
 
 **Cloud maintenance**:
 Synchronizing one game's Cloud saves without launching it, at the player's request. It runs inside Obelisk, holds the Reservation of every game of its storefront while it runs, and stops if Obelisk quits or the account signs out.
