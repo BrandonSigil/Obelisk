@@ -3,6 +3,7 @@ use crate::cloud::{
     CloudError, CloudFile, CloudListing, CloudQuota, UploadTransaction, deadline,
     preferences::ROAMING_CONFIG_APP, upload, wire,
 };
+use futures_util::TryStreamExt;
 
 #[cfg(debug_assertions)]
 mod interruption_probe;
@@ -219,6 +220,22 @@ impl<F: Fn() -> bool> crate::cloud::upload::Transport for UploadTransport<'_, F>
         }
         Ok(self.connection.service(name, request).await?)
     }
+    async fn calls<R: Message + Default>(
+        &mut self,
+        name: &str,
+        requests: &[impl Message],
+    ) -> Result<Vec<R>, CloudError> {
+        let (connection, authorized) = (self.connection, self.authorized);
+        futures_util::stream::iter(requests.iter().map(|request| async move {
+            if !authorized() {
+                return Err(CloudError::Revoked);
+            }
+            Ok(connection.service(name, request).await?)
+        }))
+        .buffered(upload::PARALLEL_FILES)
+        .try_collect()
+        .await
+    }
     async fn block(&mut self, block: &wire::UploadBlock, bytes: &[u8]) -> Result<(), CloudError> {
         let request = crate::cloud::upload::block_request(block, bytes)?;
         if !(self.authorized)() {
@@ -285,6 +302,55 @@ mod upload_receipt_tests {
         ] {
             assert!(commit_response(result, &body, succeeded).is_err());
         }
+    }
+}
+
+#[cfg(test)]
+mod parallel_tests {
+    use super::*;
+    use crate::cloud::upload::Transport;
+
+    #[tokio::test]
+    async fn a_batch_keeps_ten_file_requests_in_flight_and_answers_in_order() {
+        let (connection, mut server) = super::super::test_server::connection(1, true).await;
+        let http = reqwest::Client::new();
+        let mut transport = UploadTransport {
+            connection: &connection,
+            http: &http,
+            authorized: &|| true,
+        };
+        let deletes: Vec<_> = (0..12)
+            .map(|index| wire::DeleteRequest {
+                app_id: 7,
+                name: format!("save-{index}"),
+                explicit: true,
+                batch_id: 1,
+            })
+            .collect();
+        // Each answer echoes its request, so the order shows.
+        let answer = async {
+            let mut sent = Vec::new();
+            for _ in 0..upload::PARALLEL_FILES {
+                sent.push(server.request(SERVICE_REQUEST).await);
+            }
+            assert!(server.quiet().await, "an eleventh request waits");
+            for packet in sent.iter().rev() {
+                let request = wire::DeleteRequest::decode(packet.body.clone()).unwrap();
+                server.reply(packet, SERVICE_RESPONSE, &request).await;
+            }
+            for _ in upload::PARALLEL_FILES..deletes.len() {
+                let packet = server.request(SERVICE_REQUEST).await;
+                let request = wire::DeleteRequest::decode(packet.body.clone()).unwrap();
+                server.reply(&packet, SERVICE_RESPONSE, &request).await;
+            }
+        };
+        let (answers, ()) = tokio::join!(
+            transport.calls::<wire::DeleteRequest>("Cloud.ClientDeleteFile#1", &deletes),
+            answer
+        );
+        let names: Vec<_> = answers.unwrap().into_iter().map(|a| a.name).collect();
+        let sent: Vec<_> = deletes.into_iter().map(|d| d.name).collect();
+        assert_eq!(names, sent);
     }
 }
 

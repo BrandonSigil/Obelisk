@@ -14,6 +14,8 @@ use std::{
 
 const MAX_FILE: usize = 256 * 1024 * 1024;
 const MAX_JOURNAL: u64 = 64 * 1024 * 1024;
+/// How many file requests of one batch Steam's client keeps in flight.
+pub(crate) const PARALLEL_FILES: usize = 10;
 
 /// Bytes must come from the coordinator's immutable archive, not a running game.
 pub struct CloudUpload {
@@ -385,6 +387,20 @@ pub(crate) trait Transport {
         name: &str,
         request: &impl Message,
     ) -> Result<R, CloudError>;
+    /// Answers `requests` to the same method, in their order. A transport
+    /// may keep up to `PARALLEL_FILES` in flight. The first failure ends the
+    /// set, and the requests already sent may have arrived.
+    async fn calls<R: Message + Default>(
+        &mut self,
+        name: &str,
+        requests: &[impl Message],
+    ) -> Result<Vec<R>, CloudError> {
+        let mut answers = Vec::with_capacity(requests.len());
+        for request in requests {
+            answers.push(self.call(name, request).await?);
+        }
+        Ok(answers)
+    }
     async fn block(&mut self, block: &wire::UploadBlock, bytes: &[u8]) -> Result<(), CloudError>;
     async fn listing(&mut self, app_id: u32) -> Result<CloudListing, CloudError>;
 }
@@ -570,24 +586,28 @@ async fn upload_files(
             return Err(CloudError::NotCommitted);
         }
     }
-    for index in 0..job.state.deletes.len() {
-        let name = job.state.deletes[index].clone();
-        check(authorize)?;
-        job.save_progress(job.phase().clone(), true)?;
-        let _: wire::EmptyResponse = transport
-            .call(
-                "Cloud.ClientDeleteFile#1",
-                &wire::DeleteRequest {
-                    app_id: job.app_id(),
-                    name,
-                    explicit: true,
-                    batch_id,
-                },
-            )
-            .await?;
-        job.save_progress(job.phase().clone(), false)?;
+    if job.state.deletes.is_empty() {
+        return Ok(());
     }
-    Ok(())
+    // As Steam's client does, the deletions go out together: the journal
+    // holds them as one unanswered mutation until each is answered.
+    let deletes: Vec<_> = job
+        .state
+        .deletes
+        .iter()
+        .map(|name| wire::DeleteRequest {
+            app_id: job.app_id(),
+            name: name.clone(),
+            explicit: true,
+            batch_id,
+        })
+        .collect();
+    check(authorize)?;
+    job.save_progress(job.phase().clone(), true)?;
+    let _: Vec<wire::EmptyResponse> = transport
+        .calls("Cloud.ClientDeleteFile#1", &deletes)
+        .await?;
+    job.save_progress(job.phase().clone(), false)
 }
 
 async fn close_batch(
