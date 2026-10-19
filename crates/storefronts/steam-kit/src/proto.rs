@@ -357,6 +357,10 @@ pub(crate) struct License {
     pub time_created: u32,
     #[prost(uint32, tag = "7")]
     pub flags: u32,
+    /// The account ID of the license's owner: a family member's when it
+    /// lends the game.
+    #[prost(uint32, tag = "12")]
+    pub owner_id: u32,
     #[prost(uint64, tag = "17")]
     pub access_token: u64,
 }

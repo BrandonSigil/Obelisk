@@ -488,16 +488,51 @@ impl Client {
         }
     }
 
-    /// Ordered by the CM layer: most recently played first, then name.
+    /// Most recently played first, then name. Steam's owned games leave out
+    /// the free games the account never played, which its store and client
+    /// still count, such as Counter-Strike 2 once its store page added it:
+    /// the account's own licenses add them back.
     pub async fn games(&self) -> Result<Vec<OwnedGame>, ClientError> {
-        let games = self.cm.owned_games().await?;
-        // Rendering the library does not require expanding every license through
-        // PICS. Refresh license-derived download rights only when next needed.
+        // Download rights then follow the licenses this load reads.
         *self.catalog.lock().await = None;
         self.app_infos
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .clear();
+        let (games, licensed) = tokio::join!(self.cm.owned_games(), self.licensed_content());
+        let mut games = games?;
+        // The owned games alone still make a library.
+        if let Ok(licensed) = licensed
+            && let Ok(unplayed) = self.unplayed_games(&licensed, &games).await
+        {
+            games.extend(unplayed);
+            games.sort_by(crate::cm::library_order);
+        }
+        Ok(games)
+    }
+
+    /// The released games the account's own licenses grant that `listed`
+    /// leaves out.
+    async fn unplayed_games(
+        &self,
+        licensed: &ContentLicenses,
+        listed: &[OwnedGame],
+    ) -> Result<Vec<OwnedGame>, ClientError> {
+        let listed: HashSet<_> = listed.iter().map(|game| game.app_id).collect();
+        let missing: Vec<_> = licensed
+            .own_apps
+            .iter()
+            .copied()
+            .filter(|app_id| !listed.contains(app_id))
+            .collect();
+        // Steam withholds the metadata of some apps the licenses grant: those
+        // stay out.
+        let mut games = Vec::new();
+        for app in self.cm.readable_app_infos(&missing).await? {
+            let app = Arc::new(app);
+            self.remember_app(&app);
+            games.extend(app.unplayed_game());
+        }
         Ok(games)
     }
 

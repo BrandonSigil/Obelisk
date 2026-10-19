@@ -266,9 +266,129 @@ async fn library_platforms_carry_the_whole_pics_app_info() {
     );
 }
 
+/// The account's licenses, as Steam pushes them after logon.
+async fn push_licenses(server: &mut test_server::TestServer, licenses: Vec<proto::License>) {
+    let list = proto::LicenseList {
+        result: Some(1),
+        licenses,
+    };
+    server
+        .send(
+            LICENSE_LIST,
+            proto::Header::default(),
+            &list.encode_to_vec(),
+        )
+        .await;
+}
+
+/// A package as PICS sends it, in binary KeyValues, granting `apps`.
+fn package(id: u32, apps: &[u32]) -> proto::ProductInfo {
+    let mut buffer = 1_u32.to_le_bytes().to_vec();
+    buffer.push(0);
+    buffer.extend(format!("{id}\0").bytes());
+    buffer.push(0);
+    buffer.extend(b"appids\0");
+    for (index, app) in apps.iter().enumerate() {
+        buffer.push(2);
+        buffer.extend(format!("{index}\0").bytes());
+        buffer.extend(app.to_le_bytes());
+    }
+    buffer.extend([8, 8, 8]);
+    proto::ProductInfo {
+        id,
+        buffer: buffer.into(),
+        ..Default::default()
+    }
+}
+
+#[tokio::test]
+async fn library_adds_the_free_games_owned_games_leave_out() {
+    const ACCOUNT: u32 = 76_561_198_000_000_000_u64 as u32;
+    const BORROWED: u32 = 0x4000;
+    let (client, mut server, _) = fixture().await;
+    push_licenses(
+        &mut server,
+        vec![
+            proto::License {
+                package_id: 1,
+                owner_id: ACCOUNT,
+                time_created: 1_700_000_000,
+                ..Default::default()
+            },
+            // A family member lends app 400.
+            proto::License {
+                package_id: 2,
+                owner_id: ACCOUNT + 1,
+                flags: BORROWED,
+                ..Default::default()
+            },
+        ],
+    )
+    .await;
+    let answer = async {
+        let owned = server.request(SERVICE_REQUEST).await;
+        let response = proto::OwnedGamesResponse {
+            game_count: 1,
+            games: vec![proto::OwnedGame {
+                app_id: 620,
+                name: "Portal 2".into(),
+                last_played: 1_789_430_000,
+                ..Default::default()
+            }],
+        };
+        server.reply(&owned, SERVICE_RESPONSE, &response).await;
+        let packages = server.request(PRODUCT_REQUEST).await;
+        let response = proto::ProductResponse {
+            packages: vec![package(1, &[620, 730, 731, 732, 733]), package(2, &[400])],
+            ..Default::default()
+        };
+        server.reply(&packages, PRODUCT_RESPONSE, &response).await;
+        let app = |id: u32, common: &str| proto::ProductInfo {
+            id,
+            buffer: format!(r#""appinfo" {{ "appid" "{id}" "common" {{ {common} }} }}"#)
+                .into_bytes()
+                .into(),
+            ..Default::default()
+        };
+        let apps = proto::ProductResponse {
+            apps: vec![
+                app(
+                    730,
+                    r#""name" "Counter-Strike 2" "type" "Game" "icon" "cs2""#,
+                ),
+                app(731, r#""name" "Soundtrack" "type" "Music""#),
+                app(
+                    732,
+                    r#""name" "Upcoming" "type" "Game" "releasestate" "prerelease""#,
+                ),
+                // Steam withholds this one's metadata from the account.
+                proto::ProductInfo {
+                    id: 733,
+                    missing_token: true,
+                    ..Default::default()
+                },
+            ],
+            ..Default::default()
+        };
+        respond_batch(&mut server, &[730, 731, 732, 733], apps).await;
+    };
+    let (games, ()) = tokio::join!(client.games(), answer);
+    let games = games.unwrap();
+    let names: Vec<_> = games.iter().map(|game| game.name.as_str()).collect();
+    assert_eq!(names, ["Portal 2", "Counter-Strike 2"]);
+    assert_eq!(games[1].icon_hash, "cs2");
+    // The licenses this load read date the games without asking Steam again.
+    assert_eq!(
+        client.acquisitions().await.unwrap().get(&730),
+        Some(&1_700_000_000)
+    );
+    assert!(server.quiet().await);
+}
+
 #[tokio::test]
 async fn library_asks_steam_for_every_owned_game_field() {
     let (client, mut server, _) = fixture().await;
+    push_licenses(&mut server, Vec::new()).await;
     let answer = async {
         let packet = server.request(SERVICE_REQUEST).await;
         assert_eq!(

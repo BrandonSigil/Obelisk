@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use obelisk_core::Platform;
 
-use super::CmError;
+use super::{CmError, OwnedGameInfo};
 use crate::client::PLATFORM;
 use crate::kv;
 
@@ -29,6 +29,27 @@ impl AppInfo {
     pub fn metadata(&self) -> serde_json::Value {
         self.tree.get("appinfo").unwrap_or(&self.tree).to_json()
     }
+
+    /// The game as the library lists one the account never played, when it
+    /// is a released game: not a DLC, tool, soundtrack or demo, nor a game
+    /// Steam has yet to release.
+    pub(crate) fn unplayed_game(&self) -> Option<OwnedGameInfo> {
+        let common = |field| {
+            let root = self.tree.get("appinfo").unwrap_or(&self.tree);
+            root.at(&["common", field]).and_then(kv::Kv::text)
+        };
+        let game = common("type").is_some_and(|kind| kind.eq_ignore_ascii_case("game"));
+        let released =
+            common("releasestate").is_none_or(|state| state.eq_ignore_ascii_case("released"));
+        (game && released && !self.name.is_empty()).then(|| OwnedGameInfo {
+            app_id: self.app_id,
+            name: self.name.clone(),
+            icon_hash: common("icon").unwrap_or_default().to_owned(),
+            last_played: 0,
+            playtime_minutes: 0,
+            record: serde_json::Value::Null,
+        })
+    }
 }
 
 /// App ownership and depot entitlement are distinct package fields.
@@ -36,6 +57,8 @@ impl AppInfo {
 pub struct ContentLicenses {
     pub apps: BTreeSet<u32>,
     pub depots: BTreeSet<u32>,
+    /// The apps the account's own licenses grant, not a family member's.
+    pub own_apps: BTreeSet<u32>,
     /// When the account got each app: the creation of its oldest license
     /// that grants it, in seconds since the Unix epoch.
     pub acquired: BTreeMap<u32, u32>,
@@ -43,8 +66,8 @@ pub struct ContentLicenses {
 
 impl ContentLicenses {
     /// Adds what a package grants, under a license created at `created`
-    /// when Steam told it.
-    pub(super) fn extend_package(&mut self, root: &kv::Kv, created: Option<u32>) {
+    /// when Steam told it, which is the account's `own` or a family member's.
+    pub(super) fn extend_package(&mut self, root: &kv::Kv, created: Option<u32>, own: bool) {
         let ids = |field| {
             root.get(field).into_iter().flat_map(|entries| {
                 entries
@@ -55,6 +78,9 @@ impl ContentLicenses {
         };
         for app in ids("appids") {
             self.apps.insert(app);
+            if own {
+                self.own_apps.insert(app);
+            }
             if let Some(created) = created {
                 let acquired = self.acquired.entry(app).or_insert(created);
                 *acquired = (*acquired).min(created);
@@ -245,7 +271,7 @@ mod tests {
     fn package_entitlements_preserve_app_and_depot_namespaces() {
         let package = kv::text(br#""appids" { "0" "588650" } "depotids" { "0" "588651" "1" "588652" "2" "588653" "3" "588654" }"#).unwrap();
         let mut rights = ContentLicenses::default();
-        rights.extend_package(&package, None);
+        rights.extend_package(&package, None, true);
         assert_eq!(rights.apps, BTreeSet::from([588650]));
         assert_eq!(
             rights.depots,
@@ -256,9 +282,12 @@ mod tests {
             &kv::text(br#""appids" { "0" "99" } "depotids" { "0" "1046443" "1" "0" "2" "bad" }"#)
                 .unwrap(),
             None,
+            false,
         );
         assert!(rights.depots.contains(&1046443));
         assert!(rights.apps.contains(&99));
+        // A family member's license grants downloads, not a place in the library.
+        assert_eq!(rights.own_apps, BTreeSet::from([588650]));
         assert!(!rights.apps.contains(&1046443));
         assert!(!rights.depots.contains(&99));
         assert!(!rights.depots.contains(&0));
@@ -269,11 +298,32 @@ mod tests {
         let bundle = kv::text(br#""appids" { "0" "10" "1" "20" }"#).unwrap();
         let single = kv::text(br#""appids" { "0" "10" }"#).unwrap();
         let mut rights = ContentLicenses::default();
-        rights.extend_package(&single, Some(2_000));
-        rights.extend_package(&bundle, Some(1_000));
-        rights.extend_package(&kv::text(br#""appids" { "0" "30" }"#).unwrap(), None);
+        rights.extend_package(&single, Some(2_000), true);
+        rights.extend_package(&bundle, Some(1_000), true);
+        rights.extend_package(&kv::text(br#""appids" { "0" "30" }"#).unwrap(), None, true);
         assert_eq!(rights.acquired, BTreeMap::from([(10, 1_000), (20, 1_000)]));
         assert!(rights.apps.contains(&30));
+    }
+
+    #[test]
+    fn only_a_released_game_joins_the_library_unplayed() {
+        let app = |common: &str| {
+            let info = format!(r#""appinfo" {{ "appid" "730" "common" {{ {common} }} }}"#);
+            parse_app(730, info.as_bytes()).unwrap().unplayed_game()
+        };
+        let game = app(
+            r#""name" "Counter-Strike 2" "type" "Game" "icon" "8dbc71" "releasestate" "released""#,
+        )
+        .unwrap();
+        assert_eq!(game.name, "Counter-Strike 2");
+        assert_eq!(game.icon_hash, "8dbc71");
+        assert_eq!((game.last_played, game.playtime_minutes), (0, 0));
+        assert!(app(r#""name" "Old game" "type" "game""#).is_some());
+        assert!(app(r#""name" "Soundtrack" "type" "Music""#).is_none());
+        assert!(app(r#""name" "Expansion" "type" "DLC""#).is_none());
+        assert!(app(r#""name" "Server" "type" "Tool""#).is_none());
+        assert!(app(r#""name" "Upcoming" "type" "Game" "releasestate" "prerelease""#).is_none());
+        assert!(app(r#""type" "Game""#).is_none());
     }
 
     #[test]

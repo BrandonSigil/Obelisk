@@ -4,7 +4,7 @@
 //! each response to the request that sent its job, and keeps heartbeats going
 //! while callers download content over HTTP. Dropping it closes that session.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::io::Read;
 use std::sync::{
     Arc,
@@ -137,6 +137,15 @@ pub struct OwnedGameInfo {
     pub playtime_minutes: u32,
     /// Every field Steam returned for the game, named as Steam names them.
     pub record: serde_json::Value,
+}
+
+/// The library's order: most recently played first, then name.
+pub(crate) fn library_order(left: &OwnedGameInfo, right: &OwnedGameInfo) -> std::cmp::Ordering {
+    right
+        .last_played
+        .cmp(&left.last_played)
+        .then_with(|| left.name.cmp(&right.name))
+        .then_with(|| left.app_id.cmp(&right.app_id))
 }
 
 /// An HTTPS CDN or SteamCache server. `vhost` is the download host and always
@@ -627,13 +636,7 @@ impl SteamConnection {
                 playtime_minutes: game.playtime_forever.max(0) as u32,
             })
             .collect();
-        games.sort_by(|left, right| {
-            right
-                .last_played
-                .cmp(&left.last_played)
-                .then_with(|| left.name.cmp(&right.name))
-                .then_with(|| left.app_id.cmp(&right.app_id))
-        });
+        games.sort_by(library_order);
         Ok(games)
     }
 
@@ -657,6 +660,15 @@ impl SteamConnection {
                 .iter()
                 .filter(|license| license.package_id != 0 && license.flags & INACTIVE == 0)
         };
+        // A family member lends a game through a license of their own. The
+        // account ID is the Steam ID's low 32 bits.
+        const BORROWED: u32 = 0x4000;
+        let account = self.steam_id as u32;
+        let own: HashSet<u32> = active()
+            .filter(|license| license.flags & BORROWED == 0)
+            .filter(|license| license.owner_id == 0 || license.owner_id == account)
+            .map(|license| license.package_id)
+            .collect();
         let packages: Vec<_> = active()
             .map(|license| proto::ProductId {
                 id: license.package_id,
@@ -693,7 +705,11 @@ impl SteamConnection {
                 let tree = kv::package(&package.buffer)?;
                 let name = package.id.to_string();
                 let root = tree.get(&name).unwrap_or(&tree);
-                rights.extend_package(root, created.get(&package.id).copied());
+                rights.extend_package(
+                    root,
+                    created.get(&package.id).copied(),
+                    own.contains(&package.id),
+                );
             }
         }
         Ok(rights)
@@ -709,10 +725,25 @@ impl SteamConnection {
 
     /// Unknown or removed apps are omitted. Malformed metadata fails the request.
     pub async fn app_infos(&self, app_ids: &[u32]) -> Result<Vec<AppInfo>, CmError> {
+        self.app_infos_withheld(app_ids, false).await
+    }
+
+    /// As `app_infos`, also omitting the apps whose metadata Steam withholds
+    /// from the account, as it does for some apps its licenses grant.
+    pub async fn readable_app_infos(&self, app_ids: &[u32]) -> Result<Vec<AppInfo>, CmError> {
+        self.app_infos_withheld(app_ids, true).await
+    }
+
+    /// Withheld metadata fails the request unless `skip_withheld`.
+    async fn app_infos_withheld(
+        &self,
+        app_ids: &[u32],
+        skip_withheld: bool,
+    ) -> Result<Vec<AppInfo>, CmError> {
         self.ensure_logged_on()?;
         let requests: Vec<_> = app_ids
             .chunks(PICS_BATCH)
-            .map(|batch| self.app_info_batch(batch))
+            .map(|batch| self.app_info_batch(batch, skip_withheld))
             .collect();
         let mut batches = futures_util::stream::iter(requests).buffered(CONCURRENT_REQUESTS);
         let mut apps = Vec::new();
@@ -722,7 +753,11 @@ impl SteamConnection {
         Ok(apps)
     }
 
-    async fn app_info_batch(&self, batch: &[u32]) -> Result<Vec<AppInfo>, CmError> {
+    async fn app_info_batch(
+        &self,
+        batch: &[u32],
+        skip_withheld: bool,
+    ) -> Result<Vec<AppInfo>, CmError> {
         let token_packet = self
             .request(
                 TOKEN_REQUEST,
@@ -752,6 +787,9 @@ impl SteamConnection {
         let response = self.products(&requested, &[]).await?;
         let mut apps = Vec::new();
         for info in response.apps {
+            if info.missing_token && skip_withheld {
+                continue;
+            }
             if info.missing_token {
                 return Err(CmError::Rejected {
                     action: "backend.steam.cm.action.metadata",
