@@ -12,14 +12,23 @@ use std::{
     path::Path,
 };
 
+/// Turns the HUD on.
+pub(crate) const ENABLED: &str = "MTL_HUD_ENABLED";
+/// Has Metal write the HUD's `metal-HUD:` lines.
+pub(crate) const LOG_ENABLED: &str = "MTL_HUD_LOG_ENABLED";
+/// How visible the HUD is over the game.
+pub(crate) const OPACITY: &str = "MTL_HUD_OPACITY";
+/// Leaves the HUD's menu out.
+pub(crate) const DISABLE_MENU_BAR: &str = "MTL_HUD_DISABLE_MENU_BAR";
+
 /// What turns the HUD on for a process, without its menu: over the game when
 /// `shown`, else invisible.
 pub(crate) fn environment(shown: bool) -> [(&'static str, &'static str); 4] {
     [
-        ("MTL_HUD_ENABLED", "1"),
-        ("MTL_HUD_LOG_ENABLED", "1"),
-        ("MTL_HUD_OPACITY", if shown { "1" } else { "0" }),
-        ("MTL_HUD_DISABLE_MENU_BAR", "1"),
+        (ENABLED, "1"),
+        (LOG_ENABLED, "1"),
+        (OPACITY, if shown { "1" } else { "0" }),
+        (DISABLE_MENU_BAR, "1"),
     ]
 }
 

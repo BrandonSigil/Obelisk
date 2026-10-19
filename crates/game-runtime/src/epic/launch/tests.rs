@@ -377,7 +377,7 @@ fn a_windows_build_gets_its_ownership_token_where_its_engine_s_wine_reads_it() {
             crate::wine::Engine::Linux => {
                 // The Dock names the game as the store does.
                 assert_eq!(
-                    target.environment[crate::linux_engine::APP_NAME],
+                    target.environment[crate::wine::linux_engine::APP_NAME],
                     "Rocket League"
                 );
                 wine.prefix

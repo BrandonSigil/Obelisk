@@ -121,20 +121,10 @@ fn no_two_games_of_the_table_share_a_storefront_s_name() {
 
 #[test]
 fn the_table_leaves_obelisk_s_own_wine_settings_alone() {
-    const OWN_VARIABLES: [&str; 4] = [
-        "WINEPREFIX",
-        "WINEDLLOVERRIDES",
-        "WINEDEBUG",
-        "WINEDLLPATH_PREPEND",
-    ];
-    const OWN_DLLS: [&str; 6] = [
-        "mscoree",
-        "mshtml",
-        "winemenubuilder.exe",
-        "d3d11",
-        "dxgi",
-        "d3d12",
-    ];
+    let reserved: Vec<_> = crate::launch_settings::ENGINES
+        .iter()
+        .map(|offer| offer.engine.reserved())
+        .collect();
     const MODES: [&str; 6] = ["", "n", "b", "n,b", "b,n", "d"];
     for known in table() {
         for name in known.variables.keys() {
@@ -146,12 +136,20 @@ fn the_table_leaves_obelisk_s_own_wine_settings_alone() {
                     && characters.all(|next| next.is_ascii_alphanumeric() || next == '_'),
                 "{name}"
             );
-            assert!(!OWN_VARIABLES.contains(&name.as_str()), "{name}");
+            assert!(
+                reserved
+                    .iter()
+                    .all(|own| !own.variables.contains(&name.as_str())),
+                "{name}"
+            );
         }
         for (dll, mode) in &known.dll_overrides {
             assert!(!dll.is_empty() && !dll.contains([',', '=', ';']), "{dll}");
+            let dll_name = dll.to_ascii_lowercase();
             assert!(
-                !OWN_DLLS.contains(&dll.to_ascii_lowercase().as_str()),
+                reserved
+                    .iter()
+                    .all(|own| !own.dlls.contains(&dll_name.as_str())),
                 "{dll}"
             );
             assert!(MODES.contains(&mode.as_str()), "{dll}={mode}");

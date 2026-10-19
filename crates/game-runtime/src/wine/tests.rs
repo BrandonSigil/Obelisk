@@ -70,8 +70,8 @@ pub(crate) fn config(root: &Path) -> Config {
 
 /// A storefront that adds nothing, or the prerequisites it is given.
 #[derive(Default)]
-struct Plain {
-    prerequisites: Vec<Prerequisite>,
+pub(crate) struct Plain {
+    pub prerequisites: Vec<Prerequisite>,
 }
 impl Storefront for Plain {
     fn prerequisites(&self) -> Result<Vec<Prerequisite>, Error> {
@@ -111,8 +111,56 @@ fn linux_config(root: &Path) -> Config {
     }
 }
 
+/// A storefront whose games reach Valve's steamclient.
+struct Client;
+impl Storefront for Client {
+    const STEAM_CLIENT: bool = true;
+    fn prerequisites(&self) -> Result<Vec<Prerequisite>, Error> {
+        Ok(Vec::new())
+    }
+}
+
+/// `engine`'s configuration of a prefix beside `root`, with the backend it
+/// renders with by default.
+fn engine_config(root: &Path, engine: Engine) -> Config {
+    Config {
+        prefix: engine
+            .adapter()
+            .prefix(&root.join("Prefixes/game"))
+            .unwrap(),
+        settings: Settings {
+            engine,
+            graphics: Graphics::default_on(engine),
+            ..Settings::default()
+        },
+        ..config(root)
+    }
+}
+
+/// What Windows sees of `target`: the command line it starts and the
+/// variables Obelisk gives it, in the order it gives them.
+fn windows_side(config: &Config, target: &Target) -> (Vec<String>, Vec<(String, String)>) {
+    use super::linux_engine::tests::{guest_command, options};
+    match config.settings.engine {
+        Engine::Rosetta => (
+            target.arguments.clone(),
+            target.environment.clone().into_iter().collect(),
+        ),
+        Engine::Linux => (
+            guest_command(target).to_vec(),
+            options(target, "--env")
+                .into_iter()
+                .map(|variable| {
+                    let (name, value) = variable.split_once('=').unwrap();
+                    (name.to_owned(), value.to_owned())
+                })
+                .collect(),
+        ),
+    }
+}
+
 /// A Windows game inside `root/game`, and its target.
-fn game(root: &Path) -> (PathBuf, LaunchTarget) {
+pub(crate) fn game(root: &Path) -> (PathBuf, LaunchTarget) {
     let install = root.join("game");
     fs::create_dir_all(&install).unwrap();
     fs::write(install.join("Game.exe"), pe()).unwrap();
@@ -163,30 +211,6 @@ fn a_windows_game_starts_in_wine_itself_when_no_storefront_helper_stands_in() {
 }
 
 #[test]
-fn only_a_windows_program_inside_the_installation_starts_and_readies_a_prefix() {
-    let (_directory, root) = installation();
-    let config = recording_runtime(&root);
-    let install = root.join("game");
-    fs::create_dir_all(&install).unwrap();
-    fs::write(install.join("script.exe"), b"#!/bin/sh\n").unwrap();
-    fs::write(root.join("outside.exe"), pe()).unwrap();
-
-    for executable in [install.join("script.exe"), root.join("outside.exe")] {
-        let target = target(&executable, &[]);
-        assert!(matches!(
-            super::target::<Plain>(&config, &plain(&install), &target, HashMap::new()),
-            Err(Error::NotExecutable)
-        ));
-        assert!(matches!(
-            prepare(&config, &root, &install, &target, &Plain::default()),
-            Err(Error::NotExecutable)
-        ));
-    }
-    assert!(calls(&root).is_empty());
-    assert!(!config.prefix.join("furnished").exists());
-}
-
-#[test]
 fn an_engine_game_takes_its_store_title_in_the_dock_without_trademark_signs_or_else_its_program_s_name()
  {
     let (_directory, root) = installation();
@@ -202,7 +226,7 @@ fn an_engine_game_takes_its_store_title_in_the_dock_without_trademark_signs_or_e
         };
         super::target::<Plain>(&config, &game, &target(&executable, &[]), HashMap::new())
             .unwrap()
-            .environment[crate::linux_engine::APP_NAME]
+            .environment[super::linux_engine::APP_NAME]
             .clone()
     };
 
@@ -212,7 +236,7 @@ fn an_engine_game_takes_its_store_title_in_the_dock_without_trademark_signs_or_e
 
 #[test]
 fn a_storefront_s_helper_and_session_variables_reach_its_game_on_either_engine() {
-    use crate::linux_engine::tests::{guest_command, options};
+    use super::linux_engine::tests::{guest_command, options};
     let (_directory, root) = installation();
     let (install, launched) = game(&root);
     let program = install.join("Game.exe").to_string_lossy().into_owned();
@@ -236,6 +260,223 @@ fn a_storefront_s_helper_and_session_variables_reach_its_game_on_either_engine()
         super::target::<Plain>(&linux, &plain(&install), &launched, HashMap::new()).unwrap();
     assert_eq!(guest_command(&alone), ["/opt/game/Game.exe"]);
     assert!(options(&alone, "--pass").is_empty());
+}
+
+#[test]
+fn the_player_s_arguments_follow_the_storefront_s_on_either_engine() {
+    for offer in crate::launch_settings::ENGINES {
+        let (_directory, root) = installation();
+        let (install, launched) = game(&root);
+        let launched = LaunchTarget {
+            arguments: vec!["-AUTH_TYPE=exchangecode".into()],
+            ..launched
+        };
+        let config = engine_config(&root, offer.engine);
+        let config = Config {
+            settings: Settings {
+                arguments: vec!["-dx11".into()],
+                ..config.settings.clone()
+            },
+            ..config
+        };
+
+        let started =
+            super::target::<Plain>(&config, &plain(&install), &launched, HashMap::new()).unwrap();
+
+        let (command, _) = windows_side(&config, &started);
+        assert_eq!(
+            command[command.len() - 2..],
+            ["-AUTH_TYPE=exchangecode", "-dx11"],
+            "{:?}",
+            offer.engine
+        );
+    }
+}
+
+#[test]
+fn a_profile_s_variables_and_dll_overrides_take_effect_on_either_engine() {
+    for offer in crate::launch_settings::ENGINES {
+        let (_directory, root) = installation();
+        let (install, launched) = game(&root);
+        let config = engine_config(&root, offer.engine);
+        let config = Config {
+            settings: Settings {
+                // WINEDEBUG is one of Obelisk's own on both engines.
+                variables: BTreeMap::from([
+                    ("WINENCPU".to_owned(), "10".to_owned()),
+                    ("WINEDEBUG".to_owned(), "-all".to_owned()),
+                ]),
+                dll_overrides: BTreeMap::from([
+                    ("xaudio2_7".to_owned(), "n,b".to_owned()),
+                    ("SpeechSynthWrapper".to_owned(), String::new()),
+                ]),
+                ..config.settings.clone()
+            },
+            ..config
+        };
+
+        let started =
+            super::target::<Plain>(&config, &plain(&install), &launched, HashMap::new()).unwrap();
+
+        // Of a name given twice, the last counts.
+        let (_, variables) = windows_side(&config, &started);
+        let last = |name: &str| {
+            variables
+                .iter()
+                .rev()
+                .find(|(variable, _)| variable == name)
+                .map(|(_, value)| value.clone())
+        };
+        assert_eq!(
+            last("WINENCPU").as_deref(),
+            Some("10"),
+            "{:?}",
+            offer.engine
+        );
+        assert_eq!(
+            last("WINEDEBUG").as_deref(),
+            Some("-all"),
+            "{:?}",
+            offer.engine
+        );
+        let own = match offer.engine {
+            Engine::Rosetta => "mscoree,mshtml=;winemenubuilder.exe=d",
+            Engine::Linux => "mscoree,mshtml=;winemenubuilder.exe=d;d3d11,dxgi,d3d12=n",
+        };
+        assert_eq!(
+            last("WINEDLLOVERRIDES"),
+            Some(format!("{own};SpeechSynthWrapper=;xaudio2_7=n,b"))
+        );
+    }
+}
+
+#[test]
+fn every_variable_and_dll_an_engine_sets_is_one_it_reserves() {
+    for offer in crate::launch_settings::ENGINES {
+        let (_directory, root) = installation();
+        let (install, launched) = game(&root);
+        let config = engine_config(&root, offer.engine);
+        let config = Config {
+            settings: Settings {
+                graphics: Graphics::D3DMetal,
+                options: GraphicsOptions { ray_tracing: false },
+                ..config.settings.clone()
+            },
+            ..config
+        };
+        // A runtime that carries every optional piece, but no Mono.
+        for folder in ["lib/gstreamer-1.0", "guest"] {
+            fs::create_dir_all(config.runtime.join(folder)).unwrap();
+        }
+        backends_runtime(&config);
+        fs::write(config.runtime.join("guest/steam-hostpid.so"), b"elf").unwrap();
+
+        let started =
+            super::target::<Client>(&config, &plain(&install), &launched, HashMap::new()).unwrap();
+
+        let reserved = offer.engine.reserved();
+        let (_, variables) = windows_side(&config, &started);
+        for (name, _) in &variables {
+            assert!(
+                reserved.variables.contains(&name.as_str()),
+                "{:?} {name}",
+                offer.engine
+            );
+        }
+        let (_, overrides) = variables
+            .iter()
+            .find(|(name, _)| name == "WINEDLLOVERRIDES")
+            .unwrap();
+        let dlls = overrides
+            .split(';')
+            .filter_map(|entry| entry.split_once('='))
+            .flat_map(|(dlls, _)| dlls.split(','));
+        for dll in dlls {
+            assert!(
+                reserved.dlls.contains(&dll.to_ascii_lowercase().as_str()),
+                "{:?} {dll}",
+                offer.engine
+            );
+        }
+    }
+}
+
+#[test]
+fn only_a_windows_program_inside_the_installation_starts_or_readies_a_prefix_on_either_engine() {
+    for offer in crate::launch_settings::ENGINES {
+        let (_directory, root) = installation();
+        let config = engine_config(&root, offer.engine);
+        record_calls(&config.runtime);
+        let install = root.join("game");
+        fs::create_dir_all(&install).unwrap();
+        fs::write(install.join("script.exe"), b"#!/bin/sh\n").unwrap();
+        fs::write(root.join("outside.exe"), pe()).unwrap();
+
+        for executable in [install.join("script.exe"), root.join("outside.exe")] {
+            let target = target(&executable, &[]);
+            assert!(matches!(
+                super::target::<Plain>(&config, &plain(&install), &target, HashMap::new()),
+                Err(Error::NotExecutable)
+            ));
+            assert!(matches!(
+                prepare(
+                    &config,
+                    &locations(&root),
+                    &install,
+                    &target,
+                    &Plain::default()
+                ),
+                Err(Error::NotExecutable)
+            ));
+        }
+        assert!(!root.join("Prefixes").exists(), "{:?}", offer.engine);
+    }
+}
+
+#[test]
+fn a_missing_runtime_is_reported_before_any_prefix_is_created_on_either_engine() {
+    let (_directory, root) = installation();
+    let locations = locations(&root);
+    for offer in crate::launch_settings::ENGINES {
+        let install = root.join(format!("{:?}", offer.engine));
+        fs::create_dir_all(&install).unwrap();
+        fs::write(install.join("Game.exe"), pe()).unwrap();
+        let choices = crate::launch_settings::Choices {
+            engine: Some(offer.engine),
+            ..Default::default()
+        };
+        crate::launch_settings::choose(&locations.library, OTHER, &install, choices).unwrap();
+        let windows = Installation::of(&locations, OTHER, "windows", &install)
+            .unwrap()
+            .unwrap();
+
+        assert!(matches!(
+            windows.ready(
+                &locations,
+                &target(&install.join("Game.exe"), &[]),
+                &Plain::default()
+            ),
+            Err(Error::WineUnavailable)
+        ));
+        assert!(!locations.wine_prefixes.exists(), "{:?}", offer.engine);
+    }
+}
+
+#[test]
+fn the_engine_s_launcher_alone_gets_a_grace_and_wine_for_macos_alone_an_input_service() {
+    let (_directory, root) = installation();
+    let rosetta = engine_config(&root, Engine::Rosetta);
+    assert_eq!(rosetta.launcher_grace(), None);
+    assert_eq!(
+        rosetta.input_service(),
+        Some(root.join("runtime/linux/engine/obelisk-input"))
+    );
+    assert_eq!(rosetta.architecture(), Architecture::Intel);
+
+    let linux = engine_config(&root, Engine::Linux);
+    assert_eq!(linux.launcher_grace(), Some(Duration::from_secs(2)));
+    assert_eq!(linux.input_service(), None);
+    assert_eq!(linux.architecture(), Architecture::Arm64);
 }
 
 #[test]
@@ -335,7 +576,7 @@ fn each_storefront_s_game_is_readied_in_its_prefix_and_logs_into_its_store_s_dia
 
 #[test]
 fn the_program_a_profile_names_instead_is_the_one_readied_and_the_one_started() {
-    use crate::linux_engine::tests::guest_command;
+    use super::linux_engine::tests::guest_command;
     let rocket_league = crate::profile::Game::Epic {
         namespace: "9773aa1aa54f4f7b80e44bef04986cea",
         app_name: "Sugar",
@@ -586,7 +827,7 @@ fn a_prefix_gets_every_backend_s_placeholders_when_created_or_when_its_runtime_g
         ]
     );
     assert_eq!(
-        fs::read_to_string(config.prefix.join(BACKENDS)).unwrap(),
+        fs::read_to_string(config.prefix.join("obelisk-graphics")).unwrap(),
         "d3dmetal dxmt"
     );
 }
@@ -618,29 +859,6 @@ fn launch_settings_move_a_game_to_the_engine_and_backend_its_player_chose() {
     assert_eq!(config.settings.engine, Engine::Linux);
     assert_eq!(config.settings.graphics, Graphics::D3DMetal);
     assert!(config.settings.performance_hud);
-}
-
-#[test]
-fn the_player_s_launch_settings_arguments_follow_the_storefront_s() {
-    let (_directory, root) = installation();
-    let (install, game_target) = game(&root);
-    let game_target = LaunchTarget {
-        arguments: vec!["-AUTH_TYPE=exchangecode".into()],
-        ..game_target
-    };
-    let config = Config {
-        settings: Settings {
-            arguments: vec!["-dx11".into()],
-            ..Settings::default()
-        },
-        ..self::config(&root)
-    };
-    let started =
-        super::target::<Plain>(&config, &plain(&install), &game_target, HashMap::new()).unwrap();
-    assert_eq!(
-        started.arguments[started.arguments.len() - 2..],
-        ["-AUTH_TYPE=exchangecode", "-dx11"]
-    );
 }
 
 #[test]
@@ -697,22 +915,6 @@ fn the_game_s_log_starts_with_how_obelisk_runs_it_and_only_the_player_s_argument
 }
 
 #[test]
-fn a_missing_runtime_is_reported_before_any_prefix_is_created() {
-    let (_directory, root) = installation();
-    let locations = locations(&root);
-    let (install, target) = game(&root);
-    let windows = Installation::of(&locations, OTHER, "windows", &install)
-        .unwrap()
-        .unwrap();
-
-    assert!(matches!(
-        windows.ready(&locations, &target, &Plain::default()),
-        Err(Error::WineUnavailable)
-    ));
-    assert!(!windows.prefix().exists());
-}
-
-#[test]
 fn wine_reports_its_errors_unless_the_runtime_names_other_channels() {
     let (_directory, root) = installation();
     let config = config(&root);
@@ -751,7 +953,7 @@ fn every_wine_command_syncs_through_mach_and_gives_32_bit_games_4_gb() {
 }
 
 #[test]
-fn a_profile_s_variables_and_dll_overrides_come_after_obelisk_s_own_and_open_the_log() {
+fn a_profile_replaces_obelisk_s_own_variables_on_rosetta_s_wine_and_opens_the_log() {
     let (_directory, root) = installation();
     let config = Config {
         settings: Settings {
@@ -768,14 +970,7 @@ fn a_profile_s_variables_and_dll_overrides_come_after_obelisk_s_own_and_open_the
         ..config(&root)
     };
 
-    let environment = environment(&config);
-
-    assert_eq!(environment["WINENCPU"], "10");
-    assert_eq!(environment["ROSETTA_ADVERTISE_AVX"], "");
-    assert_eq!(
-        environment["WINEDLLOVERRIDES"],
-        "mscoree,mshtml=;winemenubuilder.exe=d;SpeechSynthWrapper=;xaudio2_7=n,b"
-    );
+    assert_eq!(environment(&config)["ROSETTA_ADVERTISE_AVX"], "");
     assert_eq!(
         config.log_header(),
         "obelisk: engine=wine-macos graphics=d3dmetal ray_tracing=on voile=development \
@@ -840,7 +1035,14 @@ fn a_prefix_profile_stops_linking_into_the_mac_home() {
     fs::write(config.prefix.join("system.reg"), "").unwrap();
     let (install, target) = game(&root);
 
-    prepare(&config, &home, &install, &target, &Plain::default()).unwrap();
+    prepare(
+        &config,
+        &locations(&root),
+        &install,
+        &target,
+        &Plain::default(),
+    )
+    .unwrap();
 
     assert!(
         fs::symlink_metadata(profile.join("Documents"))
@@ -860,7 +1062,7 @@ fn a_prefix_registers_the_runtime_mono_once_even_when_an_older_runtime_created_i
     // A runtime without Mono only creates the prefix.
     prepare_plain(&config, &root);
     assert_eq!(calls(&root), ["wineboot --init"]);
-    assert!(!config.prefix.join(MONO).exists());
+    assert!(!config.prefix.join("obelisk-mono").exists());
 
     fs::write(config.prefix.join("system.reg"), "").unwrap();
     fs::create_dir_all(config.runtime.join("share/wine/mono/wine-mono-10.4.1")).unwrap();
@@ -869,7 +1071,7 @@ fn a_prefix_registers_the_runtime_mono_once_even_when_an_older_runtime_created_i
 
     assert_eq!(calls(&root), ["wineboot --init", "wineboot --update"]);
     assert_eq!(
-        fs::read_to_string(config.prefix.join(MONO)).unwrap(),
+        fs::read_to_string(config.prefix.join("obelisk-mono")).unwrap(),
         "wine-mono-10.4.1"
     );
 }
@@ -884,14 +1086,21 @@ fn a_new_prefix_gets_mono_from_its_creation_alone() {
 
     assert_eq!(calls(&root), ["wineboot --init"]);
     assert_eq!(
-        fs::read_to_string(config.prefix.join(MONO)).unwrap(),
+        fs::read_to_string(config.prefix.join("obelisk-mono")).unwrap(),
         "wine-mono-10.4.1"
     );
 }
 
 fn prepare_plain(config: &Config, root: &Path) {
     let (install, target) = game(root);
-    prepare(config, root, &install, &target, &Plain::default()).unwrap();
+    prepare(
+        config,
+        &locations(root),
+        &install,
+        &target,
+        &Plain::default(),
+    )
+    .unwrap();
 }
 
 /// A runtime whose wine records each call in `calls` beside the prefix, and
@@ -928,102 +1137,6 @@ pub(crate) fn calls(root: &Path) -> Vec<String> {
         .lines()
         .map(str::to_owned)
         .collect()
-}
-
-#[test]
-fn each_prerequisite_runs_once_and_a_failed_one_again_on_the_next_launch() {
-    let (_directory, root) = installation();
-    let config = recording_runtime(&root);
-    let redist = root.join("game/redist");
-    fs::create_dir_all(&redist).unwrap();
-    for name in ["vc_redist.x64.exe", "Visual C++ x64.cmd", "fail.exe"] {
-        fs::write(redist.join(name), "").unwrap();
-    }
-    let prerequisites = [
-        Prerequisite {
-            id: "vcredist".into(),
-            programs: vec![
-                (redist.join("Visual C++ x64.cmd"), String::new()),
-                (
-                    redist.join("vc_redist.x64.exe"),
-                    r#"/q "/log=C:\a b.txt""#.into(),
-                ),
-            ],
-        },
-        Prerequisite {
-            id: "broken".into(),
-            programs: vec![(redist.join("fail.exe"), String::new())],
-        },
-    ];
-
-    install_prerequisites(&config, &root, &prerequisites).unwrap();
-    install_prerequisites(&config, &root, &prerequisites).unwrap();
-
-    let script = windows_path(&redist.join("Visual C++ x64.cmd"));
-    let program = redist.join("vc_redist.x64.exe");
-    let failing = redist.join("fail.exe");
-    assert_eq!(
-        calls(&root),
-        [
-            format!("cmd /c {script}"),
-            format!("{} /q /log=C:\\a b.txt", program.display()),
-            failing.display().to_string(),
-            failing.display().to_string(),
-        ]
-    );
-    assert_eq!(
-        fs::read_to_string(config.prefix.join(PREREQUISITES)).unwrap(),
-        "vcredist"
-    );
-}
-
-#[test]
-fn a_visual_cpp_installer_runs_with_the_versions_of_wine_s_own_dlls_hidden() {
-    let (_directory, root) = installation();
-    let config = recording_runtime(&root);
-    fs::write(
-        config.runtime.join("bin/wine"),
-        "#!/bin/sh\nprintf '%s %s\\n' \"${1##*/}\" \"${CX_HIDE_BUILTIN_VERSION_RESOURCES:-shown}\" \
-         >> \"$WINEPREFIX/../calls\"\n",
-    )
-    .unwrap();
-    let redist = root.join("game/redist");
-    fs::create_dir_all(&redist).unwrap();
-    let names = ["VC_redist.x64.exe", "vcredist_x86.exe", "DXSETUP.exe"];
-    for name in names {
-        fs::write(redist.join(name), "").unwrap();
-    }
-    let prerequisite = Prerequisite {
-        id: "redist".into(),
-        programs: names
-            .iter()
-            .map(|name| (redist.join(name), String::new()))
-            .collect(),
-    };
-
-    install_prerequisites(&config, &root, &[prerequisite]).unwrap();
-
-    assert_eq!(
-        calls(&root),
-        [
-            "VC_redist.x64.exe 1",
-            "vcredist_x86.exe 1",
-            "DXSETUP.exe shown"
-        ]
-    );
-}
-
-#[test]
-fn a_missing_program_leaves_its_prerequisite_pending() {
-    let (_directory, root) = installation();
-    let config = recording_runtime(&root);
-    let prerequisite = Prerequisite {
-        id: "missing".into(),
-        programs: vec![(root.join("game/absent.exe"), String::new())],
-    };
-    install_prerequisites(&config, &root, &[prerequisite]).unwrap();
-    assert!(calls(&root).is_empty());
-    assert!(!config.prefix.join(PREREQUISITES).exists());
 }
 
 #[test]
@@ -1199,7 +1312,10 @@ fn quitting_a_windows_game_asks_its_windows_to_close_and_kills_nothing() {
     let config = recording_runtime(&root);
     let environment = environment(&config);
     let program = root.join("game/Game.exe");
-    let command = quit_command(&config, &environment, Some(&program), 7).unwrap();
+    let command = config
+        .adapter()
+        .quit_command(&config, &environment, Some(&program), 7)
+        .unwrap();
     assert_eq!(command.get_program(), config.runtime.join("bin/wine"));
     assert_eq!(
         command.get_args().collect::<Vec<_>>(),
@@ -1220,7 +1336,12 @@ fn quitting_a_windows_game_asks_its_windows_to_close_and_kills_nothing() {
 
     quit(&config, &environment, Some(&program), 7);
     assert_eq!(calls(&root), ["taskkill /T /IM Game.exe"]);
-    assert!(quit_command(&config, &environment, None, 7).is_none());
+    assert!(
+        config
+            .adapter()
+            .quit_command(&config, &environment, None, 7)
+            .is_none()
+    );
 }
 
 #[test]
@@ -1234,7 +1355,10 @@ fn quitting_a_linux_engine_game_uses_its_window_server_quit() {
         ..config(&root)
     };
     let environment = HashMap::from([("TMPDIR".to_owned(), "/var/folders/T/".to_owned())]);
-    let command = quit_command(&config, &environment, None, 77).unwrap();
+    let command = config
+        .adapter()
+        .quit_command(&config, &environment, None, 77)
+        .unwrap();
     assert_eq!(command.get_program(), config.runtime.join("engine/wsdctl"));
     assert_eq!(
         command.get_args().collect::<Vec<_>>(),
@@ -1244,7 +1368,10 @@ fn quitting_a_linux_engine_game_uses_its_window_server_quit() {
             "quit"
         ]
     );
-    let command = quit_command(&config, &HashMap::new(), None, 77).unwrap();
+    let command = config
+        .adapter()
+        .quit_command(&config, &HashMap::new(), None, 77)
+        .unwrap();
     assert_eq!(
         command.get_args().next().unwrap(),
         "/tmp/obelisk-engine-77/wsd.sock"
@@ -1258,7 +1385,7 @@ fn only_a_prefix_and_its_wine_server_belong_to_one_windows_game() {
     let config = recording_runtime(&root);
     let prefix = fs::metadata(&config.prefix).unwrap();
     assert_eq!(
-        private_folders(&config),
+        private_folders(&config, &HashMap::new(), None),
         [
             config.prefix.clone(),
             PathBuf::from(format!(
@@ -1277,5 +1404,15 @@ fn only_a_prefix_and_its_wine_server_belong_to_one_windows_game() {
         },
         ..config
     };
-    assert_eq!(private_folders(&linux), [root.join("Game-linux")]);
+    assert_eq!(
+        private_folders(&linux, &HashMap::new(), Some(7)),
+        [
+            root.join("Game-linux"),
+            PathBuf::from("/tmp/obelisk-engine-7")
+        ]
+    );
+    assert_eq!(
+        private_folders(&linux, &HashMap::new(), None),
+        [root.join("Game-linux")]
+    );
 }

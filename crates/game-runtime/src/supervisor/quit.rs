@@ -47,14 +47,9 @@ impl Scope {
         }
         if let Some(wine) = wine {
             scope.runs.push(wine.runtime.clone());
-            scope.uses.extend(wine::private_folders(wine));
-            if wine.settings.engine == wine::Engine::Linux
-                && let Some(pid) = pid
-            {
-                scope
-                    .uses
-                    .push(crate::linux_engine::sockets(&game.environment, pid));
-            }
+            scope
+                .uses
+                .extend(wine::private_folders(wine, &game.environment, pid));
         }
         scope.spared.push(bundle(own));
         // lsof names files by their real path, such as /private/tmp for /tmp.

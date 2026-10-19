@@ -42,9 +42,6 @@ pub(crate) const BEGIN_DEADLINE: Duration = Duration::from_secs(120);
 const WORKERS: usize = 16;
 /// How long a game asked to stop gets to quit before it is killed.
 const STOP_GRACE: Duration = Duration::from_secs(5);
-/// How long the Linux engine's launcher gets to stop its own servers on a
-/// Force Quit; it gives them a second.
-const LAUNCHER_GRACE: Duration = Duration::from_secs(2);
 
 /// What the client handed over, as the core needs it.
 pub(crate) struct Opening<P: Provider> {
@@ -355,15 +352,12 @@ impl<P: Provider> Session<P> {
         let pid = self.state.lock().unwrap().game;
         self.ended_by_obelisk.store(true, Ordering::Release);
         if let Some(pid) = pid {
-            // The Linux engine's launcher stops its window, render and input
-            // servers itself: they are not frozen with the game, and SIGTERM
-            // lets the input server give each gamepad back its own behaviour.
-            if wine
-                .as_ref()
-                .is_some_and(|wine| wine.settings.engine == crate::wine::Engine::Linux)
-            {
+            // An engine's launcher stops its window, render and input servers
+            // itself: they are not frozen with the game, and SIGTERM lets the
+            // input server give each gamepad back its own behaviour.
+            if let Some(grace) = wine.as_ref().and_then(crate::wine::Config::launcher_grace) {
                 self.signal(pid, "-TERM");
-                self.wait_reaped(pid, LAUNCHER_GRACE);
+                self.wait_reaped(pid, grace);
             }
             let started = super::quit::started_by(pid);
             self.signal(pid, "-KILL");

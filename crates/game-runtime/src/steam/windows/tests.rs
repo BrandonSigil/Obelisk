@@ -187,7 +187,7 @@ fn a_game_whose_profile_names_the_linux_engine_readies_the_engine_s_prefix_and_t
         [HELPER, "/opt/game/Game.exe"]
     );
     assert_eq!(
-        request.target.environment[crate::linux_engine::APP_NAME],
+        request.target.environment[crate::wine::linux_engine::APP_NAME],
         "ELDEN RING"
     );
     assert_eq!(

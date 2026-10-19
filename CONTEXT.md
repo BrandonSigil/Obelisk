@@ -34,6 +34,10 @@ _Avoid_: last upload, last played
 The Windows machine one Windows installation runs in, shared by every account that launches it. It holds the game's Windows saves, is readied before each launch of the game, and goes when the installation is uninstalled.
 _Avoid_: bottle, Wine folder
 
+**Engine**:
+What runs a Windows game's Wine: Rosetta's Wine, Voile's Wine for macOS under Rosetta, for most games, or the Linux engine, Voile's Wine for Linux that voile-lkd runs natively, for games whose anti-cheat supports Linux. Each engine keeps its own Wine prefix of an installation and its own runtime in Voile, offers its own Graphics backends, and starts, quits and stops a game its own way; Prerequisites run only in Rosetta's Wine. Launch settings pick it, and a game moved to the other engine starts in that engine's Wine prefix.
+_Avoid_: backend (a Graphics backend renders), runner, bottle, Wine flavour
+
 **Launch settings**:
 How one Windows installation runs, for every account that launches it: what Obelisk knows of the game, with the player's choices over it. The player picks the arguments added after the storefront's and the game's own on its command line, its engine, then the graphics backend that renders its Direct3D there and that backend's options, each as the engine allows, and whether Metal's Performance HUD shows over the game. Only the choices that differ from what Obelisk knows of the game are kept. A change applies from the game's next launch, a game moved to the other engine runs in that engine's Wine prefix, and the settings go when the installation is uninstalled.
 _Avoid_: bottle, container, game settings, profile (what Obelisk itself knows of a game)

@@ -39,7 +39,7 @@ fn a_windows_build_on_the_linux_engine_takes_its_store_title_in_the_dock() {
     assert_eq!(architecture, Architecture::Arm64);
     assert_eq!(target.executable, Path::new("/bin/bash"));
     assert_eq!(
-        target.environment[crate::linux_engine::APP_NAME],
+        target.environment[crate::wine::linux_engine::APP_NAME],
         "The Witcher"
     );
 }

@@ -1,5 +1,6 @@
 use super::*;
 use crate::launch_settings::Settings;
+use crate::wine;
 use crate::wine::tests::{installation, pe, target as launch_target};
 
 fn linux_config(root: &Path) -> wine::Config {
@@ -13,6 +14,11 @@ fn linux_config(root: &Path) -> wine::Config {
             ..Settings::default()
         },
     }
+}
+
+/// A game installed in `install`, without a store title.
+fn game(install: &Path) -> wine::Game<'_> {
+    wine::Game { install, title: "" }
 }
 
 /// A storefront that adds nothing.
@@ -84,12 +90,11 @@ fn a_game_starts_through_the_native_launcher_with_guest_paths() {
     let mut environment = HashMap::new();
     environment.insert("HOME".to_owned(), "/Users/player".to_owned());
 
-    let target = target::<Plain>(
-        &install,
-        &launch_target(&executable, &["-AUTH_TYPE=exchangecode"]),
-        "",
-        environment,
+    let target = wine::target::<Plain>(
         &config,
+        &game(&install),
+        &launch_target(&executable, &["-AUTH_TYPE=exchangecode"]),
+        environment,
     )
     .unwrap();
 
@@ -126,56 +131,6 @@ fn a_game_starts_through_the_native_launcher_with_guest_paths() {
 }
 
 #[test]
-fn the_guest_runs_with_the_profile_s_variables_and_dll_overrides() {
-    let (_directory, root) = installation();
-    let install = root.join("install");
-    fs::create_dir_all(&install).unwrap();
-    let executable = install.join("Game.exe");
-    fs::write(&executable, pe()).unwrap();
-    let config = linux_config(&root);
-    let config = wine::Config {
-        settings: Settings {
-            variables: [("WINENCPU".to_owned(), "10".to_owned())].into(),
-            dll_overrides: [("xaudio2_7".to_owned(), "n,b".to_owned())].into(),
-            ..config.settings.clone()
-        },
-        ..config
-    };
-
-    let target = target::<Plain>(
-        &install,
-        &launch_target(&executable, &[]),
-        "",
-        HashMap::new(),
-        &config,
-    )
-    .unwrap();
-
-    let variables = options(&target, "--env");
-    assert!(variables.contains(&"WINENCPU=10"));
-    assert!(variables.contains(
-        &"WINEDLLOVERRIDES=mscoree,mshtml=;winemenubuilder.exe=d;d3d11,dxgi,d3d12=n;xaudio2_7=n,b"
-    ));
-}
-
-#[test]
-fn a_program_outside_the_installation_never_starts() {
-    let (_directory, root) = installation();
-    let install = root.join("install");
-    fs::create_dir_all(&install).unwrap();
-    let outside = root.join("Other.exe");
-    fs::write(&outside, pe()).unwrap();
-    let failure = target::<Plain>(
-        &install,
-        &launch_target(&outside, &[]),
-        "",
-        HashMap::new(),
-        &linux_config(&root),
-    );
-    assert!(matches!(failure, Err(Error::NotExecutable)));
-}
-
-#[test]
 fn a_d3dmetal_game_asks_the_launcher_for_the_d3dmetal_render_server() {
     let (_directory, root) = installation();
     let install = root.join("install");
@@ -190,12 +145,11 @@ fn a_d3dmetal_game_asks_the_launcher_for_the_d3dmetal_render_server() {
         ..config
     };
 
-    let target = target::<Plain>(
-        &install,
-        &launch_target(&install.join("Game.exe"), &[]),
-        "",
-        HashMap::new(),
+    let target = wine::target::<Plain>(
         &config,
+        &game(&install),
+        &launch_target(&install.join("Game.exe"), &[]),
+        HashMap::new(),
     )
     .unwrap();
 
@@ -214,12 +168,11 @@ fn steam_target(root: &Path, host_pid: bool) -> (wine::Config, Target) {
         fs::create_dir_all(config.runtime.join("guest")).unwrap();
         fs::write(config.runtime.join("guest").join(HOST_PID), b"elf").unwrap();
     }
-    let target = target::<SteamClient>(
-        &install,
-        &launch_target(&program, &["-eac"]),
-        "",
-        HashMap::new(),
+    let target = wine::target::<SteamClient>(
         &config,
+        &game(&install),
+        &launch_target(&program, &["-eac"]),
+        HashMap::new(),
     )
     .unwrap();
     (config, target)
@@ -671,8 +624,9 @@ fn smoke() {
     let arguments: Vec<&str> = arguments.split_whitespace().collect();
     let launch = launch_target(&executable, &arguments);
 
-    prepare(&config, &install, &launch, &Plain).unwrap();
-    let target = target::<Plain>(&install, &launch, "", HashMap::new(), &config).unwrap();
+    let locations = crate::wine::tests::locations(&root);
+    wine::prepare(&config, &locations, &install, &launch, &Plain).unwrap();
+    let target = wine::target::<Plain>(&config, &game(&install), &launch, HashMap::new()).unwrap();
     let output = Command::new(&target.executable)
         .args(&target.arguments)
         .current_dir(&target.working_directory)

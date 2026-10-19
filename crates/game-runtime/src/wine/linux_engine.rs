@@ -1,9 +1,14 @@
 //! Voile's Linux engine. A Windows game whose anti-cheat supports Linux, such
 //! as Rocket League's Easy Anti-Cheat, runs in voile-wine built for x86-64
 //! Linux, which voile-lkd's engine executes in native macOS processes: the
-//! anti-cheat then loads its Linux module. Only the games whose profile names
-//! the engine run there; every other Windows game keeps Rosetta's Wine.
-use crate::{Error, supervisor::Target, wine};
+//! anti-cheat then loads its Linux module. Only the games whose Launch settings
+//! name the engine run there, by their profile's choice or their player's;
+//! every other Windows game keeps Rosetta's Wine.
+use super::{Adapter, Additions, Config, Facts, Furnisher, Game, Graphics};
+use crate::{
+    Error,
+    supervisor::{Target, architecture::Architecture},
+};
 use obelisk_core::launch::LaunchTarget;
 use std::{
     collections::HashMap,
@@ -18,7 +23,7 @@ use std::{
 const LAUNCHER: &str = include_str!("linux_engine/launch.sh");
 /// The private folder of the window server and the render server that the
 /// launcher with `pid` started, in the temporary folder of its `environment`.
-pub(crate) fn sockets(environment: &HashMap<String, String>, pid: u32) -> PathBuf {
+fn sockets(environment: &HashMap<String, String>, pid: u32) -> PathBuf {
     let root = environment
         .get("TMPDIR")
         .filter(|root| !root.is_empty())
@@ -27,7 +32,7 @@ pub(crate) fn sockets(environment: &HashMap<String, String>, pid: u32) -> PathBu
 }
 
 /// The window server socket of the launcher with `pid`.
-pub(crate) fn window_server(environment: &HashMap<String, String>, pid: u32) -> PathBuf {
+fn window_server(environment: &HashMap<String, String>, pid: u32) -> PathBuf {
     sockets(environment, pid).join("wsd.sock")
 }
 
@@ -69,11 +74,241 @@ const TRANSLATED: &str = ".obelisk-d3dmetal-translated";
 /// Translating D3DMetal takes about 8 seconds; one still running after this
 /// long is abandoned, and the game pays for the rest.
 const TRANSLATION_TIMEOUT: Duration = Duration::from_secs(2 * 60);
+/// How long the launcher gets to stop its own servers on a Force Quit; it
+/// gives them a second.
+const LAUNCHER_GRACE: Duration = Duration::from_secs(2);
+
+/// Voile's Linux engine.
+pub(super) struct LinuxEngine;
+
+static FACTS: Facts = Facts {
+    name: "wine-linux",
+    // The launcher is a native program.
+    architecture: Architecture::Arm64,
+    input_service: None,
+    graphics: Graphics::Dxmt,
+    launcher_grace: Some(LAUNCHER_GRACE),
+    #[cfg(test)]
+    reserved: super::Reserved {
+        variables: &[
+            "HOME",
+            "USER",
+            "LOGNAME",
+            "PATH",
+            "LANG",
+            "WINEPREFIX",
+            "WINEARCH",
+            "WINEDEBUG",
+            "WINEDLLOVERRIDES",
+            "VTEST_SOCKET_NAME",
+            "NPT_DEBUG",
+            "LD_PRELOAD",
+        ],
+        dlls: &[
+            "mscoree",
+            "mshtml",
+            "winemenubuilder.exe",
+            "d3d11",
+            "dxgi",
+            "d3d12",
+        ],
+    },
+};
+
+impl Adapter for LinuxEngine {
+    fn facts(&self) -> &'static Facts {
+        &FACTS
+    }
+
+    fn runtime(&self, voile: &Path) -> Option<PathBuf> {
+        crate::voile::linux_runtime(voile)
+    }
+
+    fn prefix(&self, rosetta: &Path) -> Result<PathBuf, Error> {
+        prefix(rosetta)
+    }
+
+    /// The prefix is created through the engine on first use, lsteamclient
+    /// is led to Valve's Linux steamclient for a storefront whose games reach
+    /// it, the storefront furnishes the prefix, and Neptune's Direct3D goes
+    /// into it before each launch. Storefront prerequisites do not run there.
+    /// D3DMetal is translated before a game that renders with it starts.
+    fn ready(
+        &self,
+        config: &Config,
+        locations: &crate::Locations,
+        storefront: &dyn Furnisher,
+    ) -> Result<(), Error> {
+        if !installed(config) {
+            return Err(Error::WineUnavailable);
+        }
+        crate::files::private_directory(home(&config.prefix)?)?;
+        if !config.prefix.join("system.reg").is_file() {
+            boot(config)?;
+        }
+        if storefront.additions().steam_client {
+            link_steam_client(config)?;
+        }
+        storefront.furnish_prefix(config)?;
+        let system32 = config.prefix.join("drive_c/windows/system32");
+        for library in DIRECT3D {
+            fs::copy(
+                config.runtime.join("windows").join(library),
+                system32.join(library),
+            )?;
+        }
+        match config.log.parent() {
+            Some(logs) => crate::files::private_directory(logs)?,
+            None => return Err(Error::Storage),
+        }
+        translate_d3dmetal(config, &locations.helpers);
+        Ok(())
+    }
+
+    /// The game starts through the engine's launcher, in a guest the
+    /// storefront completes. The menu bar, the Dock and Cmd-Tab show its
+    /// title, or the program's file name without one.
+    fn target(
+        &self,
+        config: &Config,
+        game: &Game<'_>,
+        launched: &LaunchTarget,
+        program: PathBuf,
+        additions: Additions,
+        environment: HashMap<String, String>,
+    ) -> Result<Target, Error> {
+        let guest = Guest::of(config, additions.steam_client);
+        let executable = guest_path(game.install, &program).ok_or(Error::NotExecutable)?;
+        let name = match (
+            app_name(game.title),
+            Path::new(&launched.executable).file_stem(),
+        ) {
+            (name, Some(stem)) if name.is_empty() => stem.to_string_lossy().into_owned(),
+            (name, _) => name,
+        };
+        let mut environment = environment;
+        environment.insert(APP_NAME.to_owned(), name);
+        let install = game.install.canonicalize()?;
+        let working_directory = guest_path(&install, Path::new(&launched.working_directory))
+            .unwrap_or_else(|| GAME.to_owned());
+        let mut arguments = vec![
+            "-c".to_owned(),
+            LAUNCHER.to_owned(),
+            "obelisk-linux-engine".to_owned(),
+            config.runtime.to_string_lossy().into_owned(),
+            home(&config.prefix)?.to_string_lossy().into_owned(),
+            install.to_string_lossy().into_owned(),
+            working_directory,
+            "--graphics".to_owned(),
+            config.settings.graphics.name().to_owned(),
+        ];
+        for (path, folder) in &guest.binds {
+            arguments.push("--bind".to_owned());
+            arguments.push(format!("{path}={}:ro", folder.display()));
+        }
+        let variables = guest_environment(config).into_iter().chain(
+            guest
+                .environment
+                .iter()
+                .map(|(name, value)| ((*name).to_owned(), value.clone())),
+        );
+        for (name, value) in variables {
+            arguments.push("--env".to_owned());
+            arguments.push(format!("{name}={value}"));
+        }
+        // The launcher hands the guest the variables the storefront's games
+        // get from their session, which exist only once the game starts.
+        for name in additions.passed {
+            arguments.push("--pass".to_owned());
+            arguments.push((*name).to_owned());
+        }
+        arguments.push("--".to_owned());
+        arguments.extend(additions.helper.map(str::to_owned));
+        arguments.push(executable);
+        arguments.extend(launched.arguments.iter().cloned());
+        Ok(Target {
+            executable: "/bin/bash".into(),
+            arguments,
+            working_directory: install.clone(),
+            environment,
+            log: Some(config.log.clone()),
+            installation: Some(install),
+            program: Some(program),
+        })
+    }
+
+    /// The guest cannot see the Mac's disk, so the file goes into the
+    /// prefix's C: drive.
+    fn private_file(
+        &self,
+        config: &Config,
+        name: &str,
+        bytes: &[u8],
+    ) -> Result<(tempfile::TempDir, String), Error> {
+        let drive = config.prefix.join("drive_c");
+        let (directory, _) = crate::files::private_temp_file(&drive, ".obelisk-", name, bytes)?;
+        let folder = directory
+            .path()
+            .file_name()
+            .ok_or(Error::Storage)?
+            .to_string_lossy()
+            .into_owned();
+        Ok((directory, format!("C:\\{folder}\\{name}")))
+    }
+
+    /// The window server asks every window of the game to close, as its own
+    /// Quit menu does; a game that shows no window yet is asked nothing.
+    fn quit_command(
+        &self,
+        config: &Config,
+        environment: &HashMap<String, String>,
+        _program: Option<&Path>,
+        pid: u32,
+    ) -> Option<Command> {
+        let mut command = Command::new(config.runtime.join("engine/wsdctl"));
+        command
+            .arg(window_server(environment, pid))
+            .args(["window", "quit"])
+            .env_clear();
+        Some(command)
+    }
+
+    fn end_command(&self, _config: &Config) -> Option<Command> {
+        // The engine's processes follow its launcher, which the session stops
+        // or kills.
+        None
+    }
+
+    /// The guest's home, and once the launcher runs, its servers' folder.
+    fn private_folders(
+        &self,
+        config: &Config,
+        environment: &HashMap<String, String>,
+        pid: Option<u32>,
+    ) -> Vec<PathBuf> {
+        let mut folders = home(&config.prefix)
+            .map(|home| vec![home.to_owned()])
+            .unwrap_or_default();
+        if let Some(pid) = pid {
+            folders.push(sockets(environment, pid));
+        }
+        folders
+    }
+
+    fn remove(
+        &self,
+        _locations: &crate::Locations,
+        prefix: &Path,
+    ) -> Result<(), obelisk_core::installation::RemovalFailure> {
+        use obelisk_core::installation::RemovalFailure;
+        super::remove_folder(home(prefix).map_err(|_| RemovalFailure::Unsafe(prefix.to_owned()))?)
+    }
+}
 
 /// The engine's prefix of the installation whose Rosetta prefix is
 /// `rosetta`: its own folder beside it, the prefix inside, since the guest
 /// sees that folder as its home.
-pub(crate) fn prefix(rosetta: &Path) -> Result<PathBuf, Error> {
+fn prefix(rosetta: &Path) -> Result<PathBuf, Error> {
     let name = rosetta.file_name().ok_or(Error::Storage)?;
     let mut home = name.to_owned();
     home.push("-linux");
@@ -81,13 +316,18 @@ pub(crate) fn prefix(rosetta: &Path) -> Result<PathBuf, Error> {
 }
 
 /// The guest's home of an engine prefix.
-pub(crate) fn home(prefix: &Path) -> Result<&Path, Error> {
+fn home(prefix: &Path) -> Result<&Path, Error> {
     prefix.parent().ok_or(Error::Storage)
+}
+
+/// Whether the runtime is in place.
+fn installed(config: &Config) -> bool {
+    config.runtime.join("engine/fexdarwin-run").is_file()
 }
 
 /// What every Wine command of the engine runs with in the guest, then the
 /// variables the game's profile adds.
-fn guest_environment(config: &wine::Config) -> Vec<(String, String)> {
+fn guest_environment(config: &Config) -> Vec<(String, String)> {
     let own = [
         ("HOME", HOME.into()),
         ("USER", "user".into()),
@@ -111,12 +351,6 @@ fn guest_environment(config: &wine::Config) -> Vec<(String, String)> {
         .collect()
 }
 
-/// The guest path of the Windows program `target` names inside `install`.
-fn guest_program(install: &Path, target: &LaunchTarget) -> Result<String, Error> {
-    let executable = wine::program(install, target)?;
-    guest_path(install, &executable).ok_or(Error::NotExecutable)
-}
-
 /// Where the guest sees `path`, a file or folder inside `install`.
 fn guest_path(install: &Path, path: &Path) -> Option<String> {
     let root = install.canonicalize().ok()?;
@@ -128,46 +362,9 @@ fn guest_path(install: &Path, path: &Path) -> Option<String> {
     })
 }
 
-/// Readies the engine's prefix to start `target`: the game must be a Windows
-/// program inside the installation, the prefix is created through the engine
-/// on first use, lsteamclient is led to Valve's Linux steamclient for a
-/// storefront whose games reach it, the storefront furnishes the prefix, and
-/// Neptune's Direct3D goes into it before each launch. Storefront
-/// prerequisites do not run there.
-pub(crate) fn prepare<S: wine::Storefront>(
-    config: &wine::Config,
-    install: &Path,
-    target: &LaunchTarget,
-    storefront: &S,
-) -> Result<(), Error> {
-    guest_program(install, target)?;
-    if !config.installed() {
-        return Err(Error::WineUnavailable);
-    }
-    crate::files::private_directory(home(&config.prefix)?)?;
-    if !config.prefix.join("system.reg").is_file() {
-        boot(config)?;
-    }
-    if S::STEAM_CLIENT {
-        link_steam_client(config)?;
-    }
-    storefront.furnish(config)?;
-    let system32 = config.prefix.join("drive_c/windows/system32");
-    for library in DIRECT3D {
-        fs::copy(
-            config.runtime.join("windows").join(library),
-            system32.join(library),
-        )?;
-    }
-    match config.log.parent() {
-        Some(logs) => crate::files::private_directory(logs),
-        None => Err(Error::Storage),
-    }
-}
-
 /// Creates the prefix through the engine, under its timeout wrapper, which
 /// ends every process of the engine it started.
-fn boot(config: &wine::Config) -> Result<(), Error> {
+fn boot(config: &Config) -> Result<(), Error> {
     let engine = config.runtime.join("engine");
     let mut command = Command::new(engine.join("run-with-timeout.sh"));
     command
@@ -199,7 +396,7 @@ fn boot(config: &wine::Config) -> Result<(), Error> {
 }
 
 /// The engine's folders as the guest sees them; a launch adds the game.
-fn binds(config: &wine::Config, install: Option<&Path>) -> Result<String, Error> {
+fn binds(config: &Config, install: Option<&Path>) -> Result<String, Error> {
     let mut binds = vec![
         format!("/opt/wine={}:ro", config.runtime.join("wine").display()),
         format!("{HOME}={}", home(&config.prefix)?.display()),
@@ -217,10 +414,8 @@ fn binds(config: &wine::Config, install: Option<&Path>) -> Result<String, Error>
 /// give up. Rosetta keeps a translation per file until macOS updates, so it
 /// runs once per runtime and macOS build, through Obelisk's Intel helper in
 /// `helpers`. A failure only leaves the cost to the game.
-pub(crate) fn translate_d3dmetal(config: &wine::Config, helpers: &Path) {
-    if config.settings.engine != wine::Engine::Linux
-        || config.settings.graphics != wine::Graphics::D3DMetal
-    {
+fn translate_d3dmetal(config: &Config, helpers: &Path) {
+    if config.settings.graphics != Graphics::D3DMetal {
         return;
     }
     let (Some(system), Some(release)) = (macos_build(), config.runtime.parent()) else {
@@ -256,7 +451,7 @@ fn quietly(mut command: Command) -> Option<i32> {
         .stderr(Stdio::null())
         .spawn()
         .ok()?;
-    wine::wait(child, TRANSLATION_TIMEOUT).ok().flatten()
+    super::wait(child, TRANSLATION_TIMEOUT).ok().flatten()
 }
 
 /// The running macOS build, such as `25A354`.
@@ -274,7 +469,7 @@ fn macos_build() -> Option<String> {
 /// Leads lsteamclient to Valve's Linux steamclient: it loads the library the
 /// guest home's .steam/sdk64 leads to, here the runtime's, which the guest
 /// sees in /opt/steam.
-fn link_steam_client(config: &wine::Config) -> Result<(), Error> {
+fn link_steam_client(config: &Config) -> Result<(), Error> {
     let steam = home(&config.prefix)?.join(".steam");
     crate::files::private_directory(&steam)?;
     let link = steam.join("sdk64");
@@ -299,14 +494,14 @@ struct Guest {
 }
 
 impl Guest {
-    /// The guest of S's games. When they reach Valve's steamclient,
+    /// The guest of a storefront's games. When they reach Valve's steamclient,
     /// lsteamclient finds Valve's Linux steamclient in the runtime. Steam's
     /// engine drops a client whose pid is not a live macOS process: a runtime
     /// that carries steam-hostpid.so has it preloaded in every guest process,
     /// where it gives that pid to Valve's steamclient alone.
-    fn of<S: wine::Storefront>(config: &wine::Config) -> Self {
+    fn of(config: &Config, steam_client: bool) -> Self {
         let mut guest = Self::default();
-        if !S::STEAM_CLIENT {
+        if !steam_client {
             return guest;
         }
         guest.binds.push((STEAM, config.runtime.join("steam")));
@@ -321,94 +516,5 @@ impl Guest {
     }
 }
 
-/// The game `target` names inside `install`, started through the engine's
-/// launcher with `environment`, in a guest S completes, logging to the
-/// installation's log. The menu bar, the Dock and Cmd-Tab show `title`, or
-/// the program's file name without one. The launcher is a native program:
-/// no Rosetta.
-pub(crate) fn target<S: wine::Storefront>(
-    install: &Path,
-    target: &LaunchTarget,
-    title: &str,
-    environment: HashMap<String, String>,
-    config: &wine::Config,
-) -> Result<Target, Error> {
-    let guest = Guest::of::<S>(config);
-    let program = wine::program(install, target)?;
-    let executable = guest_path(install, &program).ok_or(Error::NotExecutable)?;
-    let name = match (app_name(title), Path::new(&target.executable).file_stem()) {
-        (name, Some(stem)) if name.is_empty() => stem.to_string_lossy().into_owned(),
-        (name, _) => name,
-    };
-    let mut environment = environment;
-    environment.insert(APP_NAME.to_owned(), name);
-    let install = install.canonicalize()?;
-    let working_directory = guest_path(&install, Path::new(&target.working_directory))
-        .unwrap_or_else(|| GAME.to_owned());
-    let mut arguments = vec![
-        "-c".to_owned(),
-        LAUNCHER.to_owned(),
-        "obelisk-linux-engine".to_owned(),
-        config.runtime.to_string_lossy().into_owned(),
-        home(&config.prefix)?.to_string_lossy().into_owned(),
-        install.to_string_lossy().into_owned(),
-        working_directory,
-        "--graphics".to_owned(),
-        config.settings.graphics.name().to_owned(),
-    ];
-    for (path, folder) in &guest.binds {
-        arguments.push("--bind".to_owned());
-        arguments.push(format!("{path}={}:ro", folder.display()));
-    }
-    let variables = guest_environment(config).into_iter().chain(
-        guest
-            .environment
-            .iter()
-            .map(|(name, value)| ((*name).to_owned(), value.clone())),
-    );
-    for (name, value) in variables {
-        arguments.push("--env".to_owned());
-        arguments.push(format!("{name}={value}"));
-    }
-    // The launcher hands the guest the variables S's games get from their
-    // session, which exist only once the game starts.
-    for name in S::PASSED {
-        arguments.push("--pass".to_owned());
-        arguments.push((*name).to_owned());
-    }
-    arguments.push("--".to_owned());
-    arguments.extend(S::HELPER.map(str::to_owned));
-    arguments.push(executable);
-    arguments.extend(target.arguments.iter().cloned());
-    Ok(Target {
-        executable: "/bin/bash".into(),
-        arguments,
-        working_directory: install.clone(),
-        environment,
-        log: Some(config.log.clone()),
-        installation: Some(install),
-        program: Some(program),
-    })
-}
-
-/// A file the game reads in the engine's prefix: the guest cannot see the
-/// Mac's disk, so it goes into the prefix's C: drive, in a private folder that
-/// lives as long as the game. Returns the folder and the file's Windows path.
-pub(crate) fn private_file(
-    config: &wine::Config,
-    name: &str,
-    bytes: &[u8],
-) -> Result<(tempfile::TempDir, String), Error> {
-    let drive = config.prefix.join("drive_c");
-    let (directory, _) = crate::files::private_temp_file(&drive, ".obelisk-", name, bytes)?;
-    let folder = directory
-        .path()
-        .file_name()
-        .ok_or(Error::Storage)?
-        .to_string_lossy()
-        .into_owned();
-    Ok((directory, format!("C:\\{folder}\\{name}")))
-}
-
 #[cfg(test)]
-pub(crate) mod tests;
+pub(super) mod tests;

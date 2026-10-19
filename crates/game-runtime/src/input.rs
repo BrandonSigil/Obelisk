@@ -3,7 +3,7 @@
 //! them to Windows games through XInput. The Linux engine's launcher starts
 //! its own; a game in Wine for macOS gets one from its supervisor for as long
 //! as it runs.
-use crate::wine::{Config, Engine};
+use crate::wine::Config;
 use sha2::{Digest, Sha256};
 use std::{
     fs::File,
@@ -25,15 +25,11 @@ pub(crate) struct Service {
 }
 
 impl Service {
-    /// Starts the service of `config`'s runtime for a game in Wine for macOS,
-    /// with the socket Wine must be given. Without a service in the runtime,
-    /// or when it does not start, the game runs without gamepads.
+    /// Starts the gamepad service the engine of `config` has its supervisor
+    /// run, with the socket Wine must be given. Without one, or when it does
+    /// not start, the game runs without gamepads.
     pub(crate) fn start(config: &Config) -> Option<(Self, PathBuf)> {
-        if config.settings.engine != Engine::Rosetta {
-            return None;
-        }
-        // It ships with the Linux engine's host programs, in every runtime.
-        let program = config.runtime.join("linux/engine/obelisk-input");
+        let program = config.input_service()?;
         if !program.is_file() {
             return None;
         }
