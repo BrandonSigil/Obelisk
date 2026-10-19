@@ -31,12 +31,6 @@
   <a href="https://getobelisk.app"><img src="assets/readme/macbook.png" alt="Obelisk's Home on a MacBook Pro: Rocket League, the recently played games and the games installed on this Mac" width="800"></a>
 </p>
 
-> [!IMPORTANT]
-> Obelisk is tested on a limited number of Macs and games, so expect bugs. When something goes wrong, **SOS** on the game's page sends us what we need to fix it.
->
-> - **Not every game runs yet.** Windows games run through Wine, like CrossOver and Steam's Proton. Many run well, some run poorly or not at all. Before downloading a large game, check how it runs on [getobelisk.app](https://getobelisk.app).
-> - **Games with anti-cheat.** Obelisk runs a game's anti-cheat through the Linux version its publisher enabled, and never modifies or bypasses it. Games whose anti-cheat only supports Windows do not run yet.
-
 ## Contents
 
 - [What is Obelisk?](#what-is-obelisk)
@@ -63,19 +57,18 @@ Windows games play too. Obelisk sets everything up for you: no bottles to create
 
 - **One library.** Every store in one place, with search across all of them, your recently played games and what is installed on this Mac.
 - **No other launcher needed.** Steam, the Epic Games Launcher and GOG Galaxy do not need to be installed. Obelisk downloads, updates and launches games itself.
-- **Windows games without setup.** Windows versions run through Voile, Obelisk's Windows runtime, which Obelisk installs and keeps up to date on its own.
-- **The version that runs best.** Obelisk installs a game's Mac version only when it runs natively on Apple silicon. Otherwise, such as for an old Intel or 32-bit Mac version, it installs the Windows version.
+- **Windows games without setup.** Windows versions run through [Voile](https://github.com/Zagrios/voile), Obelisk's Windows runtime, which Obelisk installs and keeps up to date on its own.
 - **Know how a game runs before you play.** A game's page shows the frame rate other players measured on a Mac with your chip.
 - **Your saves follow you.** Steam and Epic Cloud saves sync before you play and after you quit.
 - **Your friends are here.** See who is online and what they play, chat with Steam friends, and invite them or join their games.
-- **Made for the Mac.** A native macOS app, in light or dark appearance, in English and French.
+- **Made for the Mac.** A native macOS app, made with SwiftUI.
 
 ## Requirements
 
 - A Mac with Apple silicon (M1 or later). Intel Macs are not supported.
 - macOS Tahoe 26.4 or later.
 - Rosetta, for Windows games. If it is missing, Obelisk asks macOS to install it the first time a game needs it.
-- Disk space for your games. The first Windows game also downloads Voile, a few hundred MB, once.
+- Disk space for your games. The first Windows game also downloads [Voile](https://github.com/Zagrios/voile), a few hundred MB, once.
 
 ## Installation
 
@@ -85,9 +78,11 @@ Windows games play too. Obelisk sets everything up for you: no bottles to create
 
 Obelisk is signed and notarized by Apple, so it opens without a security warning.
 
-**Updating Obelisk:** Obelisk looks for a new version once a day. It downloads it in the background and installs it the next time you quit Obelisk from its menu bar item; if you rarely do, it offers the new version in a window after a while. **Check for Updates…** in the Obelisk menu looks right away, and **Settings → Updates** lets Obelisk ask before downloading instead. Your games, saves and sign-ins stay where they are.
+**Updating Obelisk:** Obelisk looks for a new version by itself. It downloads it in the background and installs it the next time you quit Obelisk. If you rarely do, it offers the new version in a window after a while. **Check for Updates…** in the Obelisk menu looks right away, and **Settings → Updates** lets Obelisk ask before downloading instead. Your games, saves and sign-ins stay where they are.
 
 ## Getting started
+
+<img src="https://github.com/user-attachments/assets/432d27ea-de67-4132-bf00-a3d2810847d8" />
 
 1. Open Obelisk. The **Home** page offers to sign in to each store.
 2. Sign in to the stores you use:
@@ -100,27 +95,23 @@ Obelisk is signed and notarized by Apple, so it opens without a security warning
 
 ### Library
 
+<img src="https://github.com/user-attachments/assets/ce35c3c8-c9de-4fb3-ae14-8b4431ba06af" />
+
 - **Home** shows your last game, your recently played games and the games installed on this Mac, and searches all your libraries at once.
 - Each store has its own library with cover art, sorted by last played, name or playtime, and filtered to installed games, games compatible with macOS or games you have already played.
 - A game's page shows your playtime, when you last played, its size, its achievements, its news on Steam and its details on Epic Games and GOG.
 - It also shows the game's **Expected FPS** on your Mac: see [How games run](#how-games-run).
 
-<p align="center">
-  <img src="assets/readme/library.jpg" alt="The Steam library in Obelisk: ELDEN RING, the last game played, above 127 games with filters and a sort" width="800">
-</p>
-
 ### Downloads and updates
 
-- **Download** picks the Mac version of a game when there is one, otherwise the Windows version. Games download in your language when they offer it, in English otherwise.
+- **Download** picks the Mac version of a game when there is one, otherwise the Windows version.
 - Downloads wait in one queue, whatever their store, and run one at a time. The **downloads** button above Settings in the sidebar shows the download speed and lets you pause, resume, reorder or remove each download.
 - An interrupted download resumes where it stopped, even after quitting Obelisk.
 - Games update automatically when a new version comes out. Updates wait while you play. To update only when you launch a game, turn off **Update games automatically** in **Settings → Games**.
 - You can play an installed game while another one downloads.
 - **Verify game files**, in the gear menu next to the **Play** button, repairs missing or damaged files. **Uninstall** is in the same menu.
 
-<p align="center">
-  <img src="assets/readme/downloads.jpg" alt="Frostpunk downloading from its page, with the downloads panel open: the download speed, its graph and the queue" width="800">
-</p>
+<img src="assets/readme/downloads.jpg">
 
 ### Cloud saves
 
@@ -139,6 +130,9 @@ Obelisk is signed and notarized by Apple, so it opens without a security warning
 
 Press **Shift+Tab** during a game to open the overlay without leaving it. It shows your friends, the game's achievements, its store page and the invitations you received. Steam games can also ask you there to authorize an in-game purchase.
 
+<img src="https://github.com/user-attachments/assets/77b7c3f4-f817-4640-be39-c06bd8f6d4c0" />
+
+
 ### Controllers
 
 Gamepads work in Windows games, which see them as Xbox controllers. Mac games use macOS's own controller support.
@@ -155,7 +149,7 @@ Some controllers, such as the Steam Controller, get full support once Obelisk is
 | Cloud saves               |  ✅   |     ✅     | ❌  |
 | Achievements              |  ✅   |     ✅     | ✅  |
 | Friends list              |  ✅   |     ✅     | ❌  |
-| Chat and invitations      |  ✅   |     ❌     | ❌  |
+| Chat and invitations      |  ✅   |     ❌ (in game)     | ❌ (in game)  |
 | In-game overlay           |  ✅   |     ✅     | ✅  |
 
 Support for more stores is planned in the near future.
@@ -164,11 +158,12 @@ Support for more stores is planned in the near future.
 
 When a game has no Mac version, Obelisk installs its Windows version and runs it through [Voile](https://github.com/Zagrios/voile), a Windows runtime built on Wine, the same kind of technology as CrossOver and Steam's Proton. You do not need to do anything:
 
-- Obelisk downloads Voile with your first Windows game and keeps it up to date.
+- Obelisk downloads [Voile](https://github.com/Zagrios/voile) with your first Windows game and keeps it up to date.
 - Each Windows game gets its own Windows environment. Uninstalling the game deletes it, after its Cloud saves are safe.
 - The software a game needs, such as DirectX or Visual C++, installs by itself before its first launch.
 - Direct3D 10, 11 and 12 games draw with Metal: 64-bit games through Apple's D3DMetal, 32-bit games through DXMT.
 - A Windows game's **Launch Settings**, in the gear menu of its page, add arguments to its command line and choose the engine that runs it and what draws its Direct3D: D3DMetal or DXMT. On D3DMetal, ray tracing can be turned off for a game that renders wrongly with it. Metal's performance HUD can show the frame rate over the game. DLSS is not supported yet.
+
 
 **Anti-cheat:** We already run games whose anti-cheat supports Linux, such as **Rocket League** and **ELDEN RING**, and more are coming. We are currently working on BattlEye support, and still studying how to run games whose anti-cheat only supports Windows, such as Easy Anti-Cheat on Windows, or works at a lower level of the system. We never modify or bypass an anti-cheat, so every game runs fully legitimately.
 
@@ -192,7 +187,7 @@ Obelisk has no account of its own and does not track what you do in it. It talks
   - how it ran: how long, how many frames it showed, the median frame rate, the 1% low and the hitches (frames shown more than 100 ms after the previous one),
   - how it ended: its exit code or signal, and whether you stopped it from Obelisk,
   - the Mac: its chip, GPU cores, model, memory and macOS version,
-  - the versions of Obelisk and Voile it ran with.
+  - the versions of Obelisk and [Voile](https://github.com/Zagrios/voile) it ran with.
 - **What it never sends.** Nothing in a report names you or ties two reports together: no account, no store ID of yours, no device ID. The site's database keeps each report and the time it arrived, not your IP address.
 - **Turning it off.** Turn off **Share game performance** in **Settings → Games**. It is on by default. With it off, Obelisk sends nothing when a game closes, and still shows Expected FPS.
 - **Bug reports.** Obelisk sends one only when you send it yourself, from **SOS** on a game's page or **I found a bug** in **Settings → Help**. It holds what you wrote, the contact you gave if any, your Mac's chip, model and macOS version, and the versions of Obelisk and Voile. With **Attach logs** on, it adds the files the sheet lists: the game's logs, Obelisk's log from the last hour and recent crash reports. Obelisk removes your user name from file paths and the device identifiers macOS writes in crash reports. getobelisk.app passes the report to a private channel of Obelisk's Discord server and keeps nothing.
@@ -262,7 +257,7 @@ Deleting the app alone leaves your games and settings on the Mac. To remove ever
 
 1. Quit Obelisk and move it from Applications to the Trash.
 2. In Finder, choose **Go → Go to Folder…**, enter `~/Library`, and delete:
-   - `Application Support/com.zagrios.obelisk`: your games, their Windows environments and Voile,
+   - `Application Support/com.zagrios.obelisk`: your games, their Windows environments and [Voile](https://github.com/Zagrios/voile),
    - `Caches/com.zagrios.obelisk`, `HTTPStorages/com.zagrios.obelisk` and `WebKit/com.zagrios.obelisk`,
    - `Preferences/com.zagrios.obelisk.plist`,
    - `Logs/Obelisk`.
@@ -277,7 +272,7 @@ You can also [open an issue](https://github.com/Zagrios/obelisk/issues/new?templ
 
 Have an idea? [Request a feature](https://github.com/Zagrios/obelisk/issues/new?template=feature_request.yml), or press **Request a feature** in **Settings → Help**.
 
-Logs help a lot. They are in `~/Library/Logs/Obelisk` (Finder: **Go → Go to Folder…**). Attach the ones of the game you tried, after checking they show nothing you want to keep private. A Windows game's log starts with a line that says how Obelisk ran it: its engine, graphics backend, Voile release and the launch arguments you added.
+Logs help a lot. They are in `~/Library/Logs/Obelisk` (Finder: **Go → Go to Folder…**). Attach the ones of the game you tried, after checking they show nothing you want to keep private. A Windows game's log starts with a line that says how Obelisk ran it: its engine, graphics backend, [Voile](https://github.com/Zagrios/voile) release and the launch arguments you added.
 
 Enjoying Obelisk? Star the repository: it helps other Mac players find it.
 
