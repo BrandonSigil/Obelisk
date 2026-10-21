@@ -370,6 +370,25 @@ fn roaming_rule() -> CloudMetadata {
 }
 
 #[tokio::test]
+async fn a_mac_build_whose_rules_are_all_for_windows_starts_without_cloud() {
+    let game = SteamGame::game();
+    game.cloud.set_metadata(Some(roaming_rule()));
+
+    tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        game.open().prepare(&no_other_session),
+    )
+    .await
+    .expect("no question before the launch")
+    .unwrap();
+
+    let status = game.control.status();
+    assert_eq!(status.phase, Phase::Unsupported);
+    assert_eq!(status.error, None);
+    assert_eq!(game.unavailable(), Some(UnavailableReason::Unsupported));
+}
+
+#[tokio::test]
 async fn launching_anyway_past_rules_obelisk_cannot_follow_starts_the_game() {
     let game = SteamGame::game();
     game.cloud.set_metadata(Some(CloudMetadata::Object(vec![(

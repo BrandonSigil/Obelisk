@@ -41,6 +41,16 @@ impl CloudPlatform {
         }
     }
 
+    /// Whether `name` is another platform's root. Steam skips a rule there,
+    /// unless a root override moves it onto this platform.
+    fn foreign_root(&self, name: &str) -> bool {
+        let foreign: &[&str] = match self {
+            Self::Mac { .. } => &["Win", "Linux"],
+            Self::Windows { .. } => &["Mac", "Linux"],
+        };
+        foreign.iter().any(|prefix| name.starts_with(prefix))
+    }
+
     fn base(&self) -> &Path {
         match self {
             Self::Mac { home } => home,
@@ -350,6 +360,14 @@ impl AutoCloudPaths {
                     }
                 }
             }
+            if !matched && platform.foreign_root(source_root) {
+                foreign.push((
+                    canonical_root(source_root).to_owned(),
+                    publisher_path(source_path, steam_id)?,
+                    recursive,
+                ));
+                continue;
+            }
             // Valve serializes some override replacements with a leading slash.
             // It is relative to the new root, never an absolute filesystem path.
             let source = publisher_path(source_path, steam_id)?;
@@ -364,7 +382,11 @@ impl AutoCloudPaths {
             });
         }
         if rules.is_empty() {
-            return Err(CloudError::Invalid("empty Auto-Cloud rules"));
+            return Err(if foreign.is_empty() {
+                CloudError::Invalid("empty Auto-Cloud rules")
+            } else {
+                CloudError::OtherPlatforms
+            });
         }
         Ok(Self {
             rules,
@@ -704,6 +726,44 @@ mod tests {
             "%WinAppDataLocalLow%Studio/Game/42/nested/slot.sav"
         );
         assert_eq!(selected[0].path, saves.join("slot.sav"));
+    }
+
+    #[test]
+    fn rules_for_other_platforms_leave_a_build_without_cloud_saves() {
+        // KIBORG: an all-platform Windows root and a Linux-only rule.
+        let metadata = serde_json::from_str(include_str!("fixtures/2405060.json")).unwrap();
+        let install = Path::new("/Games/fixture");
+        assert!(matches!(
+            AutoCloudPaths::mac(
+                &metadata,
+                0x011000010000002a,
+                Path::new("/Users/fixture"),
+                install
+            ),
+            Err(CloudError::OtherPlatforms)
+        ));
+
+        let profile = PathBuf::from("/prefix/drive_c/users/crossover");
+        let platform = CloudPlatform::Windows {
+            profile: profile.clone(),
+        };
+        let resolver =
+            AutoCloudPaths::new(&metadata, 0x011000010000002a, &platform, install).unwrap();
+        assert_eq!(
+            resolver
+                .destination("%WinAppDataLocal%KIBORG/Saved/SaveGames/slot.sav", u32::MAX)
+                .unwrap(),
+            Some(profile.join("AppData/Local/KIBORG/Saved/SaveGames/slot.sav"))
+        );
+        assert_eq!(
+            resolver
+                .destination(
+                    "%LinuxXdgConfigHome%Epic/KIBORG/Saved/SaveGames/slot.sav",
+                    4
+                )
+                .unwrap(),
+            None
+        );
     }
 
     #[test]

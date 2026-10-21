@@ -1,0 +1,98 @@
+{
+  "Object": [
+    [
+      "maxnumfiles",
+      {
+        "Value": "10"
+      }
+    ],
+    [
+      "quota",
+      {
+        "Value": "1000000"
+      }
+    ],
+    [
+      "savefiles",
+      {
+        "Object": [
+          [
+            "0",
+            {
+              "Object": [
+                [
+                  "path",
+                  {
+                    "Value": "KIBORG/Saved/SaveGames"
+                  }
+                ],
+                [
+                  "pattern",
+                  {
+                    "Value": "*.sav"
+                  }
+                ],
+                [
+                  "recursive",
+                  {
+                    "Value": "1"
+                  }
+                ],
+                [
+                  "root",
+                  {
+                    "Value": "WinAppDataLocal"
+                  }
+                ]
+              ]
+            }
+          ],
+          [
+            "2",
+            {
+              "Object": [
+                [
+                  "path",
+                  {
+                    "Value": "Epic/KIBORG/Saved/SaveGames/"
+                  }
+                ],
+                [
+                  "pattern",
+                  {
+                    "Value": "*.sav"
+                  }
+                ],
+                [
+                  "platforms",
+                  {
+                    "Object": [
+                      [
+                        "1",
+                        {
+                          "Value": "Linux"
+                        }
+                      ]
+                    ]
+                  }
+                ],
+                [
+                  "recursive",
+                  {
+                    "Value": "1"
+                  }
+                ],
+                [
+                  "root",
+                  {
+                    "Value": "LinuxXdgConfigHome"
+                  }
+                ]
+              ]
+            }
+          ]
+        ]
+      }
+    ]
+  ]
+}

@@ -37,6 +37,8 @@ pub enum CloudError {
     NotCommitted,
     #[error("Steam Cloud transfer authorization was revoked")]
     Revoked,
+    #[error("Steam Cloud keeps this game's saves only on other platforms")]
+    OtherPlatforms,
     #[error("{0}")]
     Cm(#[from] crate::cm::CmError),
 }

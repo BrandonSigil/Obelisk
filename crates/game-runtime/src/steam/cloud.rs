@@ -147,7 +147,8 @@ impl From<steam_kit::cloud::CloudError> for Failure {
             CloudError::Invalid(_)
             | CloudError::Delta
             | CloudError::UnsupportedFormat { .. }
-            | CloudError::Host(_) => Self::Unsupported,
+            | CloudError::Host(_)
+            | CloudError::OtherPlatforms => Self::Unsupported,
         }
     }
 }

@@ -207,12 +207,21 @@ impl<R: CloudRemote> Storefront for Adapter<R> {
             return Ok(Availability::Unavailable(UnavailableReason::Unsupported));
         }
         if metadata.field("savefiles").is_some() {
-            steam_kit::cloud::AutoCloudPaths::new(
+            match steam_kit::cloud::AutoCloudPaths::new(
                 &metadata,
                 self.credentials.steam_id,
                 &self.config.platform(),
                 &self.config.install,
-            )?;
+            ) {
+                // Steam keeps nothing of this build's saves, as KIBORG's Mac
+                // build, whose rules are all for Windows and Linux.
+                Err(steam_kit::cloud::CloudError::OtherPlatforms) => {
+                    return Ok(Availability::Unavailable(UnavailableReason::Unsupported));
+                }
+                paths => {
+                    paths?;
+                }
+            }
         }
         match &mut self.context {
             // A captured save can only be sent under the rules it was
