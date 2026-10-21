@@ -28,6 +28,8 @@ final class AppModel {
     let overlay: GameOverlayController
     /// Every storefront's Transfers, in their one queue.
     let downloads: DownloadsModel
+    /// Where Obelisk installs games, which the player may change.
+    let gamesFolder: GamesFolderModel
     /// The storefront's store, open over the whole window.
     var presentedStore: StorePresentation?
     /// The bug report being written, open over the whole window.
@@ -85,6 +87,7 @@ final class AppModel {
     init(directory: URL = AppIdentity.libraryDirectory, defaults: UserDefaults = .standard,
          defaultsDomain: String = Bundle.main.bundleIdentifier ?? AppIdentity.storageIdentifier, steam: SteamModel? = nil,
          epic: EpicModel? = nil, gog: GogModel? = nil, downloads: DownloadsModel? = nil,
+         gamesFolder: GamesFolderModel? = nil,
          performance: PerformanceReports? = nil, estimates: PerformanceEstimates? = nil, updates: AppUpdates? = nil,
          overlay: GameOverlayEnvironment = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil
             ? .live : .inert) {
@@ -105,6 +108,7 @@ final class AppModel {
         self.steam.overlay = self.overlay
         self.steam.notifier = overlay.notifier
         self.downloads = downloads ?? DownloadsModel()
+        self.gamesFolder = gamesFolder ?? GamesFolderModel(library: directory)
         let performance = performance ?? PerformanceReports(isEnabled: sharesGamePerformance)
         performance.isEnabled = sharesGamePerformance
         self.performance = performance
@@ -169,6 +173,21 @@ final class AppModel {
         guard let id = Model.Store.game(item.game), let game = model.library.game(id) else { return }
         selection = item.storefront.section
         model.open(game)
+    }
+
+    /// The installed games outside the games folder: their move was stopped,
+    /// or they were installed meanwhile. Two accounts' installations of one
+    /// folder count once.
+    var gamesOutsideFolder: Int {
+        let directories = steam.installations.receipts.map(\.directory)
+            + epic.installations.receipts.map(\.directory)
+            + gog.installations.receipts.map(\.directory)
+        return Set(directories.filter { !gamesFolder.holds($0) }).count
+    }
+
+    /// The games whose move into the games folder waits or runs.
+    var gamesMoving: Int {
+        downloads.waiting.count(where: { $0.kind == .move }) + (downloads.running?.kind == .move ? 1 : 0)
     }
 
     private func applyAutomaticUpdates() {

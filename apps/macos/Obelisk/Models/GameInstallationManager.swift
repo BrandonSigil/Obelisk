@@ -5,11 +5,16 @@ import Foundation
 enum GameInstallationFailure: LocalizedError {
     case downloadDirectory(String)
     case uninstall(String)
+    case move(String)
+    /// The games folder's disk is not connected: this folder.
+    case gamesFolderUnavailable(String)
 
     var errorDescription: String? {
         switch self {
         case let .downloadDirectory(message): L10n.string("model.game.downloadDirectoryFailed", message)
         case let .uninstall(reason): L10n.string("model.game.uninstallFailed", L10n.message(reason))
+        case let .move(reason): L10n.string("model.game.moveFailed", L10n.message(reason))
+        case let .gamesFolderUnavailable(path): L10n.string("model.game.gamesFolderUnavailable", path)
         }
     }
 }

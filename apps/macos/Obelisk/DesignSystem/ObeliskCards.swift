@@ -212,6 +212,46 @@ private struct AccentCapsuleStyle: ButtonStyle {
     }
 }
 
+/// A few actions behind a glass capsule, which opens their menu.
+struct GlassCapsuleMenu<Items: View>: View {
+    let title: String
+    /// What the capsule shows instead of its title, such as a picker's value.
+    var value: String?
+    var chevron = "chevron.down"
+    let identifier: String
+    @ViewBuilder let items: Items
+    @Environment(\.isEnabled) private var isEnabled
+
+    private var size: CapsuleButtonSize { .regular }
+
+    var body: some View {
+        Menu {
+            items
+        } label: {
+            HStack(spacing: 6) {
+                Text(value ?? title)
+                Image(systemName: chevron)
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(.secondary)
+            }
+            .font(.system(size: size.fontSize, weight: .semibold))
+            .foregroundStyle(isEnabled ? .primary : .tertiary)
+            .lineLimit(1)
+            .padding(.horizontal, size.padding)
+            .frame(height: size.height)
+            .modifier(StorefrontControlGlass())
+            .contentShape(.capsule)
+        }
+        .menuStyle(.button)
+        .obeliskButtonStyle(.plain)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .accessibilityLabel(title)
+        .accessibilityValue(value ?? "")
+        .accessibilityIdentifier(identifier)
+    }
+}
+
 /// A choice among a few values, as a glass capsule naming the chosen one; its
 /// menu checks it.
 struct GlassMenuPicker<Value: Hashable, Options: View>: View {
@@ -222,31 +262,10 @@ struct GlassMenuPicker<Value: Hashable, Options: View>: View {
     @ViewBuilder let options: Options
 
     var body: some View {
-        Menu {
+        GlassCapsuleMenu(title: title, value: value, chevron: "chevron.up.chevron.down", identifier: identifier) {
             Picker(title, selection: $selection) { options }
                 .pickerStyle(.inline)
                 .labelsHidden()
-        } label: {
-            HStack(spacing: 6) {
-                Text(value)
-                Image(systemName: "chevron.up.chevron.down")
-                    .font(.system(size: 9, weight: .bold))
-                    .foregroundStyle(.secondary)
-            }
-            .font(.system(size: 12, weight: .semibold))
-            .foregroundStyle(.primary)
-            .lineLimit(1)
-            .padding(.horizontal, 14)
-            .frame(height: 32)
-            .modifier(StorefrontControlGlass())
-            .contentShape(.capsule)
         }
-        .menuStyle(.button)
-        .obeliskButtonStyle(.plain)
-        .menuIndicator(.hidden)
-        .fixedSize()
-        .accessibilityLabel(title)
-        .accessibilityValue(value)
-        .accessibilityIdentifier(identifier)
     }
 }

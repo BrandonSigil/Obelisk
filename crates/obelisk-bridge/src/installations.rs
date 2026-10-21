@@ -83,6 +83,11 @@ pub enum InstallationReport {
     DownloadDirectory { message: String },
     /// An uninstall failed for this reason, a localization key.
     Uninstall { reason: String },
+    /// A move into the games folder failed for this reason, a localization
+    /// key or the system's message.
+    Move { reason: String },
+    /// The games folder's disk is not connected: this folder.
+    GamesFolderUnavailable { path: String },
 }
 
 /// What may start now, of one kind of action.
@@ -295,6 +300,10 @@ impl From<Report> for InstallationReport {
             Report::Storefront(key) => Self::Storefront { key },
             Report::DownloadDirectory(message) => Self::DownloadDirectory { message },
             Report::Uninstall(reason) => Self::Uninstall { reason },
+            Report::Move(reason) => Self::Move { reason },
+            Report::GamesFolderUnavailable(path) => Self::GamesFolderUnavailable {
+                path: path.to_string_lossy().into_owned(),
+            },
         }
     }
 }
@@ -469,8 +478,8 @@ where
         sessions,
         account,
         receipts.into(),
-        locations.library.clone(),
         locations.home.clone(),
+        crate::games_folder::shared(&locations.library),
         queueing,
     )
 }

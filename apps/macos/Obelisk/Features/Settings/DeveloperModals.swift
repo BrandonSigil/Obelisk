@@ -119,6 +119,18 @@ struct DeveloperModal: Identifiable {
                     Variant("GOG") { $0.store("gog", title: L10n.string("ui.store.gog"), url: "https://www.gog.com/") },
                 ]),
             DeveloperModal(
+                id: "games-folder", title: "Games folder",
+                detail: "From Settings › Storage, once the player picked another folder. Moves nothing here.",
+                symbol: "externaldrive.fill",
+                variants: [
+                    Variant("External disk") { $0.gamesFolder() },
+                    Variant("ExFAT") { $0.gamesFolder(format: "ExFAT") },
+                    Variant("Not enough space") { $0.gamesFolder(available: 120_000_000_000) },
+                    Variant("Read-only") { $0.gamesFolder(format: "NTFS", readOnly: true) },
+                    Variant("No games") { $0.gamesFolder(games: 0) },
+                    Variant("Back to this Mac") { $0.gamesFolder(chosen: nil) },
+                ]),
+            DeveloperModal(
                 id: "uninstall", title: "Uninstall",
                 detail: "Alert, from a game's management menu. Uninstalls nothing here.",
                 symbol: "trash.fill",
@@ -217,6 +229,19 @@ final class DeveloperModals {
         return BugReportSources(diagnostics: diagnostics, crashReports: folder,
                                 process: "obelisk-developer-modals", home: NSHomeDirectory(), unifiedLog: { "" },
                                 voile: { nil })
+    }
+
+    /// A folder the player picked: by default 23 games, 271 GB of them to
+    /// copy to an APFS disk with room for them.
+    func gamesFolder(chosen: URL? = URL(filePath: "/Volumes/Games SSD/Jeux"), games: Int = 23,
+                     available: UInt64 = 912_000_000_000, format: String? = nil, readOnly: Bool = false) {
+        let path = chosen.map { $0.appending(path: "Obelisk Games").path }
+            ?? AppIdentity.libraryDirectory.appending(path: "Games").path
+        let proposal = GamesFolderProposal(
+            chosen: chosen, path: path, games: games, copiedBytes: games > 0 ? 271_000_000_000 : 0,
+            volume: chosen == nil ? "Macintosh HD" : "Games SSD", availableBytes: available, format: format,
+            isReadOnly: readOnly)
+        present { close in GamesFolderSheet(proposal: proposal, cancel: close, confirm: close) }
     }
 
     func launchSettings(_ load: @escaping () async throws -> LaunchSettings?) {

@@ -4,6 +4,7 @@ pub mod cloud_status;
 pub mod diagnostics;
 pub mod epic;
 mod files;
+pub mod games_folder;
 pub mod gog;
 mod input;
 pub mod installations;

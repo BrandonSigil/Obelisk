@@ -517,3 +517,199 @@ fn removal_accepts_both_spellings_of_the_system_temporary_folder() {
         let _ = fs::remove_dir_all(&root);
     }
 }
+
+/// An installation with its receipt, a nested file and a link inside it.
+fn complete(parent: &Path, name: &str) -> PathBuf {
+    let game = installed(parent, name);
+    fs::create_dir_all(game.join("Contents/MacOS")).unwrap();
+    fs::write(game.join("Contents/MacOS/game"), b"binary").unwrap();
+    std::os::unix::fs::symlink("Contents/MacOS/game", game.join("launcher")).unwrap();
+    let receipt = serde_json::json!({ "appId": 620, "directory": game.to_string_lossy() });
+    fs::write(game.join(RECEIPT_FILE), receipt.to_string()).unwrap();
+    game
+}
+
+fn recorded_directory(game: &Path) -> String {
+    let receipt: serde_json::Value =
+        serde_json::from_slice(&fs::read(game.join(RECEIPT_FILE)).unwrap()).unwrap();
+    receipt["directory"].as_str().unwrap().to_owned()
+}
+
+#[test]
+fn an_installation_moves_whole_and_its_receipt_names_its_new_place() {
+    let root = tempfile::tempdir().unwrap();
+    let root = root.path().canonicalize().unwrap();
+    let game = complete(&root.join("internal"), "steam-620-macos");
+    let external = root.join("external");
+    fs::create_dir_all(&external).unwrap();
+    let mut heard = Vec::new();
+    let moved = relocate(
+        &game,
+        &external,
+        "steam-620-macos",
+        &[&root],
+        &CancelToken::new(),
+        |copied, total| heard.push((copied, total)),
+    )
+    .unwrap();
+    let destination = external.join("steam-620-macos");
+    assert_eq!(moved.directory, destination);
+    assert!(moved.original_removed && !game.exists());
+    assert!(heard.is_empty(), "the same disk only renames the folder");
+    assert_eq!(fs::read(destination.join("launcher")).unwrap(), b"binary");
+    assert_eq!(
+        recorded_directory(&destination),
+        destination.to_string_lossy()
+    );
+    assert!(lock(&destination).is_ok(), "no lock stays held");
+}
+
+#[test]
+fn a_copy_to_another_disk_keeps_links_modes_and_times_and_reports_its_bytes() {
+    use std::os::unix::fs::PermissionsExt;
+    let root = tempfile::tempdir().unwrap();
+    let root = root.path().canonicalize().unwrap();
+    let game = complete(&root.join("internal"), "steam-620-macos");
+    let binary = game.join("Contents/MacOS/game");
+    fs::set_permissions(&binary, fs::Permissions::from_mode(0o755)).unwrap();
+    let modified =
+        std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
+    File::options()
+        .write(true)
+        .open(&binary)
+        .unwrap()
+        .set_modified(modified)
+        .unwrap();
+    let held = lock(&game).unwrap();
+    let destination = root.join("external/steam-620-macos");
+    fs::create_dir_all(destination.parent().unwrap()).unwrap();
+    let mut heard = Vec::new();
+    let removed = copy_across(
+        &game,
+        &destination,
+        &CancelToken::new(),
+        &mut |copied, total| heard.push((copied, total)),
+    )
+    .unwrap();
+    drop(held);
+    assert!(removed && !game.exists());
+    let link = destination.join("launcher");
+    assert!(
+        fs::symlink_metadata(&link)
+            .unwrap()
+            .file_type()
+            .is_symlink()
+    );
+    assert_eq!(
+        fs::read_link(&link).unwrap(),
+        Path::new("Contents/MacOS/game")
+    );
+    let copied = fs::metadata(destination.join("Contents/MacOS/game")).unwrap();
+    assert_eq!(copied.permissions().mode() & 0o777, 0o755);
+    assert_eq!(copied.modified().unwrap(), modified);
+    assert!(
+        !destination.join(LOCK_FILE).exists(),
+        "the lock stays behind"
+    );
+    assert_eq!(heard.first(), Some(&(0, heard[0].1)));
+    let &(copied, total) = heard.last().unwrap();
+    assert_eq!(copied, total);
+    assert!(total > 0);
+    assert!(heard.windows(2).all(|pair| pair[0].0 <= pair[1].0));
+    assert!(!staging(destination.parent().unwrap(), "steam-620-macos").exists());
+}
+
+#[test]
+fn a_cancelled_copy_leaves_nothing_and_keeps_the_original() {
+    let root = tempfile::tempdir().unwrap();
+    let root = root.path().canonicalize().unwrap();
+    let game = complete(&root.join("internal"), "steam-620-macos");
+    let destination = root.join("external/steam-620-macos");
+    fs::create_dir_all(destination.parent().unwrap()).unwrap();
+    let cancel = CancelToken::new();
+    cancel.cancel();
+    let outcome = copy_across(&game, &destination, &cancel, &mut |_, _| {});
+    assert!(matches!(outcome, Err(RelocationFailure::Cancelled)));
+    assert!(game.join("Contents/MacOS/game").exists());
+    assert_eq!(
+        fs::read_dir(destination.parent().unwrap()).unwrap().count(),
+        0
+    );
+}
+
+#[test]
+fn a_copy_replaces_the_staging_folder_an_interrupted_move_left() {
+    let root = tempfile::tempdir().unwrap();
+    let root = root.path().canonicalize().unwrap();
+    let game = complete(&root.join("internal"), "steam-620-macos");
+    let destination = root.join("external/steam-620-macos");
+    let left = staging(destination.parent().unwrap(), "steam-620-macos");
+    fs::create_dir_all(left.join("half")).unwrap();
+    copy_across(&game, &destination, &CancelToken::new(), &mut |_, _| {}).unwrap();
+    assert!(!left.exists());
+    assert!(!destination.join("half").exists());
+    assert!(destination.join("Contents/MacOS/game").exists());
+}
+
+#[test]
+fn a_move_refuses_an_occupied_destination_and_any_other_folder() {
+    let root = tempfile::tempdir().unwrap();
+    let root = root.path().canonicalize().unwrap();
+    let game = complete(&root.join("internal"), "steam-620-macos");
+    let external = root.join("external");
+    fs::create_dir_all(external.join("steam-620-macos")).unwrap();
+    let cancel = CancelToken::new();
+    assert!(matches!(
+        relocate(&game, &external, "steam-620-macos", &[], &cancel, |_, _| {}),
+        Err(RelocationFailure::Occupied(_))
+    ));
+    assert!(matches!(
+        relocate(&game, &external, "steam-570-macos", &[], &cancel, |_, _| {}),
+        Err(RelocationFailure::Unsafe(_))
+    ));
+    assert!(matches!(
+        relocate(
+            &game,
+            &external,
+            "steam-620-macos",
+            &[&game],
+            &cancel,
+            |_, _| {}
+        ),
+        Err(RelocationFailure::Unsafe(_))
+    ));
+    assert!(matches!(
+        relocate(
+            &game,
+            game.parent().unwrap(),
+            "steam-620-macos",
+            &[],
+            &cancel,
+            |_, _| {}
+        ),
+        Err(RelocationFailure::Unsafe(_))
+    ));
+    let held = lock(&game).unwrap();
+    fs::remove_dir_all(external.join("steam-620-macos")).unwrap();
+    assert!(matches!(
+        relocate(&game, &external, "steam-620-macos", &[], &cancel, |_, _| {}),
+        Err(RelocationFailure::Busy)
+    ));
+    drop(held);
+    assert!(game.join("game.bin").exists());
+}
+
+#[test]
+fn a_rebased_receipt_keeps_its_other_fields() {
+    let root = tempfile::tempdir().unwrap();
+    let root = root.path().canonicalize().unwrap();
+    let game = complete(&root.join("internal"), "steam-620-macos");
+    let moved = root.join("elsewhere/steam-620-macos");
+    fs::create_dir_all(moved.parent().unwrap()).unwrap();
+    fs::rename(&game, &moved).unwrap();
+    rebase_receipt(&moved).unwrap();
+    let receipt: serde_json::Value =
+        serde_json::from_slice(&fs::read(moved.join(RECEIPT_FILE)).unwrap()).unwrap();
+    assert_eq!(receipt["directory"], moved.to_string_lossy().as_ref());
+    assert_eq!(receipt["appId"], 620);
+}

@@ -30,6 +30,8 @@ mod diagnostics;
 pub use diagnostics::*;
 mod installations;
 pub use installations::*;
+mod games_folder;
+pub use games_folder::{GamesFolder, GamesFolderInspection, GamesFolderState};
 mod launch_settings;
 pub use launch_settings::*;
 mod downloads;
@@ -100,6 +102,8 @@ pub enum TransferState {
     Preparing,
     Verifying,
     Downloading,
+    /// The installation moves into the games folder.
+    Moving,
     Complete,
     Cancelled,
     Failed,
@@ -112,6 +116,7 @@ impl From<obelisk_core::transfer::TransferState> for TransferState {
             State::Preparing => Self::Preparing,
             State::Verifying => Self::Verifying,
             State::Downloading => Self::Downloading,
+            State::Moving => Self::Moving,
             State::Complete => Self::Complete,
             State::Cancelled => Self::Cancelled,
             State::Failed => Self::Failed,
@@ -139,6 +144,7 @@ impl From<TransferState> for obelisk_core::transfer::TransferState {
             TransferState::Preparing => Self::Preparing,
             TransferState::Verifying => Self::Verifying,
             TransferState::Downloading => Self::Downloading,
+            TransferState::Moving => Self::Moving,
             TransferState::Complete => Self::Complete,
             TransferState::Cancelled => Self::Cancelled,
             TransferState::Failed => Self::Failed,

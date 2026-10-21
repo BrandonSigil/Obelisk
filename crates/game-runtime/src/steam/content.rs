@@ -323,6 +323,9 @@ impl<N: Network> installations::Content<Steam> for Content<N> {
     fn directory_name(&self, receipt: &Receipt<Steam>) -> String {
         steam_kit::client::installation_directory_name(receipt.product.app_id, receipt.platform)
     }
+    fn relocated(&self, receipt: &Receipt<Steam>, from: &Path) -> Result<(), String> {
+        receipt.relocated(&self.locations, from)
+    }
     fn remove_prefix(&self, receipt: &Receipt<Steam>) -> Option<Result<(), String>> {
         receipt.remove_prefix(&self.locations)
     }

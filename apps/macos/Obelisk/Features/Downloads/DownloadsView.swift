@@ -61,6 +61,7 @@ enum DownloadFormatting {
         case .install: L10n.string("ui.downloads.kind_install")
         case .update: L10n.string("ui.downloads.kind_update")
         case .repair: L10n.string("ui.downloads.kind_repair")
+        case .move: L10n.string("ui.downloads.kind_move")
         }
     }
 
@@ -159,7 +160,9 @@ struct DownloadsSidebarButton: View {
         if let running = downloads.running {
             guard let transfer else { return L10n.string("ui.transfer.preparing_short") }
             let phase = running.launching ? L10n.string("ui.downloads.before_launch") : transfer.activityTitle
-            let lead = (transfer.state == .downloading ? downloads.currentSpeed.map(DownloadFormatting.speed) : nil) ?? phase
+            // A move's pace reads as a download's.
+            let paced = transfer.state == .downloading || transfer.state == .moving
+            let lead = (paced ? downloads.currentSpeed.map(DownloadFormatting.speed) : nil) ?? phase
             return [lead, fraction.map(DownloadFormatting.percent)].compactMap { $0 }.joined(separator: " · ")
         }
         if downloads.waitsForGame { return L10n.string("ui.downloads.waiting_for_game") }

@@ -275,7 +275,7 @@ impl crate::installations::Storefront for Epic {
     const PLATFORM: obelisk_core::platform::Spelling = epic_kit::client::PLATFORM;
     const RECEIPTS_UNAVAILABLE: &'static str = "model.epic.receiptsUnavailable";
     const RECEIPTS_NOT_SAVED: &'static str = "model.epic.receiptsNotSaved";
-    const GAMES_DIRECTORY: &'static str = "Games/Epic";
+    const GAMES_DIRECTORY: &'static str = "Epic";
     const QUEUE: crate::queue::Storefront = crate::queue::Storefront::Epic;
     fn product_game(product: &Product) -> Store {
         Store {

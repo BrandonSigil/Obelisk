@@ -123,6 +123,42 @@ pub(super) fn check_switch(
     Err(Error::Recovery)
 }
 
+/// Moves every claim on a save under `from` to the same save under `to`,
+/// whichever account's vault holds it: the installation holding those saves
+/// moved there whole. Both are canonical folders. An account switch that did
+/// not finish refuses it.
+pub fn relocate(root: &Path, from: &Path, to: &Path) -> Result<()> {
+    let path = root.join("owners.json");
+    if !fs::exists(&path)? {
+        return Ok(());
+    }
+    let guard = disk::owners_lock(root, disk::OWNERS_WAIT)?;
+    check_switch(root, Some(&guard), disk::OWNERS_WAIT)?;
+    let Some(mut owners): Option<Owners> = disk::read(&path)? else {
+        return Ok(());
+    };
+    let moved: BTreeSet<PathBuf> = owners
+        .files
+        .keys()
+        .chain(owners.metadata.keys())
+        .filter(|file| file.starts_with(from))
+        .cloned()
+        .collect();
+    if moved.is_empty() {
+        return Ok(());
+    }
+    for old in moved {
+        let new = to.join(old.strip_prefix(from).map_err(|_| Error::Invalid)?);
+        if let Some(owner) = owners.files.remove(&old) {
+            owners.files.insert(new.clone(), owner);
+        }
+        if let Some(metadata) = owners.metadata.remove(&old) {
+            owners.metadata.insert(new, metadata);
+        }
+    }
+    disk::write(&path, &owners)
+}
+
 fn canonical_file(path: &Path) -> Result<PathBuf> {
     if !path.is_absolute() || path.components().any(|c| matches!(c, Component::ParentDir)) {
         return Err(Error::Invalid);
@@ -881,6 +917,45 @@ mod activation_tests {
                 )
             })
             .collect()
+    }
+
+    #[test]
+    fn a_moved_installation_s_saves_keep_their_owner_and_switch_from_their_new_place() {
+        let root = tempfile::tempdir().unwrap();
+        let disks = tempfile::tempdir().unwrap();
+        let disks = disks.path().canonicalize().unwrap();
+        let (old, new) = (disks.join("old"), disks.join("new"));
+        fs::create_dir_all(&old).unwrap();
+        fs::write(old.join("one"), b"A one").unwrap();
+        let mut first = Vault::open(root.path(), scope(1)).unwrap();
+        first.capture(&bindings(&old)).unwrap();
+        drop(first);
+        fs::rename(&old, &new).unwrap();
+        relocate(root.path(), &old, &new).unwrap();
+        let owners: Owners = disk::read(&root.path().join("owners.json"))
+            .unwrap()
+            .unwrap();
+        assert!(owners.files.keys().all(|file| file.starts_with(&new)));
+        assert!(owners.metadata.keys().all(|file| file.starts_with(&new)));
+        let mut first = Vault::open(root.path(), scope(1)).unwrap();
+        first.capture(&bindings(&new)).unwrap();
+        drop(first);
+        // Another account takes the saves over: the first one's set names
+        // each save once, at its new place.
+        let mut second = Vault::open(root.path(), scope(2)).unwrap();
+        assert!(second.activate(&bindings(&new)).unwrap());
+        assert!(!new.join("one").exists());
+        drop(second);
+        let mut first = Vault::open(root.path(), scope(1)).unwrap();
+        assert!(first.activate(&bindings(&new)).unwrap());
+        assert_eq!(fs::read(new.join("one")).unwrap(), b"A one");
+    }
+
+    #[test]
+    fn a_move_without_any_claim_leaves_the_archive_untouched() {
+        let root = tempfile::tempdir().unwrap();
+        relocate(root.path(), Path::new("/old"), Path::new("/new")).unwrap();
+        assert_eq!(fs::read_dir(root.path()).unwrap().count(), 0);
     }
 
     #[test]

@@ -340,6 +340,8 @@ final class GameInstallations<Store: InstallationStorefront> {
         case let .storefront(key): Store.failure(key)
         case let .downloadDirectory(message): GameInstallationFailure.downloadDirectory(message)
         case let .uninstall(reason): GameInstallationFailure.uninstall(reason)
+        case let .move(reason): GameInstallationFailure.move(reason)
+        case let .gamesFolderUnavailable(path): GameInstallationFailure.gamesFolderUnavailable(path)
         }
     }
 

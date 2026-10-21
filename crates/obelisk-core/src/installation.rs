@@ -6,9 +6,9 @@
 //! only preparation and file installation.
 use std::{
     fmt::Display,
-    fs::{self, File},
+    fs::{self, File, FileTimes},
     future::Future,
-    io,
+    io::{self, Read, Write},
     path::{Component, Path, PathBuf},
 };
 
@@ -28,6 +28,10 @@ use crate::{
 
 /// Receipts are small JSON documents; anything larger is not one of ours.
 const MAX_RECEIPT_BYTES: usize = 1024 * 1024;
+/// How much of a file a move copies between two looks at its cancellation.
+const COPY_CHUNK: usize = 4 * 1024 * 1024;
+/// Ends the name of the hidden folder a move to another disk copies into.
+const STAGING_SUFFIX: &str = ".obelisk-moving";
 
 /// A Transfer's progress, as every storefront presents it.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -199,12 +203,7 @@ where
     }
     let installed = install_files(prepared, root.clone(), transfer.clone()).await?;
     cancel.check()?;
-    let bytes = serde_json::to_vec_pretty(&installed.receipt)
-        .map_err(io::Error::other)
-        .map_err(InstallFailure::Io)?;
-    // Re-checked right before the replacement, so a link substituted while
-    // files were written is refused too.
-    crate::write_atomic_with(&receipt, &bytes, || receipt_path(&root).map(drop))?;
+    write_receipt(&root, &installed.receipt)?;
     transfer.update(|progress| {
         progress.completed_bytes = installed.total_bytes;
         progress.total_bytes = installed.total_bytes;
@@ -311,6 +310,16 @@ fn receipt_in<R: DeserializeOwned>(root: &Path) -> Result<Option<R>, InstallFail
         .and_then(|bytes| serde_json::from_slice(&bytes).ok()))
 }
 
+/// Makes `receipt` the Installation receipt in `root`. Its path is checked
+/// again right before the replacement, so a link substituted while files
+/// were written is refused too.
+fn write_receipt(root: &Path, receipt: &impl Serialize) -> Result<(), InstallFailure> {
+    let bytes = serde_json::to_vec_pretty(receipt).map_err(io::Error::other)?;
+    crate::write_atomic_with(&receipt_path(root)?, &bytes, || {
+        receipt_path(root).map(drop)
+    })
+}
+
 /// Why an installation was not removed.
 #[derive(Debug, Error)]
 pub enum RemovalFailure {
@@ -328,6 +337,19 @@ pub enum RemovalFailure {
 /// are removed, never followed.
 pub fn remove(directory: &Path, expected: &str, protected: &[&Path]) -> Result<(), RemovalFailure> {
     let refuse = || RemovalFailure::Unsafe(directory.to_owned());
+    let resolved = dedicated(directory, expected, protected)?.ok_or_else(refuse)?;
+    let _lock = lock(&resolved).map_err(|failure| match failure {
+        InstallFailure::Locked => RemovalFailure::Busy,
+        InstallFailure::Io(error) => RemovalFailure::Io(error),
+        _ => refuse(),
+    })?;
+    Ok(fs::remove_dir_all(&resolved)?)
+}
+
+/// The canonical path of a storefront's dedicated installation folder: named
+/// `expected`, neither being nor holding any of `protected`, and reached
+/// through no link. `None` for any other folder.
+fn dedicated(directory: &Path, expected: &str, protected: &[&Path]) -> io::Result<Option<PathBuf>> {
     if !directory.is_absolute()
         || expected.is_empty()
         || expected.contains('/')
@@ -335,7 +357,7 @@ pub fn remove(directory: &Path, expected: &str, protected: &[&Path]) -> Result<(
             .components()
             .any(|component| matches!(component, Component::ParentDir))
     {
-        return Err(refuse());
+        return Ok(None);
     }
     let candidate: PathBuf = directory
         .components()
@@ -343,28 +365,250 @@ pub fn remove(directory: &Path, expected: &str, protected: &[&Path]) -> Result<(
         .collect();
     let named = |path: &Path| path.file_name().is_some_and(|name| name == expected);
     if !fs::symlink_metadata(&candidate)?.is_dir() || !named(&candidate) {
-        return Err(refuse());
+        return Ok(None);
     }
     let resolved = candidate.canonicalize()?;
-    if !named(&resolved)
-        || resolved.components().count() <= 2
-        || protected.iter().any(|path| {
+    let safe = named(&resolved)
+        && resolved.components().count() > 2
+        && !protected.iter().any(|path| {
             path.canonicalize()
                 .unwrap_or_else(|_| path.to_path_buf())
                 .starts_with(&resolved)
         })
         // macOS spells its temporary folders both ways; any other link on
         // the way redirects the removal.
-        || system_path(&candidate) != system_path(&resolved)
-    {
+        && system_path(&candidate) == system_path(&resolved);
+    Ok(safe.then_some(resolved))
+}
+
+/// Why an installation was not moved.
+#[derive(Debug, Error)]
+pub enum RelocationFailure {
+    #[error("not a dedicated installation folder: {0}")]
+    Unsafe(PathBuf),
+    #[error("a folder is already where the installation goes: {0}")]
+    Occupied(PathBuf),
+    #[error("a Transfer, launch or uninstall holds the installation")]
+    Busy,
+    #[error("the move was cancelled")]
+    Cancelled,
+    #[error(transparent)]
+    Io(#[from] io::Error),
+}
+
+/// Where an installation went.
+#[derive(Debug)]
+pub struct Relocation {
+    /// The canonical installation folder at its old place.
+    pub origin: PathBuf,
+    /// The canonical installation folder at its new place.
+    pub directory: PathBuf,
+    /// Whether the folder at its old place is gone. A copy to another disk
+    /// that could not remove every original file still succeeded.
+    pub original_removed: bool,
+}
+
+/// Moves a storefront's dedicated installation folder, named `expected` as
+/// `remove` requires, into `parent`, an existing folder, under its
+/// installation lock. On the same disk the folder only changes its place. To
+/// another disk its files are copied into a hidden folder beside the
+/// destination, which takes the installation's name once complete, then the
+/// original goes; `progress` hears the bytes copied of the total as the copy
+/// goes, and a cancellation removes the copy and keeps the original. Links
+/// are copied as links. The Installation receipt the folder keeps then names
+/// its new place.
+pub fn relocate(
+    directory: &Path,
+    parent: &Path,
+    expected: &str,
+    protected: &[&Path],
+    cancel: &CancelToken,
+    mut progress: impl FnMut(u64, u64),
+) -> Result<Relocation, RelocationFailure> {
+    let refuse = || RelocationFailure::Unsafe(directory.to_owned());
+    let resolved = dedicated(directory, expected, protected)?.ok_or_else(refuse)?;
+    let parent = parent.canonicalize()?;
+    if parent.starts_with(&resolved) || resolved.parent() == Some(parent.as_path()) {
         return Err(refuse());
     }
+    let destination = parent.join(expected);
+    match fs::symlink_metadata(&destination) {
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Ok(_) => return Err(RelocationFailure::Occupied(destination)),
+        Err(error) => return Err(error.into()),
+    }
     let _lock = lock(&resolved).map_err(|failure| match failure {
-        InstallFailure::Locked => RemovalFailure::Busy,
-        InstallFailure::Io(error) => RemovalFailure::Io(error),
+        InstallFailure::Locked => RelocationFailure::Busy,
+        InstallFailure::Io(error) => RelocationFailure::Io(error),
         _ => refuse(),
     })?;
-    Ok(fs::remove_dir_all(&resolved)?)
+    let original_removed = match fs::rename(&resolved, &destination) {
+        Ok(()) => true,
+        Err(error) if error.kind() == io::ErrorKind::CrossesDevices => {
+            copy_across(&resolved, &destination, cancel, &mut progress)?
+        }
+        Err(error) => return Err(error.into()),
+    };
+    rebase_receipt(&destination)?;
+    Ok(Relocation {
+        origin: resolved,
+        directory: destination,
+        original_removed,
+    })
+}
+
+/// Copies the installation folder `from`, whose lock the caller holds, to
+/// `to` on another disk through its staging folder, then removes `from`:
+/// `false` when some original file stayed.
+fn copy_across(
+    from: &Path,
+    to: &Path,
+    cancel: &CancelToken,
+    progress: &mut impl FnMut(u64, u64),
+) -> Result<bool, RelocationFailure> {
+    let (Some(parent), Some(name)) = (to.parent(), to.file_name()) else {
+        return Err(RelocationFailure::Unsafe(to.to_owned()));
+    };
+    // A copy an earlier move left behind is only ever Obelisk's own.
+    let staging = staging(parent, &name.to_string_lossy());
+    match fs::symlink_metadata(&staging) {
+        Ok(_) => fs::remove_dir_all(&staging)?,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error.into()),
+    }
+    let mut copy = Copy {
+        cancel,
+        buffer: vec![0; COPY_CHUNK],
+        copied: 0,
+        total: size(from)?,
+        progress,
+    };
+    (copy.progress)(0, copy.total);
+    let outcome = copy
+        .folder(from, &staging, true)
+        .and_then(|()| Ok(fs::rename(&staging, to)?));
+    if let Err(failure) = outcome {
+        let _ = fs::remove_dir_all(&staging);
+        return Err(failure);
+    }
+    Ok(fs::remove_dir_all(from).is_ok())
+}
+
+/// The hidden folder a move to another disk copies `expected` into, inside
+/// the destination's `parent`.
+fn staging(parent: &Path, expected: &str) -> PathBuf {
+    parent.join(format!(".{expected}{STAGING_SUFFIX}"))
+}
+
+/// Whether `name` is one of the hidden folders a move to another disk
+/// copies into.
+pub fn is_staging(name: &str) -> bool {
+    name.starts_with('.') && name.ends_with(STAGING_SUFFIX)
+}
+
+/// The bytes of every regular file in `folder`, links not followed.
+fn size(folder: &Path) -> io::Result<u64> {
+    let mut total = 0;
+    for entry in fs::read_dir(folder)? {
+        let entry = entry?;
+        let kind = entry.file_type()?;
+        if kind.is_dir() {
+            total += size(&entry.path())?;
+        } else if kind.is_file() {
+            total += entry.metadata()?.len();
+        }
+    }
+    Ok(total)
+}
+
+/// One copy of an installation folder to another disk.
+struct Copy<'a, P: FnMut(u64, u64)> {
+    cancel: &'a CancelToken,
+    buffer: Vec<u8>,
+    copied: u64,
+    total: u64,
+    /// Hears the bytes copied of the total after each run written.
+    progress: &'a mut P,
+}
+
+impl<P: FnMut(u64, u64)> Copy<'_, P> {
+    /// Copies `from` into the new folder `to`: folders, regular files with
+    /// their permissions and times, and links as links. The installation
+    /// lock stays behind.
+    fn folder(&mut self, from: &Path, to: &Path, root: bool) -> Result<(), RelocationFailure> {
+        fs::create_dir(to)?;
+        for entry in fs::read_dir(from)? {
+            let entry = entry?;
+            let name = entry.file_name();
+            if root && name == LOCK_FILE {
+                continue;
+            }
+            let (source, target) = (entry.path(), to.join(&name));
+            let kind = entry.file_type()?;
+            if kind.is_symlink() {
+                std::os::unix::fs::symlink(fs::read_link(&source)?, &target)?;
+            } else if kind.is_dir() {
+                self.folder(&source, &target, false)?;
+            } else if kind.is_file() {
+                self.file(&source, &target)?;
+            }
+            // Nothing else, such as a socket, belongs to an installation.
+        }
+        // Last, so a folder that only reads still takes its files. A disk
+        // that keeps no permissions, such as exFAT, keeps what it can.
+        let _ = fs::set_permissions(to, fs::metadata(from)?.permissions());
+        Ok(())
+    }
+
+    fn file(&mut self, from: &Path, to: &Path) -> Result<(), RelocationFailure> {
+        let mut source = File::open(from)?;
+        let metadata = source.metadata()?;
+        let mut target = File::create_new(to)?;
+        loop {
+            if self.cancel.is_cancelled() {
+                return Err(RelocationFailure::Cancelled);
+            }
+            let read = match source.read(&mut self.buffer) {
+                Ok(0) => break,
+                Ok(read) => read,
+                Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+                Err(error) => return Err(error.into()),
+            };
+            target.write_all(&self.buffer[..read])?;
+            self.copied += read as u64;
+            (self.progress)(self.copied, self.total);
+        }
+        let _ = target.set_permissions(metadata.permissions());
+        if let (Ok(accessed), Ok(modified)) = (metadata.accessed(), metadata.modified()) {
+            let _ = target.set_times(
+                FileTimes::new()
+                    .set_accessed(accessed)
+                    .set_modified(modified),
+            );
+        }
+        Ok(())
+    }
+}
+
+/// Makes the Installation receipt in `root` name `root` as its folder, as
+/// after the folder moved.
+fn rebase_receipt(root: &Path) -> Result<(), RelocationFailure> {
+    let failure = |failure: InstallFailure| match failure {
+        InstallFailure::Io(error) => RelocationFailure::Io(error),
+        _ => RelocationFailure::Unsafe(root.join(RECEIPT_FILE)),
+    };
+    let Some(mut receipt) = receipt_in::<serde_json::Value>(root).map_err(failure)? else {
+        return Ok(());
+    };
+    let Some(directory) = receipt.get_mut("directory") else {
+        return Ok(());
+    };
+    let named = serde_json::Value::String(root.to_string_lossy().into_owned());
+    if *directory == named {
+        return Ok(());
+    }
+    *directory = named;
+    write_receipt(root, &receipt).map_err(failure)
 }
 
 fn system_path(path: &Path) -> PathBuf {

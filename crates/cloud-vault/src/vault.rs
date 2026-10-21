@@ -7,7 +7,7 @@ use crate::*;
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, fs::File, path::PathBuf, time::Duration};
 
-pub use projection::{Bindings, SelectedFile};
+pub use projection::{Bindings, SelectedFile, relocate};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

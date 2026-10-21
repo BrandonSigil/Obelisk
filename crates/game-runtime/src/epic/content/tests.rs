@@ -531,8 +531,8 @@ async fn an_older_receipt_learns_its_catalog_item_from_the_installation_itself()
         sessions,
         ACCOUNT.to_string(),
         file.clone(),
-        fixture.locations.library.clone(),
         fixture.locations.home.clone(),
+        crate::games_folder::GamesFolder::new(&fixture.locations.library),
         crate::installations::Queueing {
             queue: crate::queue::DownloadQueue::new(),
             account: ACCOUNT.into(),

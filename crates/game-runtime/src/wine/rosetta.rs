@@ -457,6 +457,35 @@ fn unlink_home_folders(profile: &Path) -> Result<(), Error> {
     Ok(())
 }
 
+/// The prerequisites `prefix` ran, as its record keeps them.
+fn ran_prerequisites(prefix: &Path) -> std::io::Result<BTreeSet<String>> {
+    match fs::read_to_string(prefix.join(PREREQUISITES)) {
+        Ok(text) => Ok(text.lines().map(str::to_owned).collect()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(BTreeSet::new()),
+        Err(error) => Err(error),
+    }
+}
+
+/// Records `ran` as the prerequisites `prefix` ran.
+fn record_prerequisites(prefix: &Path, ran: &BTreeSet<String>) -> std::io::Result<()> {
+    let text: Vec<_> = ran.iter().map(String::as_str).collect();
+    obelisk_core::write_atomic(&prefix.join(PREREQUISITES), text.join("\n").as_bytes())
+}
+
+/// Forgets the prerequisites `forget` picks among those `prefix` ran.
+pub(super) fn forget_prerequisites(
+    prefix: &Path,
+    forget: impl Fn(&str) -> bool,
+) -> std::io::Result<()> {
+    let mut ran = ran_prerequisites(prefix)?;
+    let before = ran.len();
+    ran.retain(|id| !forget(id));
+    if ran.len() == before {
+        return Ok(());
+    }
+    record_prerequisites(prefix, &ran)
+}
+
 /// Runs, in order, the prerequisites this prefix has not run yet. One that
 /// fails or outlasts its timeout runs again on the next launch; the game still
 /// starts, and may tell what it misses.
@@ -465,12 +494,7 @@ fn install_prerequisites(
     home: &Path,
     prerequisites: &[Prerequisite],
 ) -> Result<(), Error> {
-    let record = config.prefix.join(PREREQUISITES);
-    let mut ran: BTreeSet<String> = match fs::read_to_string(&record) {
-        Ok(text) => text.lines().map(str::to_owned).collect(),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => BTreeSet::new(),
-        Err(error) => return Err(error.into()),
-    };
+    let mut ran = ran_prerequisites(&config.prefix)?;
     let pending: Vec<_> = prerequisites
         .iter()
         .filter(|prerequisite| !prerequisite.id.contains('\n') && !ran.contains(&prerequisite.id))
@@ -482,8 +506,7 @@ fn install_prerequisites(
     for prerequisite in pending {
         if run_prerequisite(config, home, prerequisite, &log)? {
             ran.insert(prerequisite.id.clone());
-            let text: Vec<_> = ran.iter().map(String::as_str).collect();
-            obelisk_core::write_atomic(&record, text.join("\n").as_bytes())?;
+            record_prerequisites(&config.prefix, &ran)?;
         }
     }
     // The game must not start while an installer's processes still run.

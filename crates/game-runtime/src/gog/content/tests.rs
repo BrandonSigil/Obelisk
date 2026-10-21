@@ -352,8 +352,8 @@ async fn an_installed_build_updates_in_place_whether_updated_or_offered_again() 
         sessions,
         ACCOUNT.to_string(),
         file,
-        library.clone(),
         fixture.locations.home.clone(),
+        crate::games_folder::GamesFolder::new(&library),
         Queueing {
             queue: DownloadQueue::new(),
             account: ACCOUNT.into(),

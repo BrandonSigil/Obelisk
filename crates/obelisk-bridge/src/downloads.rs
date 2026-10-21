@@ -18,6 +18,8 @@ pub enum DownloadKind {
     Install,
     Update,
     Repair,
+    /// The installation moves into the games folder.
+    Move,
 }
 
 /// One Transfer in the queue.
@@ -64,6 +66,7 @@ impl From<queue::Item> for DownloadItem {
                 queue::Kind::Install => DownloadKind::Install,
                 queue::Kind::Update => DownloadKind::Update,
                 queue::Kind::Repair => DownloadKind::Repair,
+                queue::Kind::Move => DownloadKind::Move,
             },
             automatic: item.automatic,
             launching: item.launching,

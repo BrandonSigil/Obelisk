@@ -193,6 +193,8 @@ pub enum TransferState {
     Preparing,
     Verifying,
     Downloading,
+    /// The installation moves into the games folder.
+    Moving,
     Complete,
     Cancelled,
     Failed,

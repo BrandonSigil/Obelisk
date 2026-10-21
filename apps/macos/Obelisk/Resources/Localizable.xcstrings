@@ -7488,13 +7488,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "%1$@ installs your games here and keeps their data."
+            "value": "%1$@ keeps your saves, its runtimes and your Windows games’ environments here, on this Mac."
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "%1$@ y installe vos jeux et y garde leurs données."
+            "value": "%1$@ y garde vos sauvegardes, ses runtimes et les environnements de vos jeux Windows, sur ce Mac."
           }
         }
       }
@@ -14321,6 +14321,775 @@
           "stringUnit": {
             "state": "translated",
             "value": "Ajoutés après les arguments du jeu à chaque lancement. Mettez un argument qui contient des espaces entre guillemets doubles."
+          }
+        }
+      }
+    },
+    "model.game.moveFailed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Could not move the game: %@"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Impossible de déplacer le jeu : %@"
+          }
+        }
+      }
+    },
+    "model.game.gamesFolderUnavailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The disk of the games folder is not connected: %@. Connect it, or choose another folder in Settings."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Le disque du dossier des jeux n’est pas connecté : %@. Connectez-le, ou choisissez un autre dossier dans les Réglages."
+          }
+        }
+      }
+    },
+    "model.installations.moveOccupied": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A folder of the same name is already in the games folder."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Un dossier du même nom se trouve déjà dans le dossier des jeux."
+          }
+        }
+      }
+    },
+    "model.installations.moveNoSpace": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The disk of the games folder is full."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Le disque du dossier des jeux est plein."
+          }
+        }
+      }
+    },
+    "model.installations.moveRecordsNotUpdated": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The game moved, but the place of its Cloud saves could not be updated."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Le jeu a été déplacé, mais l’emplacement de ses sauvegardes Cloud n’a pas pu être mis à jour."
+          }
+        }
+      }
+    },
+    "model.installations.originalNotRemoved": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The game moved, but some of its files could not be deleted from its old folder."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Le jeu a été déplacé, mais certains de ses fichiers n’ont pas pu être supprimés de son ancien dossier."
+          }
+        }
+      }
+    },
+    "model.gamesFolder.missing": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This folder no longer exists."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ce dossier n’existe plus."
+          }
+        }
+      }
+    },
+    "model.gamesFolder.inside": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choose a folder outside %1$@’s own folders and outside your games."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choisissez un dossier hors des dossiers d’%1$@ et hors de vos jeux."
+          }
+        }
+      }
+    },
+    "model.gamesFolder.refused": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This folder cannot hold your games."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ce dossier ne peut pas accueillir vos jeux."
+          }
+        }
+      }
+    },
+    "model.gamesFolder.failed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Could not change the games folder: %@"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Impossible de changer le dossier des jeux : %@"
+          }
+        }
+      }
+    },
+    "ui.transfer.moving": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Moving"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Déplacement en cours"
+          }
+        }
+      }
+    },
+    "ui.transfer.moving_short": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Moving…"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Déplacement…"
+          }
+        }
+      }
+    },
+    "ui.transfer.moved_files": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Files moved: %1$@ of %2$@"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fichiers déplacés : %1$@ sur %2$@"
+          }
+        }
+      }
+    },
+    "ui.downloads.kind_move": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Move"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Déplacement"
+          }
+        }
+      }
+    },
+    "ui.settings.games_folder": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Games folder"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dossier des jeux"
+          }
+        }
+      }
+    },
+    "ui.settings.games_folder_description": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ installs your games here."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ y installe vos jeux."
+          }
+        }
+      }
+    },
+    "ui.settings.games_folder_change": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Change…"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Changer…"
+          }
+        }
+      }
+    },
+    "ui.settings.games_folder_choose": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choose Another Folder…"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choisir un autre dossier…"
+          }
+        }
+      }
+    },
+    "ui.settings.games_folder_back": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Move Back to This Mac"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Revenir sur ce Mac"
+          }
+        }
+      }
+    },
+    "ui.settings.games_folder_pick": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choose where %1$@ installs your games, such as a folder on an external disk."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choisissez où %1$@ installe vos jeux, par exemple un dossier sur un disque externe."
+          }
+        }
+      }
+    },
+    "ui.settings.games_folder_pick_confirm": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choose"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choisir"
+          }
+        }
+      }
+    },
+    "ui.settings.games_folder_failed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Could not use this folder"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Impossible d’utiliser ce dossier"
+          }
+        }
+      }
+    },
+    "ui.settings.games_moving": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "Moving %lld game"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "Moving %lld games"
+                }
+              }
+            }
+          }
+        },
+        "fr": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "Déplacement de %lld jeu"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "Déplacement de %lld jeux"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "ui.settings.games_moving_description": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "They move one at a time in Downloads. A game cannot be played while it moves."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ils sont déplacés un par un dans les téléchargements. Un jeu ne peut pas être lancé pendant son déplacement."
+          }
+        }
+      }
+    },
+    "ui.settings.games_moving_show": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Show"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Afficher"
+          }
+        }
+      }
+    },
+    "ui.settings.games_outside": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld game is outside the games folder"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld games are outside the games folder"
+                }
+              }
+            }
+          }
+        },
+        "fr": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld jeu est hors du dossier des jeux"
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld jeux sont hors du dossier des jeux"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "ui.settings.games_outside_description": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A game outside it stays playable where it is."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Un jeu hors du dossier reste jouable là où il est."
+          }
+        }
+      }
+    },
+    "ui.settings.games_outside_move": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Move"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Déplacer"
+          }
+        }
+      }
+    },
+    "ui.games_folder.title_move": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Move your games to “%1$@”?"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Déplacer vos jeux vers « %1$@ » ?"
+          }
+        }
+      }
+    },
+    "ui.games_folder.title_install": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Install your games on “%1$@”?"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Installer vos jeux sur « %1$@ » ?"
+          }
+        }
+      }
+    },
+    "ui.games_folder.title_mac": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Move your games back to this Mac?"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ramener vos jeux sur ce Mac ?"
+          }
+        }
+      }
+    },
+    "ui.games_folder.moves": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld installed game moves there, in Downloads. It cannot be played while it moves."
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld installed games move there one at a time, in Downloads. A game cannot be played while it moves; the others can."
+                }
+              }
+            }
+          }
+        },
+        "fr": {
+          "variations": {
+            "plural": {
+              "one": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld jeu installé y sera déplacé, dans les téléchargements. Il ne peut pas être lancé pendant son déplacement."
+                }
+              },
+              "other": {
+                "stringUnit": {
+                  "state": "translated",
+                  "value": "%lld jeux installés y seront déplacés un par un, dans les téléchargements. Un jeu ne peut pas être lancé pendant son déplacement ; les autres, si."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "ui.games_folder.space": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ to copy · %2$@ available on this disk"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ à copier · %2$@ disponibles sur ce disque"
+          }
+        }
+      }
+    },
+    "ui.games_folder.installs": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ installs your games there from now on."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ y installera désormais vos jeux."
+          }
+        }
+      }
+    },
+    "ui.games_folder.stays": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ keeps your saves and your Windows games’ environments on this Mac."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ garde vos sauvegardes et les environnements de vos jeux Windows sur ce Mac."
+          }
+        }
+      }
+    },
+    "ui.games_folder.read_only": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "“%1$@” is read-only: choose a folder on another disk."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "« %1$@ » est en lecture seule : choisissez un dossier sur un autre disque."
+          }
+        }
+      }
+    },
+    "ui.games_folder.no_space": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Not enough space on “%1$@”: %2$@ to copy, %3$@ available."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pas assez d’espace sur « %1$@ » : %2$@ à copier, %3$@ disponibles."
+          }
+        }
+      }
+    },
+    "ui.games_folder.format": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "“%1$@” is formatted as %2$@. Games can be installed there, but it is slower with some of them and can be damaged if it is unplugged without being ejected. APFS suits a disk used only with Macs best."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "« %1$@ » est formaté en %2$@. Les jeux peuvent s’y installer, mais il est plus lent avec certains et peut s’abîmer s’il est débranché sans être éjecté. APFS convient mieux à un disque utilisé seulement avec des Mac."
+          }
+        }
+      }
+    },
+    "ui.games_folder.move": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Move Games"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Déplacer les jeux"
+          }
+        }
+      }
+    },
+    "ui.games_folder.use": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Use This Folder"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Utiliser ce dossier"
+          }
+        }
+      }
+    },
+    "ui.settings.games_folder_disconnected": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Its disk is not connected: its games show as not installed until it comes back."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Son disque n’est pas connecté : ses jeux apparaissent comme non installés jusqu’à son retour."
           }
         }
       }

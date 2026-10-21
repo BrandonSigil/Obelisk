@@ -331,6 +331,9 @@ impl<N: Network> installations::Content<Epic> for Content<N> {
             receipt.platform,
         )
     }
+    fn relocated(&self, receipt: &Receipt<Epic>, from: &Path) -> Result<(), String> {
+        receipt.relocated(&self.locations, from)
+    }
     fn remove_prefix(&self, receipt: &Receipt<Epic>) -> Option<Result<(), String>> {
         receipt.remove_prefix(&self.locations)
     }

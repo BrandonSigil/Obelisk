@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// Obelisk's settings: a hero drawn from Obelisk's icon, its prism and the
 /// stores' beams, reaching under the title bar band; then the appearance, the
@@ -10,6 +11,8 @@ struct SettingsView: View {
     @Bindable var model: AppModel
     @State private var showsBackdrop = false
     @State private var showsTitle = false
+    /// The player picks another folder for the games.
+    @State private var picksGamesFolder = false
 
     /// The hero's height below the bar it reaches under.
     private static var heroHeight: CGFloat { 210 }
@@ -49,9 +52,7 @@ struct SettingsView: View {
                         }
                     }
                     GamePageSection(title: L10n.string("ui.settings.storage")) {
-                        ObeliskCard {
-                            libraryFolder
-                        }
+                        storage
                     }
                     GamePageSection(title: L10n.string("ui.settings.stores")) {
                         ObeliskCard {
@@ -101,6 +102,17 @@ struct SettingsView: View {
             SettingsBar(showsBackdrop: showsBackdrop, showsTitle: showsTitle)
         }
         .ignoresSafeArea(.container, edges: .top)
+        .fileImporter(isPresented: $picksGamesFolder, allowedContentTypes: [.folder]) { result in
+            if case let .success(folder) = result { model.gamesFolder.propose(folder) }
+        }
+        .fileDialogMessage(L10n.string("ui.settings.games_folder_pick", AppIdentity.name))
+        .fileDialogConfirmationLabel(L10n.string("ui.settings.games_folder_pick_confirm"))
+        .fileDialogDefaultDirectory(URL(filePath: "/Volumes", directoryHint: .isDirectory))
+        .sheet(item: Bindable(model.gamesFolder).proposal) { proposal in
+            GamesFolderSheet(proposal: proposal, cancel: { model.gamesFolder.proposal = nil },
+                             confirm: model.gamesFolder.confirm)
+        }
+        .errorAlert(L10n.string("ui.settings.games_folder_failed"), message: Bindable(model.gamesFolder).failure)
     }
 
     /// Asks for the restart a newly chosen language waits for.
@@ -213,19 +225,87 @@ struct SettingsView: View {
         }
     }
 
+    private var storage: some View {
+        let moving = model.gamesMoving
+        let outside = moving > 0 ? 0 : model.gamesOutsideFolder
+        return ObeliskCard {
+            gamesFolder(isMoving: moving > 0)
+            if moving > 0 {
+                ObeliskCardDivider()
+                gamesMoving(moving)
+            } else if outside > 0 {
+                ObeliskCardDivider()
+                gamesOutside(outside)
+            }
+            ObeliskCardDivider()
+            libraryFolder
+        }
+    }
+
+    private func gamesFolder(isMoving: Bool) -> some View {
+        let folder = model.gamesFolder
+        return ObeliskRow(title: L10n.string("ui.settings.games_folder")) {
+            SymbolTile(name: folder.isDefault ? "folder.fill" : "externaldrive.fill", colors: TileColors.blue)
+        } detail: {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(L10n.string("ui.settings.games_folder_description", AppIdentity.name))
+                if !folder.isConnected {
+                    Label(L10n.string("ui.settings.games_folder_disconnected"), systemImage: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                }
+                FolderPath(path: folder.path)
+            }
+        } accessory: {
+            HStack(spacing: 8) {
+                StorefrontGlassButton(systemName: "folder", size: 13, label: L10n.string("ui.settings.show_in_finder"),
+                                      identifier: "settings-show-games-folder") {
+                    NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: folder.path)
+                }
+                .help(L10n.string("ui.settings.show_in_finder"))
+                if folder.isDefault {
+                    GlassCapsuleButton(title: L10n.string("ui.settings.games_folder_change"),
+                                       identifier: "settings-change-games-folder") { picksGamesFolder = true }
+                } else {
+                    GlassCapsuleMenu(title: L10n.string("ui.settings.games_folder_change"),
+                                     identifier: "settings-change-games-folder") {
+                        Button(L10n.string("ui.settings.games_folder_choose")) { picksGamesFolder = true }
+                        Button(L10n.string("ui.settings.games_folder_back")) { folder.proposeDefault() }
+                    }
+                }
+            }
+            .disabled(isMoving)
+        }
+    }
+
+    private func gamesMoving(_ count: Int) -> some View {
+        ObeliskRow(title: L10n.string("ui.settings.games_moving", Int64(count))) {
+            SymbolTile(name: "arrow.right.arrow.left", colors: TileColors.blue)
+        } detail: {
+            Text(L10n.string("ui.settings.games_moving_description"))
+        } accessory: {
+            GlassCapsuleButton(title: L10n.string("ui.settings.games_moving_show"),
+                               identifier: "settings-show-moves") { model.downloads.isPresented = true }
+        }
+    }
+
+    private func gamesOutside(_ count: Int) -> some View {
+        ObeliskRow(title: L10n.string("ui.settings.games_outside", Int64(count))) {
+            SymbolTile(name: "exclamationmark.triangle.fill", colors: TileColors.gold)
+        } detail: {
+            Text(L10n.string("ui.settings.games_outside_description"))
+        } accessory: {
+            GlassCapsuleButton(title: L10n.string("ui.settings.games_outside_move"),
+                               identifier: "settings-move-outside-games", action: model.gamesFolder.gather)
+        }
+    }
+
     private var libraryFolder: some View {
         ObeliskRow(title: L10n.string("ui.settings.library_folder")) {
             SymbolTile(name: "folder.fill", colors: TileColors.blue)
         } detail: {
             VStack(alignment: .leading, spacing: 4) {
                 Text(L10n.string("ui.settings.library_folder_description", AppIdentity.name))
-                Text(model.libraryDirectory)
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(.tertiary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                    .textSelection(.enabled)
-                    .help(model.libraryDirectory)
+                FolderPath(path: model.libraryDirectory)
             }
         } accessory: {
             GlassCapsuleButton(title: L10n.string("ui.settings.show_in_finder"), systemImage: "folder",
@@ -817,6 +897,21 @@ private struct SettingsStoreRow: View {
 #if DEBUG
 /// Debug builds only: each modal Obelisk presents, opened over made-up data
 /// to check how it looks.
+/// A folder's path under a row's description, whole in its help tag.
+private struct FolderPath: View {
+    let path: String
+
+    var body: some View {
+        Text(path)
+            .font(.system(size: 11, design: .monospaced))
+            .foregroundStyle(.tertiary)
+            .lineLimit(1)
+            .truncationMode(.middle)
+            .textSelection(.enabled)
+            .help(path)
+    }
+}
+
 private struct DeveloperModalsCard: View {
     @State private var modals = DeveloperModals()
 
@@ -844,28 +939,11 @@ private struct DeveloperModalsCard: View {
                 variant.open(modals)
             }
         } else {
-            Menu {
+            GlassCapsuleMenu(title: L10n.string("ui.settings.open"), identifier: "developer-modal-\(modal.id)") {
                 ForEach(modal.variants) { variant in
                     Button(variant.title) { variant.open(modals) }
                 }
-            } label: {
-                HStack(spacing: 6) {
-                    Text(L10n.string("ui.settings.open"))
-                    Image(systemName: "chevron.down")
-                        .font(.system(size: 9, weight: .bold))
-                }
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(.primary)
-                .padding(.horizontal, 14)
-                .frame(height: 32)
-                .modifier(StorefrontControlGlass())
-                .contentShape(.capsule)
             }
-            .menuStyle(.button)
-            .obeliskButtonStyle(.plain)
-            .menuIndicator(.hidden)
-            .fixedSize()
-            .accessibilityIdentifier("developer-modal-\(modal.id)")
         }
     }
 }

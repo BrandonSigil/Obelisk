@@ -189,7 +189,7 @@ impl crate::installations::Storefront for Gog {
     const PLATFORM: obelisk_core::platform::Spelling = gog_kit::client::PLATFORM;
     const RECEIPTS_UNAVAILABLE: &'static str = "model.gog.receiptsUnavailable";
     const RECEIPTS_NOT_SAVED: &'static str = "model.gog.receiptsNotSaved";
-    const GAMES_DIRECTORY: &'static str = "Games/GOG";
+    const GAMES_DIRECTORY: &'static str = "GOG";
     const QUEUE: crate::queue::Storefront = crate::queue::Storefront::Gog;
     fn product_game(product: &Product) -> String {
         product.product_id.clone()

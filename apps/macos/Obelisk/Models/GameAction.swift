@@ -279,6 +279,7 @@ extension GameTransfer {
         case .preparing: L10n.string("ui.transfer.checking_updates")
         case .verifying: L10n.string("ui.transfer.verifying_files")
         case .downloading: L10n.string("ui.transfer.downloading")
+        case .moving: L10n.string("ui.transfer.moving")
         case .complete: L10n.string("ui.transfer.up_to_date")
         case .cancelled: L10n.string("ui.transfer.interrupted")
         case .failed: L10n.string("ui.transfer.failed")
@@ -286,7 +287,8 @@ extension GameTransfer {
     }
 
     var verifiedProgressText: String {
-        L10n.string("ui.transfer.verified_files", GameFormatting.bytes(completedBytes), GameFormatting.bytes(totalBytes))
+        let key = state == .moving ? "ui.transfer.moved_files" : "ui.transfer.verified_files"
+        return L10n.string(key, GameFormatting.bytes(completedBytes), GameFormatting.bytes(totalBytes))
     }
 
     var downloadedGameDataText: String? {
@@ -305,6 +307,7 @@ extension GameTransfer {
         case .preparing: L10n.string("ui.transfer.preparing_short")
         case .verifying: L10n.string("ui.transfer.verifying_short")
         case .downloading: L10n.string("ui.transfer.downloading_short")
+        case .moving: L10n.string("ui.transfer.moving_short")
         case .complete: L10n.string("ui.transfer.finishing_short")
         case .cancelled: L10n.string("ui.transfer.cancelling_short")
         case .failed: L10n.string("ui.transfer.failed_short")
@@ -312,7 +315,7 @@ extension GameTransfer {
     }
 
     var isInProgress: Bool {
-        state == .preparing || state == .verifying || state == .downloading
+        state == .preparing || state == .verifying || state == .downloading || state == .moving
     }
 
     var progressFraction: Double? {

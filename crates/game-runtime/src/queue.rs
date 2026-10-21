@@ -28,6 +28,8 @@ pub enum Kind {
     Update,
     /// The installed build's files are checked and repaired.
     Repair,
+    /// The installation moves into the games folder.
+    Move,
 }
 
 /// One Transfer in the queue, as the player sees it.

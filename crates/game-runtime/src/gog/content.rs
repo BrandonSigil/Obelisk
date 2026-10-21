@@ -232,6 +232,19 @@ impl<N: Network> installations::Content<Gog> for Content<N> {
     fn directory_name(&self, receipt: &Receipt<Gog>) -> String {
         gog_kit::client::installation_directory_name(&receipt.product.product_id, receipt.platform)
     }
+    /// Its installer scripts ran with the old folder: they run again with
+    /// the new one at the next launch.
+    fn relocated(&self, receipt: &Receipt<Gog>, from: &Path) -> Result<(), String> {
+        receipt.relocated(&self.locations, from)?;
+        let Ok(Some(windows)) = receipt.windows(&self.locations) else {
+            return Ok(());
+        };
+        windows
+            .forget_prerequisites(&self.locations, |id| {
+                id.starts_with("gog:isi:") || id.starts_with("gog:installer:")
+            })
+            .map_err(|error| error.to_string())
+    }
     fn remove_prefix(&self, receipt: &Receipt<Gog>) -> Option<Result<(), String>> {
         receipt.remove_prefix(&self.locations)
     }

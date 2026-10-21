@@ -345,8 +345,8 @@ impl Account {
             sessions,
             42,
             receipts.clone(),
-            library.clone(),
             library.join("home"),
+            crate::games_folder::GamesFolder::new(&library),
             Queueing {
                 queue: DownloadQueue::new(),
                 account: "42".into(),

@@ -29,6 +29,8 @@ struct Script {
     launches: VecDeque<Launched>,
     archive: Option<Failure>,
     prefix: Option<Result<(), String>>,
+    /// What the next move's records report.
+    relocated: Option<Result<(), String>>,
     held: bool,
     calls: Vec<String>,
     /// Each Transfer, launches' verifications included.
@@ -266,6 +268,16 @@ impl super::Content<Steam> for Content {
     fn directory_name(&self, receipt: &Receipt<Steam>) -> String {
         steam_kit::client::installation_directory_name(receipt.game(), receipt.platform)
     }
+    fn relocated(&self, receipt: &Receipt<Steam>, from: &Path) -> Result<(), String> {
+        self.0.with(|script| {
+            script.calls.push(format!(
+                "relocated:{}:{}",
+                receipt.game(),
+                from.file_name().unwrap().to_string_lossy()
+            ));
+            script.relocated.take().unwrap_or(Ok(()))
+        })
+    }
     fn remove_prefix(&self, receipt: &Receipt<Steam>) -> Option<Result<(), String>> {
         (receipt.platform == Platform::Windows).then(|| {
             self.0.with(|script| {
@@ -426,6 +438,9 @@ struct Fixture {
     sessions: Arc<Sessions<Steam>>,
     queue: Arc<DownloadQueue>,
     installations: Installations<Steam>,
+    folder: Arc<GamesFolder>,
+    /// A place outside Obelisk's library, such as another disk.
+    outside: tempfile::TempDir,
 }
 
 /// Waits until no Transfer of the account runs or waits in the queue.
@@ -502,18 +517,21 @@ impl Fixture {
         ));
         eventually(|| !sessions.state().recovering).await;
         let queue = DownloadQueue::new();
+        let folder = GamesFolder::new(&root);
         let installations = Installations::new(
             Arc::new(Content(fake.clone())),
             sessions.clone(),
             42,
             file,
-            root.clone(),
             root.join("home"),
+            folder.clone(),
             queueing(&queue),
         );
         Self {
             _root: directory,
             root,
+            outside: tempfile::tempdir().unwrap(),
+            folder,
             fake,
             runtimes,
             sessions,
@@ -537,6 +555,19 @@ impl Fixture {
     }
     fn receipt(&self) -> Receipt<Steam> {
         self.installations.state().receipts[0].clone()
+    }
+    /// Account 42's installations again, from `file`, in the same games
+    /// folder.
+    fn reload(&self, file: PathBuf) -> Installations<Steam> {
+        Installations::new(
+            Arc::new(Content(Fake::new())),
+            self.sessions.clone(),
+            42,
+            file,
+            self.root.join("home"),
+            self.folder.clone(),
+            queueing(&self.queue),
+        )
     }
     fn saved(&self) -> Vec<Receipt<Steam>> {
         load(&self.root.join("steam-installations-42.json")).unwrap()
@@ -587,27 +618,11 @@ async fn receipts_load_from_the_account_file_without_games_removed_outside_obeli
 
     std::fs::remove_dir_all(fixture.root.join("Games/Steam/steam-620-macos")).unwrap();
     let file = fixture.root.join("steam-installations-42.json");
-    let reloaded = Installations::new(
-        Arc::new(Content(Fake::new())),
-        fixture.sessions.clone(),
-        42,
-        file.clone(),
-        fixture.root.clone(),
-        fixture.root.join("home"),
-        queueing(&fixture.queue),
-    );
+    let reloaded = fixture.reload(file.clone());
     assert!(reloaded.state().receipts.is_empty());
 
     std::fs::write(&file, b"not json").unwrap();
-    let unreadable = Installations::new(
-        Arc::new(Content(Fake::new())),
-        fixture.sessions.clone(),
-        42,
-        file,
-        fixture.root.clone(),
-        fixture.root.join("home"),
-        queueing(&fixture.queue),
-    );
+    let unreadable = fixture.reload(file);
     assert_eq!(
         unreadable.state().warning.map(|(_, key)| key).as_deref(),
         Some("model.steam.receiptsUnavailable")
@@ -1558,8 +1573,8 @@ async fn a_new_installation_goes_to_the_library_and_an_update_or_launch_stays_wh
         fixture.sessions.clone(),
         43,
         file,
-        fixture.root.clone(),
         fixture.root.join("home"),
+        fixture.folder.clone(),
         queueing(&DownloadQueue::new()),
     );
     moved.launch("620-macos");
@@ -1826,4 +1841,269 @@ async fn the_transfer_after_one_cancelled_during_its_runtimes_gets_them_again() 
     let state = fixture.installations.state();
     assert_eq!(state.transfer.unwrap().state, TransferState::Complete);
     assert_eq!(state.receipts.len(), 1);
+}
+
+// MARK: The games folder
+
+impl Fixture {
+    /// Another folder to keep the games in, and the installation folder
+    /// Portal 2's Mac build gets there.
+    fn elsewhere(&self) -> (PathBuf, PathBuf) {
+        let chosen = self.outside.path().canonicalize().unwrap().join("External");
+        std::fs::create_dir_all(&chosen).unwrap();
+        let installation = chosen
+            .join(games_folder::CHOSEN_DIRECTORY)
+            .join("Steam")
+            .join(steam_kit::client::installation_directory_name(
+                620,
+                Platform::Mac,
+            ));
+        (chosen, installation)
+    }
+
+    /// The queue's moves, waiting or running.
+    fn moves(&self) -> Vec<queue::Item> {
+        let view = self.queue.view();
+        view.running
+            .into_iter()
+            .chain(view.waiting)
+            .filter(|item| item.kind == queue::Kind::Move)
+            .collect()
+    }
+}
+
+#[tokio::test]
+async fn choosing_another_games_folder_moves_each_installation_there_through_the_queue() {
+    let fixture = Fixture::new(true).await;
+    let old = PathBuf::from(&fixture.receipt().directory);
+    let (chosen, moved) = fixture.elsewhere();
+    std::fs::write(old.join("game.bin"), b"Portal 2").unwrap();
+
+    fixture.folder.choose(&chosen).unwrap();
+    eventually(|| fixture.receipt().directory == moved.to_string_lossy()).await;
+    eventually(|| fixture.moves().is_empty()).await;
+
+    assert_eq!(std::fs::read(moved.join("game.bin")).unwrap(), b"Portal 2");
+    assert!(!old.exists());
+    assert_eq!(fixture.saved(), fixture.installations.state().receipts);
+    assert!(
+        fixture
+            .fake
+            .calls()
+            .contains(&"relocated:620:steam-620-macos".to_owned()),
+        "the Cloud archive follows the saves inside it"
+    );
+    assert!(
+        !fixture.root.join("Games").exists(),
+        "Obelisk's emptied folder goes"
+    );
+    let state = fixture.installations.state();
+    assert_eq!(state.report, None);
+    assert_eq!(state.warning, None);
+    assert!(!state.downloading && state.transfer.is_none());
+    // A new installation goes there too.
+    fixture.installations.install(Offer {
+        product: Product {
+            app_id: 570,
+            language: "french".into(),
+        },
+        name: "Dota 2".into(),
+    });
+    idle(&fixture.installations).await;
+    let receipts = fixture.installations.state().receipts;
+    let dota = receipts
+        .iter()
+        .find(|receipt| receipt.game() == 570)
+        .unwrap();
+    assert!(Path::new(&dota.directory).starts_with(fixture.folder.path()));
+}
+
+#[tokio::test]
+async fn a_move_waits_behind_the_transfer_of_its_game_queued_before_it() {
+    let fixture = Fixture::new(true).await;
+    let (chosen, moved) = fixture.elsewhere();
+    fixture.fake.hold();
+    fixture.installations.update("620-macos");
+    eventually(|| fixture.installations.state().downloading).await;
+
+    fixture.folder.choose(&chosen).unwrap();
+    assert_eq!(fixture.moves().len(), 1);
+    let state = fixture.installations.state();
+    assert!(
+        state.receipts[0]
+            .directory
+            .ends_with("Games/Steam/steam-620-macos")
+    );
+    assert!(!modifiable(&fixture.installations, 620));
+
+    fixture.fake.release();
+    eventually(|| fixture.receipt().directory == moved.to_string_lossy()).await;
+    assert!(moved.is_dir());
+}
+
+#[tokio::test]
+async fn a_game_whose_move_waits_still_launches_and_a_removed_move_leaves_it_in_place() {
+    let fixture = Fixture::new(true).await;
+    let old = fixture.receipt().directory;
+    let (chosen, _) = fixture.elsewhere();
+    fixture.fake.hold();
+    fixture.installations.update("620-macos");
+    eventually(|| fixture.installations.state().downloading).await;
+    fixture.folder.choose(&chosen).unwrap();
+
+    let state = fixture.installations.state();
+    assert!(
+        state.queued.is_empty(),
+        "a waiting move does not show its game as queued"
+    );
+    let moving = fixture.moves();
+    fixture.queue.remove(moving[0].id);
+    fixture.fake.release();
+    idle(&fixture.installations).await;
+    assert_eq!(fixture.receipt().directory, old);
+    assert!(Path::new(&old).is_dir());
+}
+
+#[tokio::test]
+async fn a_new_installation_still_waiting_goes_to_the_chosen_folder() {
+    let fixture = Fixture::new(false).await;
+    let (chosen, _) = fixture.elsewhere();
+    fixture.fake.hold();
+    fixture.installations.install(Offer {
+        product: Product {
+            app_id: 570,
+            language: "french".into(),
+        },
+        name: "Dota 2".into(),
+    });
+    eventually(|| fixture.installations.state().downloading).await;
+    fixture.installations.install(fixture.offer());
+
+    fixture.folder.choose(&chosen).unwrap();
+    fixture.fake.release();
+    idle(&fixture.installations).await;
+
+    let receipts = fixture.installations.state().receipts;
+    let directory = |game: u32| {
+        receipts
+            .iter()
+            .find(|receipt| receipt.game() == game)
+            .map(|receipt| PathBuf::from(&receipt.directory))
+            .unwrap()
+    };
+    // The Transfer under way finishes where it started.
+    assert!(directory(570).starts_with(fixture.root.join("Games")));
+    assert!(directory(620).starts_with(fixture.folder.path()));
+}
+
+#[tokio::test]
+async fn a_move_into_an_occupied_folder_is_reported_and_keeps_the_installation() {
+    let fixture = Fixture::new(true).await;
+    let old = fixture.receipt().directory;
+    let (chosen, moved) = fixture.elsewhere();
+    std::fs::create_dir_all(&moved).unwrap();
+
+    fixture.folder.choose(&chosen).unwrap();
+    eventually(|| fixture.installations.state().report.is_some()).await;
+    eventually(|| fixture.moves().is_empty()).await;
+    assert_eq!(
+        fixture.installations.state().report,
+        Some(Report::Move("model.installations.moveOccupied".into()))
+    );
+    assert_eq!(fixture.receipt().directory, old);
+    assert!(fixture.saved()[0].directory == old);
+}
+
+#[tokio::test]
+async fn a_move_whose_records_did_not_follow_warns_but_keeps_the_new_place() {
+    let fixture = Fixture::new(true).await;
+    let (chosen, moved) = fixture.elsewhere();
+    fixture
+        .fake
+        .with(|script| script.relocated = Some(Err("busy".into())));
+    fixture.folder.choose(&chosen).unwrap();
+    eventually(|| fixture.receipt().directory == moved.to_string_lossy()).await;
+    eventually(|| fixture.installations.state().warning.is_some()).await;
+    assert_eq!(
+        fixture.installations.state().warning.map(|(_, key)| key),
+        Some("model.installations.moveRecordsNotUpdated".into())
+    );
+}
+
+#[tokio::test]
+async fn an_installation_on_a_disconnected_disk_is_kept_but_not_shown() {
+    let fixture = Fixture::new(true).await;
+    let file = fixture.root.join("steam-installations-42.json");
+    let away = receipt(
+        Path::new(
+            "/Volumes/Obelisk Test Disk That Is Not There/Obelisk Games/Steam/steam-620-windows",
+        ),
+        Platform::Windows,
+    );
+    let mut saved = fixture.saved();
+    saved.push(away.clone());
+    save(&file, &saved).unwrap();
+    let reloaded = fixture.reload(file);
+    let state = reloaded.state();
+    assert_eq!(state.receipts.len(), 1);
+    assert_eq!(state.receipts[0].platform, Platform::Mac);
+
+    // Saving the account's receipts keeps the one of the missing disk.
+    reloaded.uninstall("620-macos");
+    eventually(|| reloaded.state().receipts.is_empty()).await;
+    eventually(|| fixture.saved() == [away.clone()]).await;
+    fixture.folder.volumes_changed();
+    assert!(reloaded.state().receipts.is_empty());
+}
+
+#[tokio::test]
+async fn a_receipt_whose_installation_moved_into_the_games_folder_names_it_there() {
+    let fixture = Fixture::new(false).await;
+    let file = fixture.root.join("steam-installations-42.json");
+    let there = fixture.root.join("Games/Steam/steam-620-macos");
+    std::fs::create_dir_all(&there).unwrap();
+    let elsewhere = fixture.root.join("Elsewhere/Steam/steam-620-macos");
+    save(&file, &[receipt(&elsewhere, Platform::Mac)]).unwrap();
+
+    let reloaded = fixture.reload(file);
+    assert_eq!(
+        reloaded.state().receipts[0].directory,
+        there.to_string_lossy()
+    );
+    assert_eq!(fixture.saved()[0].directory, there.to_string_lossy());
+}
+
+#[tokio::test]
+async fn a_new_installation_waits_for_the_disk_of_the_games_folder() {
+    let fixture = Fixture::new(false).await;
+    let (chosen, _) = fixture.elsewhere();
+    fixture.folder.choose(&chosen).unwrap();
+    std::fs::remove_dir_all(fixture.folder.path()).unwrap();
+
+    fixture.installations.install(fixture.offer());
+    assert_eq!(
+        fixture.installations.state().report,
+        Some(Report::GamesFolderUnavailable(fixture.folder.path()))
+    );
+    assert!(fixture.fake.calls().is_empty());
+}
+
+#[tokio::test]
+async fn a_move_still_waiting_goes_to_the_folder_chosen_last() {
+    let fixture = Fixture::new(true).await;
+    let (first, _) = fixture.elsewhere();
+    let last = fixture.outside.path().canonicalize().unwrap().join("Last");
+    std::fs::create_dir_all(&last).unwrap();
+    fixture.fake.hold();
+    fixture.installations.update("620-macos");
+    eventually(|| fixture.installations.state().downloading).await;
+
+    fixture.folder.choose(&first).unwrap();
+    fixture.folder.choose(&last).unwrap();
+    assert_eq!(fixture.moves().len(), 1, "one move per installation");
+    fixture.fake.release();
+    let moved = last
+        .join(games_folder::CHOSEN_DIRECTORY)
+        .join("Steam/steam-620-macos");
+    eventually(|| fixture.receipt().directory == moved.to_string_lossy()).await;
 }

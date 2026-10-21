@@ -2044,6 +2044,272 @@ public func FfiConverterTypeEpicSession_lower(_ value: EpicSession) -> UInt64 {
 
 
 
+/**
+ * Obelisk's games folder.
+ */
+public protocol GamesFolderProtocol: AnyObject, Sendable {
+    
+    /**
+     * Waits for a revision newer than `after`.
+     */
+    func changed(after: UInt64) async  -> GamesFolderState
+    
+    /**
+     * Makes the games folder `chosen` gives the one new installations go
+     * to, and queues the move of every installation into it.
+     */
+    func choose(chosen: String) throws 
+    
+    /**
+     * Makes Obelisk's own folder the games folder again, and queues the
+     * move of every installation into it.
+     */
+    func chooseDefault() throws 
+    
+    /**
+     * Queues the move of the installations still outside the games folder.
+     */
+    func gather() 
+    
+    /**
+     * What choosing `chosen` would do. It blocks on file reads.
+     */
+    func inspect(chosen: String)  -> GamesFolderInspection
+    
+    /**
+     * What making Obelisk's own folder the games folder again would do. It
+     * makes that folder, and blocks on file reads.
+     */
+    func inspectDefault()  -> GamesFolderInspection
+    
+    func state()  -> GamesFolderState
+    
+    /**
+     * A disk came or left.
+     */
+    func volumesChanged() 
+    
+}
+/**
+ * Obelisk's games folder.
+ */
+open class GamesFolder: GamesFolderProtocol, @unchecked Sendable {
+    fileprivate let handle: UInt64
+
+    /// Used to instantiate a [FFIObject] without an actual handle, for fakes in tests, mostly.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public struct NoHandle {
+        public init() {}
+    }
+
+    // TODO: We'd like this to be `private` but for Swifty reasons,
+    // we can't implement `FfiConverter` without making this `required` and we can't
+    // make it `required` without making it `public`.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    required public init(unsafeFromHandle handle: UInt64) {
+        self.handle = handle
+    }
+
+    // This constructor can be used to instantiate a fake object.
+    // - Parameter noHandle: Placeholder value so we can have a constructor separate from the default empty one that may be implemented for classes extending [FFIObject].
+    //
+    // - Warning:
+    //     Any object instantiated with this constructor cannot be passed to an actual Rust-backed object. Since there isn't a backing handle the FFI lower functions will crash.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public init(noHandle: NoHandle) {
+        self.handle = 0
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public func uniffiCloneHandle() -> UInt64 {
+        return try! rustCall { uniffi_obelisk_bridge_fn_clone_gamesfolder(self.handle, $0) }
+    }
+    /**
+     * The games folder of the Obelisk whose library is `library`.
+     */
+public convenience init(library: String) {
+    let handle =
+        try! rustCall() {
+        uniffiCallStatus in
+    uniffi_obelisk_bridge_fn_constructor_gamesfolder_new(
+        FfiConverterString.lower(library),uniffiCallStatus
+    )
+}
+    self.init(unsafeFromHandle: handle)
+}
+
+    deinit {
+        if handle == 0 {
+            // Mock objects have handle=0 don't try to free them
+            return
+        }
+
+        try! rustCall { uniffi_obelisk_bridge_fn_free_gamesfolder(handle, $0) }
+    }
+
+    
+
+    
+    /**
+     * Waits for a revision newer than `after`.
+     */
+open func changed(after: UInt64)async  -> GamesFolderState  {
+    return
+        try!  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_obelisk_bridge_fn_method_gamesfolder_changed(
+                        self.uniffiCloneHandle(),FfiConverterUInt64.lower(after)
+                )
+            },
+            pollFunc: ffi_obelisk_bridge_rust_future_poll_rust_buffer,
+            completeFunc: ffi_obelisk_bridge_rust_future_complete_rust_buffer,
+            freeFunc: ffi_obelisk_bridge_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterTypeGamesFolderState_lift,
+            errorHandler: nil
+            
+        )
+}
+    
+    /**
+     * Makes the games folder `chosen` gives the one new installations go
+     * to, and queues the move of every installation into it.
+     */
+open func choose(chosen: String)throws   {try rustCallWithError(FfiConverterTypeGameSessionError_lift) {
+        uniffiCallStatus in
+    uniffi_obelisk_bridge_fn_method_gamesfolder_choose(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(chosen),uniffiCallStatus
+    )
+}
+}
+    
+    /**
+     * Makes Obelisk's own folder the games folder again, and queues the
+     * move of every installation into it.
+     */
+open func chooseDefault()throws   {try rustCallWithError(FfiConverterTypeGameSessionError_lift) {
+        uniffiCallStatus in
+    uniffi_obelisk_bridge_fn_method_gamesfolder_choose_default(
+            self.uniffiCloneHandle(),uniffiCallStatus
+    )
+}
+}
+    
+    /**
+     * Queues the move of the installations still outside the games folder.
+     */
+open func gather()  {try! rustCall() {
+        uniffiCallStatus in
+    uniffi_obelisk_bridge_fn_method_gamesfolder_gather(
+            self.uniffiCloneHandle(),uniffiCallStatus
+    )
+}
+}
+    
+    /**
+     * What choosing `chosen` would do. It blocks on file reads.
+     */
+open func inspect(chosen: String) -> GamesFolderInspection  {
+    return try!  FfiConverterTypeGamesFolderInspection_lift(try! rustCall() {
+        uniffiCallStatus in
+    uniffi_obelisk_bridge_fn_method_gamesfolder_inspect(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(chosen),uniffiCallStatus
+    )
+})
+}
+    
+    /**
+     * What making Obelisk's own folder the games folder again would do. It
+     * makes that folder, and blocks on file reads.
+     */
+open func inspectDefault() -> GamesFolderInspection  {
+    return try!  FfiConverterTypeGamesFolderInspection_lift(try! rustCall() {
+        uniffiCallStatus in
+    uniffi_obelisk_bridge_fn_method_gamesfolder_inspect_default(
+            self.uniffiCloneHandle(),uniffiCallStatus
+    )
+})
+}
+    
+open func state() -> GamesFolderState  {
+    return try!  FfiConverterTypeGamesFolderState_lift(try! rustCall() {
+        uniffiCallStatus in
+    uniffi_obelisk_bridge_fn_method_gamesfolder_state(
+            self.uniffiCloneHandle(),uniffiCallStatus
+    )
+})
+}
+    
+    /**
+     * A disk came or left.
+     */
+open func volumesChanged()  {try! rustCall() {
+        uniffiCallStatus in
+    uniffi_obelisk_bridge_fn_method_gamesfolder_volumes_changed(
+            self.uniffiCloneHandle(),uniffiCallStatus
+    )
+}
+}
+    
+
+    
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeGamesFolder: FfiConverter {
+    typealias FfiType = UInt64
+    typealias SwiftType = GamesFolder
+
+    public static func lift(_ handle: UInt64) throws -> GamesFolder {
+        return GamesFolder(unsafeFromHandle: handle)
+    }
+
+    public static func lower(_ value: GamesFolder) -> UInt64 {
+        return value.uniffiCloneHandle()
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> GamesFolder {
+        let handle: UInt64 = try readInt(&buf)
+        return try lift(handle)
+    }
+
+    public static func write(_ value: GamesFolder, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeGamesFolder_lift(_ handle: UInt64) throws -> GamesFolder {
+    return try FfiConverterTypeGamesFolder.lift(handle)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeGamesFolder_lower(_ value: GamesFolder) -> UInt64 {
+    return FfiConverterTypeGamesFolder.lower(value)
+}
+
+
+
+
+
+
 public protocol GogSessionProtocol: AnyObject, Sendable {
     
     /**
@@ -6782,6 +7048,83 @@ public func FfiConverterTypeGameTransfer_lower(_ value: GameTransfer) -> RustBuf
 }
 
 
+/**
+ * Where new installations go. `revision` grows with every change.
+ */
+public struct GamesFolderState: Equatable, Hashable {
+    public var revision: UInt64
+    public var path: String
+    /**
+     * Obelisk's own folder, inside its library.
+     */
+    public var isDefault: Bool
+    /**
+     * Its disk is there: Obelisk's own folder always is.
+     */
+    public var isConnected: Bool
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(revision: UInt64, path: String, 
+        /**
+         * Obelisk's own folder, inside its library.
+         */isDefault: Bool, 
+        /**
+         * Its disk is there: Obelisk's own folder always is.
+         */isConnected: Bool) {
+        self.revision = revision
+        self.path = path
+        self.isDefault = isDefault
+        self.isConnected = isConnected
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension GamesFolderState: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeGamesFolderState: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> GamesFolderState {
+        return
+            try GamesFolderState(
+                revision: FfiConverterUInt64.read(from: &buf), 
+                path: FfiConverterString.read(from: &buf), 
+                isDefault: FfiConverterBool.read(from: &buf), 
+                isConnected: FfiConverterBool.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: GamesFolderState, into buf: inout [UInt8]) {
+        FfiConverterUInt64.write(value.revision, into: &buf)
+        FfiConverterString.write(value.path, into: &buf)
+        FfiConverterBool.write(value.isDefault, into: &buf)
+        FfiConverterBool.write(value.isConnected, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeGamesFolderState_lift(_ buf: RustBuffer) throws -> GamesFolderState {
+    return try FfiConverterTypeGamesFolderState.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeGamesFolderState_lower(_ value: GamesFolderState) -> RustBuffer {
+    return FfiConverterTypeGamesFolderState.lower(value)
+}
+
+
 public struct GogCredentials: Equatable, Hashable {
     public var userId: String
     public var username: String
@@ -10714,6 +11057,10 @@ public enum DownloadKind: Equatable, Hashable {
     case install
     case update
     case repair
+    /**
+     * The installation moves into the games folder.
+     */
+    case move
 
 
 
@@ -10741,6 +11088,8 @@ public struct FfiConverterTypeDownloadKind: FfiConverterRustBuffer {
         
         case 3: return .repair
         
+        case 4: return .move
+        
         default: throw UniffiInternalError.unexpectedEnumCase
         }
     }
@@ -10759,6 +11108,10 @@ public struct FfiConverterTypeDownloadKind: FfiConverterRustBuffer {
         
         case .repair:
             writeInt(&buf, Int32(3))
+        
+        
+        case .move:
+            writeInt(&buf, Int32(4))
         
         }
     }
@@ -11742,6 +12095,97 @@ public func FfiConverterTypeGameSessionError_lower(_ value: GameSessionError) ->
 }
 
 
+/**
+ * What choosing a folder would do.
+ */
+
+public enum GamesFolderInspection: Equatable, Hashable {
+    
+    /**
+     * The games go in `path`: `games` installations move there, and
+     * `copied_bytes` of theirs are copied from another disk.
+     */
+    case ready(path: String, games: UInt32, copiedBytes: UInt64
+    )
+    /**
+     * The folder is gone.
+     */
+    case missing
+    /**
+     * The folder is inside Obelisk's library or a game's installation.
+     */
+    case inside
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension GamesFolderInspection: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeGamesFolderInspection: FfiConverterRustBuffer {
+    typealias SwiftType = GamesFolderInspection
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> GamesFolderInspection {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .ready(path: try FfiConverterString.read(from: &buf), games: try FfiConverterUInt32.read(from: &buf), copiedBytes: try FfiConverterUInt64.read(from: &buf)
+        )
+        
+        case 2: return .missing
+        
+        case 3: return .inside
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: GamesFolderInspection, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case let .ready(path,games,copiedBytes):
+            writeInt(&buf, Int32(1))
+            FfiConverterString.write(path, into: &buf)
+            FfiConverterUInt32.write(games, into: &buf)
+            FfiConverterUInt64.write(copiedBytes, into: &buf)
+            
+        
+        case .missing:
+            writeInt(&buf, Int32(2))
+        
+        
+        case .inside:
+            writeInt(&buf, Int32(3))
+        
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeGamesFolderInspection_lift(_ buf: RustBuffer) throws -> GamesFolderInspection {
+    return try FfiConverterTypeGamesFolderInspection.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeGamesFolderInspection_lower(_ value: GamesFolderInspection) -> RustBuffer {
+    return FfiConverterTypeGamesFolderInspection.lower(value)
+}
+
+
+
 public 
 enum GogError: Swift.Error, Equatable, Hashable, Foundation.LocalizedError {
 
@@ -11862,6 +12306,17 @@ public enum InstallationReport: Equatable, Hashable {
      */
     case uninstall(reason: String
     )
+    /**
+     * A move into the games folder failed for this reason, a localization
+     * key or the system's message.
+     */
+    case move(reason: String
+    )
+    /**
+     * The games folder's disk is not connected: this folder.
+     */
+    case gamesFolderUnavailable(path: String
+    )
 
 
 
@@ -11892,6 +12347,12 @@ public struct FfiConverterTypeInstallationReport: FfiConverterRustBuffer {
         case 3: return .uninstall(reason: try FfiConverterString.read(from: &buf)
         )
         
+        case 4: return .move(reason: try FfiConverterString.read(from: &buf)
+        )
+        
+        case 5: return .gamesFolderUnavailable(path: try FfiConverterString.read(from: &buf)
+        )
+        
         default: throw UniffiInternalError.unexpectedEnumCase
         }
     }
@@ -11913,6 +12374,16 @@ public struct FfiConverterTypeInstallationReport: FfiConverterRustBuffer {
         case let .uninstall(reason):
             writeInt(&buf, Int32(3))
             FfiConverterString.write(reason, into: &buf)
+            
+        
+        case let .move(reason):
+            writeInt(&buf, Int32(4))
+            FfiConverterString.write(reason, into: &buf)
+            
+        
+        case let .gamesFolderUnavailable(path):
+            writeInt(&buf, Int32(5))
+            FfiConverterString.write(path, into: &buf)
             
         }
     }
@@ -13346,6 +13817,10 @@ public enum TransferState: Equatable, Hashable {
     case preparing
     case verifying
     case downloading
+    /**
+     * The installation moves into the games folder.
+     */
+    case moving
     case complete
     case cancelled
     case failed
@@ -13376,11 +13851,13 @@ public struct FfiConverterTypeTransferState: FfiConverterRustBuffer {
         
         case 3: return .downloading
         
-        case 4: return .complete
+        case 4: return .moving
         
-        case 5: return .cancelled
+        case 5: return .complete
         
-        case 6: return .failed
+        case 6: return .cancelled
+        
+        case 7: return .failed
         
         default: throw UniffiInternalError.unexpectedEnumCase
         }
@@ -13402,16 +13879,20 @@ public struct FfiConverterTypeTransferState: FfiConverterRustBuffer {
             writeInt(&buf, Int32(3))
         
         
-        case .complete:
+        case .moving:
             writeInt(&buf, Int32(4))
         
         
-        case .cancelled:
+        case .complete:
             writeInt(&buf, Int32(5))
         
         
-        case .failed:
+        case .cancelled:
             writeInt(&buf, Int32(6))
+        
+        
+        case .failed:
+            writeInt(&buf, Int32(7))
         
         }
     }
@@ -15435,6 +15916,30 @@ private let initializationResult: InitializationResult = {
     if (uniffi_obelisk_bridge_checksum_method_storefrontsessions_stop() != 44469) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_obelisk_bridge_checksum_method_gamesfolder_changed() != 29481) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_obelisk_bridge_checksum_method_gamesfolder_choose() != 29832) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_obelisk_bridge_checksum_method_gamesfolder_choose_default() != 44243) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_obelisk_bridge_checksum_method_gamesfolder_gather() != 10869) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_obelisk_bridge_checksum_method_gamesfolder_inspect() != 46467) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_obelisk_bridge_checksum_method_gamesfolder_inspect_default() != 35240) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_obelisk_bridge_checksum_method_gamesfolder_state() != 20183) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_obelisk_bridge_checksum_method_gamesfolder_volumes_changed() != 47232) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_obelisk_bridge_checksum_method_gogsession_achievement_shares() != 31127) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -15709,6 +16214,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_obelisk_bridge_checksum_constructor_storefrontsessions_new() != 58149) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_obelisk_bridge_checksum_constructor_gamesfolder_new() != 52166) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_obelisk_bridge_checksum_constructor_gogsession_restore() != 909) {

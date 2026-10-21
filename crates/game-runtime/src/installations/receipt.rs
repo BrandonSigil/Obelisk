@@ -110,6 +110,17 @@ impl<S: Storefront> Receipt<S> {
         )
     }
 
+    /// Follows its installation, which moved from `from`: the Cloud
+    /// archive's claims on the saves inside it name their new place.
+    pub(crate) fn relocated(
+        &self,
+        locations: &crate::Locations,
+        from: &Path,
+    ) -> Result<(), String> {
+        cloud_vault::relocate(&locations.cloud_archive, from, Path::new(&self.directory))
+            .map_err(|error| error.to_string())
+    }
+
     /// Deletes its Wine prefix once its folder is gone. `None` when it has
     /// none.
     pub(crate) fn remove_prefix(&self, locations: &crate::Locations) -> Option<Result<(), String>> {
@@ -161,19 +172,14 @@ impl<S: Storefront> Offer<S> {
     }
 }
 
-/// The receipts in `file`, without those whose folder has vanished: the game
-/// was removed outside Obelisk.
+/// The receipts in `file`, whose folders the installations then sort.
 pub(super) fn load<S: Storefront>(file: &Path) -> std::io::Result<Vec<Receipt<S>>> {
     let bytes = match std::fs::read(file) {
         Ok(bytes) => bytes,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
         Err(error) => return Err(error),
     };
-    let receipts: Vec<Receipt<S>> = serde_json::from_slice(&bytes)?;
-    Ok(receipts
-        .into_iter()
-        .filter(|receipt| Path::new(&receipt.directory).is_dir())
-        .collect())
+    Ok(serde_json::from_slice(&bytes)?)
 }
 
 pub(super) fn save<S: Storefront>(file: &Path, receipts: &[Receipt<S>]) -> std::io::Result<()> {

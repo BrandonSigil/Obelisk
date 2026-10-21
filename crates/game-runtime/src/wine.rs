@@ -543,6 +543,19 @@ impl Installation {
         })
     }
 
+    /// Forgets the prerequisites `forget` picks among those its Rosetta
+    /// prefix ran: they run again at the next launch. Only Rosetta's Wine runs
+    /// prerequisites.
+    pub(crate) fn forget_prerequisites(
+        &self,
+        locations: &crate::Locations,
+        forget: impl Fn(&str) -> bool,
+    ) -> std::io::Result<()> {
+        let rosetta = prefix(&locations.wine_prefixes, &self.install)
+            .map_err(|error| std::io::Error::other(error.to_string()))?;
+        rosetta::forget_prerequisites(&rosetta, forget)
+    }
+
     /// Deletes the prefixes of the uninstalled installation, as Steam deletes
     /// a Proton prefix, and its launch settings. Both engines' go, whichever
     /// runs the game now: an earlier launch may have made the other's before

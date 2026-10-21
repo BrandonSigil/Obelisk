@@ -251,7 +251,7 @@ impl crate::installations::Storefront for Steam {
     const PLATFORM: obelisk_core::platform::Spelling = steam_kit::client::PLATFORM;
     const RECEIPTS_UNAVAILABLE: &'static str = "model.steam.receiptsUnavailable";
     const RECEIPTS_NOT_SAVED: &'static str = "model.steam.receiptsNotSaved";
-    const GAMES_DIRECTORY: &'static str = "Games/Steam";
+    const GAMES_DIRECTORY: &'static str = "Steam";
     const QUEUE: crate::queue::Storefront = crate::queue::Storefront::Steam;
     fn product_game(product: &Product) -> u32 {
         product.app_id
