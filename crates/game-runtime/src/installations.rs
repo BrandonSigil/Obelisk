@@ -1581,7 +1581,7 @@ impl<S: Storefront> Installations<S> {
                 shared.update(|inner| inner.state.verifying_before_launch = false);
                 let mut admission = admission;
                 if ready.platform == Platform::Windows {
-                    admission.needs_voile(ready.profile().voile);
+                    admission.needs_voile(ready.profile().minimum_voile);
                 }
                 shared
                     .content

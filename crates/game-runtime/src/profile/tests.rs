@@ -30,7 +30,7 @@ fn rocket_league_fall_guys_and_elden_ring_run_on_the_linux_engine_and_nothing_el
         by_id(FALL_GUYS).executable,
         Some("start_protected_game.exe")
     );
-    assert_eq!(by_id(FALL_GUYS).voile, Some("v26.3.0-16"));
+    assert_eq!(by_id(FALL_GUYS).minimum_voile, Some("v26.3.0-16"));
     assert_eq!(by_id(Game::Steam { app_id: 1245620 }).engine, Engine::Linux);
     for other in [
         Game::Epic {
@@ -90,7 +90,7 @@ fn entry_with(key: &str, value: Option<serde_json::Value>) -> Option<Known> {
         "executable": "Binaries/Win64/Game.exe",
         "variables": {"SteamDeck": "1"},
         "dll_overrides": {"xaudio2_7": "n,b"},
-        "voile": "v26.3.0-16"
+        "minimum_voile": "v26.3.0-16"
     });
     let fields = entry.as_object_mut().unwrap();
     match value {
@@ -104,7 +104,7 @@ fn entry_with(key: &str, value: Option<serde_json::Value>) -> Option<Known> {
 fn an_entry_that_sets_what_a_profile_may_not_is_left_out() {
     use serde_json::json;
     let kept = entry_with("gog", Some(json!("1207658924"))).unwrap();
-    assert_eq!(kept.voile.as_deref(), Some("v26.3.0-16"));
+    assert_eq!(kept.minimum_voile.as_deref(), Some("v26.3.0-16"));
 
     for (what, key, value) in [
         ("a key Obelisk does not read", "launcher", Some(json!("x"))),
@@ -163,7 +163,7 @@ fn an_entry_that_sets_what_a_profile_may_not_is_left_out() {
         ),
         (
             "a release that is no version",
-            "voile",
+            "minimum_voile",
             Some(json!("latest")),
         ),
     ] {

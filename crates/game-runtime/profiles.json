@@ -29,7 +29,7 @@
       "engine": "Linux",
       "graphics": "Dxmt",
       "executable": "start_protected_game.exe",
-      "voile": "v26.3.0-16"
+      "minimum_voile": "v26.3.0-16"
     },
     {
       "name": "Counter-Strike 2",

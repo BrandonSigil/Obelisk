@@ -99,4 +99,4 @@ To withdraw a release, run the Feed workflow from Voile's Actions tab with its v
 
 ## A game that needs a release
 
-A game profile in `crates/game-runtime/profiles.json` can name the oldest release its game runs in, with `voile`. When an older release is in place, that game's launch waits for the newest release of the contract to download, instead of starting with the old one. Other games start at once, and the newer release downloads once no game runs.
+A game profile in `crates/game-runtime/profiles.json` can name the oldest release its game runs in, with `minimum_voile`. It is a floor, not a pin: the game runs in the newest release installed, as every game does. Only when the release in place is older than that one does the game's launch wait for the newest release of the contract to download, instead of starting with the old one. Other games start at once, and the newer release downloads once no game runs.

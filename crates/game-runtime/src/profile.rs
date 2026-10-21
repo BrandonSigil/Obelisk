@@ -69,8 +69,9 @@ pub(crate) struct Profile {
     /// it: `n,b` for the game's own copy first, nothing to never load it.
     pub dll_overrides: &'static BTreeMap<String, String>,
     /// The oldest Voile release it runs in, such as `v26.3.0-16`: its launch
-    /// waits for one when an older one is in place.
-    pub voile: Option<&'static str>,
+    /// waits for the newest when an older one is in place, and runs in the
+    /// newest installed otherwise, as every game does.
+    pub minimum_voile: Option<&'static str>,
 }
 
 static NONE: BTreeMap<String, String> = BTreeMap::new();
@@ -85,7 +86,7 @@ impl Default for Profile {
             arguments: &[],
             variables: &NONE,
             dll_overrides: &NONE,
-            voile: None,
+            minimum_voile: None,
         }
     }
 }
@@ -120,7 +121,7 @@ struct Known {
     variables: BTreeMap<String, String>,
     #[serde(default)]
     dll_overrides: BTreeMap<String, String>,
-    voile: Option<String>,
+    minimum_voile: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -215,7 +216,10 @@ impl Known {
                 .all(|(dll, mode)| dll_allowed(dll, mode))
             && self.executable.as_deref().is_none_or(inside)
             && self.path.as_deref().is_none_or(inside)
-            && self.voile.as_deref().is_none_or(crate::voile::is_version)
+            && self
+                .minimum_voile
+                .as_deref()
+                .is_none_or(crate::voile::is_version)
     }
 
     /// Whether this entry names `game` by its storefront's id.
@@ -243,7 +247,7 @@ impl Known {
             arguments: &self.arguments,
             variables: &self.variables,
             dll_overrides: &self.dll_overrides,
-            voile: self.voile.as_deref(),
+            minimum_voile: self.minimum_voile.as_deref(),
         }
     }
 
