@@ -3,7 +3,7 @@
 use super::{Adapter, Additions, Config, Facts, Furnisher, Game, Graphics, Prerequisite};
 use crate::{
     Error,
-    supervisor::{Target, architecture::Architecture},
+    supervisor::{LaunchStep, Target, architecture::Architecture},
 };
 use obelisk_core::launch::LaunchTarget;
 use std::{
@@ -95,10 +95,12 @@ impl Adapter for RosettaWine {
         config: &Config,
         locations: &crate::Locations,
         storefront: &dyn Furnisher,
+        step: &dyn Fn(LaunchStep),
     ) -> Result<(), Error> {
-        boot(config, &locations.home)?;
+        boot(config, &locations.home, step)?;
         storefront.furnish_prefix(config)?;
-        install_prerequisites(config, &locations.home, &storefront.prerequisites_to_run()?)?;
+        let prerequisites = storefront.prerequisites_to_run()?;
+        install_prerequisites(config, &locations.home, &prerequisites, step)?;
         match config.log.parent() {
             Some(logs) => crate::files::private_directory(logs),
             None => Err(Error::Storage),
@@ -368,14 +370,16 @@ fn search_path(folders: &[PathBuf]) -> Option<String> {
 }
 
 /// Creates the prefix on first use, registers the runtime's Wine Mono in it,
-/// and keeps its user folders apart from the Mac home.
-fn boot(config: &Config, home: &Path) -> Result<(), Error> {
+/// and keeps its user folders apart from the Mac home. `step` shows each run
+/// of wineboot as it begins.
+fn boot(config: &Config, home: &Path, step: &dyn Fn(LaunchStep)) -> Result<(), Error> {
     if !installed(config) {
         return Err(Error::WineUnavailable);
     }
     crate::files::private_directory(&config.prefix)?;
     let created = !config.prefix.join("system.reg").is_file();
     if created {
+        step(LaunchStep::WinePrefix);
         wineboot(config, home, "--init")?;
     }
     // wineboot installs Mono's .NET registration and a placeholder for every
@@ -397,6 +401,7 @@ fn boot(config: &Config, home: &Path) -> Result<(), Error> {
         .collect();
     if !stale.is_empty() {
         if !created {
+            step(LaunchStep::WinePrefix);
             wineboot(config, home, "--update")?;
         }
         for (record, value) in stale {
@@ -485,13 +490,15 @@ pub(super) fn forget_prerequisites(
     record_prerequisites(prefix, &ran)
 }
 
-/// Runs, in order, the prerequisites this prefix has not run yet. One that
-/// fails or outlasts its timeout runs again on the next launch; the game still
-/// starts, and may tell what it misses.
+/// Runs, in order, the prerequisites this prefix has not run yet, `step`
+/// showing each as it begins. One that fails or outlasts its timeout runs
+/// again on the next launch; the game still starts, and may tell what it
+/// misses.
 fn install_prerequisites(
     config: &Config,
     home: &Path,
     prerequisites: &[Prerequisite],
+    step: &dyn Fn(LaunchStep),
 ) -> Result<(), Error> {
     let mut ran = ran_prerequisites(&config.prefix)?;
     let pending: Vec<_> = prerequisites
@@ -503,6 +510,9 @@ fn install_prerequisites(
     }
     let log = fs::File::create(config.prefix.join(PREREQUISITES_LOG))?;
     for prerequisite in pending {
+        step(LaunchStep::Prerequisite {
+            name: prerequisite.name.clone(),
+        });
         if run_prerequisite(config, home, prerequisite, &log)? {
             ran.insert(prerequisite.id.clone());
             record_prerequisites(&config.prefix, &ran)?;

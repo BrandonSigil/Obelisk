@@ -80,6 +80,7 @@ fn an_epic_prerequisite_runs_unless_it_leaves_the_installation() {
         ))),
         [wine::Prerequisite {
             id: "epic:a,b".into(),
+            name: Some("Prerequisites".into()),
             programs: vec![(
                 install.join("Redist/DirectX/setup.exe"),
                 "/quiet /norestart".into()
@@ -133,7 +134,7 @@ fn a_windows_build_readies_its_prefix_with_its_prerequisite_before_any_credentia
     .unwrap()
     .unwrap();
 
-    let wine = ready(&windows, &config, &locations).unwrap();
+    let wine = ready(&windows, &config, &locations, &|_| {}).unwrap();
 
     assert_eq!(wine.prefix, root.join("library/Prefixes/epic-hash-Windows"));
     assert!(config.runs_in(Some(&wine)));

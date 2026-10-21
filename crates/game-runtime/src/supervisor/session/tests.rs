@@ -19,6 +19,9 @@ pub(crate) struct Script {
     pub ask: bool,
     /// Cloud finalization waits until `release-finish` exists.
     pub hold_finish: bool,
+    /// The storefront's host, where it has one, waits until `release-host`
+    /// exists.
+    pub hold_host: bool,
     /// The game is an Intel executable.
     pub intel: bool,
     pub helper: Helper,

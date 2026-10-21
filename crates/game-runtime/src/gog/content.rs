@@ -5,7 +5,7 @@ use super::{Configuration, Error, Gog, Product};
 use crate::{
     Locations, cloud_status,
     installations::{self, BoxFuture, Credentials, Receipt, Transfer, blocking},
-    sessions::{self, Admission, Failure, Storefront as _, Supervised, failed},
+    sessions::{self, Admission, Failure, ShowStep, Storefront as _, Supervised, failed},
 };
 use gog_kit::{GogError, client::Client as GogClient};
 use obelisk_core::{Platform, installation::TransferProgress, transfer::CancelToken};
@@ -277,7 +277,7 @@ impl<N: Network> sessions::Handover<Gog> for Handover<N> {
     fn platform(&self) -> Platform {
         self.configuration.platform
     }
-    fn prepare(&self) -> BoxFuture<'_, Result<Self::Prepared, Failure>> {
+    fn prepare(&self, step: ShowStep) -> BoxFuture<'_, Result<Self::Prepared, Failure>> {
         Box::pin(async move {
             let wine = match &self.windows {
                 None => None,
@@ -287,13 +287,17 @@ impl<N: Network> sessions::Handover<Gog> for Handover<N> {
                         self.configuration.clone(),
                         self.locations.clone(),
                     );
-                    Some(
-                        blocking(Error::Session.to_string(), move || {
-                            super::windows::ready(&windows, &configuration, &locations)
+                    let shown = step.clone();
+                    let wine = blocking(Error::Session.to_string(), move || {
+                        super::windows::ready(&windows, &configuration, &locations, &|now| {
+                            shown(Some(now))
                         })
-                        .await?
-                        .map_err(failed)?,
-                    )
+                    })
+                    .await?
+                    .map_err(failed)?;
+                    // Asking for the account is no step of the prefix.
+                    step(None);
+                    Some(wine)
                 }
             };
             Ok((self.network.account_id().await?, wine))

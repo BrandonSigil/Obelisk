@@ -109,6 +109,20 @@ pub enum Phase {
     Failed,
 }
 
+/// What a launch still preparing waits on, where its preparation names it,
+/// so that its player tells a long step from a hang.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub enum LaunchStep {
+    /// Wine creates the game's Wine prefix, or updates it for its runtime.
+    WinePrefix,
+    /// A Prerequisite runs in the Wine prefix, with the name its storefront
+    /// gives it, if any.
+    Prerequisite { name: Option<String> },
+    /// The storefront signs in for the game, as Steam's host signs in to the
+    /// account and checks its license.
+    SignIn,
+}
+
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum FailureReason {
     Cancelled,
@@ -191,6 +205,9 @@ pub struct Record<P: Provider> {
     pub account_id: P::Account,
     pub store: P::Store,
     pub phase: Phase,
+    /// What preparation waits on now, while it names it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub step: Option<LaunchStep>,
     pub cloud: crate::cloud::Status,
     pub exit_code: Option<i32>,
     /// Set once the game ran and exited.

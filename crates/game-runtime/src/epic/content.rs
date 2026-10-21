@@ -8,7 +8,9 @@ use crate::{
     cloud::{Control, record},
     cloud_status,
     installations::{self, BoxFuture, Credentials, Receipt, Transfer, blocking},
-    sessions::{self, Admission, BeforeBegin, Failure, Storefront as _, Supervised, failed},
+    sessions::{
+        self, Admission, BeforeBegin, Failure, ShowStep, Storefront as _, Supervised, failed,
+    },
 };
 use cloud_vault::{EpicScope, StoreScope};
 use epic_kit::{EpicError, client::Client as EpicClient};
@@ -402,7 +404,7 @@ impl<N: Network> sessions::Handover<Epic> for Handover<N> {
     fn platform(&self) -> Platform {
         self.configuration.platform
     }
-    fn prepare(&self) -> BoxFuture<'_, Result<Self::Prepared, Failure>> {
+    fn prepare(&self, step: ShowStep) -> BoxFuture<'_, Result<Self::Prepared, Failure>> {
         Box::pin(async move {
             // A Windows build runs in Wine, readied before any exchange code
             // exists: a prerequisite may take minutes.
@@ -414,13 +416,17 @@ impl<N: Network> sessions::Handover<Epic> for Handover<N> {
                         self.configuration.clone(),
                         self.locations.clone(),
                     );
-                    Some(
-                        blocking(Error::Session.to_string(), move || {
-                            super::windows::ready(&windows, &configuration, &locations)
+                    let shown = step.clone();
+                    let wine = blocking(Error::Session.to_string(), move || {
+                        super::windows::ready(&windows, &configuration, &locations, &|now| {
+                            shown(Some(now))
                         })
-                        .await?
-                        .map_err(failed)?,
-                    )
+                    })
+                    .await?
+                    .map_err(failed)?;
+                    // The exchange code that follows is no step of the prefix.
+                    step(None);
+                    Some(wine)
                 }
             };
             let account = self.network.account_id().await?;

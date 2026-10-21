@@ -121,18 +121,20 @@ impl supervisor::Provider for Steam {
 
 /// The launch of the Steam game `receipt` installed, started as `target`
 /// says, with its Cloud, ready for its supervisor. A Windows game runs in
-/// Wine, in the installation's own prefix, which is readied first.
+/// Wine, in the installation's own prefix, which is readied first, showing
+/// through `step` what it waits on.
 pub fn prepare(
     locations: &crate::Locations,
     receipt: &Receipt<Steam>,
     target: &obelisk_core::launch::LaunchTarget,
+    step: &dyn Fn(supervisor::LaunchStep),
 ) -> Result<Request, Error> {
     let home = &locations.home;
     let install = Path::new(&receipt.directory);
     let app_id = receipt.product.app_id;
     let (wine, target, steam_api) = match receipt.windows(locations)? {
         Some(windows) => {
-            let wine = windows.ready(locations, target, &windows::Prefix { install })?;
+            let wine = windows.ready(locations, target, &windows::Prefix { install }, step)?;
             let launched = windows::target(&wine, &receipt.wine_game(), target, home)?;
             (Some(wine), launched, None)
         }

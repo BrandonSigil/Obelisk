@@ -7,7 +7,7 @@
 use super::{Adapter, Additions, Config, Facts, Furnisher, Game, Graphics};
 use crate::{
     Error,
-    supervisor::{Target, architecture::Architecture},
+    supervisor::{LaunchStep, Target, architecture::Architecture},
 };
 use obelisk_core::launch::LaunchTarget;
 use std::{
@@ -137,12 +137,14 @@ impl Adapter for LinuxEngine {
         config: &Config,
         locations: &crate::Locations,
         storefront: &dyn Furnisher,
+        step: &dyn Fn(LaunchStep),
     ) -> Result<(), Error> {
         if !installed(config) {
             return Err(Error::WineUnavailable);
         }
         crate::files::private_directory(home(&config.prefix)?)?;
         if !config.prefix.join("system.reg").is_file() {
+            step(LaunchStep::WinePrefix);
             boot(config)?;
         }
         if storefront.additions().steam_client {

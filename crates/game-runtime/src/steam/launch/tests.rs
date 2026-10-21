@@ -119,6 +119,10 @@ impl Machine for FakeMac {
         launch.check_cancelled()?;
         let (directory, script) = fixture_directory();
         record(&directory, "host.prepare");
+        while script.hold_host && !directory.join("release-host").exists() {
+            launch.check_cancelled()?;
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
         // Both helpers are the suite's; the adapter chooses between them.
         write_helper(&config.helpers.join(package::HOST), &directory, &script);
         write_helper(&config.cache.join(package::SDK_INTEL), &directory, &script);
@@ -254,6 +258,24 @@ fn a_lost_steam_host_keeps_the_game_reserved() {
     let finished = run.until(Snapshot::finished);
     assert_eq!(finished.exit_code, Some(3));
     assert_eq!(finished.store.host, HostState::Stopped);
+}
+
+#[test]
+fn the_launch_shows_its_host_signing_in_until_its_game_runs() {
+    let run = launch::<SteamHarness>(Script {
+        hold_host: true,
+        ..script(HELD)
+    });
+    let signing_in = run.until(|r| r.step.is_some());
+    assert_eq!(
+        (signing_in.phase, signing_in.step),
+        (Phase::Preparing, Some(LaunchStep::SignIn))
+    );
+    run.release("release-host");
+    let running = run.until(|r| r.phase == Phase::Running);
+    assert_eq!(running.step, None);
+    run.release("release-game");
+    run.until(Snapshot::finished);
 }
 
 #[test]

@@ -4,7 +4,7 @@ use super::*;
 use crate::{
     HostUpdate, NativeStorage, Runtime, package,
     supervisor::{
-        Error as Core,
+        Error as Core, LaunchStep,
         architecture::Architecture,
         session::{self, LaunchCloud, Opening, Prepared, Session},
         storage,
@@ -164,7 +164,7 @@ impl<M: Machine> session::Launch for Launch<M> {
 
     async fn prepare_host(
         &mut self,
-        _: &Arc<Session<Steam>>,
+        session: &Arc<Session<Steam>>,
         target: &Target,
         architecture: Option<Architecture>,
         cloud: Option<&Box<dyn SteamCloud>>,
@@ -174,9 +174,13 @@ impl<M: Machine> session::Launch for Launch<M> {
             None => None,
         };
         let (launch, config) = (self.launch.clone(), self.request.config.clone());
+        // The host signs in to the account and checks its license before the
+        // game may start, which may take up to its timeout.
+        session.show_step(Some(LaunchStep::SignIn));
         let runtime = tokio::task::spawn_blocking(move || M::prepare(&launch, config, storage))
             .await
             .map_err(|_| Error::StartFailed)??;
+        session.show_step(None);
         // The Intel helper comes from the prepared runtime; arm64 games use
         // the bundled host's gated exec.
         let (helper, subcommand) = if architecture == Some(Architecture::Intel) {

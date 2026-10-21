@@ -68,6 +68,45 @@ final class GameActionTests: XCTestCase {
         }
     }
 
+    func testEveryPlaceShowsWhatTheLaunchWaitsOnUnderItsButton() async throws {
+        let fixture = InstallationsFixture()
+        let installations = fixture.connect()
+        installations.selectedAction?.perform()
+        fixture.backend.publish {
+            $0.launching = true
+            $0.launchGame = 620
+            $0.gate = .action(620)
+        }
+        try await eventually { installations.isLaunching }
+        XCTAssertNil(installations.selectedAction?.detail, "a launch that names no step shows none")
+
+        var session = GameSessionState.steam(appID: 620, phase: .preparing, observed: false)
+        let steps: [(LaunchStep, String)] = [
+            (.winePrefix, L10n.string("model.game.launchStep.winePrefix")),
+            (.prerequisite(name: "DirectX"), L10n.string("model.game.launchStep.prerequisite", "DirectX")),
+            (.prerequisite(name: nil), L10n.string("model.game.launchStep.prerequisites")),
+            (.signIn, L10n.string("model.game.launchStep.signIn", L10n.string("model.section.steam.title"))),
+        ]
+        for (step, detail) in steps {
+            session.launchStep = step
+            fixture.sessions.fake.show(session)
+            try await eventually { installations.selectedAction?.detail == detail }
+            for action in try everyPlace(fixture) {
+                XCTAssertEqual(action.kind, .waiting(.launch))
+                XCTAssertEqual(action.title, L10n.string("model.game.launching"))
+                XCTAssertEqual(action.detail, detail)
+            }
+        }
+
+        session.launchStep = nil
+        fixture.sessions.fake.show(session)
+        try await eventually { installations.selectedAction?.detail == nil }
+        for action in try everyPlace(fixture) {
+            XCTAssertEqual(action.kind, .waiting(.launch))
+            XCTAssertNil(action.detail)
+        }
+    }
+
     func testAnInstallationLaunchesAndUpdatesBeforeTheStorefrontKnowsWhatItCanInstall() async throws {
         let fixture = InstallationsFixture()
         // The storefront would install the Windows build, once it knows it can.

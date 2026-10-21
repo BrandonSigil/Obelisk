@@ -434,6 +434,11 @@ impl<P: Provider> Session<P> {
         self.notify();
         written
     }
+    /// Shows what preparation waits on now; `None` once it waits on nothing
+    /// it names. A failed write fails the launch as any other before spawn.
+    pub(crate) fn show_step(&self, step: Option<LaunchStep>) {
+        let _ = self.update(|record| record.step = step);
+    }
     /// Whether preparation may go on.
     pub(crate) fn check(&self) -> Result<(), Error> {
         let state = self.state.lock().unwrap();
@@ -523,6 +528,7 @@ pub(crate) fn serve<L: Launch>(
         account_id: opening.account_id,
         store: opening.store,
         phase: Phase::Preparing,
+        step: None,
         cloud: Default::default(),
         exit_code: None,
         played: None,
@@ -636,6 +642,7 @@ pub(crate) fn serve<L: Launch>(
                     FailureReason::Failed
                 });
                 r.error = Some(failure.to_string());
+                r.step = None;
                 r.rosetta = None;
                 r.game = None;
                 r.starting = None;
@@ -823,6 +830,7 @@ async fn run<L: Launch>(
                 .map(|StartingGame::Process { identity, .. }| identity);
             r.game = identity.or(starting);
             r.phase = Phase::Running;
+            r.step = None;
         });
     }
     let watching = launch.watch(&host, session);
@@ -869,6 +877,7 @@ async fn run<L: Launch>(
     // success never turns into a failure.
     let _ = session.update(|r| {
         r.phase = Phase::Finalizing;
+        r.step = None;
         r.exit_code = Some(exit);
         r.played = played;
         r.game = None;

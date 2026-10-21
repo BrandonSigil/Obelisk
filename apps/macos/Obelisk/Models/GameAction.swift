@@ -61,6 +61,8 @@ struct GameAction {
 
     let kind: Kind
     let title: String
+    /// What its launch waits on now, shown under the button.
+    let detail: String?
     let isAvailable: Bool
     /// Green to launch, blue to install or update.
     let launches: Bool
@@ -80,13 +82,14 @@ struct GameAction {
     /// A Force Quit loses what the game did not save: its player confirms it.
     var needsConfirmation: Bool { kind == .running(.forceQuit) }
 
-    init(kind: Kind, title: String, isAvailable: Bool, launches: Bool, isCancellable: Bool = false,
-         place: GameActionPlace = .page,
+    init(kind: Kind, title: String, detail: String? = nil, isAvailable: Bool, launches: Bool,
+         isCancellable: Bool = false, place: GameActionPlace = .page,
          transfer: @escaping @MainActor () -> GameTransfer? = { nil },
          stepFraction: @escaping @MainActor () -> Double? = { nil },
          perform: @escaping @MainActor () -> Void = {}, cancel: @escaping @MainActor () -> Void = {}) {
         self.kind = kind
         self.title = title
+        self.detail = detail
         self.isAvailable = isAvailable
         self.launches = launches
         self.isCancellable = isCancellable
@@ -155,6 +158,7 @@ struct GameActions<Store: InstallationStorefront> {
         return GameAction(
             kind: kind,
             title: title(of: kind),
+            detail: detail(of: kind, session: ownSession),
             isAvailable: isAvailable(kind, of: selection),
             launches: ownSession != nil || (receipt != nil && !update),
             isCancellable: cancellableSync == game || transferring == game || launching == game
@@ -213,6 +217,18 @@ struct GameActions<Store: InstallationStorefront> {
         case .step(.runtime(.voile)): L10n.string("model.game.installingVoile")
         case .step(.runtime(.steamComponents)): L10n.string("model.game.installingSteamComponents")
         case let .running(stage): stage?.title ?? L10n.string("model.game.running")
+        }
+    }
+
+    /// What a wait for the game's launch names under its button: the step its
+    /// preparation is on, such as a Prerequisite installing.
+    private func detail(of kind: GameAction.Kind, session: GameSessions<Store>.ActiveGame?) -> String? {
+        guard kind == .waiting(.launch), !isRecovering, let step = session?.step else { return nil }
+        return switch step {
+        case .winePrefix: L10n.string("model.game.launchStep.winePrefix")
+        case let .prerequisite(name?): L10n.string("model.game.launchStep.prerequisite", name)
+        case .prerequisite(nil): L10n.string("model.game.launchStep.prerequisites")
+        case .signIn: L10n.string("model.game.launchStep.signIn", Store.storefront.section.title)
         }
     }
 

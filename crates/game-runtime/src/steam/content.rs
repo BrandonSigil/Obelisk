@@ -8,7 +8,7 @@ use crate::{
     cloud_status,
     installations::{self, BoxFuture, Receipt, Transfer, blocking},
     protocol::Credentials,
-    sessions::{self, Admission, Failure, Storefront as _, Supervised, failed},
+    sessions::{self, Admission, Failure, ShowStep, Storefront as _, Supervised, failed},
 };
 use cloud_vault::StoreScope;
 use obelisk_core::{
@@ -392,7 +392,7 @@ impl sessions::Handover<Steam> for Handover {
     fn platform(&self) -> Platform {
         self.receipt.platform
     }
-    fn prepare(&self) -> BoxFuture<'_, Result<super::Request, Failure>> {
+    fn prepare(&self, step: ShowStep) -> BoxFuture<'_, Result<super::Request, Failure>> {
         let (locations, receipt, target) = (
             self.locations.clone(),
             self.receipt.clone(),
@@ -400,7 +400,7 @@ impl sessions::Handover<Steam> for Handover {
         );
         Box::pin(async move {
             blocking(crate::Error::StartFailed.to_string(), move || {
-                super::prepare(&locations, &receipt, &target)
+                super::prepare(&locations, &receipt, &target, &|now| step(Some(now)))
             })
             .await?
             .map_err(|error| match error {

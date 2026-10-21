@@ -598,6 +598,49 @@ fn a_failed_translation_is_tried_again_and_a_dxmt_game_needs_none() {
 /// itself, `OBELISK_LINUX_ENGINE_ARGUMENTS` its arguments, and
 /// `OBELISK_LINUX_ENGINE_GRAPHICS=d3dmetal` its renderer. It opens a window.
 #[test]
+fn creating_the_engine_s_prefix_shows_as_a_step_and_a_created_one_shows_none() {
+    use std::os::unix::fs::PermissionsExt;
+    let (_directory, root) = installation();
+    let config = linux_config(&root);
+    let engine = config.runtime.join("engine");
+    fs::create_dir_all(&engine).unwrap();
+    fs::write(engine.join("fexdarwin-run"), "").unwrap();
+    // The engine's wineboot creates the prefix's registry and system folder.
+    let boot = engine.join("run-with-timeout.sh");
+    let system32 = config.prefix.join("drive_c/windows/system32");
+    fs::write(
+        &boot,
+        format!(
+            "#!/bin/sh\nmkdir -p '{}'\ntouch '{}'\n",
+            system32.display(),
+            config.prefix.join("system.reg").display()
+        ),
+    )
+    .unwrap();
+    fs::set_permissions(&boot, fs::Permissions::from_mode(0o755)).unwrap();
+    fs::create_dir_all(config.runtime.join("windows")).unwrap();
+    for library in DIRECT3D {
+        fs::write(config.runtime.join("windows").join(library), library).unwrap();
+    }
+    let install = root.join("install");
+    fs::create_dir_all(&install).unwrap();
+    fs::write(install.join("Game.exe"), pe()).unwrap();
+    let launch = launch_target(&install.join("Game.exe"), &[]);
+    let locations = crate::wine::tests::locations(&root);
+    let steps = || {
+        let steps = std::sync::Mutex::new(Vec::new());
+        wine::prepare(&config, &locations, &install, &launch, &Plain, &|step| {
+            steps.lock().unwrap().push(step)
+        })
+        .unwrap();
+        steps.into_inner().unwrap()
+    };
+
+    assert_eq!(steps(), [LaunchStep::WinePrefix]);
+    assert_eq!(steps(), []);
+}
+
+#[test]
 #[ignore]
 fn smoke() {
     let runtime = PathBuf::from(std::env::var("OBELISK_LINUX_ENGINE_RUNTIME").unwrap());
@@ -625,7 +668,7 @@ fn smoke() {
     let launch = launch_target(&executable, &arguments);
 
     let locations = crate::wine::tests::locations(&root);
-    wine::prepare(&config, &locations, &install, &launch, &Plain).unwrap();
+    wine::prepare(&config, &locations, &install, &launch, &Plain, &|_| {}).unwrap();
     let target = wine::target::<Plain>(&config, &game(&install), &launch, HashMap::new()).unwrap();
     let output = Command::new(&target.executable)
         .args(&target.arguments)

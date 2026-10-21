@@ -69,7 +69,7 @@ fn a_windows_build_readies_its_prefix_with_its_prerequisites() {
     .unwrap()
     .unwrap();
 
-    let wine = ready(&windows, &config, &locations).unwrap();
+    let wine = ready(&windows, &config, &locations, &|_| {}).unwrap();
 
     // The supervisor starts the game its configuration names: the one
     // readied.

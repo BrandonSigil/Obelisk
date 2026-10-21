@@ -33,6 +33,27 @@ impl From<supervisor::Phase> for GamePhase {
     }
 }
 
+/// What a launch still preparing waits on, where its preparation names it.
+#[derive(Clone, Debug, PartialEq, Eq, uniffi::Enum)]
+pub enum LaunchStep {
+    /// Wine creates the game's Wine prefix, or updates it for its runtime.
+    WinePrefix,
+    /// A Prerequisite runs in the Wine prefix, with the name its storefront
+    /// gives it, if any.
+    Prerequisite { name: Option<String> },
+    /// The storefront signs in for the game, as Steam's host does.
+    SignIn,
+}
+impl From<supervisor::LaunchStep> for LaunchStep {
+    fn from(step: supervisor::LaunchStep) -> Self {
+        match step {
+            supervisor::LaunchStep::WinePrefix => Self::WinePrefix,
+            supervisor::LaunchStep::Prerequisite { name } => Self::Prerequisite { name },
+            supervisor::LaunchStep::SignIn => Self::SignIn,
+        }
+    }
+}
+
 /// A runtime a launch downloads before its game is prepared.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Enum)]
 pub enum RuntimeComponent {
@@ -457,6 +478,9 @@ pub struct GameSessionState {
     pub observed: bool,
     /// How much of a runtime has downloaded while the launch waits for it.
     pub runtime_install: Option<RuntimeInstallState>,
+    /// What the launch waits on now, while its preparation names it.
+    #[uniffi(default = None)]
+    pub launch_step: Option<LaunchStep>,
     /// When this Obelisk saw the game start, in seconds since the Unix epoch,
     /// even if it already exited. A game recovered running has none.
     #[uniffi(default = None)]
@@ -573,6 +597,7 @@ fn session_state<P: Bridged>(session: sessions::Session<P>) -> GameSessionState 
         cloud: session.cloud.into(),
         observed: session.observed,
         runtime_install: session.runtime_install.map(Into::into),
+        launch_step: session.step.map(Into::into),
         started_at: session.started_at,
         played: session.played.map(Into::into),
     }

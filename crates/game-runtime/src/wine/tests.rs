@@ -424,7 +424,8 @@ fn only_a_windows_program_inside_the_installation_starts_or_readies_a_prefix_on_
                     &locations(&root),
                     &install,
                     &target,
-                    &Plain::default()
+                    &Plain::default(),
+                    &|_| {}
                 ),
                 Err(Error::NotExecutable)
             ));
@@ -454,7 +455,8 @@ fn a_missing_runtime_is_reported_before_any_prefix_is_created_on_either_engine()
             windows.ready(
                 &locations,
                 &target(&install.join("Game.exe"), &[]),
-                &Plain::default()
+                &Plain::default(),
+                &|_| {}
             ),
             Err(Error::WineUnavailable)
         ));
@@ -541,6 +543,7 @@ fn each_storefront_s_game_is_readied_in_its_prefix_and_logs_into_its_store_s_dia
         let storefront = Plain {
             prerequisites: vec![Prerequisite {
                 id: "setup".into(),
+                name: None,
                 programs: vec![(install.join("setup.exe"), "/quiet".into())],
             }],
         };
@@ -553,6 +556,7 @@ fn each_storefront_s_game_is_readied_in_its_prefix_and_logs_into_its_store_s_dia
                 &locations,
                 &target(&install.join("Game.exe"), &[]),
                 &storefront,
+                &|_| {},
             )
             .unwrap();
 
@@ -598,7 +602,7 @@ fn the_program_a_profile_names_instead_is_the_one_readied_and_the_one_started() 
     fs::write(windows.prefix().join("system.reg"), "registry").unwrap();
 
     let config = windows
-        .ready(&locations, &launcher, &Plain::default())
+        .ready(&locations, &launcher, &Plain::default(), &|_| {})
         .unwrap();
     let started =
         super::target::<Plain>(&config, &plain(&install), &launcher, HashMap::new()).unwrap();
@@ -621,7 +625,7 @@ fn the_program_a_profile_names_instead_is_the_one_readied_and_the_one_started() 
         .unwrap()
         .unwrap();
     assert!(matches!(
-        other.ready(&locations, &launcher, &Plain::default()),
+        other.ready(&locations, &launcher, &Plain::default(), &|_| {}),
         Err(Error::NotExecutable)
     ));
     let without = Config {
@@ -663,7 +667,7 @@ fn a_d3dmetal_game_is_translated_once_it_is_readied() {
     fs::write(windows.prefix().join("system.reg"), "registry").unwrap();
 
     windows
-        .ready(&locations, &target, &Plain::default())
+        .ready(&locations, &target, &Plain::default(), &|_| {})
         .unwrap();
 
     assert_eq!(fs::read_to_string(&record).unwrap(), "warm-d3dmetal\n");
@@ -1040,6 +1044,7 @@ fn a_prefix_profile_stops_linking_into_the_mac_home() {
         &install,
         &target,
         &Plain::default(),
+        &|_| {},
     )
     .unwrap();
 
@@ -1098,6 +1103,7 @@ fn prepare_plain(config: &Config, root: &Path) {
         &install,
         &target,
         &Plain::default(),
+        &|_| {},
     )
     .unwrap();
 }

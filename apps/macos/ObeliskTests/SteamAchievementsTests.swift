@@ -65,11 +65,15 @@ final class SteamAchievementsTests: XCTestCase {
                                       achievements: GameAchievementsModel(storeID: "steam", describe: SteamModel.message))
         for scheme in [ColorScheme.dark, .light] {
             for width in [CGFloat(1100), CGFloat(860), CGFloat(740), CGFloat(620)] {
-                for (name, metrics) in [("installed", installed), ("uninstalled", uninstalled)] {
+                for (name, metrics) in [("installed", installed), ("uninstalled", uninstalled),
+                                        ("launching", installed)] {
                     let launches = metrics.isInstalled
+                    let launching = GameAction(kind: .waiting(.launch), title: L10n.string("model.game.launching"),
+                                               detail: L10n.string("model.game.launchStep.prerequisite", "DirectX"),
+                                               isAvailable: false, launches: true, isCancellable: true)
                     // The game page's launch row and metrics, at the widths its header gets.
                     let view = GameLaunchRow(metrics: metrics) {
-                        GameActionButton(action: GameAction(
+                        GameActionButton(action: name == "launching" ? launching : GameAction(
                             kind: launches ? .launch : .download(.install),
                             title: L10n.string(launches ? "model.game.launch" : "model.game.download"),
                             isAvailable: true, launches: launches
@@ -104,6 +108,10 @@ final class SteamAchievementsTests: XCTestCase {
                                                 title: L10n.string("model.game.installingVoile"),
                                                 isAvailable: true, launches: true, isCancellable: true,
                                                 stepFraction: { 0.4 }), gameName: "Thronefall")
+            GameActionButton(action: GameAction(kind: .waiting(.launch), title: L10n.string("model.game.launching"),
+                                                detail: L10n.string("model.game.launchStep.winePrefix"),
+                                                isAvailable: false, launches: true, isCancellable: true,
+                                                place: .library), gameName: "Thronefall")
         }
         try await render(buttons.padding(24).foregroundStyle(.white).environment(\.colorScheme, .dark).background(.black),
                          to: output.appending(path: "header-buttons.png"))

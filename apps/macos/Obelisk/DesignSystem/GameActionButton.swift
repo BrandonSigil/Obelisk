@@ -1,8 +1,8 @@
 import SwiftUI
 
-/// A game's Game action as its page and its library's hero show it. It reads
-/// the game's progress in its own body, so a progress tick redraws the button
-/// alone.
+/// A game's Game action as its page and its library's hero show it, with what
+/// its launch waits on under it. It reads the game's progress in its own body,
+/// so a progress tick redraws the button alone.
 struct GameActionButton: View {
     let action: GameAction
     /// Names the game a Force Quit asks about.
@@ -63,38 +63,53 @@ struct GameActionButton: View {
         }
     }
 
+    private static var titleWidth: CGFloat { 150 }
+
     var body: some View {
         let transfer = action.transfer()
-        HStack(spacing: 8) {
-            Button { action.run(asking: $asking) } label: {
-                Group {
-                    switch mode {
-                    case .step:
-                        Text(action.title)
-                    case .transferring:
-                        Text(transfer?.buttonTitle ?? L10n.string("ui.transfer.preparing_short"))
-                    case .idle:
-                        Label(action.title, systemImage: symbol)
+        HStack(alignment: .top, spacing: 8) {
+            VStack(spacing: 6) {
+                Button { action.run(asking: $asking) } label: {
+                    Group {
+                        switch mode {
+                        case .step:
+                            Text(action.title)
+                        case .transferring:
+                            Text(transfer?.buttonTitle ?? L10n.string("ui.transfer.preparing_short"))
+                        case .idle:
+                            Label(action.title, systemImage: symbol)
+                        }
+                    }
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                    .frame(width: Self.titleWidth)
+                }
+                .buttonStyle(GameActionButtonStyle(colors: colors, isBusy: mode != .idle))
+                .overlay(alignment: .bottom) {
+                    if showsProgress(transfer) {
+                        GameButtonProgress(fraction: mode == .step ? action.stepFraction() : transfer?.progressFraction)
+                            .frame(height: 3)
+                            .padding(.horizontal, 24)
+                            .padding(.bottom, 6)
+                            .allowsHitTesting(false)
+                            .accessibilityHidden(true)
                     }
                 }
-                .lineLimit(1)
-                .minimumScaleFactor(0.8)
-                .frame(width: 150)
-            }
-            .buttonStyle(GameActionButtonStyle(colors: colors, isBusy: mode != .idle))
-            .overlay(alignment: .bottom) {
-                if showsProgress(transfer) {
-                    GameButtonProgress(fraction: mode == .step ? action.stepFraction() : transfer?.progressFraction)
-                        .frame(height: 3)
-                        .padding(.horizontal, 24)
-                        .padding(.bottom, 6)
-                        .allowsHitTesting(false)
-                        .accessibilityHidden(true)
+                .disabled(!action.isAvailable || mode != .idle)
+                .help(helpText(transfer))
+                .accessibilityValue(accessibilityText(transfer))
+
+                if let detail = action.detail {
+                    Text(detail)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        // Over a library's artwork, as its hero's own details.
+                        .shadow(color: .black.opacity(action.place == .library ? 0.6 : 0), radius: 6)
+                        .lineLimit(1)
+                        // No wider than the button.
+                        .frame(width: Self.titleWidth + 2 * GameActionButtonStyle.titleInset)
                 }
             }
-            .disabled(!action.isAvailable || mode != .idle)
-            .help(helpText(transfer))
-            .accessibilityValue(accessibilityText(transfer))
 
             if action.isCancellable {
                 Button(action: action.cancel) {
@@ -104,10 +119,13 @@ struct GameActionButton: View {
                 .foregroundStyle(.secondary)
                 .accessibilityLabel(L10n.string("ui.transfer.cancel"))
                 .help(L10n.string("ui.transfer.cancel"))
+                .frame(height: GameActionButtonStyle.height)
                 .transition(.scale(scale: 0.5).combined(with: .opacity))
             }
         }
         .fixedSize()
+        // What stands beside the button lines up with it, whatever shows under it.
+        .alignmentGuide(VerticalAlignment.center) { $0[.top] + GameActionButtonStyle.height / 2 }
         .forceQuitConfirmation(gameName, for: action, asking: $asking)
     }
 }
@@ -119,6 +137,10 @@ private struct GameActionButtonStyle: ButtonStyle {
     let colors: [Color]
     /// A button showing progress keeps its color while it cannot be pressed.
     let isBusy: Bool
+
+    static var height: CGFloat { 44 }
+    /// How far the title keeps from the capsule's ends.
+    static var titleInset: CGFloat { 18 }
 
     func makeBody(configuration: Configuration) -> some View {
         Appearance(configuration: configuration, colors: colors, isBusy: isBusy)
@@ -141,8 +163,8 @@ private struct GameActionButtonStyle: ButtonStyle {
                 .tracking(0.5)
                 .foregroundStyle(.white.opacity(isDimmed ? 0.6 : 1))
                 .shadow(color: .black.opacity(0.2), radius: 1.5, y: 0.5)
-                .padding(.horizontal, 18)
-                .frame(height: 44)
+                .padding(.horizontal, GameActionButtonStyle.titleInset)
+                .frame(height: GameActionButtonStyle.height)
                 .background {
                     Capsule()
                         .fill(LinearGradient(colors: colors, startPoint: .leading, endPoint: .trailing))

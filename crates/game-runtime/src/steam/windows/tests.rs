@@ -1,8 +1,8 @@
 use super::*;
-use crate::installations::Receipt;
 use crate::wine::tests::{
     config, engine_runtime, installation, locations, pe, record_calls, target,
 };
+use crate::{installations::Receipt, supervisor::LaunchStep};
 use std::path::PathBuf;
 
 /// The receipt of Steam's `app_id`, named `name`, as a Windows build in
@@ -94,6 +94,7 @@ fn a_steam_installation_lists_the_steps_of_its_install_scripts() {
             id:
                 r"HKEY_LOCAL_MACHINE\Software\Valve\Steam\Apps\CommonRedist\vcredist\2022\x64 14.51"
                     .into(),
+            name: Some("Visual C++".into()),
             programs: vec![(redist.join("VC_redist.x64.exe"), "/q /norestart".into())],
         }]
     );
@@ -113,13 +114,43 @@ fn a_windows_launch_readies_the_installation_prefix_and_names_it_once() {
     let install = steam_game(&root.join("library/Games/Steam"));
     let install = install.parent().unwrap().join("steam-42-windows");
     fs::rename(root.join("library/Games/Steam/game"), &install).unwrap();
+    let redist = install.join("_CommonRedist/vcredist/2022");
+    fs::create_dir_all(&redist).unwrap();
+    fs::write(redist.join("VC_redist.x64.exe"), "").unwrap();
+    fs::create_dir_all(install.join(".obelisk-content")).unwrap();
+    fs::write(
+        install.join(steam_kit::install_script::LIST),
+        "_CommonRedist/vcredist/2022/installscript.vdf",
+    )
+    .unwrap();
+    fs::write(
+        redist.join("installscript.vdf"),
+        r#""installscript" { "Run Process" { "x64 14.51" {
+            "HasRunKey" "HKEY_LOCAL_MACHINE\\Software\\Valve\\Steam\\Apps\\CommonRedist\\vcredist\\2022"
+            "process 1" "%INSTALLDIR%\\_CommonRedist\\vcredist\\2022\\VC_redist.x64.exe"
+        } } }"#,
+    )
+    .unwrap();
+    let steps = std::sync::Mutex::new(Vec::new());
 
     let request = crate::steam::prepare(
         &locations,
         &receipt(&install, 42, "Game"),
         &target(&install.join("Game.exe"), &[]),
+        &|step| steps.lock().unwrap().push(step),
     )
     .unwrap();
+
+    // The launch shows each long step of the new prefix as it begins.
+    assert_eq!(
+        steps.into_inner().unwrap(),
+        [
+            LaunchStep::WinePrefix,
+            LaunchStep::Prerequisite {
+                name: Some("Visual C++".into())
+            }
+        ]
+    );
 
     let prefix = root.join("library/Prefixes/steam-42-windows");
     let wine = request.config.wine.as_ref().unwrap();
@@ -163,6 +194,7 @@ fn a_game_whose_profile_names_the_linux_engine_readies_the_engine_s_prefix_and_t
         &locations,
         &receipt(&install, 1245620, "ELDEN RING"),
         &target(&install.join("Game.exe"), &[]),
+        &|_| {},
     )
     .unwrap();
 
@@ -212,7 +244,8 @@ fn a_windows_launch_waits_for_voile_and_a_mac_one_never_does() {
         crate::steam::prepare(
             &locations,
             &receipt(&install, 42, "Game"),
-            &target(&install.join("Game.exe"), &[])
+            &target(&install.join("Game.exe"), &[]),
+            &|_| {}
         ),
         Err(Error::WineUnavailable)
     ));

@@ -1,17 +1,18 @@
 //! A Windows Epic build: Wine starts it in its installation's prefix, once the
 //! prefix ran the prerequisite the installation's manifest names.
 use super::{Configuration, Result};
-use crate::wine;
+use crate::{supervisor::LaunchStep, wine};
 use std::path::Path;
 
 /// Readies a Windows build for its Game session in `windows`, its
-/// installation's prefix, with the prerequisite the build names. This runs
-/// before any short-lived game credential exists, since a prerequisite may
-/// take minutes.
+/// installation's prefix, with the prerequisite the build names, showing
+/// through `step` what it waits on. This runs before any short-lived game
+/// credential exists, since a prerequisite may take minutes.
 pub(super) fn ready(
     windows: &wine::Installation,
     config: &Configuration,
     locations: &crate::Locations,
+    step: &dyn Fn(LaunchStep),
 ) -> Result<wine::Config> {
     let installed = epic_kit::client::installed_launch(
         &config.namespace,
@@ -24,7 +25,7 @@ pub(super) fn ready(
         install: &config.install,
         prerequisite: installed.prerequisite.as_ref(),
     };
-    Ok(windows.ready(locations, &installed.target, &prefix)?)
+    Ok(windows.ready(locations, &installed.target, &prefix, step)?)
 }
 
 /// What Epic adds to the prefix of the installation in `install`.
@@ -53,8 +54,10 @@ impl wine::Storefront for Prefix<'_> {
         } else {
             prerequisite.ids.join(",")
         };
+        let name = prerequisite.name.trim();
         Ok(vec![wine::Prerequisite {
             id: format!("epic:{id}"),
+            name: (!name.is_empty()).then(|| name.to_owned()),
             programs: vec![(self.install.join(relative), prerequisite.arguments.clone())],
         }])
     }

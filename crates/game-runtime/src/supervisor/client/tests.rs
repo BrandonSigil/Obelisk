@@ -105,6 +105,7 @@ impl<P: Sample> Fixture<P> {
             account_id: P::account(),
             store: P::store(),
             phase,
+            step: None,
             cloud: Default::default(),
             exit_code: None,
             played: None,

@@ -55,6 +55,7 @@ impl<P: Provider> Fake<P> {
                     account,
                     store,
                     phase,
+                    step: None,
                     finished: false,
                     failure: None,
                     error: None,
@@ -1049,6 +1050,8 @@ struct Scripted<P: Provider> {
     /// The platform of the build it starts: a Mac one unless the test says.
     platform: Platform,
     steps: Arc<Mutex<Vec<&'static str>>>,
+    /// What preparing shows it waits on, in order, before it is held.
+    shows: Vec<LaunchStep>,
     /// Preparing waits until the test notifies it.
     held: Option<Arc<tokio::sync::Notify>>,
     prepared: Result<(), Failure>,
@@ -1062,6 +1065,7 @@ impl<P: Provider> Scripted<P> {
         Self {
             platform: Platform::Mac,
             steps: Arc::default(),
+            shows: Vec::new(),
             held: None,
             prepared: Ok(()),
             awaits_cancellation: false,
@@ -1078,9 +1082,12 @@ impl<P: Storefront> Handover<P> for Scripted<P> {
     fn platform(&self) -> Platform {
         self.platform
     }
-    fn prepare(&self) -> BoxFuture<'_, Result<(), Failure>> {
+    fn prepare(&self, step: ShowStep) -> BoxFuture<'_, Result<(), Failure>> {
         Box::pin(async move {
             self.steps.lock().unwrap().push("prepare");
+            for shown in &self.shows {
+                step(Some(shown.clone()));
+            }
             if let Some(held) = &self.held {
                 held.notified().await;
             }
@@ -1128,6 +1135,46 @@ async fn a_handover_prepares_starts_the_supervisor_and_opens_its_start_gate_afte
 
     assert_eq!(launch.await.unwrap(), Ok(()));
     assert!(sessions.state().active.is_none());
+}
+
+#[tokio::test]
+async fn a_launch_shows_what_its_preparation_waits_on_then_what_its_supervisor_shows() {
+    let sessions = sessions();
+    settled(&sessions).await;
+    let game = Fake::<Steam>::with(42, Store::new(42), Phase::Preparing);
+    let mut handover = Scripted::starting(Ok(game.clone() as Arc<dyn Supervised<Steam>>));
+    let directx = LaunchStep::Prerequisite {
+        name: Some("DirectX".into()),
+    };
+    handover.shows = vec![LaunchStep::WinePrefix, directx.clone()];
+    let held = Arc::new(tokio::sync::Notify::new());
+    handover.held = Some(held.clone());
+    let admission = sessions.admit(42, 42).unwrap();
+    let step = || sessions.state().active.and_then(|active| active.step);
+
+    let launch = tokio::spawn(admission.hand_off(handover));
+    eventually(|| step() == Some(directx.clone())).await;
+    held.notify_one();
+    // Once handed off, the session shows what its supervisor shows.
+    eventually(|| {
+        sessions
+            .state()
+            .active
+            .is_some_and(|active| active.observed)
+    })
+    .await;
+    assert_eq!(step(), None, "the prefix's last step no longer shows");
+    game.change(|state| state.current.step = Some(LaunchStep::SignIn));
+    eventually(|| step() == Some(LaunchStep::SignIn)).await;
+    game.change(|state| {
+        state.current.phase = Phase::Running;
+        state.current.step = None;
+    });
+    eventually(|| running(&sessions)).await;
+    assert_eq!(step(), None);
+    game.finish(false);
+
+    assert_eq!(launch.await.unwrap(), Ok(()));
 }
 
 #[tokio::test]

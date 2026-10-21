@@ -345,6 +345,7 @@ impl Game {
                 account: 42,
                 store: Store::new(620),
                 phase: Phase::Running,
+                step: None,
                 finished: false,
                 failure: None,
                 error: None,

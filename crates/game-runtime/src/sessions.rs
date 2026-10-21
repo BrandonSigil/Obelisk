@@ -6,7 +6,7 @@
 use crate::{
     cloud::{Choice, Phase as CloudPhase, Status as CloudStatus},
     runtimes::{self, Runtime, Runtimes},
-    supervisor::{self, FailureReason, Phase, Provider, Record},
+    supervisor::{self, FailureReason, LaunchStep, Phase, Provider, Record},
 };
 use obelisk_core::{Platform, transfer::CancelToken};
 use std::{
@@ -45,6 +45,8 @@ pub struct Observation<P: Provider> {
     pub account: P::Account,
     pub store: P::Store,
     pub phase: Phase,
+    /// What preparation waits on now, while it names it.
+    pub step: Option<LaunchStep>,
     /// The phase is final and the session owns no game or starting process:
     /// only then is the Reservation released.
     pub finished: bool,
@@ -69,6 +71,7 @@ impl<P: Provider> From<Record<P>> for Observation<P> {
             account: record.account_id,
             store: record.store,
             phase: record.phase,
+            step: record.step,
             error: record.error,
             revision: record.revision,
             reconnecting: record.reconnecting,
@@ -146,6 +149,10 @@ impl<P: Provider> Supervised<P> for supervisor::Client<P> {
 /// such as saving the credentials its handoff rotated.
 pub type BeforeBegin = Box<dyn FnOnce() + Send>;
 
+/// Shows on the session what a launch's preparation waits on now; `None`
+/// once it waits on nothing it names.
+pub type ShowStep = Arc<dyn Fn(Option<LaunchStep>) + Send + Sync>;
+
 pub type BoxFuture<'a, T> = std::pin::Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
 /// A storefront's part of handing an admitted game to a new supervisor.
@@ -158,8 +165,9 @@ pub trait Handover<P: Storefront>: Send + Sync + 'static {
     /// needs before it is prepared.
     fn platform(&self) -> Platform;
     /// Readies the game, such as its Wine prefix, which may take minutes, and
-    /// then the short-lived credentials it starts with. A failure is definite.
-    fn prepare(&self) -> BoxFuture<'_, Result<Self::Prepared, Failure>>;
+    /// then the short-lived credentials it starts with, showing through `step`
+    /// what it waits on. A failure is definite.
+    fn prepare(&self, step: ShowStep) -> BoxFuture<'_, Result<Self::Prepared, Failure>>;
     /// Runs once the new supervisor holds the game, before its start gate
     /// opens.
     fn before_begin(&self) -> BeforeBegin {
@@ -231,6 +239,9 @@ pub struct Session<P: Storefront> {
     pub game: P::Game,
     pub account: P::Account,
     pub phase: Phase,
+    /// What its launch waits on now, while its preparation names it, before
+    /// its handoff or in its supervisor.
+    pub step: Option<LaunchStep>,
     /// The control connection was lost; the game may still run.
     pub reconnecting: bool,
     pub cloud: CloudStatus,
@@ -255,6 +266,7 @@ impl<P: Storefront> Session<P> {
             game,
             account,
             phase: Phase::Preparing,
+            step: None,
             reconnecting: false,
             cloud: CloudStatus::default(),
             store: None,
@@ -271,6 +283,7 @@ impl<P: Storefront> Session<P> {
             game: P::game(&observation.store),
             account: observation.account.clone(),
             phase: observation.phase,
+            step: observation.step.clone(),
             reconnecting: observation.reconnecting,
             cloud: observation.cloud.clone(),
             store: Some(observation.store.clone()),
@@ -922,6 +935,17 @@ impl<P: Storefront> Canceller<P> {
             }
         });
     }
+
+    /// What the launch's preparation waits on now, before its handoff.
+    fn step(&self, step: Option<LaunchStep>) {
+        self.shared.update(|inner| {
+            if inner.current(&self.operation)
+                && let Some(active) = &mut inner.active
+            {
+                active.step = step;
+            }
+        });
+    }
 }
 
 impl<P: Storefront> std::ops::Deref for Admission<P> {
@@ -945,9 +969,10 @@ impl<P: Storefront> Admission<P> {
 
     /// Hands the admitted game to a new supervisor through `handover`, then
     /// follows its session until it is finished. The runtimes its build
-    /// misses come first, their download showing on the session. A failure
-    /// or cancellation before the supervisor starts refuses the launch and
-    /// gives the Reservation back; once it starts, only its session does.
+    /// misses come first, their download showing on the session, then its
+    /// preparation, which shows there what it waits on. A failure or
+    /// cancellation before the supervisor starts refuses the launch and gives
+    /// the Reservation back; once it starts, only its session does.
     pub async fn hand_off<H: Handover<P>>(self, handover: H) -> Result<(), Failure> {
         let admission = self.canceller();
         let voile = self.voile;
@@ -965,7 +990,12 @@ impl<P: Storefront> Admission<P> {
                 .await;
             admission.runtime_install(None);
             got.map_err(Handoff::Refused)?;
-            let prepared = handover.prepare().await.map_err(Handoff::Refused)?;
+            let shown = admission.clone();
+            let prepared = handover
+                .prepare(Arc::new(move |step| shown.step(step)))
+                .await;
+            admission.step(None);
+            let prepared = prepared.map_err(Handoff::Refused)?;
             if admission.cancelled() {
                 return Err(Handoff::Refused(Failure::Cancelled));
             }

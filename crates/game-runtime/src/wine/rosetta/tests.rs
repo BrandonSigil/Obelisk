@@ -4,16 +4,33 @@ use crate::wine::{
     tests::{Plain, calls, game, installation, locations, recording_runtime},
     windows_path,
 };
+use std::sync::Mutex;
 
 /// Readies the created prefix of `config` for a game whose storefront names
-/// `prerequisites`.
-fn ready(config: &Config, root: &Path, prerequisites: &[Prerequisite]) {
+/// `prerequisites`, and returns the steps it showed.
+fn ready(config: &Config, root: &Path, prerequisites: &[Prerequisite]) -> Vec<LaunchStep> {
     fs::write(config.prefix.join("system.reg"), "").unwrap();
-    let (install, target) = game(root);
     let storefront = Plain {
         prerequisites: prerequisites.to_vec(),
     };
-    prepare(config, &locations(root), &install, &target, &storefront).unwrap();
+    steps(config, root, &storefront)
+}
+
+/// Readies the prefix of `config` for `storefront`'s game, and returns the
+/// steps it showed.
+fn steps(config: &Config, root: &Path, storefront: &Plain) -> Vec<LaunchStep> {
+    let (install, target) = game(root);
+    let steps = Mutex::new(Vec::new());
+    prepare(
+        config,
+        &locations(root),
+        &install,
+        &target,
+        storefront,
+        &|step| steps.lock().unwrap().push(step),
+    )
+    .unwrap();
+    steps.into_inner().unwrap()
 }
 
 #[test]
@@ -28,6 +45,7 @@ fn each_prerequisite_runs_once_and_a_failed_one_again_on_the_next_launch() {
     let prerequisites = [
         Prerequisite {
             id: "vcredist".into(),
+            name: None,
             programs: vec![
                 (redist.join("Visual C++ x64.cmd"), String::new()),
                 (
@@ -38,6 +56,7 @@ fn each_prerequisite_runs_once_and_a_failed_one_again_on_the_next_launch() {
         },
         Prerequisite {
             id: "broken".into(),
+            name: None,
             programs: vec![(redist.join("fail.exe"), String::new())],
         },
     ];
@@ -81,6 +100,7 @@ fn a_visual_cpp_installer_runs_with_the_versions_of_wine_s_own_dlls_hidden() {
     }
     let prerequisite = Prerequisite {
         id: "redist".into(),
+        name: None,
         programs: names
             .iter()
             .map(|name| (redist.join(name), String::new()))
@@ -105,9 +125,71 @@ fn a_missing_program_leaves_its_prerequisite_pending() {
     let config = recording_runtime(&root);
     let prerequisite = Prerequisite {
         id: "missing".into(),
+        name: None,
         programs: vec![(root.join("game/absent.exe"), String::new())],
     };
     ready(&config, &root, &[prerequisite]);
     assert!(calls(&root).is_empty());
     assert!(!config.prefix.join(PREREQUISITES).exists());
+}
+
+#[test]
+fn each_pending_prerequisite_shows_by_its_name_as_it_begins() {
+    let (_directory, root) = installation();
+    let config = recording_runtime(&root);
+    let redist = root.join("game/redist");
+    fs::create_dir_all(&redist).unwrap();
+    for name in ["DXSETUP.exe", "setup.exe", "fail.exe"] {
+        fs::write(redist.join(name), "").unwrap();
+    }
+    let prerequisites = [
+        Prerequisite {
+            id: "directx".into(),
+            name: Some("DirectX".into()),
+            programs: vec![(redist.join("DXSETUP.exe"), "/silent".into())],
+        },
+        Prerequisite {
+            id: "setup".into(),
+            name: None,
+            programs: vec![(redist.join("setup.exe"), String::new())],
+        },
+        Prerequisite {
+            id: "broken".into(),
+            name: Some("Broken".into()),
+            programs: vec![(redist.join("fail.exe"), String::new())],
+        },
+    ];
+    let prerequisite = |name: Option<&str>| LaunchStep::Prerequisite {
+        name: name.map(str::to_owned),
+    };
+
+    assert_eq!(
+        ready(&config, &root, &prerequisites),
+        [
+            prerequisite(Some("DirectX")),
+            prerequisite(None),
+            prerequisite(Some("Broken"))
+        ]
+    );
+    // Only the one that failed runs, and shows, again.
+    assert_eq!(
+        ready(&config, &root, &prerequisites),
+        [prerequisite(Some("Broken"))]
+    );
+}
+
+#[test]
+fn creating_or_updating_the_prefix_shows_as_a_step_and_a_ready_one_shows_none() {
+    let (_directory, root) = installation();
+    let config = recording_runtime(&root);
+    let plain = Plain::default();
+
+    assert_eq!(steps(&config, &root, &plain), [LaunchStep::WinePrefix]);
+    fs::write(config.prefix.join("system.reg"), "").unwrap();
+    assert_eq!(steps(&config, &root, &plain), []);
+    // A runtime that gained Mono updates the prefix once.
+    fs::create_dir_all(config.runtime.join("share/wine/mono/wine-mono-10.4.1")).unwrap();
+    assert_eq!(steps(&config, &root, &plain), [LaunchStep::WinePrefix]);
+    assert_eq!(steps(&config, &root, &plain), []);
+    assert_eq!(calls(&root), ["wineboot --init", "wineboot --update"]);
 }

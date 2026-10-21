@@ -24,6 +24,8 @@ pub struct Program {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Step {
     pub id: String,
+    /// What a player knows it by, such as DirectX or Visual C++.
+    pub name: String,
     pub programs: Vec<Program>,
 }
 
@@ -70,13 +72,36 @@ pub fn steps(
         if programs.is_empty() {
             continue;
         }
-        let id = match step.get("HasRunKey").and_then(Kv::text) {
+        let run_key = step.get("HasRunKey").and_then(Kv::text);
+        let id = match run_key {
             Some(key) => format!("{key}\\{name}"),
             None => name.clone(),
         };
-        steps.push(Step { id, programs });
+        steps.push(Step {
+            id,
+            name: player_name(name, run_key),
+            programs,
+        });
     }
     Ok(steps)
+}
+
+/// What a player knows a step by. One of Valve's Common Redistributables,
+/// whose steps name only an architecture and a version, is the
+/// redistributable its run key files it under, such as DirectX or Visual C++;
+/// any other step goes by its own name.
+fn player_name(name: &str, run_key: Option<&str>) -> String {
+    let redistributable = run_key.and_then(|key| {
+        let mut components = key.split('\\');
+        components.find(|component| component.eq_ignore_ascii_case("CommonRedist"))?;
+        components.next().filter(|component| !component.is_empty())
+    });
+    match redistributable {
+        Some(folder) if folder.eq_ignore_ascii_case("vcredist") => "Visual C++".into(),
+        Some(folder) if folder.eq_ignore_ascii_case("DotNet") => ".NET Framework".into(),
+        Some(folder) => folder.into(),
+        None => name.into(),
+    }
 }
 
 /// Scripts come in UTF-8 or, from older tools, UTF-16 with a byte order mark.

@@ -42,6 +42,7 @@ fn a_64_bit_machine_runs_both_visual_cpp_steps_once_each() {
         [
             Step {
                 id: format!("{key}\\x86 14.51.36247.0"),
+                name: "Visual C++".into(),
                 programs: vec![Program {
                     path: install()
                         .join("_CommonRedist/vcredist/2022/Microsoft Visual C++ 2022 x86.cmd"),
@@ -50,6 +51,7 @@ fn a_64_bit_machine_runs_both_visual_cpp_steps_once_each() {
             },
             Step {
                 id: format!("{key}\\x64 14.51.36247.0"),
+                name: "Visual C++".into(),
                 programs: vec![Program {
                     path: install()
                         .join("_CommonRedist/vcredist/2022/Microsoft Visual C++ 2022 x64.cmd"),
@@ -70,6 +72,10 @@ fn programs_keep_their_order_and_command_lines_name_the_windows_installation() {
     let steps = steps(script.as_bytes(), &install(), "Z:\\Games\\Game").unwrap();
     assert_eq!(steps[0].id, "setup");
     assert_eq!(
+        steps[0].name, "setup",
+        "a step of the game's own goes by its name"
+    );
+    assert_eq!(
         steps[0].programs,
         [
             Program {
@@ -82,6 +88,31 @@ fn programs_keep_their_order_and_command_lines_name_the_windows_installation() {
             },
         ]
     );
+}
+
+#[test]
+fn a_common_redistributable_goes_by_the_redistributable_its_run_key_files_it_under() {
+    let script = r#""InstallScript" { "Run Process" {
+        "DirectX" {
+            "HasRunKey" "HKEY_LOCAL_MACHINE\\Software\\Valve\\Steam\\Apps\\CommonRedist\\DirectX\\Jun2010"
+            "process 1" "%INSTALLDIR%\\_CommonRedist\\DirectX\\Jun2010\\DXSETUP.exe"
+            "command 1" "/silent"
+        }
+        "4.8" {
+            "HasRunKey" "HKEY_LOCAL_MACHINE\\Software\\Valve\\Steam\\Apps\\CommonRedist\\DotNet\\4.8"
+            "process 1" "%INSTALLDIR%\\_CommonRedist\\DotNet\\4.8\\ndp48-x86-x64-allos-enu.exe"
+        }
+        "Launcher" {
+            "HasRunKey" "HKEY_LOCAL_MACHINE\\Software\\Publisher\\Game"
+            "process 1" "%INSTALLDIR%\\launcher-setup.exe"
+        }
+    } }"#;
+    let names: Vec<_> = steps(script.as_bytes(), &install(), "Z:\\")
+        .unwrap()
+        .into_iter()
+        .map(|step| step.name)
+        .collect();
+    assert_eq!(names, ["DirectX", ".NET Framework", "Launcher"]);
 }
 
 #[test]

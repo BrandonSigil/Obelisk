@@ -95,7 +95,8 @@ private func label(_ kind: GameAction.Kind, title: String) -> String? {
     }
 }
 
-/// The card's glass bar: the title opens the game, the button acts on it.
+/// The card's glass bar: the title opens the game, the button acts on it, and
+/// what its launch waits on shows under the title.
 private struct LibraryCardBar: View {
     let title: String
     let action: GameAction
@@ -106,13 +107,20 @@ private struct LibraryCardBar: View {
     var body: some View {
         HStack(spacing: 8) {
             Button(action: open) {
-                Text(title)
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .shadow(color: .black.opacity(0.45), radius: 3, y: 1)
-                    .lineLimit(1)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .contentShape(.rect)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(title)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.white)
+                    if let detail = action.detail {
+                        Text(detail)
+                            .font(.system(size: 11))
+                            .foregroundStyle(.white.opacity(0.75))
+                    }
+                }
+                .shadow(color: .black.opacity(0.45), radius: 3, y: 1)
+                .lineLimit(1)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(.rect)
             }
             .obeliskButtonStyle(.plain)
             // The cover already opens the game for assistive technologies.
@@ -147,7 +155,10 @@ private struct LibraryCardButton: View {
             ProgressView()
                 .controlSize(.small)
                 .frame(width: Self.diameter, height: Self.diameter)
+                .help(action.detail ?? action.title)
                 .accessibilityLabel(L10n.string("ui.transfer.preparing_accessibility"))
+                // The title's line, which shows it, is hidden from assistive technologies.
+                .accessibilityValue(action.detail ?? "")
         case .transferring:
             LibraryCardProgress(progress: { action.transfer()?.progressFraction }, diameter: Self.diameter)
         case .queued:

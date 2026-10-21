@@ -201,6 +201,8 @@ final class GameSessions<Store: GameStorefront> {
         var observed: Bool
         /// Which runtime downloads while the launch waits for it, and how much.
         var runtimeInstall: RuntimeInstallState?
+        /// What the launch waits on now, while its preparation names it.
+        var launchStep: LaunchStep?
         /// When this Obelisk saw the game start, even if it already exited. A
         /// game recovered running started before, and has none.
         var startedAt: Date?
@@ -224,6 +226,7 @@ final class GameSessions<Store: GameStorefront> {
             microTxn = state.microTxn
             observed = state.observed
             runtimeInstall = state.runtimeInstall
+            launchStep = state.launchStep
             startedAt = state.startedAt.map { Date(timeIntervalSince1970: TimeInterval($0)) }
             played = state.played
         }
@@ -238,11 +241,13 @@ final class GameSessions<Store: GameStorefront> {
         let ended: Bool
         /// The runtime the launch waits for, while it downloads.
         let runtime: RuntimeComponent?
+        /// What the launch waits on now, while its preparation names it.
+        let step: LaunchStep?
     }
 
     private(set) var active: Session?
-    /// Changes with `active`'s game, phase and awaited runtime only, not with
-    /// how far that runtime downloaded.
+    /// Changes with `active`'s game, phase, awaited runtime and launch step
+    /// only, not with how far that runtime downloaded.
     private(set) var activeGame: ActiveGame?
     private(set) var isRecovering = true
     private(set) var recoveryError: String?
@@ -317,7 +322,7 @@ final class GameSessions<Store: GameStorefront> {
         let activeGame = active.map {
             ActiveGame(game: $0.game, account: $0.account, running: $0.running,
                        ended: $0.phase == .finalizing || $0.phase == .finished,
-                       runtime: $0.runtimeInstall?.component)
+                       runtime: $0.runtimeInstall?.component, step: $0.launchStep)
         }
         if self.activeGame != activeGame { self.activeGame = activeGame }
         if isRecovering != state.recovering { isRecovering = state.recovering }

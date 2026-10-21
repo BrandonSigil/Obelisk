@@ -31,6 +31,9 @@ pub struct InstalledLaunch {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Prerequisite {
     pub id: String,
+    /// A redistributable's name in GOG's dependencies, such as DirectX; the
+    /// game's own installer has none.
+    pub name: Option<String>,
     pub program: PathBuf,
     pub arguments: String,
 }
@@ -178,6 +181,7 @@ impl InstalledLaunch {
             if installation.script_interpreter {
                 prerequisites.push(Prerequisite {
                     id: format!("isi:{}:{}", product.product_id, installation.build_id),
+                    name: None,
                     program: self.root.join("__redist/ISI/scriptinterpreter.exe"),
                     arguments: format!(
                         "{} \"/supportDir={}\"",
@@ -188,6 +192,7 @@ impl InstalledLaunch {
             } else if let Some(installer) = inside(&support, &product.temp_executable) {
                 prerequisites.push(Prerequisite {
                     id: format!("installer:{}:{}", product.product_id, installation.build_id),
+                    name: None,
                     program: installer,
                     arguments: switches(&product.product_id),
                 });
@@ -196,6 +201,7 @@ impl InstalledLaunch {
         prerequisites.extend(installation.dependencies.iter().filter_map(|dependency| {
             Some(Prerequisite {
                 id: dependency.id.clone(),
+                name: Some(dependency.id.clone()),
                 program: inside(&self.root, &dependency.path)?,
                 arguments: dependency.arguments.clone(),
             })

@@ -60,6 +60,7 @@ impl wine::Storefront for Prefix<'_> {
             prerequisites.extend(steps.into_iter().map(|step| {
                 wine::Prerequisite {
                     id: step.id,
+                    name: Some(step.name),
                     programs: step
                         .programs
                         .into_iter()

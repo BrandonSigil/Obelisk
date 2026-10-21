@@ -6689,6 +6689,10 @@ public struct GameSessionState: Equatable, Hashable {
      */
     public var runtimeInstall: RuntimeInstallState?
     /**
+     * What the launch waits on now, while its preparation names it.
+     */
+    public var launchStep: LaunchStep?
+    /**
      * When this Obelisk saw the game start, in seconds since the Unix epoch,
      * even if it already exited. A game recovered running has none.
      */
@@ -6739,6 +6743,9 @@ public struct GameSessionState: Equatable, Hashable {
          * How much of a runtime has downloaded while the launch waits for it.
          */runtimeInstall: RuntimeInstallState?, 
         /**
+         * What the launch waits on now, while its preparation names it.
+         */launchStep: LaunchStep? = nil, 
+        /**
          * When this Obelisk saw the game start, in seconds since the Unix epoch,
          * even if it already exited. A game recovered running has none.
          */startedAt: UInt64? = nil, 
@@ -6773,6 +6780,7 @@ public struct GameSessionState: Equatable, Hashable {
         self.host = host
         self.observed = observed
         self.runtimeInstall = runtimeInstall
+        self.launchStep = launchStep
         self.startedAt = startedAt
         self.inviteRequest = inviteRequest
         self.lobbyId = lobbyId
@@ -6806,6 +6814,7 @@ public struct FfiConverterTypeGameSessionState: FfiConverterRustBuffer {
                 host: FfiConverterOptionTypeSteamHostState.read(from: &buf), 
                 observed: FfiConverterBool.read(from: &buf), 
                 runtimeInstall: FfiConverterOptionTypeRuntimeInstallState.read(from: &buf), 
+                launchStep: FfiConverterOptionTypeLaunchStep.read(from: &buf), 
                 startedAt: FfiConverterOptionUInt64.read(from: &buf), 
                 inviteRequest: FfiConverterOptionTypeSteamInviteRequest.read(from: &buf), 
                 lobbyId: FfiConverterOptionUInt64.read(from: &buf), 
@@ -6825,6 +6834,7 @@ public struct FfiConverterTypeGameSessionState: FfiConverterRustBuffer {
         FfiConverterOptionTypeSteamHostState.write(value.host, into: &buf)
         FfiConverterBool.write(value.observed, into: &buf)
         FfiConverterOptionTypeRuntimeInstallState.write(value.runtimeInstall, into: &buf)
+        FfiConverterOptionTypeLaunchStep.write(value.launchStep, into: &buf)
         FfiConverterOptionUInt64.write(value.startedAt, into: &buf)
         FfiConverterOptionTypeSteamInviteRequest.write(value.inviteRequest, into: &buf)
         FfiConverterOptionUInt64.write(value.lobbyId, into: &buf)
@@ -12610,6 +12620,95 @@ public func FfiConverterTypeLaunchGraphicsOption_lower(_ value: LaunchGraphicsOp
 
 
 /**
+ * What a launch still preparing waits on, where its preparation names it.
+ */
+
+public enum LaunchStep: Equatable, Hashable {
+    
+    /**
+     * Wine creates the game's Wine prefix, or updates it for its runtime.
+     */
+    case winePrefix
+    /**
+     * A Prerequisite runs in the Wine prefix, with the name its storefront
+     * gives it, if any.
+     */
+    case prerequisite(name: String?
+    )
+    /**
+     * The storefront signs in for the game, as Steam's host does.
+     */
+    case signIn
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension LaunchStep: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeLaunchStep: FfiConverterRustBuffer {
+    typealias SwiftType = LaunchStep
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> LaunchStep {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .winePrefix
+        
+        case 2: return .prerequisite(name: try FfiConverterOptionString.read(from: &buf)
+        )
+        
+        case 3: return .signIn
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: LaunchStep, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case .winePrefix:
+            writeInt(&buf, Int32(1))
+        
+        
+        case let .prerequisite(name):
+            writeInt(&buf, Int32(2))
+            FfiConverterOptionString.write(name, into: &buf)
+            
+        
+        case .signIn:
+            writeInt(&buf, Int32(3))
+        
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeLaunchStep_lift(_ buf: RustBuffer) throws -> LaunchStep {
+    return try FfiConverterTypeLaunchStep.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeLaunchStep_lower(_ value: LaunchStep) -> RustBuffer {
+    return FfiConverterTypeLaunchStep.lower(value)
+}
+
+
+
+/**
  * What translates a game's x86 code on one engine.
  */
 
@@ -14629,6 +14728,30 @@ fileprivate struct FfiConverterOptionTypeLaunchGraphics: FfiConverterRustBuffer 
         switch try readInt(&buf) as Int8 {
         case 0: return nil
         case 1: return try FfiConverterTypeLaunchGraphics.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterOptionTypeLaunchStep: FfiConverterRustBuffer {
+    typealias SwiftType = LaunchStep?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypeLaunchStep.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypeLaunchStep.read(from: &buf)
         default: throw UniffiInternalError.unexpectedOptionalTag
         }
     }

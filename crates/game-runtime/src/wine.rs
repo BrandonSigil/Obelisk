@@ -5,7 +5,7 @@
 //! adapter.
 use crate::{
     Error,
-    supervisor::{Target, architecture::Architecture},
+    supervisor::{LaunchStep, Target, architecture::Architecture},
 };
 use obelisk_core::{Platform, launch::LaunchTarget};
 use serde::{Deserialize, Serialize};
@@ -226,12 +226,14 @@ trait Adapter {
     fn prefix(&self, rosetta: &Path) -> Result<PathBuf, Error>;
     /// Readies config's prefix for a game whose program is already checked:
     /// creates or updates it, has `storefront` furnish it, then makes the
-    /// log's folder. Fails with WineUnavailable before the prefix is created.
+    /// log's folder, showing through `step` each long step as it begins.
+    /// Fails with WineUnavailable before the prefix is created.
     fn ready(
         &self,
         config: &Config,
         locations: &crate::Locations,
         storefront: &dyn Furnisher,
+        step: &dyn Fn(LaunchStep),
     ) -> Result<(), Error>;
     /// How `program`, checked inside `game.install`, starts with
     /// `launched`'s arguments and working directory, behind the storefront's
@@ -398,17 +400,18 @@ pub(crate) struct Game<'a> {
 
 /// Readies the prefix of the Windows installation in `install` to start
 /// `target`: the game must be a Windows program inside the installation; then
-/// its engine readies the prefix. Nothing touches the prefix for a game that
-/// cannot start.
+/// its engine readies the prefix, showing through `step` what it waits on.
+/// Nothing touches the prefix for a game that cannot start.
 fn prepare<S: Storefront>(
     config: &Config,
     locations: &crate::Locations,
     install: &Path,
     target: &LaunchTarget,
     storefront: &S,
+    step: &dyn Fn(LaunchStep),
 ) -> Result<(), Error> {
     program(install, target)?;
-    config.adapter().ready(config, locations, storefront)
+    config.adapter().ready(config, locations, storefront, step)
 }
 
 /// The game `target` names, or the program its launch settings start
@@ -463,6 +466,9 @@ fn program(install: &Path, target: &LaunchTarget) -> Result<PathBuf, Error> {
 pub struct Prerequisite {
     /// A prefix runs each id once.
     pub id: String,
+    /// What a player knows it by, such as DirectX, when its storefront names
+    /// it.
+    pub name: Option<String>,
     /// Run in order, each with its Windows command line.
     pub programs: Vec<(PathBuf, String)>,
 }
@@ -516,17 +522,19 @@ impl Installation {
 
     /// Readies the prefix, with `storefront`'s additions, to start `target`
     /// or the program the game's profile names instead, and returns how its
-    /// game runs. D3DMetal is translated before a game that renders with it
-    /// starts.
+    /// game runs. `step` shows each long step, such as creating the prefix or
+    /// running a prerequisite, as it begins. D3DMetal is translated before a
+    /// game that renders with it starts.
     pub fn ready<S: Storefront>(
         &self,
         locations: &crate::Locations,
         target: &LaunchTarget,
         storefront: &S,
+        step: &dyn Fn(LaunchStep),
     ) -> Result<Config, Error> {
         let config = self.runtime(locations)?;
         let target = self.settings.started(&self.install, target);
-        prepare(&config, locations, &self.install, &target, storefront)?;
+        prepare(&config, locations, &self.install, &target, storefront, step)?;
         Ok(config)
     }
 
