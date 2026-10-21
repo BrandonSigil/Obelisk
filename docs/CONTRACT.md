@@ -59,6 +59,7 @@ In the Linux engine's guest:
 - the render server's `--obelisk-translate`
 - `obelisk-input --dir`, and the `wsd.sock`, `vtest.sock` and `input.sock` sockets it waits for
 - `wineserver -p0` and `wineserver -w`
+- winebrowser running `xdg-open` from the guest's `PATH`, and the guest root's `/bin/sh`, `mktemp` and `mv`, which the launcher's `xdg-open` runs with
 
 ### The Steam bridge
 

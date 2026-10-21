@@ -15,7 +15,8 @@
 #   --bind GUEST=HOST[:ro]    a folder the guest also sees, at GUEST, whose parent exists in the root
 #   --env NAME=VALUE          a variable of the guest
 #   --pass NAME               this script's variable NAME, when set, as a variable of the guest
-# OBELISK_APP_NAME names the game in the menu bar, the Dock and Cmd-Tab.
+# OBELISK_APP_NAME names the game in the menu bar, the Dock and Cmd-Tab. OBELISK_OPEN_LINK, for tests, replaces the
+# Mac's /usr/bin/open.
 set -u
 runtime=$1 home=$2 install=$3 cwd=$4
 shift 4
@@ -59,6 +60,24 @@ sockets=obelisk-engine-$$
 cd "$sockets_root" || exit 1
 mkdir -m 700 "$sockets" || exit 1
 
+# Opens each link the guest left, at most 4 KiB of its first line, on the Mac.
+open_link=${OBELISK_OPEN_LINK:-/usr/bin/open}
+relay_pending() {
+    local link url
+    for link in "$sockets/links"/*.url; do
+        [ -f "$link" ] || continue
+        url=$(LC_ALL=C head -c 4096 "$link" | head -n 1 | LC_ALL=C tr -d '[:cntrl:]')
+        rm -f "$link"
+        case $url in http://* | https://*) "$open_link" "$url" </dev/null >/dev/null 2>&1 ;; esac
+    done
+}
+relay_links() {
+    while :; do
+        relay_pending
+        sleep 0.25
+    done
+}
+
 helpers=()
 game=
 finish() {
@@ -72,6 +91,8 @@ finish() {
         sleep 0.05
     done
     for helper in ${helpers[@]+"${helpers[@]}"}; do kill -KILL "$helper" 2>/dev/null; done
+    # A link the game opened just before it ended still opens.
+    relay_pending
     rm -rf "${sockets_root:?}/$sockets"
 }
 trap 'finish; trap - EXIT; exit 143' TERM INT HUP
@@ -164,6 +185,22 @@ else
         NPT_D3D11_LIBRARY_PATH="$dxmt" NPT_DXGI_LIBRARY_PATH="$dxmt" NPT_D3D12_LIBRARY_PATH="$dxmt" \
         "$runtime/graphics/bin/virgl_test_server" --no-virgl --no-fork --socket-path "$sockets/vtest.sock" &
 fi
+helpers+=($!)
+# A game that opens a web page asks Wine's winebrowser, which runs xdg-open: the guest has neither it nor a browser, so
+# a page the game waits on, such as Epic's sign-in when the account has something to accept, never showed. The guest's
+# xdg-open, in /run/obelisk/bin, leaves each http(s) link in /run/obelisk/links, and this script opens it on the Mac, in
+# the player's browser. Any other link is dropped.
+mkdir -m 700 "$sockets/bin" "$sockets/links" || exit 1
+cat > "$sockets/bin/xdg-open" <<'OPEN'
+#!/bin/sh
+case $1 in http://* | https://*) ;; *) exit 1 ;; esac
+links=${0%/bin/*}/links
+[ -d "$links" ] || links=/run/obelisk/links
+pending=$(mktemp "$links/.pending.XXXXXX") || exit 1
+printf '%s\n' "$1" > "$pending" && mv "$pending" "$links/${pending##*.}.url"
+OPEN
+chmod 700 "$sockets/bin/xdg-open" || exit 1
+relay_links &
 helpers+=($!)
 # The input service gives the Mac's gamepads to Wine's Obelisk bus. A runtime without it starts the game without
 # gamepads.

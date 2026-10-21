@@ -331,7 +331,12 @@ fn guest_environment(config: &Config) -> Vec<(String, String)> {
         ("HOME", HOME.into()),
         ("USER", "user".into()),
         ("LOGNAME", "user".into()),
-        ("PATH", "/opt/wine/bin:/usr/bin:/bin".into()),
+        // The launcher's xdg-open, which hands the links the game opens to the
+        // Mac, is in /run/obelisk/bin.
+        (
+            "PATH",
+            "/opt/wine/bin:/usr/bin:/bin:/run/obelisk/bin".into(),
+        ),
         ("LANG", "en_US.UTF-8".into()),
         ("WINEPREFIX", format!("{HOME}/{PREFIX}")),
         ("WINEARCH", "win64".into()),

@@ -276,9 +276,17 @@ exec /usr/bin/nc -lU "$4""#;
         "graphics/x86_64/libexec/virgl_render_server",
         r#"echo "Intel $*" >> "$OBELISK_TEST_ROOT/servers.txt""#,
     );
+    // With OBELISK_TEST_LINKS, the game opens each of its lines as winebrowser
+    // would, through the xdg-open the guest finds in /run/obelisk/bin, then
+    // stays long enough for the launcher to relay them.
     script(
         "engine/fexdarwin-run",
-        r#"{ printf '%s\n' "$FEXDARWIN_BIND" "files $(ulimit -S -n)"; printf '%s\n' "$@"; } > "$OBELISK_TEST_ROOT/engine.txt""#,
+        r#"{ printf '%s\n' "$FEXDARWIN_BIND" "files $(ulimit -S -n)"; printf '%s\n' "$@"; } > "$OBELISK_TEST_ROOT/engine.txt"
+if [ -n "${OBELISK_TEST_LINKS-}" ]; then
+    run=${FEXDARWIN_BIND#*/run/obelisk=}
+    printf '%s\n' "$OBELISK_TEST_LINKS" | while IFS= read -r link; do "${run%%;*}/bin/xdg-open" "$link"; done
+    sleep 1
+fi"#,
     );
     runtime
 }
@@ -372,6 +380,53 @@ fn the_launcher_hands_the_guest_its_binds_its_variables_and_the_session_s_values
         format!("dxmt {}", dxmt.display())
     );
     assert_eq!(server.lines().nth(2).unwrap(), "residency set default");
+}
+
+#[test]
+fn the_web_pages_the_game_opens_open_on_the_mac_and_nothing_else_does() {
+    use std::os::unix::fs::PermissionsExt;
+    let (_directory, root) = installation();
+    let open = root.join("open");
+    fs::write(
+        &open,
+        "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$OBELISK_TEST_ROOT/opened.txt\"\n",
+    )
+    .unwrap();
+    fs::set_permissions(&open, fs::Permissions::from_mode(0o755)).unwrap();
+    let activate = "https://www.epicgames.com/activate?userCode=ABCD1234&lang=en";
+
+    let (engine, _) = run_launcher(
+        &root,
+        &[],
+        &[
+            (
+                "OBELISK_TEST_LINKS",
+                &format!("{activate}\nfile:///etc/passwd\nhttp://example.com/"),
+            ),
+            ("OBELISK_OPEN_LINK", open.to_str().unwrap()),
+        ],
+    );
+
+    // Each http(s) link once, in order; a file link never reaches the Mac.
+    let opened = fs::read_to_string(root.join("opened.txt")).unwrap();
+    assert_eq!(
+        opened.lines().collect::<Vec<_>>(),
+        [activate, "http://example.com/"]
+    );
+    // The guest finds the launcher's xdg-open, and the launcher's folder goes
+    // with the game.
+    assert!(engine.contains("/run/obelisk="), "{engine}");
+    let leftovers: Vec<_> = fs::read_dir(&root)
+        .unwrap()
+        .filter_map(Result::ok)
+        .filter(|entry| {
+            entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with("obelisk-engine-")
+        })
+        .collect();
+    assert!(leftovers.is_empty(), "{leftovers:?}");
 }
 
 #[test]
