@@ -1200,6 +1200,12 @@ RustBuffer uniffi_obelisk_bridge_fn_func_gog_login_url(RustCallStatus *_Nonnull 
     
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_OBELISK_BRIDGE_FN_FUNC_VERIFIED_GAMES
+#define UNIFFI_FFIDEF_UNIFFI_OBELISK_BRIDGE_FN_FUNC_VERIFIED_GAMES
+RustBuffer uniffi_obelisk_bridge_fn_func_verified_games(RustCallStatus *_Nonnull out_status
+    
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_OBELISK_BRIDGE_FN_FUNC_END_ORPHANED_WINDOWS_GAMES
 #define UNIFFI_FFIDEF_UNIFFI_OBELISK_BRIDGE_FN_FUNC_END_ORPHANED_WINDOWS_GAMES
 uint32_t uniffi_obelisk_bridge_fn_func_end_orphaned_windows_games(RustBuffer locations, RustCallStatus *_Nonnull out_status
@@ -1535,6 +1541,12 @@ uint16_t uniffi_obelisk_bridge_checksum_func_gog_is_login_redirect(void
 #ifndef UNIFFI_FFIDEF_UNIFFI_OBELISK_BRIDGE_CHECKSUM_FUNC_GOG_LOGIN_URL
 #define UNIFFI_FFIDEF_UNIFFI_OBELISK_BRIDGE_CHECKSUM_FUNC_GOG_LOGIN_URL
 uint16_t uniffi_obelisk_bridge_checksum_func_gog_login_url(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_OBELISK_BRIDGE_CHECKSUM_FUNC_VERIFIED_GAMES
+#define UNIFFI_FFIDEF_UNIFFI_OBELISK_BRIDGE_CHECKSUM_FUNC_VERIFIED_GAMES
+uint16_t uniffi_obelisk_bridge_checksum_func_verified_games(void
     
 );
 #endif

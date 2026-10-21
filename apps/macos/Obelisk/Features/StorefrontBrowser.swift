@@ -14,6 +14,9 @@ struct StorefrontBrowser<Model: LibraryStorefront, HeroArtwork: View, HeroLogo: 
     let avatarURL: URL?
     /// How the storefront's store opens, signed in as the account.
     let storePage: (@MainActor () async -> WebPageStart)?
+    /// How its store's search opens, which the library offers when its own
+    /// search finds nothing.
+    let storeSearch: (@MainActor (String) async -> WebPageStart)?
     let scrollMemory: LibraryScrollMemory
     @ViewBuilder let heroArtwork: (Model.Game) -> HeroArtwork
     @ViewBuilder let heroLogo: (Model.Game) -> HeroLogo
@@ -35,6 +38,7 @@ struct StorefrontBrowser<Model: LibraryStorefront, HeroArtwork: View, HeroLogo: 
         accountName: String?,
         avatarURL: URL? = nil,
         storePage: (@MainActor () async -> WebPageStart)? = nil,
+        storeSearch: (@MainActor (String) async -> WebPageStart)? = nil,
         scrollMemory: LibraryScrollMemory,
         @ViewBuilder heroArtwork: @escaping (Model.Game) -> HeroArtwork,
         @ViewBuilder heroLogo: @escaping (Model.Game) -> HeroLogo,
@@ -49,6 +53,7 @@ struct StorefrontBrowser<Model: LibraryStorefront, HeroArtwork: View, HeroLogo: 
         self.accountName = accountName
         self.avatarURL = avatarURL
         self.storePage = storePage
+        self.storeSearch = storeSearch
         self.scrollMemory = scrollMemory
         self.heroArtwork = heroArtwork
         self.heroLogo = heroLogo
@@ -74,6 +79,7 @@ struct StorefrontBrowser<Model: LibraryStorefront, HeroArtwork: View, HeroLogo: 
                     storeTitle: storeTitle,
                     libraryTitle: libraryTitle,
                     scrollMemory: scrollMemory,
+                    stores: storeSearch.map { [StoreSearch(storeID: storeID, storeTitle: storeTitle, page: $0)] } ?? [],
                     open: open,
                     heroArtwork: heroArtwork,
                     heroLogo: heroLogo,

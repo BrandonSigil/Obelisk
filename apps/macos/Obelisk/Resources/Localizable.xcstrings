@@ -7210,6 +7210,40 @@
         }
       }
     },
+    "ui.search.owned_only": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Search only looks through the games you own."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "La recherche ne porte que sur les jeux que vous possédez."
+          }
+        }
+      }
+    },
+    "ui.search.store": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Search %@ Store"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Rechercher dans le magasin %@"
+          }
+        }
+      }
+    },
     "ui.search.placeholder": {
       "extractionState": "manual",
       "localizations": {
@@ -12532,6 +12566,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "Joués récemment"
+          }
+        }
+      }
+    },
+    "ui.home.verified": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ Verified"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Vérifiés par %@"
           }
         }
       }

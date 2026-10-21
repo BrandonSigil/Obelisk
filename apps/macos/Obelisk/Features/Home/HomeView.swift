@@ -1,11 +1,12 @@
 import SwiftUI
 
 /// Home: every library at once. The last game played anywhere is its hero,
-/// then come the games played before it and the games on the Mac, each a
-/// shelf of covers, then a tile for each library. Its search looks through
-/// every library. A game opens its page over Home, its cover flying in as
-/// from the game's own library. Signed in nowhere, Home is a sign-in page
-/// leading to each storefront's.
+/// then come the games played before it, the games on the Mac and the ones
+/// Obelisk was set up to run, each a shelf of covers, then a tile for each
+/// library. Its search looks through every library, and offers Steam's and
+/// Epic's stores when it finds nothing. A game opens its page over Home, its
+/// cover flying in as from the game's own library. Signed in nowhere, Home is
+/// a sign-in page leading to each storefront's.
 struct HomeView: View {
     @Bindable var model: AppModel
     @Namespace private var namespace
@@ -251,13 +252,14 @@ private struct HomePage: View {
     }
 
     private var homeLibraries: Libraries {
-        Libraries(
-            steam: model.steam.homeLibrary(in: .steam, cover: SteamView.cover, heroArtwork: SteamView.heroArtwork,
-                                           heroLogo: SteamView.heroLogo),
-            epic: model.epic.homeLibrary(in: .epic, cover: EpicView.cover, heroArtwork: EpicView.heroArtwork,
-                                         heroLogo: EpicView.heroLogo),
-            gog: model.gog.homeLibrary(in: .gog, cover: GogView.cover, heroArtwork: GogView.heroArtwork,
-                                       heroLogo: GogView.heroLogo)
+        let verified = ObeliskVerified.games
+        return Libraries(
+            steam: model.steam.homeLibrary(in: .steam, verified: verified.contains, cover: SteamView.cover,
+                                           heroArtwork: SteamView.heroArtwork, heroLogo: SteamView.heroLogo),
+            epic: model.epic.homeLibrary(in: .epic, verified: verified.contains, cover: EpicView.cover,
+                                         heroArtwork: EpicView.heroArtwork, heroLogo: EpicView.heroLogo),
+            gog: model.gog.homeLibrary(in: .gog, verified: verified.contains, cover: GogView.cover,
+                                       heroArtwork: GogView.heroArtwork, heroLogo: GogView.heroLogo)
         )
     }
 
@@ -294,6 +296,11 @@ private struct HomePage: View {
                         if !shelves.installed.isEmpty {
                             CoverShelf(title: L10n.string("ui.home.installed"), items: shelves.installed, id: "installed",
                                        memory: shelfMemory) { card($0, on: "installed") }
+                        }
+                        if !shelves.verified.isEmpty {
+                            CoverShelf(title: L10n.string("ui.home.verified", AppIdentity.name),
+                                       items: shelves.verified, id: "verified",
+                                       memory: shelfMemory) { card($0, on: "verified") }
                         }
                         self.libraries(libraries)
                     } else {
@@ -426,6 +433,18 @@ private struct HomePage: View {
         )
     }
 
+    /// The stores whose search Home offers for a game no library holds.
+    private var stores: [StoreSearch] {
+        let steam = model.steam
+        let epic = model.epic
+        return [
+            StoreSearch(storeID: "steam", storeTitle: L10n.string("ui.store.steam"), page: steam.storeSearch),
+            StoreSearch(storeID: "epic", storeTitle: L10n.string("ui.store.epic")) {
+                await epic.storePage(at: EpicGames.storeSearchURL($0))
+            },
+        ]
+    }
+
     private func results(_ games: [HomeGame]) -> some View {
         VStack(alignment: .leading, spacing: 22) {
             VStack(alignment: .leading, spacing: 3) {
@@ -438,7 +457,7 @@ private struct HomePage: View {
                     .monospacedDigit()
             }
             if games.isEmpty {
-                StorefrontEmptyLibrary(searchText: $model.searchText, refresh: model.refresh)
+                StorefrontEmptyLibrary(searchText: $model.searchText, stores: stores, refresh: model.refresh)
             } else {
                 LazyVGrid(columns: Self.columns, alignment: .leading, spacing: 18) {
                     ForEach(games) { card($0, on: "search") }

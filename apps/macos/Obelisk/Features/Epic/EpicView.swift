@@ -33,6 +33,7 @@ struct EpicView: View {
             libraryTitle: L10n.string("ui.epic.library"),
             accountName: model.accountName,
             storePage: model.storePage,
+            storeSearch: { [model] in await model.storePage(at: EpicGames.storeSearchURL($0)) },
             scrollMemory: libraryScroll,
             heroArtwork: Self.heroArtwork,
             heroLogo: Self.heroLogo,

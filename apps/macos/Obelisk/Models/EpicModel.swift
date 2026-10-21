@@ -20,6 +20,13 @@ extension EpicGames: WebStorefront {
 
     static let storeID = "epic"
     static let storeURL = URL(string: "https://store.epicgames.com/")!
+    /// The store's search for `query`.
+    static func storeSearchURL(_ query: String) -> URL {
+        var url = URLComponents(string: "https://store.epicgames.com/browse")!
+        url.queryItems = [URLQueryItem(name: "q", value: query), URLQueryItem(name: "sortBy", value: "relevancy"),
+                          URLQueryItem(name: "sortDir", value: "DESC")]
+        return url.url!
+    }
     static let webSignIn = WebSignIn.epic
     static func keychain() -> any CredentialStore<EpicCredentials> { EpicKeychain() }
 
@@ -41,8 +48,8 @@ extension EpicGames: WebStorefront {
     }
     static func disconnect(_ session: Session) async throws { try await session.disconnect() }
     /// Each address spends a new exchange code of the session.
-    static func webSignInURL(session: Session) async throws -> URL? {
-        URL(string: try await session.webSignInUrl(redirectUrl: storeURL.absoluteString))
+    static func webSignInURL(session: Session, to destination: URL) async throws -> URL? {
+        URL(string: try await session.webSignInUrl(redirectUrl: destination.absoluteString))
     }
 
     static func games(of session: Session) async throws -> [EpicGame] { try await session.games() }
