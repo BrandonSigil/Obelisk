@@ -2,9 +2,10 @@
 //! runs in Wine, Valve's Steam components for every Steam game. A Transfer
 //! gets the missing ones before the game's files. A launch that still misses
 //! one gets it after its Admission, before its game is prepared. Each shows
-//! the download its own way. A Voile release the pinned one replaced goes
-//! only when a launch finds no Game session, of any storefront, that may run
-//! a game from it.
+//! the download its own way. A newer Voile release than the one in place
+//! downloads once no game runs, unless the game's profile needs it. A Voile
+//! release a newer one replaced goes only when a launch finds no Game
+//! session, of any storefront, that may run a game from it.
 use crate::{
     installations::blocking,
     sessions::{self, BoxFuture, Failure, failed},
@@ -12,12 +13,20 @@ use crate::{
 use obelisk_core::{Platform, transfer::CancelToken};
 use std::{
     path::PathBuf,
-    sync::{Arc, Mutex},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, Ordering},
+    },
     time::Duration,
 };
 
 /// How often a download under way shows its progress.
 const PACE: Duration = Duration::from_millis(250);
+/// How often a newer release waiting to download looks for a running game.
+const PREFETCH_PACE: Duration = Duration::from_secs(30);
+/// How long a newer release waits for the launch that found it to run its
+/// game, before it downloads anyway once no game runs.
+const PREFETCH_DELAY: Duration = Duration::from_secs(600);
 
 /// A runtime a build needs to launch, beside its own files.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -26,6 +35,19 @@ pub enum Runtime {
     Voile,
     /// Valve's Steam components, which Obelisk's Steam host loads.
     SteamComponents,
+}
+
+/// What a launch makes of a runtime in place.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Standing {
+    /// In place, and nothing newer is offered.
+    Current,
+    /// In place and enough for the game, while a newer release is offered:
+    /// it downloads once no game runs.
+    Outdated,
+    /// Not in place, or not enough for the game while a release that is
+    /// enough is offered: the launch waits for it.
+    Missing,
 }
 
 /// How much of a runtime has downloaded: the bytes received, and the total.
@@ -46,13 +68,20 @@ pub(crate) trait RuntimeDownload: Send + Sync {
     fn run(&self) -> BoxFuture<'_, Result<(), Failure>>;
 }
 
-/// Where the runtimes are: whether one is in place, its download, and the
-/// Voile releases the pinned one replaced. Tests stand in for it.
+/// Where the runtimes are: where one stands, its download, what decides
+/// which release a launch wants, and the Voile releases a newer one
+/// replaced. Tests stand in for it.
 pub(crate) trait RuntimeSource: Send + Sync {
-    /// It reads a few files, never a whole runtime.
-    fn present(&self, runtime: Runtime) -> bool;
+    /// Where `runtime` stands for a game whose profile needs `voile` or a
+    /// newer Voile release. It reads a few files, never a whole runtime.
+    fn standing(&self, runtime: Runtime, voile: Option<&str>) -> Standing;
+    /// The download of the release a launch wants: for Voile, the newest its
+    /// feed offers once read again.
     fn download(&self, runtime: Runtime) -> Arc<dyn RuntimeDownload>;
-    /// Removes the Voile releases the pinned one replaced. What cannot go now
+    /// Reads anew what launches decide on: Voile's feed and the game
+    /// profiles. Without the network, it soon gives up and keeps the last.
+    fn refresh(&self) -> BoxFuture<'_, ()>;
+    /// Removes the Voile releases a newer one replaced. What cannot go now
     /// goes with a later launch.
     fn remove_replaced(&self);
 }
@@ -63,6 +92,8 @@ pub struct Runtimes {
     source: Arc<dyn RuntimeSource>,
     /// Whether each storefront's Game sessions may run a game now.
     sessions: Mutex<Vec<Box<dyn Fn() -> bool + Send + Sync>>>,
+    /// A newer release downloads, or waits for no game to run.
+    prefetching: AtomicBool,
 }
 
 impl Runtimes {
@@ -76,6 +107,7 @@ impl Runtimes {
         Arc::new(Self {
             source,
             sessions: Mutex::new(Vec::new()),
+            prefetching: AtomicBool::new(false),
         })
     }
 
@@ -85,10 +117,17 @@ impl Runtimes {
         self.sessions.lock().unwrap().push(Box::new(may_run));
     }
 
-    /// Gets each runtime a build of `platform` from P needs that is not in
-    /// place, in order. `shown` gets each download's progress when it starts
-    /// and every `PACE`. Cancelling `cancel` stops the download under way and
-    /// any after it. Never removes a release.
+    /// Reads anew what a launch decides on, before its game's profile is
+    /// read: Voile's feed and the game profiles.
+    pub(crate) async fn refresh_before_launch(&self) {
+        self.source.refresh().await;
+    }
+
+    /// Gets each runtime a build of `platform` from P needs that is missing,
+    /// in order, the newest Voile release offered when Voile is. `shown` gets
+    /// each download's progress when it starts and every `PACE`. Cancelling
+    /// `cancel` stops the download under way and any after it. Never removes
+    /// a release.
     pub(crate) async fn get<P: sessions::Storefront>(
         &self,
         platform: Platform,
@@ -96,35 +135,8 @@ impl Runtimes {
         shown: impl Fn(Progress) + Send,
     ) -> Result<(), Failure> {
         for runtime in needed::<P>(platform) {
-            let source = self.source.clone();
-            if blocking(storage_failed(runtime), move || source.present(runtime)).await? {
-                continue;
-            }
-            if cancel.is_cancelled() {
-                return Err(Failure::Cancelled);
-            }
-            let download = self.source.download(runtime);
-            let mut run = download.run();
-            let outcome = loop {
-                let (received, total) = download.progress();
-                shown(Progress {
-                    runtime,
-                    received,
-                    total,
-                });
-                tokio::select! {
-                    outcome = &mut run => break outcome,
-                    () = cancel.cancelled() => {
-                        download.cancel();
-                        // The install cleans up before the wait ends.
-                        break (&mut run).await;
-                    }
-                    () = tokio::time::sleep(PACE) => {}
-                }
-            };
-            match outcome {
-                Err(_) if cancel.is_cancelled() => return Err(Failure::Cancelled),
-                outcome => outcome?,
+            if self.standing(runtime, None).await? == Standing::Missing {
+                self.download(runtime, cancel, &shown).await?;
             }
         }
         match cancel.is_cancelled() {
@@ -133,22 +145,112 @@ impl Runtimes {
         }
     }
 
-    /// Gets the runtimes as `get` does. Then, for a build that needs Voile,
-    /// removes the releases the pinned one replaced, unless the Game sessions
-    /// of a storefront may run a game. A failed or cancelled launch removes
-    /// nothing.
+    /// Gets the runtimes as `get` does, for a game whose profile needs
+    /// `voile` or a newer Voile release; a newer release than the one in
+    /// place and enough downloads once no game runs. Then, for a build that
+    /// needs Voile, removes the releases a newer one replaced, unless the
+    /// Game sessions of a storefront may run a game. A failed or cancelled
+    /// launch removes nothing.
     pub(crate) async fn get_for_launch<P: sessions::Storefront>(
-        &self,
+        self: &Arc<Self>,
         platform: Platform,
+        voile: Option<&'static str>,
         cancel: &CancelToken,
         shown: impl Fn(Progress) + Send,
     ) -> Result<(), Failure> {
-        self.get::<P>(platform, cancel, shown).await?;
+        for runtime in needed::<P>(platform) {
+            match self.standing(runtime, voile).await? {
+                Standing::Current => {}
+                Standing::Outdated => self.prefetch(runtime),
+                Standing::Missing => self.download(runtime, cancel, &shown).await?,
+            }
+        }
+        if cancel.is_cancelled() {
+            return Err(Failure::Cancelled);
+        }
         if needed::<P>(platform).contains(&Runtime::Voile) && !self.may_run() {
             let source = self.source.clone();
             let _ = tokio::task::spawn_blocking(move || source.remove_replaced()).await;
         }
         Ok(())
+    }
+
+    async fn standing(
+        &self,
+        runtime: Runtime,
+        voile: Option<&'static str>,
+    ) -> Result<Standing, Failure> {
+        let source = self.source.clone();
+        blocking(storage_failed(runtime), move || {
+            source.standing(runtime, voile)
+        })
+        .await
+    }
+
+    /// Downloads `runtime`, showing its progress through `shown`, until it
+    /// ends or `cancel` stops it.
+    async fn download(
+        &self,
+        runtime: Runtime,
+        cancel: &CancelToken,
+        shown: &(impl Fn(Progress) + Send),
+    ) -> Result<(), Failure> {
+        if cancel.is_cancelled() {
+            return Err(Failure::Cancelled);
+        }
+        let download = self.source.download(runtime);
+        let mut run = download.run();
+        let outcome = loop {
+            let (received, total) = download.progress();
+            shown(Progress {
+                runtime,
+                received,
+                total,
+            });
+            tokio::select! {
+                outcome = &mut run => break outcome,
+                () = cancel.cancelled() => {
+                    download.cancel();
+                    // The install cleans up before the wait ends.
+                    break (&mut run).await;
+                }
+                () = tokio::time::sleep(PACE) => {}
+            }
+        };
+        match outcome {
+            Err(_) if cancel.is_cancelled() => Err(Failure::Cancelled),
+            outcome => outcome,
+        }
+    }
+
+    /// Downloads the newer release of `runtime` once no game runs, as
+    /// automatic updates wait for one: the launch that found it goes on with
+    /// the release in place, and a later launch runs the new one.
+    fn prefetch(self: &Arc<Self>, runtime: Runtime) {
+        if self.prefetching.swap(true, Ordering::AcqRel) {
+            return;
+        }
+        let runtimes = self.clone();
+        tokio::spawn(async move {
+            runtimes.until_no_game_runs().await;
+            let _ = runtimes.source.download(runtime).run().await;
+            runtimes.prefetching.store(false, Ordering::Release);
+        });
+    }
+
+    /// Waits until no Game session may run a game, once a game has run, or
+    /// after `PREFETCH_DELAY` when none did.
+    async fn until_no_game_runs(&self) {
+        let since = tokio::time::Instant::now();
+        let mut ran = false;
+        loop {
+            tokio::time::sleep(PREFETCH_PACE).await;
+            let running = self.may_run();
+            ran |= running;
+            if !running && (ran || since.elapsed() >= PREFETCH_DELAY) {
+                return;
+            }
+        }
     }
 
     /// Whether the Game sessions of a storefront may run a game now.
@@ -182,10 +284,15 @@ fn storage_failed(runtime: Runtime) -> String {
 struct Downloads(crate::Locations);
 
 impl RuntimeSource for Downloads {
-    fn present(&self, runtime: Runtime) -> bool {
+    fn standing(&self, runtime: Runtime, voile: Option<&str>) -> Standing {
         match runtime {
-            Runtime::Voile => crate::voile::runtime(&self.0.voile).is_some(),
-            Runtime::SteamComponents => crate::valve::installed(&self.0.steam_runtime_package),
+            Runtime::Voile => crate::voile::standing(&self.0.voile, voile),
+            Runtime::SteamComponents => {
+                match crate::valve::installed(&self.0.steam_runtime_package) {
+                    true => Standing::Current,
+                    false => Standing::Missing,
+                }
+            }
         }
     }
     fn download(&self, runtime: Runtime) -> Arc<dyn RuntimeDownload> {
@@ -199,6 +306,14 @@ impl RuntimeSource for Downloads {
                 path: self.0.steam_runtime_package.clone(),
             }),
         }
+    }
+    fn refresh(&self) -> BoxFuture<'_, ()> {
+        Box::pin(async move {
+            tokio::join!(
+                crate::voile::refresh(&self.0.voile),
+                crate::profile::refresh(&self.0.library),
+            );
+        })
     }
     fn remove_replaced(&self) {
         crate::voile::remove_replaced(&self.0.voile);
@@ -242,8 +357,8 @@ impl RuntimeDownload for Download<crate::valve::Install> {
     }
 }
 
-/// A local copy of the pinned Voile release, which replaces its download in
-/// development builds while the release is private.
+/// A local copy of the Voile release Obelisk was built with, which replaces
+/// its download in development builds.
 fn development_archive() -> Option<PathBuf> {
     if !cfg!(debug_assertions) {
         return None;

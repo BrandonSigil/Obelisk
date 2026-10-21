@@ -1,9 +1,15 @@
-//! Voile, the Wine runtime Windows games run in. Obelisk downloads the release
-//! it pins with a Windows build's Transfer, before the game's files, and a
-//! launch that still misses it downloads it first; a development runtime that
-//! voile's install-dev.sh put in `current` takes precedence.
+//! Voile, the Wine runtime Windows games run in. Obelisk runs the newest
+//! release installed that keeps its contract: the paths, variables and
+//! programs it relies on in a runtime, which docs/CONTRACT.md lists. As a
+//! Windows game launches, Obelisk reads Voile's feed: a newer release of its
+//! contract downloads once no game runs, unless the game needs it to start.
+//! A Windows build's Transfer gets a release before the game's files when
+//! none is installed. The release built into Obelisk stands in for the feed
+//! until one was read. A development runtime that voile's install-dev.sh put
+//! in `current` takes precedence.
 //!
 //! The release also carries the Linux engine's runtime, in its `linux` folder.
+use crate::runtimes::Standing;
 use obelisk_core::transfer::CancelToken;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
@@ -19,6 +25,11 @@ use std::{
     time::Duration,
 };
 
+mod feed;
+
+use feed::Offered;
+pub(crate) use feed::refresh;
+
 const RELEASE: &str = include_str!("../voile-release.json");
 /// Where install-dev.sh puts a locally built runtime.
 const DEVELOPMENT: &str = "current";
@@ -33,8 +44,8 @@ const LINUX: &str = "linux";
 /// Two installs never extract into the same folder.
 static INSTALLING: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
-/// The Voile release Obelisk runs Windows games with.
-#[derive(Debug, Deserialize)]
+/// A Voile release: its version and its archive.
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 pub struct Release {
     pub version: String,
     pub url: String,
@@ -42,9 +53,30 @@ pub struct Release {
     pub sha256: String,
 }
 
-pub fn release() -> &'static Release {
-    static VALUE: OnceLock<Release> = OnceLock::new();
+/// `voile-release.json`: the contract Obelisk keeps with Voile, and the
+/// release Obelisk was built with, of that contract.
+#[derive(Debug, Deserialize)]
+struct BuiltIn {
+    contract: u32,
+    #[serde(flatten)]
+    release: Release,
+}
+
+fn built_in() -> &'static BuiltIn {
+    static VALUE: OnceLock<BuiltIn> = OnceLock::new();
     VALUE.get_or_init(|| serde_json::from_str(RELEASE).expect("checked-in Voile release"))
+}
+
+/// The release Obelisk was built with, which Transfers and launches install
+/// until they read a feed.
+pub fn release() -> &'static Release {
+    &built_in().release
+}
+
+/// What Obelisk relies on in a runtime, as Voile's `CONTRACT` counts it:
+/// Obelisk runs only releases of this contract.
+pub fn contract() -> u32 {
+    built_in().contract
 }
 
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
@@ -65,42 +97,39 @@ impl From<std::io::Error> for Failure {
 }
 
 /// The runtime in `root` Windows games run in: the development runtime, else
-/// the pinned release once installed.
+/// the newest release installed there that Obelisk runs.
 pub fn runtime(root: &Path) -> Option<PathBuf> {
-    located(root, release())
-}
-
-fn located(root: &Path, release: &Release) -> Option<PathBuf> {
-    let development = root.join(DEVELOPMENT);
-    if has_wine(&development) {
+    if let Some(development) = development(root) {
         return Some(development);
     }
-    let pinned = root.join(&release.version);
-    (has_wine(&pinned) && version(&pinned).as_deref() == Some(release.version.as_str()))
-        .then_some(pinned)
+    newest(root, &feed::offered(root)).map(|(_, runtime)| runtime)
+}
+
+/// The runtime install-dev.sh put in `root`, when there is one.
+fn development(root: &Path) -> Option<PathBuf> {
+    let development = root.join(DEVELOPMENT);
+    has_wine(&development).then_some(development)
 }
 
 fn has_wine(runtime: &Path) -> bool {
     runtime.join("bin/wine").is_file()
 }
 
-/// The Linux engine's runtime in `root`: the development runtime's, else the
-/// pinned release's once installed.
-pub fn linux_runtime(root: &Path) -> Option<PathBuf> {
-    located_linux(root, release())
+/// Whether `runtime` holds the Wine of `release`, as its runtime.json names
+/// it.
+fn holds(runtime: &Path, release: &str) -> bool {
+    has_wine(runtime) && version(runtime).as_deref() == Some(release)
 }
 
-fn located_linux(root: &Path, release: &Release) -> Option<PathBuf> {
+/// The Linux engine's runtime in `root`: the development runtime's, else the
+/// one inside the release Windows games run in.
+pub fn linux_runtime(root: &Path) -> Option<PathBuf> {
     let development = root.join(DEVELOPMENT).join(LINUX);
     if has_engine(&development) {
         return Some(development);
     }
-    let pinned = root.join(&release.version);
-    let linux = pinned.join(LINUX);
-    (has_wine(&pinned)
-        && version(&pinned).as_deref() == Some(release.version.as_str())
-        && has_engine(&linux))
-    .then_some(linux)
+    let linux = newest(root, &feed::offered(root))?.1.join(LINUX);
+    has_engine(&linux).then_some(linux)
 }
 
 /// The engine and the Wine it runs.
@@ -108,14 +137,9 @@ fn has_engine(runtime: &Path) -> bool {
     runtime.join("engine/fexdarwin-run").is_file() && runtime.join("wine/bin/wine").exists()
 }
 
-/// The Voile release Windows games run in now, as its runtime.json names it:
-/// the development runtime's, else the pinned release once installed.
+/// The Voile release Windows games run in now, as its runtime.json names it.
 pub fn installed_release(root: &Path) -> Option<String> {
-    installed(root, release())
-}
-
-fn installed(root: &Path, release: &Release) -> Option<String> {
-    release_of(&located(root, release)?)
+    release_of(&runtime(root)?)
 }
 
 /// The Voile release `runtime` comes from: a Rosetta runtime, or the Linux
@@ -124,18 +148,106 @@ pub(crate) fn release_of(runtime: &Path) -> Option<String> {
     version(runtime).or_else(|| version(runtime.parent()?))
 }
 
-fn version(runtime: &Path) -> Option<String> {
-    #[derive(Deserialize)]
-    struct Manifest {
-        version: String,
-    }
-    let manifest = fs::read(runtime.join(MANIFEST)).ok()?;
-    serde_json::from_slice::<Manifest>(&manifest)
-        .ok()
-        .map(|manifest| manifest.version)
+/// What a release says of itself in its runtime.json.
+#[derive(Deserialize)]
+struct Manifest {
+    version: String,
+    /// The releases before `CONTRACT` kept the first contract.
+    #[serde(default = "first_contract")]
+    contract: u32,
 }
 
-/// One install of the pinned release, which the player can cancel and watch.
+fn first_contract() -> u32 {
+    1
+}
+
+fn manifest(runtime: &Path) -> Option<Manifest> {
+    serde_json::from_slice(&fs::read(runtime.join(MANIFEST)).ok()?).ok()
+}
+
+fn version(runtime: &Path) -> Option<String> {
+    manifest(runtime).map(|manifest| manifest.version)
+}
+
+/// The numbers of a release's version, which order releases: `v26.3.0-16`
+/// is [26, 3, 0, 16].
+fn numbers(version: &str) -> Option<Vec<u64>> {
+    version
+        .strip_prefix('v')?
+        .split(['.', '-'])
+        .map(|number| number.parse().ok())
+        .collect()
+}
+
+/// Whether `version` names a release as Voile's tags do, such as
+/// `v26.3.0-16`.
+pub(crate) fn is_version(version: &str) -> bool {
+    numbers(version).is_some_and(|numbers| numbers.len() == 4)
+}
+
+/// The newest release installed in `root` that Obelisk runs, with its
+/// version's numbers: a folder named after the release its runtime.json
+/// names, of Obelisk's contract, that the last feed read, which `offered`
+/// those, does not withdraw.
+fn newest(root: &Path, offered: &[Offered]) -> Option<(Vec<u64>, PathBuf)> {
+    let withdrawn: Vec<&str> = offered
+        .iter()
+        .filter(|offered| offered.withdrawn.is_some())
+        .map(|offered| offered.release.version.as_str())
+        .collect();
+    fs::read_dir(root)
+        .ok()?
+        .flatten()
+        .filter_map(|entry| {
+            let name = entry.file_name().into_string().ok()?;
+            let order = numbers(&name)?;
+            let runtime = entry.path();
+            let manifest = manifest(&runtime)?;
+            (has_wine(&runtime)
+                && manifest.version == name
+                && manifest.contract == contract()
+                && !withdrawn.contains(&name.as_str()))
+            .then_some((order, runtime))
+        })
+        .max_by(|a, b| a.0.cmp(&b.0))
+}
+
+/// The release Obelisk wants of those the last feed read `offered`: the
+/// newest for its contract, else the one it was built with.
+fn wanted(offered: &[Offered]) -> Release {
+    offered
+        .iter()
+        .filter(|offered| offered.contract == contract() && offered.withdrawn.is_none())
+        .filter_map(|offered| Some((numbers(&offered.release.version)?, &offered.release)))
+        .max_by(|a, b| a.0.cmp(&b.0))
+        .map_or_else(|| release().clone(), |(_, newest)| newest.clone())
+}
+
+/// What a launch makes of the runtimes in `root`, for a game whose profile
+/// needs `minimum` or a newer release.
+pub(crate) fn standing(root: &Path, minimum: Option<&str>) -> Standing {
+    if development(root).is_some() {
+        return Standing::Current;
+    }
+    let offered = feed::offered(root);
+    let Some((installed, _)) = newest(root, &offered) else {
+        return Standing::Missing;
+    };
+    let Some(wanted) = numbers(&wanted(&offered).version) else {
+        return Standing::Current;
+    };
+    if installed >= wanted {
+        return Standing::Current;
+    }
+    // A game that needs a newer release waits for the one wanted, when that
+    // one is enough.
+    match minimum.and_then(numbers) {
+        Some(minimum) if installed < minimum && wanted >= minimum => Standing::Missing,
+        _ => Standing::Outdated,
+    }
+}
+
+/// One install of a release, which the player can cancel and watch.
 #[derive(Default)]
 pub struct Install {
     received: AtomicU64,
@@ -160,12 +272,21 @@ impl Install {
         (self.received.load(Ordering::Acquire), total)
     }
 
-    /// Installs the pinned release in `root` unless a runtime is already
+    /// Installs in `root` the release Obelisk wants there once it read
+    /// Voile's feed again, unless it or a development runtime is already
     /// there. It keeps the releases it replaces: a game may run from one, and
     /// `runtimes` decides when they go. `archive`, a local copy of the
-    /// release, stands in for the download while the release is private.
+    /// release Obelisk was built with, stands in for the feed and the
+    /// download.
     pub async fn run(&self, root: &Path, archive: Option<&Path>) -> Result<PathBuf, Failure> {
-        self.install(root, release(), archive).await
+        let release = match archive {
+            Some(_) => release().clone(),
+            None => {
+                self.cancellable(feed::refresh(root)).await?;
+                wanted(&feed::offered(root))
+            }
+        };
+        self.install(root, &release, archive).await
     }
 
     async fn install(
@@ -175,17 +296,19 @@ impl Install {
         archive: Option<&Path>,
     ) -> Result<PathBuf, Failure> {
         let _installing = self.cancellable(INSTALLING.lock()).await?;
-        if let Some(runtime) = located(root, release) {
-            return Ok(runtime);
+        if let Some(development) = development(root) {
+            return Ok(development);
+        }
+        let destination = root.join(&release.version);
+        if holds(&destination, &release.version) {
+            return Ok(destination);
         }
         let extracted = self.extract(root, release, archive).await?;
         let runtime = extracted.path().join(format!("voile-{}", release.version));
-        if !has_wine(&runtime) || version(&runtime).as_deref() != Some(release.version.as_str()) {
+        if !holds(&runtime, &release.version) {
             return Err(Failure::Damaged);
         }
-        let (root, version) = (root.to_owned(), release.version.clone());
         tokio::task::spawn_blocking(move || {
-            let destination = root.join(&version);
             if destination.exists() {
                 fs::remove_dir_all(&destination)?;
             }
@@ -298,18 +421,22 @@ impl Install {
     }
 }
 
-/// Removes the releases in `root` the pinned one replaces. `runtimes` calls
-/// it once a launch finds no Game session, of any storefront, that may run a
-/// game from one.
+/// Removes the releases in `root` games no longer run in: all but the newest
+/// Obelisk runs, beside the development runtime, the last feed read and
+/// unfinished installs. `runtimes` calls it once a launch finds no Game
+/// session, of any storefront, that may run a game from one.
 pub fn remove_replaced(root: &Path) {
-    remove_replaced_by(root, &release().version);
-}
-
-/// Removes every release in `root` but `version`, leaving the development
-/// runtime and unfinished installs.
-fn remove_replaced_by(root: &Path, version: &str) {
+    let Some((_, kept)) = newest(root, &feed::offered(root)) else {
+        return;
+    };
+    let kept = kept
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned());
     remove_entries(root, |name| {
-        name != DEVELOPMENT && name != version && !name.starts_with(UNFINISHED)
+        name != DEVELOPMENT
+            && Some(name) != kept.as_deref()
+            && name != feed::KEPT
+            && !name.starts_with(UNFINISHED)
     });
 }
 

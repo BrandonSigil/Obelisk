@@ -71,6 +71,11 @@ impl<S: Storefront> Receipt<S> {
         }
     }
 
+    /// Its game's profile.
+    pub(crate) fn profile(&self) -> crate::profile::Profile {
+        crate::profile::of(S::profile_game(&self.product), Path::new(&self.directory))
+    }
+
     /// Its launch settings, by its game's profile and the choices kept for it
     /// in Obelisk's `library`.
     pub(crate) fn launch_settings(&self, library: &Path) -> crate::launch_settings::View {

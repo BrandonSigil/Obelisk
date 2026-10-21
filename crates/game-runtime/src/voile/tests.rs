@@ -5,18 +5,11 @@ use super::*;
 /// `manifest_version` is what its runtime.json claims.
 fn release_archive(directory: &Path, version: &str, manifest_version: &str) -> (PathBuf, Release) {
     let package = directory.join("package");
-    let runtime = package.join(format!("voile-{version}"));
-    fs::create_dir_all(runtime.join("bin")).unwrap();
-    fs::write(runtime.join("bin/wine"), "wine").unwrap();
-    fs::create_dir_all(runtime.join("linux/engine")).unwrap();
-    fs::create_dir_all(runtime.join("linux/wine/bin")).unwrap();
-    fs::write(runtime.join("linux/engine/fexdarwin-run"), "engine").unwrap();
-    fs::write(runtime.join("linux/wine/bin/wine"), "wine").unwrap();
-    fs::write(
-        runtime.join(MANIFEST),
-        format!(r#"{{"version": "{manifest_version}"}}"#),
-    )
-    .unwrap();
+    lay(
+        &package,
+        &format!("voile-{version}"),
+        &format!(r#"{{"version": "{manifest_version}"}}"#),
+    );
     let archive = directory.join(format!("voile-{version}.tar.xz"));
     let status = std::process::Command::new("/usr/bin/tar")
         .arg("-cJf")
@@ -45,14 +38,166 @@ fn names(root: &Path) -> Vec<String> {
     names
 }
 
+/// A release's runtime in `root`, in `folder`, as its archive and an install
+/// lay it, whose runtime.json holds `manifest`.
+fn lay(root: &Path, folder: &str, manifest: &str) {
+    let runtime = root.join(folder);
+    fs::create_dir_all(runtime.join("bin")).unwrap();
+    fs::write(runtime.join("bin/wine"), "wine").unwrap();
+    fs::create_dir_all(runtime.join("linux/engine")).unwrap();
+    fs::create_dir_all(runtime.join("linux/wine/bin")).unwrap();
+    fs::write(runtime.join("linux/engine/fexdarwin-run"), "engine").unwrap();
+    fs::write(runtime.join("linux/wine/bin/wine"), "wine").unwrap();
+    fs::write(runtime.join(MANIFEST), manifest).unwrap();
+}
+
+/// The feed Obelisk read last, in `root`, offering `releases`.
+fn feed(root: &Path, releases: &str) {
+    fs::create_dir_all(root).unwrap();
+    fs::write(
+        root.join(feed::KEPT),
+        format!(r#"{{"format": 1, "releases": [{releases}]}}"#),
+    )
+    .unwrap();
+}
+
+/// A release a feed offers, of `contract`.
+fn offered(version: &str, contract: u32, withdrawn: Option<&str>) -> String {
+    let withdrawn = withdrawn
+        .map(|reason| format!(r#", "withdrawn": "{reason}""#))
+        .unwrap_or_default();
+    format!(
+        r#"{{"version": "{version}", "contract": {contract}, "url": "https://example.invalid/voile-{version}.tar.xz", "size": 3, "sha256": "{}"{withdrawn}}}"#,
+        "a".repeat(64)
+    )
+}
+
 #[test]
-fn the_checked_in_release_names_its_archive() {
+fn the_checked_in_release_names_its_archive_and_obelisk_s_contract() {
     let release = release();
     assert!(release.url.ends_with(&format!(
         "/releases/download/{0}/voile-{0}.tar.xz",
         release.version
     )));
     assert_eq!(release.sha256.len(), 64);
+    assert!(is_version(&release.version));
+    assert!(contract() >= 1);
+}
+
+#[test]
+fn versions_order_by_their_numbers() {
+    assert_eq!(numbers("v26.3.0-16"), Some(vec![26, 3, 0, 16]));
+    assert!(numbers("v26.3.0-10") > numbers("v26.3.0-9"));
+    assert!(numbers("v26.4.0-1") > numbers("v26.3.0-16"));
+    assert_eq!(numbers("current"), None);
+    assert_eq!(numbers("v26.3.0-x"), None);
+    assert!(is_version("v26.3.0-16"));
+    assert!(!is_version("v26.3"));
+    assert!(!is_version("26.3.0-16"));
+}
+
+#[test]
+fn games_run_in_the_newest_release_of_obelisk_s_contract() {
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path();
+    assert_eq!(runtime(root), None);
+    // A release before CONTRACT kept the first contract.
+    lay(root, "v1.0.0-9", r#"{"version": "v1.0.0-9"}"#);
+    lay(
+        root,
+        "v1.0.0-10",
+        r#"{"version": "v1.0.0-10", "contract": 1}"#,
+    );
+    lay(
+        root,
+        "v1.0.0-11",
+        r#"{"version": "v1.0.0-11", "contract": 2}"#,
+    );
+    lay(
+        root,
+        "v1.0.0-12",
+        r#"{"version": "v1.0.0-1", "contract": 1}"#,
+    );
+    assert_eq!(runtime(root), Some(root.join("v1.0.0-10")));
+    assert_eq!(linux_runtime(root), Some(root.join("v1.0.0-10/linux")));
+    assert_eq!(installed_release(root), Some("v1.0.0-10".into()));
+}
+
+#[test]
+fn a_withdrawn_release_runs_no_game_and_goes_with_the_others_replaced() {
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path();
+    lay(root, "v1.0.0-1", r#"{"version": "v1.0.0-1"}"#);
+    lay(root, "v1.0.0-2", r#"{"version": "v1.0.0-2"}"#);
+    lay(
+        root,
+        "v1.0.0-3",
+        r#"{"version": "v1.0.0-3", "contract": 2}"#,
+    );
+    feed(
+        root,
+        &[
+            offered("v1.0.0-2", 1, Some("breaks a game")),
+            offered("v1.0.0-1", 1, None),
+        ]
+        .join(","),
+    );
+    fs::create_dir_all(root.join(".unfinished")).unwrap();
+    assert_eq!(runtime(root), Some(root.join("v1.0.0-1")));
+
+    remove_replaced(root);
+
+    assert_eq!(names(root), [".unfinished", "feed.json", "v1.0.0-1"]);
+}
+
+#[test]
+fn the_release_wanted_is_the_newest_the_feed_offers_for_obelisk_s_contract() {
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path();
+    assert_eq!(&wanted(&feed::offered(root)), release(), "no feed read yet");
+    feed(
+        root,
+        &[
+            offered("v1.0.0-5", 1, Some("breaks a game")),
+            offered("v1.0.0-4", 2, None),
+            offered("v1.0.0-3", 1, None),
+            offered("v1.0.0-2", 1, None),
+        ]
+        .join(","),
+    );
+    let wanted = wanted(&feed::offered(root));
+    assert_eq!(wanted.version, "v1.0.0-3");
+    assert_eq!(wanted.url, "https://example.invalid/voile-v1.0.0-3.tar.xz");
+}
+
+#[test]
+fn a_launch_waits_for_a_missing_release_and_lets_an_outdated_one_run() {
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path();
+    feed(root, &offered("v1.0.0-3", 1, None));
+    assert_eq!(standing(root, None), Standing::Missing);
+
+    lay(root, "v1.0.0-2", r#"{"version": "v1.0.0-2"}"#);
+    assert_eq!(standing(root, None), Standing::Outdated);
+    assert_eq!(
+        standing(root, Some("v1.0.0-3")),
+        Standing::Missing,
+        "the game needs the release offered"
+    );
+    assert_eq!(
+        standing(root, Some("v1.0.0-9")),
+        Standing::Outdated,
+        "no release offered is enough: the game runs in the newest it can"
+    );
+    assert_eq!(standing(root, Some("v1.0.0-2")), Standing::Outdated);
+
+    lay(root, "v1.0.0-3", r#"{"version": "v1.0.0-3"}"#);
+    assert_eq!(standing(root, Some("v1.0.0-3")), Standing::Current);
+
+    fs::create_dir_all(root.join("current/bin")).unwrap();
+    fs::write(root.join("current/bin/wine"), "wine").unwrap();
+    feed(root, &offered("v1.0.0-4", 1, None));
+    assert_eq!(standing(root, Some("v1.0.0-4")), Standing::Current);
 }
 
 #[tokio::test]
@@ -69,14 +214,22 @@ async fn a_release_keeps_the_ones_before_it_until_they_are_removed() {
         .unwrap();
 
     assert_eq!(runtime, root.join("v1.0.0-2"));
-    assert_eq!(located(&root, &release), Some(runtime));
+    assert_eq!(self::runtime(&root), Some(runtime));
     assert_eq!(names(&root), ["v1.0.0-1", "v1.0.0-2"]);
 
     // Once no game may run from them, the ones before it go.
     fs::create_dir_all(root.join("current/bin")).unwrap();
     fs::create_dir_all(root.join(".unfinished")).unwrap();
-    remove_replaced_by(&root, "v1.0.0-2");
+    remove_replaced(&root);
     assert_eq!(names(&root), [".unfinished", "current", "v1.0.0-2"]);
+
+    // The same release again is in place already.
+    assert_eq!(
+        Install::new()
+            .install(&root, &release, Some(&root.join("no archive")))
+            .await,
+        Ok(root.join("v1.0.0-2"))
+    );
 }
 
 #[tokio::test]
@@ -124,16 +277,16 @@ async fn the_installed_release_is_the_runtime_games_run_in() {
     let directory = tempfile::tempdir().unwrap();
     let root = directory.path().join("Voile");
     let (archive, release) = release_archive(directory.path(), "v1.0.0-2", "v1.0.0-2");
-    assert_eq!(installed(&root, &release), None);
+    assert_eq!(installed_release(&root), None);
     Install::new()
         .install(&root, &release, Some(&archive))
         .await
         .unwrap();
-    assert_eq!(installed(&root, &release), Some("v1.0.0-2".into()));
+    assert_eq!(installed_release(&root), Some("v1.0.0-2".into()));
     fs::create_dir_all(root.join("current/bin")).unwrap();
     fs::write(root.join("current/bin/wine"), "wine").unwrap();
     fs::write(root.join("current").join(MANIFEST), r#"{"version": "dev"}"#).unwrap();
-    assert_eq!(installed(&root, &release), Some("dev".into()));
+    assert_eq!(installed_release(&root), Some("dev".into()));
 }
 
 #[tokio::test]
@@ -153,41 +306,33 @@ async fn the_linux_runtime_comes_with_its_release() {
     let directory = tempfile::tempdir().unwrap();
     let root = directory.path().join("Voile");
     let (archive, release) = release_archive(directory.path(), "v1.0.0-2", "v1.0.0-2");
-    assert_eq!(located_linux(&root, &release), None);
+    assert_eq!(linux_runtime(&root), None);
     Install::new()
         .install(&root, &release, Some(&archive))
         .await
         .unwrap();
-    assert_eq!(
-        located_linux(&root, &release),
-        Some(root.join("v1.0.0-2/linux"))
-    );
+    assert_eq!(linux_runtime(&root), Some(root.join("v1.0.0-2/linux")));
 }
 
 #[test]
 fn a_linux_runtime_left_from_another_release_is_not_used() {
     let directory = tempfile::tempdir().unwrap();
     let root = directory.path().join("Voile");
-    let (_, release) = release_archive(directory.path(), "v1.0.0-2", "v1.0.0-2");
     fs::create_dir_all(root.join("v1.0.0-2/linux/engine")).unwrap();
     fs::create_dir_all(root.join("v1.0.0-2/linux/wine/bin")).unwrap();
     fs::write(root.join("v1.0.0-2/linux/engine/fexdarwin-run"), "engine").unwrap();
     fs::write(root.join("v1.0.0-2/linux/wine/bin/wine"), "wine").unwrap();
     // No Windows runtime of this release around it.
-    assert_eq!(located_linux(&root, &release), None);
+    assert_eq!(linux_runtime(&root), None);
 }
 
 #[test]
 fn the_development_linux_runtime_takes_precedence() {
     let directory = tempfile::tempdir().unwrap();
     let root = directory.path().join("Voile");
-    let (_, release) = release_archive(directory.path(), "v1.0.0-2", "v1.0.0-2");
     fs::create_dir_all(root.join("current/linux/engine")).unwrap();
     fs::create_dir_all(root.join("current/linux/wine/bin")).unwrap();
     fs::write(root.join("current/linux/engine/fexdarwin-run"), "engine").unwrap();
     fs::write(root.join("current/linux/wine/bin/wine"), "wine").unwrap();
-    assert_eq!(
-        located_linux(&root, &release),
-        Some(root.join("current/linux"))
-    );
+    assert_eq!(linux_runtime(&root), Some(root.join("current/linux")));
 }

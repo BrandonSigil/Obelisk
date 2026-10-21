@@ -17,6 +17,7 @@ mod process;
 pub mod profile;
 pub mod protocol;
 pub mod queue;
+mod remote;
 pub mod runtimes;
 pub mod sessions;
 pub mod steam;

@@ -47,7 +47,6 @@ static FACTS: Facts = Facts {
     input_service: Some("linux/engine/obelisk-input"),
     graphics: Graphics::D3DMetal,
     launcher_grace: None,
-    #[cfg(test)]
     reserved: super::Reserved {
         variables: &[
             "WINEPREFIX",

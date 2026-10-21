@@ -1552,7 +1552,18 @@ impl<S: Storefront> Installations<S> {
                 if shared.inner.lock().unwrap().launch_cancelled {
                     return Err(Failure::Cancelled);
                 }
-                let update = !verify && shared.newer_build(&ready).await == Some(true);
+                // Voile's feed and the game profiles, which decide how a
+                // Windows game runs and in which release, are read anew
+                // while its storefront is asked for a newer build.
+                let refresh = async {
+                    if ready.platform == Platform::Windows {
+                        shared.sessions.runtimes().refresh_before_launch().await;
+                    }
+                };
+                let (update, ()) = tokio::join!(
+                    async { !verify && shared.newer_build(&ready).await == Some(true) },
+                    refresh,
+                );
                 if update {
                     shared.update(|inner| inner.state.verifying_before_launch = true);
                 }
@@ -1568,6 +1579,10 @@ impl<S: Storefront> Installations<S> {
                     return Err(Failure::Cancelled);
                 }
                 shared.update(|inner| inner.state.verifying_before_launch = false);
+                let mut admission = admission;
+                if ready.platform == Platform::Windows {
+                    admission.needs_voile(ready.profile().voile);
+                }
                 shared
                     .content
                     .launch(&ready, admission, join.as_ref())

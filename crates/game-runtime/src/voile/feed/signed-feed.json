@@ -1,0 +1,13 @@
+{
+  "format": 1,
+  "releases": [
+    {
+      "version": "v26.3.0-16",
+      "contract": 1,
+      "published": "2026-10-21",
+      "url": "https://example.invalid/voile-v26.3.0-16.tar.xz",
+      "size": 3,
+      "sha256": "a3c2e7b9b0f2f5e8c4d1e6a7b8c9d0e1f2a3b4c5d6e7f8091a2b3c4d5e6f7081"
+    }
+  ]
+}

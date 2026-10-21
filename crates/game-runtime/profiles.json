@@ -1,4 +1,5 @@
 {
+  "format": 1,
   "games": [
     {
       "name": "Rocket League",
@@ -20,14 +21,15 @@
     },
     {
       "name": "Fall Guys",
-      "note": "Easy Anti-Cheat, as Rocket League's, with its Linux support turned on. Unity renders it with Direct3D 11, through DXMT as Rocket League. Its publisher executable, RunFallGuys.exe, is a 32-bit .NET program that checks the Visual C++ runtimes and starts FallGuys_client.exe, a 32-bit EOS bootstrapper, and the engine's Wine only runs 64-bit programs: the game starts with the Easy Anti-Cheat bootstrapper those two would start, with the same arguments.",
+      "note": "Easy Anti-Cheat, as Rocket League's, with its Linux support turned on. Unity renders it with Direct3D 11, through DXMT as Rocket League. Its publisher executable, RunFallGuys.exe, is a 32-bit .NET program that checks the Visual C++ runtimes and starts FallGuys_client.exe, a 32-bit EOS bootstrapper, and the engine's Wine only runs 64-bit programs: the game starts with the Easy Anti-Cheat bootstrapper those two would start, with the same arguments. Its sockets need Voile v26.3.0-16, whose Linux engine keeps their path MTU options, and its locked mouse the empty clip rectangle that release reads.",
       "epic": {
         "namespace": "50118b7f954e450f8823df1614b24e80",
         "app_name": "0a2d9f6403244d12969e11da6713137b"
       },
       "engine": "Linux",
       "graphics": "Dxmt",
-      "executable": "start_protected_game.exe"
+      "executable": "start_protected_game.exe",
+      "voile": "v26.3.0-16"
     },
     {
       "name": "Counter-Strike 2",

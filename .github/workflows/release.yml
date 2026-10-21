@@ -34,6 +34,9 @@ jobs:
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
           echo "KEYCHAIN=$RUNNER_TEMP/obelisk-signing.keychain-db" >> "$GITHUB_ENV"
 
+      - name: Pin the newest Voile release of Obelisk's contract
+        run: scripts/pin-voile.sh
+
       - name: Install the Rust targets
         run: |
           rustup toolchain install stable --profile minimal

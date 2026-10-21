@@ -690,6 +690,7 @@ impl<P: Storefront> Sessions<P> {
                 operation,
                 launched: Arc::new(AtomicBool::new(false)),
             },
+            voile: None,
         })
     }
 
@@ -877,6 +878,8 @@ impl<P: Storefront> Sessions<P> {
 /// finished, or until it is cancelled or dropped before its handoff.
 pub struct Admission<P: Storefront> {
     canceller: Canceller<P>,
+    /// The oldest Voile release its game runs in, as its profile says.
+    voile: Option<&'static str>,
 }
 
 /// Cancels one admitted launch, before or after its handoff.
@@ -934,6 +937,12 @@ impl<P: Storefront> Admission<P> {
         self.canceller.clone()
     }
 
+    /// Its game runs in `release` or a newer Voile release, as its profile
+    /// says: the handoff waits for one when an older one is in place.
+    pub(crate) fn needs_voile(&mut self, release: Option<&'static str>) {
+        self.voile = release;
+    }
+
     /// Hands the admitted game to a new supervisor through `handover`, then
     /// follows its session until it is finished. The runtimes its build
     /// misses come first, their download showing on the session. A failure
@@ -941,6 +950,7 @@ impl<P: Storefront> Admission<P> {
     /// gives the Reservation back; once it starts, only its session does.
     pub async fn hand_off<H: Handover<P>>(self, handover: H) -> Result<(), Failure> {
         let admission = self.canceller();
+        let voile = self.voile;
         let before_begin = handover.before_begin();
         let handoff = async move {
             let cancel = CancelToken::new();
@@ -949,7 +959,7 @@ impl<P: Storefront> Admission<P> {
             let got = admission
                 .shared
                 .runtimes
-                .get_for_launch::<P>(handover.platform(), &cancel, |progress| {
+                .get_for_launch::<P>(handover.platform(), voile, &cancel, |progress| {
                     admission.runtime_install(Some(progress.into()))
                 })
                 .await;

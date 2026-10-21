@@ -1,5 +1,5 @@
 use super::*;
-use std::{collections::HashSet, path::Component};
+use std::collections::HashSet;
 
 /// The profile of `game` found by its id, in an installation that holds no
 /// file of the table.
@@ -30,6 +30,7 @@ fn rocket_league_fall_guys_and_elden_ring_run_on_the_linux_engine_and_nothing_el
         by_id(FALL_GUYS).executable,
         Some("start_protected_game.exe")
     );
+    assert_eq!(by_id(FALL_GUYS).voile, Some("v26.3.0-16"));
     assert_eq!(by_id(Game::Steam { app_id: 1245620 }).engine, Engine::Linux);
     for other in [
         Game::Epic {
@@ -73,43 +74,111 @@ fn entries() -> Vec<serde_json::Map<String, serde_json::Value>> {
 }
 
 #[test]
-fn every_game_of_the_table_has_a_name_a_note_an_id_or_a_file_and_only_what_obelisk_reads() {
-    const KEYS: [&str; 12] = [
-        "name",
-        "note",
-        "steam",
-        "epic",
-        "gog",
-        "path",
-        "engine",
-        "graphics",
-        "executable",
-        "arguments",
-        "variables",
-        "dll_overrides",
-    ];
-    assert_eq!(entries().len(), table().len());
-    for entry in entries() {
-        let name = entry["name"].as_str().unwrap();
-        assert!(!name.is_empty());
-        assert!(
-            entry["note"].as_str().is_some_and(|note| !note.is_empty()),
-            "{name}"
-        );
-        assert!(
-            ["steam", "epic", "gog", "path"]
-                .iter()
-                .any(|key| entry.contains_key(*key)),
-            "{name}"
-        );
-        for key in entry.keys() {
-            assert!(KEYS.contains(&key.as_str()), "{name}: {key}");
-        }
-        if let Some(epic) = entry.get("epic") {
-            let keys: Vec<_> = epic.as_object().unwrap().keys().collect();
-            assert_eq!(keys, ["app_name", "namespace"], "{name}");
-        }
+fn every_game_of_the_table_passes_the_checks_a_table_read_from_main_passes() {
+    assert_eq!(table().len(), entries().len());
+}
+
+/// A table entry Obelisk keeps, with `key` set to `value`, or removed
+/// without one.
+fn entry_with(key: &str, value: Option<serde_json::Value>) -> Option<Known> {
+    let mut entry = serde_json::json!({
+        "name": "A game",
+        "note": "Why it runs so.",
+        "steam": 42,
+        "engine": "Linux",
+        "graphics": "Dxmt",
+        "executable": "Binaries/Win64/Game.exe",
+        "variables": {"SteamDeck": "1"},
+        "dll_overrides": {"xaudio2_7": "n,b"},
+        "voile": "v26.3.0-16"
+    });
+    let fields = entry.as_object_mut().unwrap();
+    match value {
+        Some(value) => fields.insert(key.into(), value),
+        None => fields.remove(key),
+    };
+    checked(entry)
+}
+
+#[test]
+fn an_entry_that_sets_what_a_profile_may_not_is_left_out() {
+    use serde_json::json;
+    let kept = entry_with("gog", Some(json!("1207658924"))).unwrap();
+    assert_eq!(kept.voile.as_deref(), Some("v26.3.0-16"));
+
+    for (what, key, value) in [
+        ("a key Obelisk does not read", "launcher", Some(json!("x"))),
+        ("no note", "note", None),
+        ("no id nor file", "steam", None),
+        (
+            "an Epic id with more",
+            "epic",
+            Some(json!({"namespace": "n", "app_name": "a", "id": "i"})),
+        ),
+        ("an unknown engine", "engine", Some(json!("Windows"))),
+        (
+            "one of Obelisk's variables",
+            "variables",
+            Some(json!({"WINEPREFIX": "/tmp"})),
+        ),
+        (
+            "a variable the macOS loader reads",
+            "variables",
+            Some(json!({"DYLD_INSERT_LIBRARIES": "/tmp/x.dylib"})),
+        ),
+        (
+            "a variable the Linux loader reads",
+            "variables",
+            Some(json!({"LD_LIBRARY_PATH": "/tmp"})),
+        ),
+        (
+            "a variable no shell names",
+            "variables",
+            Some(json!({"1A": "x"})),
+        ),
+        (
+            "one of Obelisk's DLLs",
+            "dll_overrides",
+            Some(json!({"MSCOREE": "n"})),
+        ),
+        (
+            "an unknown DLL mode",
+            "dll_overrides",
+            Some(json!({"xaudio2_7": "native"})),
+        ),
+        (
+            "a program outside the installation",
+            "executable",
+            Some(json!("../Game.exe")),
+        ),
+        (
+            "a program at an absolute path",
+            "executable",
+            Some(json!("/Applications/Game.exe")),
+        ),
+        (
+            "a file outside the installation",
+            "path",
+            Some(json!("../Game.exe")),
+        ),
+        (
+            "a release that is no version",
+            "voile",
+            Some(json!("latest")),
+        ),
+    ] {
+        assert!(entry_with(key, value).is_none(), "{what}");
     }
+}
+
+#[test]
+fn a_table_of_another_format_is_not_read() {
+    let mut table: serde_json::Value = serde_json::from_str(TABLE).unwrap();
+    table["format"] = 2.into();
+    assert!(parsed(table.to_string().as_bytes()).is_none());
+    table.as_object_mut().unwrap().remove("format");
+    assert!(parsed(table.to_string().as_bytes()).is_none());
+    assert!(parsed(b"404: Not Found").is_none());
 }
 
 #[test]
@@ -131,56 +200,12 @@ fn no_two_games_of_the_table_share_a_storefront_s_name() {
 }
 
 #[test]
-fn the_table_leaves_obelisk_s_own_wine_settings_alone() {
-    let reserved: Vec<_> = crate::launch_settings::ENGINES
-        .iter()
-        .map(|offer| offer.engine.reserved())
-        .collect();
-    const MODES: [&str; 6] = ["", "n", "b", "n,b", "b,n", "d"];
-    for known in table() {
-        for name in known.variables.keys() {
-            let mut characters = name.chars();
-            assert!(
-                characters
-                    .next()
-                    .is_some_and(|first| first.is_ascii_alphabetic() || first == '_')
-                    && characters.all(|next| next.is_ascii_alphanumeric() || next == '_'),
-                "{name}"
-            );
-            assert!(
-                reserved
-                    .iter()
-                    .all(|own| !own.variables.contains(&name.as_str())),
-                "{name}"
-            );
-        }
-        for (dll, mode) in &known.dll_overrides {
-            assert!(!dll.is_empty() && !dll.contains([',', '=', ';']), "{dll}");
-            let dll_name = dll.to_ascii_lowercase();
-            assert!(
-                reserved
-                    .iter()
-                    .all(|own| !own.dlls.contains(&dll_name.as_str())),
-                "{dll}"
-            );
-            assert!(MODES.contains(&mode.as_str()), "{dll}={mode}");
-        }
-        if let Some(executable) = &known.executable {
-            assert!(
-                Path::new(executable)
-                    .components()
-                    .all(|component| matches!(component, Component::Normal(_))),
-                "{executable}"
-            );
-        }
-    }
-}
-
-#[test]
 fn a_game_of_the_table_keeps_the_defaults_it_does_not_change_and_adds_its_arguments() {
     let known: &'static Known = Box::leak(Box::new(
         serde_json::from_str(
             r#"{
+                "name": "A game",
+                "note": "Why it runs so.",
                 "steam": 42,
                 "arguments": ["-dx11"],
                 "variables": {"WINENCPU": "10"},
@@ -213,13 +238,11 @@ fn a_file_of_the_table_is_inside_the_installation_and_only_one_game_holds_it() {
     ];
     let mut paths = HashSet::new();
     for path in table().iter().filter_map(|known| known.path.as_deref()) {
-        let file = Path::new(path);
-        assert!(
-            file.components()
-                .all(|component| matches!(component, Component::Normal(_))),
-            "{path}"
-        );
-        let name = file.file_name().unwrap().to_string_lossy().to_lowercase();
+        let name = Path::new(path)
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .to_lowercase();
         assert!(!SHARED.contains(&name.as_str()), "{path}");
         assert!(paths.insert(path.to_lowercase()), "{path}");
     }

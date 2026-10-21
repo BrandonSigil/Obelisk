@@ -298,13 +298,12 @@ struct Facts {
     /// before it is killed; none when it has none.
     launcher_grace: Option<Duration>,
     /// The variables and DLL overrides its Wine gets from Obelisk.
-    #[cfg(test)]
     reserved: Reserved,
 }
 
-/// Names Obelisk sets in an engine's Wine. A profile may still replace one
-/// for its game; the profiles table sets none.
-#[cfg(test)]
+/// Names Obelisk sets in an engine's Wine. A profile could still replace one
+/// for its game; the profiles table sets none, and a table that does loses
+/// that game.
 pub(crate) struct Reserved {
     pub variables: &'static [&'static str],
     pub dlls: &'static [&'static str],
@@ -365,7 +364,6 @@ impl Engine {
     }
 
     /// The names Obelisk sets in this engine's Wine.
-    #[cfg(test)]
     pub(crate) fn reserved(self) -> &'static Reserved {
         &self.adapter().facts().reserved
     }

@@ -1,6 +1,7 @@
 {
-  "version": "v26.3.0-15",
-  "url": "https://github.com/Zagrios/voile/releases/download/v26.3.0-15/voile-v26.3.0-15.tar.xz",
-  "size": 430529452,
-  "sha256": "5b3466a62287a32da01bc150dbba02251076c04df0625cba58a1079657c8a935"
+  "contract": 1,
+  "version": "v26.3.0-16",
+  "url": "https://github.com/Zagrios/Voile/releases/download/v26.3.0-16/voile-v26.3.0-16.tar.xz",
+  "size": 430517340,
+  "sha256": "e9ede5c94a2723efbbd5e79d882bb05a979e3fa8a6262ed48ad052a7af5f63ef"
 }

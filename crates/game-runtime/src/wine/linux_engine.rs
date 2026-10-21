@@ -88,7 +88,6 @@ static FACTS: Facts = Facts {
     input_service: None,
     graphics: Graphics::Dxmt,
     launcher_grace: Some(LAUNCHER_GRACE),
-    #[cfg(test)]
     reserved: super::Reserved {
         variables: &[
             "HOME",
