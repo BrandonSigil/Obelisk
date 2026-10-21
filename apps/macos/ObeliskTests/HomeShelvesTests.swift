@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import XCTest
 @testable import Obelisk
@@ -78,6 +79,68 @@ final class HomeShelvesTests: XCTestCase {
         XCTAssertEqual(shelves.recent.map(\.id.section), [.epic, .gog])
         XCTAssertEqual(shelves.installed.map(\.id.section), [.steam, .epic, .gog, .gog])
         XCTAssertEqual(shelves.installed.last?.title, "Celeste")
+    }
+
+    func testHomeShowsStorefrontCloudLaunchFailures() async throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: "ObeliskHomeNotices-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let suite = "ObeliskTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let epic = await connectedModel(WebTestSession<EpicGames>(
+            credentials: EpicGames.credentials("current"),
+            games: [EpicGames.game("rocket-league", title: "Rocket League")]
+        ))
+        let model = AppModel(directory: root, defaults: defaults, epic: epic)
+        model.steam.cloud.connect(account: 42, backend: FakeInstallations())
+        let host = NSHostingView(rootView: HomeView(model: model).frame(width: 900, height: 700))
+        let rect = NSRect(x: -20_000, y: -20_000, width: 900, height: 700)
+        let window = NSWindow(contentRect: rect, styleMask: .borderless, backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.sharingType = .none
+        window.contentView = host
+        window.setFrameOrigin(rect.origin)
+        window.orderBack(nil)
+        defer { window.close() }
+
+        func documentHeight() async throws -> CGFloat {
+            for _ in 0..<5 {
+                await Task.yield()
+                host.layoutSubtreeIfNeeded()
+                window.displayIfNeeded()
+            }
+            let scroll = try XCTUnwrap(firstScrollView(in: host))
+            return try XCTUnwrap(scroll.documentView).frame.height
+        }
+
+        let baseHeight = try await documentHeight()
+        XCTAssertGreaterThan(baseHeight, 0)
+
+        model.steam.storageWarning = "Fixture storage warning"
+        let warningHeight = try await documentHeight()
+        XCTAssertGreaterThan(warningHeight, baseHeight)
+
+        model.steam.storageWarning = nil
+        let clearedWarningHeight = try await documentHeight()
+        XCTAssertEqual(clearedWarningHeight, baseHeight, accuracy: 0.5)
+
+        model.steam.cloud.sync = GameCloudSync.launch(
+            2405060, question: .failed(1, error: "backend.steam.cloud.unsupported", launchAnyway: true)
+        )
+        let steamFailureHeight = try await documentHeight()
+        XCTAssertGreaterThan(steamFailureHeight, baseHeight)
+
+        model.steam.cloud.sync = nil
+        model.epic.cloud.sync = GameCloudSync.launch(
+            "fixture:rocket-league", question: .failed(2, error: "backend.epic.cloud_network", launchAnyway: true)
+        )
+        let epicFailureHeight = try await documentHeight()
+        XCTAssertGreaterThan(epicFailureHeight, baseHeight)
+
+        model.epic.cloud.sync = nil
+        let finalHeight = try await documentHeight()
+        XCTAssertEqual(finalHeight, baseHeight, accuracy: 0.5)
     }
 
     // MARK: Fixtures

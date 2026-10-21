@@ -58,14 +58,19 @@ struct HomeView: View {
     }
 
     var body: some View {
-        if showsLibrary {
-            libraries
-        } else if model.restoringStorefronts.isEmpty {
-            HomeSignIn(model: model)
-        } else {
-            // Saved sessions are restoring: their libraries are on their way.
-            Color.clear
+        Group {
+            if showsLibrary {
+                libraries
+            } else if model.restoringStorefronts.isEmpty {
+                HomeSignIn(model: model)
+            } else {
+                // Saved sessions are restoring: their libraries are on their way.
+                Color.clear
+            }
         }
+        .errorAlert(L10n.string("ui.store.steam"), message: Bindable(model.steam).errorMessage)
+        .errorAlert(L10n.string("ui.store.epic"), message: Bindable(model.epic).errorMessage)
+        .errorAlert(L10n.string("ui.store.gog"), message: Bindable(model.gog).errorMessage)
     }
 
     private var libraries: some View {
@@ -280,6 +285,7 @@ private struct HomePage: View {
                     hero(heroGame)
                 }
                 VStack(alignment: .leading, spacing: 30) {
+                    notices
                     if let shelves, let libraries {
                         if !shelves.recent.isEmpty {
                             CoverShelf(title: L10n.string("ui.home.recent"), items: shelves.recent, id: "recent",
@@ -311,6 +317,32 @@ private struct HomePage: View {
             bar?.showsGameTitle = false
         }
         .ignoresSafeArea(.container, edges: .top)
+    }
+
+    private var hasNotices: Bool {
+        hasNotice(model.steam) || hasNotice(model.epic) || hasNotice(model.gog)
+    }
+
+    private func hasNotice<Model: LibraryStorefront>(_ storefront: Model) -> Bool {
+        storefront.storageWarning != nil || storefront.cloud.failurePresented
+    }
+
+    @ViewBuilder private var notices: some View {
+        if hasNotices {
+            VStack(alignment: .leading, spacing: 22) {
+                notice(model.steam, storeID: "steam")
+                notice(model.epic, storeID: "epic")
+                notice(model.gog, storeID: "gog")
+            }
+            .padding(.horizontal, ObeliskStyle.contentPadding)
+        }
+    }
+
+    @ViewBuilder private func notice<Model: LibraryStorefront>(_ storefront: Model, storeID: String) -> some View {
+        StorefrontWarningBanner(message: Bindable(storefront).storageWarning)
+        if storefront.cloud.failurePresented {
+            SteamCloudFailureView(model: storefront, storefront: storeID)
+        }
     }
 
     private func hero(_ game: HomeGame) -> some View {
