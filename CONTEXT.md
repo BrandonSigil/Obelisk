@@ -79,7 +79,7 @@ One account-scoped launch of a game, holding a Reservation from admission until 
 _Avoid_: launch, supervisor session
 
 **Diagnostics**:
-The files Obelisk writes about how a game ran, in its storefront's folder under ~/Library/Logs/Obelisk: the log of the game's last launch, the one before it and its input service's, and a Steam launch's launch or failure report. A bug report attaches them. macOS's crash reports and Obelisk's unified log are not diagnostics.
+The files Obelisk writes about how a game ran, in its storefront's folder under ~/Library/Logs/Obelisk: the log of the game's last launch, the one before it and its input service's, the log of the last boot of its Wine prefix, and a Steam launch's launch or failure report. A bug report attaches them. macOS's crash reports and Obelisk's unified log are not diagnostics.
 _Avoid_: logs folder, launch logs
 
 **Cloud maintenance**:

@@ -38,6 +38,7 @@ fn a_game_report_finds_what_its_launches_wrote() {
     age_of(&previous, now, seconds(600));
     age_of(&log, now, seconds(60));
     let input = write(&input_log(&log), now, seconds(60));
+    let boot = write(&boot_log(&log), now, seconds(3600));
     write(
         &game_log(home, Steam(1245620), Mac),
         now,
@@ -67,11 +68,27 @@ fn a_game_report_finds_what_its_launches_wrote() {
 
     let files = files(home, Some(Steam(1245620)), now);
 
-    assert_eq!(files, [log, previous, input, launch, failure]);
+    assert_eq!(files, [log, previous, input, boot, launch, failure]);
     assert_eq!(
         files[0],
         home.join("Library/Logs/Obelisk/Steam/wine-1245620.log")
     );
+}
+
+#[test]
+fn a_launch_whose_prefix_failed_to_boot_reports_its_boot_log() {
+    let home = tempfile::tempdir().unwrap();
+    let home = home.path();
+    let now = SystemTime::now();
+    let tf2 = Steam(440);
+    write(&game_log(home, tf2, Mac), now, seconds(3600));
+    let boot = write(&boot_log(&game_log(home, tf2, Windows)), now, seconds(60));
+
+    assert_eq!(
+        boot,
+        home.join("Library/Logs/Obelisk/Steam/wine-440.boot.log")
+    );
+    assert_eq!(files(home, Some(tf2), now), [boot]);
 }
 
 #[test]

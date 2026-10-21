@@ -362,8 +362,10 @@ fn guest_path(install: &Path, path: &Path) -> Option<String> {
 }
 
 /// Creates the prefix through the engine, under its timeout wrapper, which
-/// ends every process of the engine it started.
+/// ends every process of the engine it started. Its output goes to the
+/// prefix's boot log.
 fn boot(config: &Config) -> Result<(), Error> {
+    let log = super::boot_log(config)?;
     let engine = config.runtime.join("engine");
     let mut command = Command::new(engine.join("run-with-timeout.sh"));
     command
@@ -385,11 +387,11 @@ fn boot(config: &Config) -> Result<(), Error> {
         .env("FEXDARWIN_ROOT_RO", "1")
         .env("FEXDARWIN_BIND", binds(config, None)?)
         .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
+        .stdout(log.try_clone()?)
+        .stderr(log)
         .status()?;
     if !status.success() || !config.prefix.join("system.reg").is_file() {
-        return Err(Error::StartFailed);
+        return Err(Error::WineBootFailed);
     }
     Ok(())
 }

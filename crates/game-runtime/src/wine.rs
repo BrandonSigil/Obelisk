@@ -580,6 +580,15 @@ fn log(locations: &crate::Locations, game: crate::profile::Game<'_>) -> PathBuf 
     crate::diagnostics::game_log(&locations.home, game.into(), Platform::Windows)
 }
 
+/// Opens, empty, the log that wineboot and its Wine server write as they
+/// boot config's prefix: it lies beside the game's log, which a prefix that
+/// fails to boot never opens.
+fn boot_log(config: &Config) -> Result<fs::File, Error> {
+    let log = crate::diagnostics::boot_log(&config.log);
+    crate::files::private_directory(log.parent().ok_or(Error::Storage)?)?;
+    Ok(crate::diagnostics::create_log(&log)?)
+}
+
 /// Deletes `folder`. A missing one is already gone; a link in its place is
 /// never followed.
 fn remove_folder(folder: &Path) -> Result<(), obelisk_core::installation::RemovalFailure> {

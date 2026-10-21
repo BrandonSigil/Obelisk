@@ -33,6 +33,8 @@ pub enum Error {
     RosettaUnavailable,
     #[error("backend.runtime.wineUnavailable")]
     WineUnavailable,
+    #[error("backend.runtime.wineBootFailed")]
+    WineBootFailed,
     #[error("{0}")]
     Gog(#[from] gog_kit::GogError),
     #[error("backend.gog.storage")]

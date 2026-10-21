@@ -252,6 +252,27 @@ fn the_guest_home_leads_lsteamclient_to_the_runtime_s_linux_steamclient() {
     assert!(link.is_dir());
 }
 
+#[test]
+fn a_prefix_the_engine_cannot_boot_fails_with_what_it_wrote_in_its_boot_log() {
+    use std::os::unix::fs::PermissionsExt;
+    let (_directory, root) = installation();
+    let config = linux_config(&root);
+    let engine = config.runtime.join("engine/run-with-timeout.sh");
+    fs::create_dir_all(engine.parent().unwrap()).unwrap();
+    fs::write(
+        &engine,
+        "#!/bin/sh\necho 'wineboot: no system.reg' >&2\nexit 1\n",
+    )
+    .unwrap();
+    fs::set_permissions(&engine, fs::Permissions::from_mode(0o755)).unwrap();
+
+    assert!(matches!(boot(&config), Err(Error::WineBootFailed)));
+    assert_eq!(
+        fs::read_to_string(crate::diagnostics::boot_log(&config.log)).unwrap(),
+        "wineboot: no system.reg\n"
+    );
+}
+
 /// A runtime whose window server and render servers only listen, and whose
 /// engine records what it was asked to run into `engine.txt`.
 fn recording_runtime(root: &Path) -> PathBuf {

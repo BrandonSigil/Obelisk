@@ -1090,6 +1090,34 @@ fn a_new_prefix_gets_mono_from_its_creation_alone() {
     );
 }
 
+#[test]
+fn a_prefix_wine_cannot_boot_fails_the_launch_with_what_wine_wrote_in_its_boot_log() {
+    let (_directory, root) = installation();
+    let config = recording_runtime(&root);
+    fs::write(
+        config.runtime.join("bin/wine"),
+        "#!/bin/sh\necho 'wine: crashed starting its server' >&2\nkill -SEGV $$\n",
+    )
+    .unwrap();
+    let (install, target) = game(&root);
+
+    assert!(matches!(
+        prepare(
+            &config,
+            &locations(&root),
+            &install,
+            &target,
+            &Plain::default()
+        ),
+        Err(Error::WineBootFailed)
+    ));
+    assert_eq!(
+        fs::read_to_string(crate::diagnostics::boot_log(&config.log)).unwrap(),
+        "wine: crashed starting its server\n"
+    );
+    assert!(!config.prefix.join("furnished").exists());
+}
+
 fn prepare_plain(config: &Config, root: &Path) {
     let (install, target) = game(root);
     prepare(

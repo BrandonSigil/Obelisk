@@ -409,27 +409,32 @@ fn boot(config: &Config, home: &Path) -> Result<(), Error> {
 /// Runs wineboot in the prefix and waits until its server stops writing the
 /// registry, which the game must not start before. Every backend's folder
 /// comes first, so that the prefix gets a placeholder for each of their DLLs.
+/// Both write to the prefix's boot log.
 fn wineboot(config: &Config, home: &Path, argument: &str) -> Result<(), Error> {
     let mut environment = environment(config);
     if let Some(folders) = search_path(&backends(config)) {
         environment.insert("WINEDLLPATH_PREPEND".into(), folders);
     }
+    let log = super::boot_log(config)?;
     let status = Command::new(wine(config))
         .args(["wineboot", argument])
         .env_clear()
         .envs(crate::native::environment(home))
         .envs(environment)
         .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
+        .stdout(log.try_clone()?)
+        .stderr(log.try_clone()?)
         .status()?;
     let server = Command::new(config.runtime.join("bin/wineserver"))
         .arg("-w")
         .env_clear()
         .env("WINEPREFIX", &config.prefix)
+        .stdin(Stdio::null())
+        .stdout(log.try_clone()?)
+        .stderr(log)
         .status()?;
     if !status.success() || !server.success() {
-        return Err(Error::StartFailed);
+        return Err(Error::WineBootFailed);
     }
     Ok(())
 }

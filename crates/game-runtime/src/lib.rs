@@ -139,6 +139,10 @@ pub enum Error {
     ApiMissing,
     #[error("backend.runtime.wineUnavailable")]
     WineUnavailable,
+    /// Wine failed to create or update the game's prefix, as its boot log
+    /// tells.
+    #[error("backend.runtime.wineBootFailed")]
+    WineBootFailed,
 }
 impl From<std::io::Error> for Error {
     fn from(_: std::io::Error) -> Self {

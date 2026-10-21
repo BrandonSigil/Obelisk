@@ -10241,6 +10241,23 @@
         }
       }
     },
+    "backend.runtime.wineBootFailed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Wine could not prepare this game's Windows environment. A bug report about the game includes what Wine wrote."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Wine n'a pas pu préparer l'environnement Windows de ce jeu. Un rapport de bug sur ce jeu inclut ce que Wine a écrit."
+          }
+        }
+      }
+    },
     "backend.runtime.wineUnavailable": {
       "extractionState": "manual",
       "localizations": {

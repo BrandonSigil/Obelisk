@@ -83,8 +83,13 @@ pub fn game_log(home: &Path, game: Game<'_>, build: Platform) -> PathBuf {
 /// as `<name>.previous.log`: a player who relaunches a game that crashed
 /// still has the crash's log to send.
 pub fn open_log(log: &Path) -> io::Result<File> {
-    use std::os::unix::fs::OpenOptionsExt;
     let _ = fs::rename(log, previous_log(log));
+    create_log(log)
+}
+
+/// Opens `log` empty, readable by the player alone.
+pub(crate) fn create_log(log: &Path) -> io::Result<File> {
+    use std::os::unix::fs::OpenOptionsExt;
     fs::OpenOptions::new()
         .write(true)
         .create(true)
@@ -100,6 +105,13 @@ fn previous_log(log: &Path) -> PathBuf {
 /// The log of the input service that serves the game logging to `log`.
 pub(crate) fn input_log(log: &Path) -> PathBuf {
     log.with_extension("input.log")
+}
+
+/// The log of the wineboot, and its Wine server, that last created or
+/// updated the prefix of the game logging to `log`. A launch that boots no
+/// prefix leaves it as it was.
+pub(crate) fn boot_log(log: &Path) -> PathBuf {
+    log.with_extension("boot.log")
 }
 
 /// The report of Steam launch `run` of `app_id`, in `folder`.
@@ -140,15 +152,19 @@ pub fn files(home: &Path, game: Option<Game<'_>>, now: SystemTime) -> Vec<PathBu
 
 fn game_files(home: &Path, game: Game<'_>) -> Vec<PathBuf> {
     let mut files = Vec::new();
-    // A build's logs are dated by its last launch; the input log is not.
+    // A build's logs are dated by its last launch; the input log is not. A
+    // launch whose prefix failed to boot wrote its boot log alone.
     let mut played: Option<(Platform, SystemTime)> = None;
     for build in BUILDS {
         let log = game_log(home, game, build);
-        let Some(modified) = [modified(&log), modified(&previous_log(&log))]
-            .into_iter()
-            .flatten()
-            .max()
-        else {
+        let Some(modified) = [
+            modified(&log),
+            modified(&previous_log(&log)),
+            modified(&boot_log(&log)),
+        ]
+        .into_iter()
+        .flatten()
+        .max() else {
             continue;
         };
         if played.is_none_or(|(_, best)| modified > best) {
@@ -157,7 +173,7 @@ fn game_files(home: &Path, game: Game<'_>) -> Vec<PathBuf> {
     }
     if let Some((build, _)) = played {
         let log = game_log(home, game, build);
-        let logs = [previous_log(&log), input_log(&log)];
+        let logs = [previous_log(&log), input_log(&log), boot_log(&log)];
         files.extend(
             std::iter::once(log)
                 .chain(logs)
