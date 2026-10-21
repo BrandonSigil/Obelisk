@@ -127,6 +127,9 @@ struct InstallationsSnapshot<Store: InstallationStorefront>: Equatable {
     var cloudSync: GameCloudSync<Store.GameID>?
     /// The games whose Transfer waits in the download queue.
     var queued: [Store.GameID] = []
+    /// The new installations whose Transfer has not succeeded yet. None is an
+    /// installed game.
+    var incomplete: [InstallationReceipt<Store.GameID>] = []
 }
 
 /// One account's installations of one storefront, in Rust. Each action
@@ -158,6 +161,8 @@ protocol InstallationsBackend<Store>: AnyObject {
     /// joining `invite`.
     func join(_ receipt: InstallationReceipt<Store.GameID>, invite: SteamGameInvite)
     func uninstall(_ receipt: InstallationReceipt<Store.GameID>)
+    /// Deletes the files of `receipt`'s incomplete installation and forgets it.
+    func discard(_ receipt: InstallationReceipt<Store.GameID>)
     func signedOut()
     /// Syncs the game's Cloud saves: those of `installed`, or an uninstalled
     /// game's when nil.
@@ -204,6 +209,10 @@ final class GameInstallations<Store: InstallationStorefront> {
     /// The game whose Transfer stopped before its receipt: the player can
     /// resume it.
     private(set) var resumableGame: Store.GameID?
+    /// The new installations whose Transfer has not succeeded yet: their files
+    /// wait in their folder, even after Obelisk quits, until the player
+    /// resumes or deletes them.
+    private(set) var incompleteReceipts: [Receipt] = []
     /// The games whose Transfer waits in the download queue.
     private(set) var queuedGames: [Store.GameID] = []
     /// What Rust's Reservation lets start now.
@@ -298,6 +307,7 @@ final class GameInstallations<Store: InstallationStorefront> {
         transfer = nil
         transferGame = nil
         resumableGame = nil
+        incompleteReceipts = []
         queuedGames = []
         gate = .closed
         isDownloading = false
@@ -322,6 +332,7 @@ final class GameInstallations<Store: InstallationStorefront> {
         if launchGame != snapshot.launchGame { launchGame = snapshot.launchGame }
         if uninstallGame != snapshot.uninstallGame { uninstallGame = snapshot.uninstallGame }
         if resumableGame != snapshot.resumable { resumableGame = snapshot.resumable }
+        if incompleteReceipts != snapshot.incomplete { incompleteReceipts = snapshot.incomplete }
         if queuedGames != snapshot.queued { queuedGames = snapshot.queued }
         if gate != snapshot.gate { gate = snapshot.gate }
         if cloud.sync != snapshot.cloudSync { cloud.sync = snapshot.cloudSync }
@@ -412,6 +423,21 @@ final class GameInstallations<Store: InstallationStorefront> {
     /// installed build stays on screen whatever the storefront would install now.
     var selectedReceipt: Receipt? {
         selection().flatMap { receipt(for: $0.game, preferring: $0.platform) }
+    }
+
+    /// The incomplete installation of the game on screen while none of its
+    /// builds is installed.
+    var selectedIncompleteReceipt: Receipt? {
+        guard selectedReceipt == nil, let selection = selection() else { return nil }
+        return Receipt.preferred(among: incompleteReceipts.filter { $0.gameID == selection.game },
+                                 platform: selection.platform)
+    }
+
+    /// Whether the files of the game on screen's incomplete installation may
+    /// be deleted.
+    var canDiscardSelectedGame: Bool {
+        guard account != nil, selectedIncompleteReceipt != nil, let game = selection()?.game else { return false }
+        return gate.uninstall.allows(game)
     }
 
     /// Whether the game on screen's installation may be verified.
@@ -518,6 +544,13 @@ final class GameInstallations<Store: InstallationStorefront> {
         act { $0.uninstall(receipt) }
     }
 
+    /// Deletes the files of an incomplete installation, from its game's page.
+    func discard(_ receipt: Receipt) {
+        guard account != nil, gate.uninstall.allows(receipt.gameID), incompleteReceipts.contains(receipt)
+        else { return }
+        act { $0.discard(receipt) }
+    }
+
     // MARK: Launch settings
 
     /// The launch settings of an installed Windows build; nil for a Mac build
@@ -598,6 +631,7 @@ final class NoInstallations<Store: InstallationStorefront>: InstallationsBackend
     func launch(_ receipt: InstallationReceipt<Store.GameID>) {}
     func join(_ receipt: InstallationReceipt<Store.GameID>, invite: SteamGameInvite) {}
     func uninstall(_ receipt: InstallationReceipt<Store.GameID>) {}
+    func discard(_ receipt: InstallationReceipt<Store.GameID>) {}
     func signedOut() {}
     func maintainCloud(_ game: Store.GameID, installed: InstallationReceipt<Store.GameID>?) {}
     func answerCloud(_ game: Store.GameID, decisionId: UInt64, choice: CloudChoice) async throws {
@@ -638,6 +672,7 @@ final class RustInstallations<Store: InstallationStorefront>: InstallationsBacke
         core.join(installation: receipt.id, invite: invite)
     }
     func uninstall(_ receipt: InstallationReceipt<Store.GameID>) { core.uninstall(installation: receipt.id) }
+    func discard(_ receipt: InstallationReceipt<Store.GameID>) { core.discard(installation: receipt.id) }
     func signedOut() { core.signedOut() }
     func maintainCloud(_ game: Store.GameID, installed: InstallationReceipt<Store.GameID>?) {
         core.maintainCloud(game: Store.name(game), installation: installed?.id)
@@ -661,18 +696,22 @@ final class RustInstallations<Store: InstallationStorefront>: InstallationsBacke
         catch { throw GameSessions<Store>.translated(error) }
     }
 
+    private static func receipts(_ installations: [Installation]) -> [InstallationReceipt<Store.GameID>] {
+        installations.compactMap { installation in
+            Store.game(installation.game).map {
+                InstallationReceipt(id: installation.id, gameID: $0, name: installation.name,
+                                    directory: installation.directory, platform: installation.platform,
+                                    totalBytes: installation.totalBytes,
+                                    needsVerification: installation.needsVerification,
+                                    updateAvailable: installation.updateAvailable)
+            }
+        }
+    }
+
     private static func snapshot(_ state: InstallationsState) -> InstallationsSnapshot<Store> {
         InstallationsSnapshot(
             revision: state.revision,
-            receipts: state.installations.compactMap { installation in
-                Store.game(installation.game).map {
-                    InstallationReceipt(id: installation.id, gameID: $0, name: installation.name,
-                                        directory: installation.directory, platform: installation.platform,
-                                        totalBytes: installation.totalBytes,
-                                        needsVerification: installation.needsVerification,
-                                        updateAvailable: installation.updateAvailable)
-                }
-            },
+            receipts: receipts(state.installations),
             transfer: state.transfer, transferGame: state.transferGame.flatMap(Store.game),
             downloading: state.downloading, launching: state.launching,
             verifyingBeforeLaunch: state.verifyingBeforeLaunch, launchGame: state.launchGame.flatMap(Store.game),
@@ -686,7 +725,8 @@ final class RustInstallations<Store: InstallationStorefront>: InstallationsBacke
                                   question: sync.question)
                 }
             },
-            queued: state.queued.compactMap(Store.game)
+            queued: state.queued.compactMap(Store.game),
+            incomplete: receipts(state.incomplete)
         )
     }
 }

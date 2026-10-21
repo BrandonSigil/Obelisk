@@ -764,6 +764,119 @@ async fn a_cancelled_transfer_ends_silently() {
     assert!(state.last_download.is_some());
 }
 
+/// The incomplete receipts account 42's file keeps.
+fn saved_incomplete(fixture: &Fixture) -> Vec<Receipt<Steam>> {
+    load(&fixture.root.join("steam-installations-42.incomplete.json")).unwrap()
+}
+
+/// Starts installing Portal 2, which Steam builds for macOS, and stops it
+/// once its first files are in its folder.
+async fn stopped_install(fixture: &Fixture) -> PathBuf {
+    fixture.fake.hold();
+    fixture.installations.install(fixture.offer());
+    eventually(|| fixture.fake.calls().len() == 1).await;
+    let folder = fixture.root.join("Games/Steam/steam-620-macos");
+    std::fs::create_dir_all(&folder).unwrap();
+    std::fs::write(folder.join("portal2.dat"), b"half").unwrap();
+    fixture.installations.cancel(&620);
+    idle(&fixture.installations).await;
+    fixture.fake.release();
+    folder
+}
+
+#[tokio::test]
+async fn a_new_installation_that_stopped_stays_resumable_after_obelisk_quits() {
+    let fixture = Fixture::new(false).await;
+    let folder = stopped_install(&fixture).await;
+
+    let incomplete = fixture.installations.state().incomplete;
+    assert_eq!(incomplete.len(), 1);
+    assert_eq!(incomplete[0].id(), "620-macos");
+    assert_eq!(Path::new(&incomplete[0].directory), folder);
+    assert!(incomplete[0].needs_verification);
+    assert_eq!(saved_incomplete(&fixture), incomplete);
+    // An installed game's receipts never name it.
+    assert!(fixture.saved().is_empty());
+
+    let reloaded = fixture.reload(fixture.root.join("steam-installations-42.json"));
+    let state = reloaded.state();
+    assert!(state.receipts.is_empty());
+    assert_eq!(state.last_download, None);
+    assert_eq!(state.incomplete, incomplete);
+
+    // Installing it again goes on in its folder, with the build it began.
+    fixture.installations.install(fixture.offer());
+    idle(&fixture.installations).await;
+    let state = fixture.installations.state();
+    assert_eq!(state.receipts.len(), 1);
+    assert!(state.incomplete.is_empty());
+    assert!(saved_incomplete(&fixture).is_empty());
+    assert_eq!(
+        fixture.fake.with(|script| script.transfers.clone()),
+        [
+            fixture.transfer(Platform::Mac),
+            fixture.transfer(Platform::Mac)
+        ]
+    );
+}
+
+#[tokio::test]
+async fn an_incomplete_installation_whose_folder_went_is_forgotten_at_the_next_start() {
+    let fixture = Fixture::new(false).await;
+    let folder = stopped_install(&fixture).await;
+    std::fs::remove_dir_all(folder).unwrap();
+
+    let reloaded = fixture.reload(fixture.root.join("steam-installations-42.json"));
+    assert!(reloaded.state().incomplete.is_empty());
+    assert!(saved_incomplete(&fixture).is_empty());
+}
+
+#[tokio::test]
+async fn discarding_an_incomplete_installation_deletes_its_files_and_forgets_it() {
+    let fixture = Fixture::new(false).await;
+    let folder = stopped_install(&fixture).await;
+
+    fixture.installations.discard("620-macos");
+    eventually(|| fixture.installations.state().incomplete.is_empty()).await;
+    let state = fixture.installations.state();
+    assert!(!folder.exists());
+    assert_eq!(state.uninstall_game, None);
+    assert_eq!(state.last_download, None);
+    assert_eq!(state.transfer, None);
+    assert_eq!(state.report, None);
+    assert!(saved_incomplete(&fixture).is_empty());
+    // Nothing ran from it: no Cloud archive, no prefix.
+    assert_eq!(fixture.fake.calls(), ["download:620"]);
+}
+
+#[tokio::test]
+async fn an_incomplete_installation_is_kept_while_its_transfer_waits_or_runs() {
+    let fixture = Fixture::new(false).await;
+    let folder = stopped_install(&fixture).await;
+    fixture.fake.hold();
+    fixture.installations.install(fixture.offer());
+    eventually(|| fixture.fake.calls().len() == 2).await;
+
+    fixture.installations.discard("620-macos");
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    assert!(folder.exists());
+    assert_eq!(fixture.installations.state().incomplete.len(), 1);
+    fixture.fake.release();
+    idle(&fixture.installations).await;
+}
+
+#[tokio::test]
+async fn a_transfer_over_an_installed_game_records_no_incomplete_installation() {
+    let fixture = Fixture::new(true).await;
+    fixture.fake.hold();
+    fixture.installations.update("620-macos");
+    eventually(|| fixture.fake.calls().len() == 1).await;
+    assert!(fixture.installations.state().incomplete.is_empty());
+    fixture.fake.release();
+    idle(&fixture.installations).await;
+    assert!(fixture.installations.state().incomplete.is_empty());
+}
+
 #[tokio::test]
 async fn a_folder_that_cannot_be_created_is_reported_before_any_transfer() {
     let fixture = Fixture::new(false).await;

@@ -143,6 +143,14 @@ struct GameDetailPage<Model: LibraryStorefront, HeroArtwork: View, Cover: View, 
                             }
                         )
                         .id(receipt.id + receipt.directory)
+                    } else if let incomplete = installations.selectedIncompleteReceipt {
+                        IncompleteDownloadButton(
+                            gameName: name,
+                            canDiscard: installations.canDiscardSelectedGame,
+                            discard: { installations.discard(incomplete) },
+                            directory: incomplete.directory
+                        )
+                        .id(incomplete.id + incomplete.directory)
                     }
                 }
                 .padding(.top, 18)

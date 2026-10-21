@@ -52,6 +52,48 @@ struct GameManagementButton: View {
     }
 }
 
+/// The menu of a game whose download stopped before it was installed: its
+/// files wait in their folder until the player resumes or deletes them.
+struct IncompleteDownloadButton: View {
+    let gameName: String
+    let canDiscard: Bool
+    let discard: () -> Void
+    /// The download's directory, revealed in Finder from the menu.
+    let directory: String
+    @State private var confirmsDiscard = false
+
+    var body: some View {
+        Menu {
+            Button(L10n.string("ui.game.show_files"), systemImage: "folder") {
+                NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: directory)
+            }
+            .disabled(!FileManager.default.fileExists(atPath: directory))
+            Divider()
+            Button(L10n.string("ui.game.delete_download"), systemImage: "trash", role: .destructive) {
+                confirmsDiscard = true
+            }
+            .disabled(!canDiscard)
+        } label: {
+            StorefrontGlassIcon(systemName: "gearshape.fill", size: 15)
+                .foregroundStyle(.primary)
+        }
+        .menuStyle(.button)
+        .obeliskButtonStyle(.plain)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .accessibilityLabel(L10n.string("ui.game.manage_named", gameName))
+        .accessibilityIdentifier("game-management-menu")
+        .help(L10n.string("ui.game.manage"))
+        .alert(L10n.string("ui.game.delete_download_title", gameName), isPresented: $confirmsDiscard) {
+            Button(L10n.string("ui.common.cancel"), role: .cancel) {}
+            Button(L10n.string("ui.game.delete_download"), role: .destructive, action: discard)
+                .disabled(!canDiscard)
+        } message: {
+            Text(L10n.string("ui.game.delete_download_message"))
+        }
+    }
+}
+
 extension View {
     /// Asks before uninstalling `gameName`: its files are deleted.
     func uninstallConfirmation(_ gameName: String, isPresented: Binding<Bool>, canUninstall: Bool,

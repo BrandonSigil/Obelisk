@@ -280,6 +280,11 @@ pub struct State<S: Storefront> {
     pub uninstall_game: Option<S::Game>,
     /// A Transfer that stopped before its receipt, which the player can resume.
     pub last_download: Option<Transfer<S>>,
+    /// The receipts of the new installations whose Transfer has not
+    /// succeeded yet, kept apart from the installed games': their files
+    /// stay in their folder until the player resumes or deletes them, even
+    /// after Obelisk quits.
+    pub incomplete: Vec<Receipt<S>>,
     /// The failure shown, until the next action clears it.
     pub report: Option<Report>,
     /// A storage warning, a localization key, with an id that changes each
@@ -327,6 +332,8 @@ struct Inner<S: Storefront> {
     state: State<S>,
     /// The receipts whose disk is not connected: saved, never shown.
     offline: Vec<Receipt<S>>,
+    /// The incomplete receipts whose disk is not connected.
+    incomplete_offline: Vec<Receipt<S>>,
     signed_out: bool,
     /// A DEBUG diagnostic fences the storefront like a Game session would.
     diagnostic: bool,
@@ -367,6 +374,9 @@ struct Shared<S: Storefront> {
     sessions: Arc<Sessions<S>>,
     account: S::Account,
     receipts_file: PathBuf,
+    /// Keeps the incomplete receipts, beside `receipts_file`: an Obelisk
+    /// that does not know them never reads them as installed games.
+    incomplete_file: PathBuf,
     /// Where new installations go and every installation moves, inside
     /// Obelisk's library directory unless the player chose another.
     folder: Arc<GamesFolder>,
@@ -534,6 +544,48 @@ impl<S: Storefront> Shared<S> {
         if save(&self.receipts_file, &inner.saved()).is_err() {
             Self::warn(inner, S::RECEIPTS_NOT_SAVED);
         }
+    }
+
+    fn save_incomplete(&self, inner: &mut Inner<S>) {
+        if save(&self.incomplete_file, &inner.saved_incomplete()).is_err() {
+            Self::warn(inner, S::RECEIPTS_NOT_SAVED);
+        }
+    }
+
+    /// Records the new installation `transfer`, whose platform is settled,
+    /// as incomplete before its files arrive: a download Obelisk quits
+    /// during still resumes where it stopped, or has its files deleted.
+    fn record_incomplete(&self, inner: &mut Inner<S>, transfer: &Transfer<S>) {
+        let Some(platform) = transfer.platform else {
+            return;
+        };
+        if inner
+            .state
+            .receipts
+            .iter()
+            .any(|receipt| transfer.lands_on(receipt))
+        {
+            return;
+        }
+        let mut receipt = Receipt {
+            product: transfer.product.clone(),
+            name: transfer.name.clone(),
+            directory: String::new(),
+            platform,
+            total_bytes: 0,
+            needs_verification: true,
+        };
+        let id = receipt.id();
+        if inner.state.incomplete.iter().any(|kept| kept.id() == id) {
+            return;
+        }
+        receipt.directory = transfer
+            .directory
+            .join(self.content.directory_name(&receipt))
+            .to_string_lossy()
+            .into_owned();
+        inner.state.incomplete.push(receipt);
+        self.save_incomplete(inner);
     }
 
     /// The Reservation gate every action asks.
@@ -875,6 +927,7 @@ impl<S: Storefront> Shared<S> {
                 platform: Some(platform),
                 ..transfer.clone()
             };
+            self.update(|inner| self.record_incomplete(inner, &transfer));
             let polling = {
                 let (shared, name) = (self.clone(), name.clone());
                 runtime().spawn(async move {
@@ -927,6 +980,10 @@ impl<S: Storefront> Shared<S> {
                 inner.state.updates.retain(|kept| *kept != id);
                 inner.state.last_download = None;
                 self.save(inner);
+                if inner.state.incomplete.iter().any(|kept| kept.id() == id) {
+                    inner.state.incomplete.retain(|kept| kept.id() != id);
+                    self.save_incomplete(inner);
+                }
             }
             match last {
                 Some(progress) => inner.state.transfer = Some(progress),
@@ -1167,12 +1224,38 @@ impl<S: Storefront> Inner<S> {
             .cloned()
     }
 
-    /// The Transfer of `game` that stopped before its receipt.
+    /// Every incomplete receipt the account's file keeps.
+    fn saved_incomplete(&self) -> Vec<Receipt<S>> {
+        self.state
+            .incomplete
+            .iter()
+            .chain(&self.incomplete_offline)
+            .cloned()
+            .collect()
+    }
+
+    /// The Transfer of `game` that stopped before its receipt: the last one,
+    /// or that of its incomplete installation while none is installed.
     fn resumable(&self, game: &S::Game) -> Option<Transfer<S>> {
         self.state
             .last_download
             .clone()
             .filter(|last| &last.game() == game)
+            .or_else(|| {
+                if self
+                    .state
+                    .receipts
+                    .iter()
+                    .any(|receipt| &receipt.game() == game)
+                {
+                    return None;
+                }
+                self.state
+                    .incomplete
+                    .iter()
+                    .find(|receipt| &receipt.game() == game)
+                    .map(Receipt::transfer)
+            })
     }
 }
 
@@ -1206,6 +1289,7 @@ impl<S: Storefront> Installations<S> {
         let library = folder.library().to_owned();
         let mut inner = Inner {
             offline: Vec::new(),
+            incomplete_offline: Vec::new(),
             state: State {
                 revision: 1,
                 receipts: Vec::new(),
@@ -1217,6 +1301,7 @@ impl<S: Storefront> Installations<S> {
                 launch_game: None,
                 uninstall_game: None,
                 last_download: None,
+                incomplete: Vec::new(),
                 report: None,
                 warning: None,
                 maintenance: None,
@@ -1262,6 +1347,16 @@ impl<S: Storefront> Installations<S> {
             }
             Err(_) => Shared::<S>::warn(&mut inner, S::RECEIPTS_UNAVAILABLE),
         }
+        let incomplete_file = incomplete_file(&receipts_file);
+        // An unreadable file only forgets the downloads it kept, as an
+        // Obelisk before it did.
+        let (incomplete, offline, changed) =
+            sort(load(&incomplete_file).unwrap_or_default(), &folder);
+        inner.state.incomplete = incomplete;
+        inner.incomplete_offline = offline;
+        if changed && save(&incomplete_file, &inner.saved_incomplete()).is_err() {
+            Shared::<S>::warn(&mut inner, S::RECEIPTS_NOT_SAVED);
+        }
         // The watcher follows the sessions from the state this gate shows.
         let seen = sessions.state();
         inner.state.gate = gate(&inner, &seen);
@@ -1274,6 +1369,7 @@ impl<S: Storefront> Installations<S> {
             sessions: sessions.clone(),
             account,
             receipts_file,
+            incomplete_file,
             protected: vec![library, home],
             folder,
             queueing,
@@ -1676,6 +1772,75 @@ impl<S: Storefront> Installations<S> {
         });
     }
 
+    /// Deletes the files of the incomplete installation `receipt` names,
+    /// and forgets it. Nothing ran from them: there are no Cloud saves to
+    /// archive and no prefix to delete.
+    pub fn discard(&self, receipt: &str) {
+        let shared = &self.shared;
+        let started = shared.update(|inner| {
+            let receipt = inner
+                .state
+                .incomplete
+                .iter()
+                .find(|kept| kept.id() == receipt)
+                .cloned()?;
+            let game = receipt.game();
+            if !shared.gate(inner).uninstall.allows(&game) {
+                return None;
+            }
+            inner.state.uninstall_game = Some(game.clone());
+            inner.state.report = None;
+            Some((receipt, game))
+        });
+        let Some((receipt, game)) = started else {
+            return;
+        };
+        let directory = PathBuf::from(&receipt.directory);
+        let expected = shared.content.directory_name(&receipt);
+        let protected = shared.protected.clone();
+        let shared = shared.clone();
+        runtime().spawn(async move {
+            let removal = blocking("model.game.installationBusy", move || {
+                // A Transfer stopped before its first file leaves no folder.
+                if !directory.exists() {
+                    return Ok(());
+                }
+                let protected: Vec<&Path> = protected.iter().map(PathBuf::as_path).collect();
+                obelisk_core::installation::remove(&directory, &expected, &protected)
+                    .map_err(removal_reason)
+            })
+            .await
+            .and_then(|removal| removal);
+            shared.update(|inner| {
+                inner.state.uninstall_game = None;
+                match removal {
+                    Ok(()) => {
+                        inner.state.incomplete.retain(|kept| *kept != receipt);
+                        shared.save_incomplete(inner);
+                        if inner
+                            .state
+                            .last_download
+                            .as_ref()
+                            .is_some_and(|last| last.lands_on(&receipt))
+                        {
+                            inner.state.last_download = None;
+                        }
+                        if inner.state.transfer_game.as_ref() == Some(&game) {
+                            inner.state.transfer = None;
+                            inner.state.transfer_game = None;
+                        }
+                    }
+                    Err(Failure::Cancelled) => {}
+                    Err(Failure::Failed(reason)) => {
+                        if !inner.signed_out {
+                            inner.state.report = Some(Report::Uninstall(reason));
+                        }
+                    }
+                }
+            });
+        });
+    }
+
     /// Takes the account's Transfers out of the queue, and stops its Cloud
     /// maintenance and launch still preparing. A running game keeps its Game
     /// session; an uninstall already removing files finishes.
@@ -1909,6 +2074,7 @@ impl<S: Storefront> Resident for Shared<S> {
                             .state
                             .receipts
                             .iter()
+                            .chain(&inner.state.incomplete)
                             .any(|receipt| waiting.transfer.lands_on(receipt))
                 })
                 .map(|waiting| waiting.id)
@@ -1962,8 +2128,22 @@ impl<S: Storefront> Resident for Shared<S> {
             if changed {
                 self.save(inner);
             }
+            let (incomplete, offline, changed) = sort(inner.saved_incomplete(), &self.folder);
+            inner.state.incomplete = incomplete;
+            inner.incomplete_offline = offline;
+            if changed {
+                self.save_incomplete(inner);
+            }
         });
     }
+}
+
+/// The file beside `receipts_file` that keeps its account's incomplete
+/// receipts.
+fn incomplete_file(receipts_file: &Path) -> PathBuf {
+    let mut name = receipts_file.file_stem().unwrap_or_default().to_os_string();
+    name.push(".incomplete.json");
+    receipts_file.with_file_name(name)
 }
 
 /// Sorts receipts by their installation's folder: those there, and those
