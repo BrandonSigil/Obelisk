@@ -31,7 +31,7 @@ extension LibraryStorefront {
     func syncCloud() { installations.syncCloud() }
     var unreadCount: Int { 0 }
 
-    /// Names the game a Cloud question or banner is about.
+    /// Names the game a Cloud question is about.
     func cloudTitle(for game: Store.GameID?) -> String {
         guard let game else { return Store.cloudTitle }
         let name = library.game(game)?.title
@@ -120,9 +120,6 @@ struct StorefrontLibraryPage<Model: LibraryStorefront, HeroArtwork: View, HeroLo
                 }
                 VStack(alignment: .leading, spacing: 22) {
                     StorefrontWarningBanner(message: $model.storageWarning)
-                    if model.cloud.failurePresented {
-                        SteamCloudFailureView(model: model, storefront: storeID)
-                    }
                     library(actions)
                 }
                 .padding(.horizontal, ObeliskStyle.contentPadding)

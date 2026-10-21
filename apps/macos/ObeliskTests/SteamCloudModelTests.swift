@@ -121,7 +121,7 @@ final class SteamCloudModelTests: XCTestCase {
         backend.publish { $0.cloudSync = nil }
 
         try await eventually { !model.isMaintaining }
-        XCTAssertFalse(model.failurePresented, "Only a launch check shows a banner")
+        XCTAssertFalse(model.failurePresented, "Only a launch check asks after a failure")
         XCTAssertEqual(model.promptMessage, L10n.string("ui.cloud.working"))
         fixture.installations.syncCloud()
         XCTAssertEqual(backend.actions, [.maintain(42, installed: nil), .maintain(42, installed: nil)],

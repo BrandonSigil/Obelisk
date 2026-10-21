@@ -199,15 +199,20 @@ final class AppModel {
     /// The Cloud or Rosetta question shown over the whole app, whichever tab is
     /// open. One sheet at a time, in a fixed order.
     enum StorefrontPrompt: Equatable {
-        case steamRosetta, steamCloud, epicRosetta, epicCloud, gogRosetta
+        case steamRosetta, steamCloud, steamCloudFailure
+        case epicRosetta, epicCloud, epicCloudFailure
+        case gogRosetta, gogCloudFailure
     }
 
     var presentedPrompt: StorefrontPrompt? {
         if steam.rosetta.prompt != nil { return .steamRosetta }
         if steam.cloud.promptPresented { return .steamCloud }
+        if steam.cloud.failurePresented { return .steamCloudFailure }
         if epic.rosetta.prompt != nil { return .epicRosetta }
         if epic.cloud.promptPresented { return .epicCloud }
+        if epic.cloud.failurePresented { return .epicCloudFailure }
         if gog.rosetta.prompt != nil { return .gogRosetta }
+        if gog.cloud.failurePresented { return .gogCloudFailure }
         return nil
     }
 

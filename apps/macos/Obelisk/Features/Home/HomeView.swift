@@ -326,29 +326,22 @@ private struct HomePage: View {
     }
 
     private var hasNotices: Bool {
-        hasNotice(model.steam) || hasNotice(model.epic) || hasNotice(model.gog)
-    }
-
-    private func hasNotice<Model: LibraryStorefront>(_ storefront: Model) -> Bool {
-        storefront.storageWarning != nil || storefront.cloud.failurePresented
+        model.steam.storageWarning != nil || model.epic.storageWarning != nil || model.gog.storageWarning != nil
     }
 
     @ViewBuilder private var notices: some View {
         if hasNotices {
             VStack(alignment: .leading, spacing: 22) {
-                notice(model.steam, storeID: "steam")
-                notice(model.epic, storeID: "epic")
-                notice(model.gog, storeID: "gog")
+                notice(model.steam)
+                notice(model.epic)
+                notice(model.gog)
             }
             .padding(.horizontal, ObeliskStyle.contentPadding)
         }
     }
 
-    @ViewBuilder private func notice<Model: LibraryStorefront>(_ storefront: Model, storeID: String) -> some View {
+    private func notice<Model: LibraryStorefront>(_ storefront: Model) -> some View {
         StorefrontWarningBanner(message: Bindable(storefront).storageWarning)
-        if storefront.cloud.failurePresented {
-            SteamCloudFailureView(model: storefront, storefront: storeID)
-        }
     }
 
     private func hero(_ game: HomeGame) -> some View {

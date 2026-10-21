@@ -48,6 +48,28 @@ struct DeveloperModal: Identifiable {
                     },
                 ]),
             DeveloperModal(
+                id: "cloud-failure", title: "Cloud failure",
+                detail: "Over the whole window, when a launch's Cloud check fails before the game starts.",
+                symbol: "icloud.slash",
+                variants: [
+                    Variant("Steam") {
+                        $0.cloudFailure(storefront: "steam", title: SteamGames.cloudTitle,
+                                        message: "backend.steam.cloud.unsupported")
+                    },
+                    Variant("Epic Games") {
+                        $0.cloudFailure(storefront: "epic", title: EpicGames.cloudTitle,
+                                        message: "backend.epic.cloud.failed")
+                    },
+                    Variant("No Launch anyway") {
+                        $0.cloudFailure(storefront: "steam", title: SteamGames.cloudTitle,
+                                        message: "backend.steam.cloud.network", canLaunchAnyway: false)
+                    },
+                    Variant("Working") {
+                        $0.cloudFailure(storefront: "steam", title: SteamGames.cloudTitle,
+                                        message: "backend.steam.cloud.network", busy: true)
+                    },
+                ]),
+            DeveloperModal(
                 id: "rosetta", title: "Rosetta",
                 detail: "Over the whole window, when a Windows game needs Rosetta. Install fails after 3 seconds.",
                 symbol: "cpu",
@@ -186,6 +208,15 @@ final class DeveloperModals {
             SteamCloudPromptView(title: "\(title) · \(Self.gameName)", message: message, busy: busy,
                                  onCancel: close, onChooseLocal: close, onChooseCloud: close, storefront: storefront)
                 .interactiveDismissDisabled()
+        }
+    }
+
+    func cloudFailure(storefront: String, title: String, message: String, busy: Bool = false,
+                      canLaunchAnyway: Bool = true) {
+        present { close in
+            SteamCloudFailureView(title: "\(title) · \(Self.gameName)", message: message, busy: busy,
+                                  canLaunchAnyway: canLaunchAnyway, onRetry: close, onCancel: close,
+                                  onLaunchAnyway: close, storefront: storefront)
         }
     }
 

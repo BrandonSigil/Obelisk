@@ -800,6 +800,28 @@ final class SteamPresentationTests: XCTestCase {
     }
 
     @MainActor
+    func testAFailedLaunchCheckAsksOverTheWholeAppWhateverTabIsOpen() async throws {
+        let fixture = try await launchFixture()
+        defer { fixture.cleanUp() }
+        let app = AppModel(directory: fixture.root, defaults: fixture.preferences, steam: fixture.model,
+                           epic: EpicModel(directory: fixture.root, gameSessions: EpicGameSessions()))
+        app.selection = .epic
+        XCTAssertNil(app.presentedPrompt)
+
+        fixture.model.installations.selectedAction?.perform()
+        fixture.preparing()
+        fixture.sync(.launch(620, question: .failed(17, error: "backend.steam.cloud.unsupported", launchAnyway: true)))
+
+        try await eventually { app.presentedPrompt == .steamCloudFailure }
+        app.selection = .home
+        XCTAssertEqual(app.presentedPrompt, .steamCloudFailure, "The failure does not wait for the Steam tab")
+        fixture.model.cloud.respond(.launchAnyway)
+        try await eventually { fixture.backend.actions.last == .answer(620, decision: 17, .launchAnyway) }
+        fixture.sync(.launch(620, working: true, cancellable: true))
+        try await eventually { app.presentedPrompt == nil }
+    }
+
+    @MainActor
     func testRunningSessionBlocksRelaunchVerificationAndUninstallUntilActualExit() async throws {
         let fixture = try await launchFixture()
         defer { fixture.cleanUp() }

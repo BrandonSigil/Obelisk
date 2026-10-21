@@ -93,7 +93,7 @@ final class HomeShelvesTests: XCTestCase {
         XCTAssertEqual(shelves.installed.last?.title, "Celeste")
     }
 
-    func testHomeShowsStorefrontCloudLaunchFailures() async throws {
+    func testHomeShowsStorageWarningsButNotCloudLaunchFailures() async throws {
         let root = FileManager.default.temporaryDirectory.appending(path: "ObeliskHomeNotices-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }
@@ -141,18 +141,19 @@ final class HomeShelvesTests: XCTestCase {
             2405060, question: .failed(1, error: "backend.steam.cloud.unsupported", launchAnyway: true)
         )
         let steamFailureHeight = try await documentHeight()
-        XCTAssertGreaterThan(steamFailureHeight, baseHeight)
+        XCTAssertEqual(steamFailureHeight, baseHeight, accuracy: 0.5)
+        XCTAssertEqual(model.presentedPrompt, .steamCloudFailure)
 
         model.steam.cloud.sync = nil
         model.epic.cloud.sync = GameCloudSync.launch(
             "fixture:rocket-league", question: .failed(2, error: "backend.epic.cloud_network", launchAnyway: true)
         )
         let epicFailureHeight = try await documentHeight()
-        XCTAssertGreaterThan(epicFailureHeight, baseHeight)
+        XCTAssertEqual(epicFailureHeight, baseHeight, accuracy: 0.5)
+        XCTAssertEqual(model.presentedPrompt, .epicCloudFailure)
 
         model.epic.cloud.sync = nil
-        let finalHeight = try await documentHeight()
-        XCTAssertEqual(finalHeight, baseHeight, accuracy: 0.5)
+        XCTAssertNil(model.presentedPrompt)
     }
 
     // MARK: Fixtures

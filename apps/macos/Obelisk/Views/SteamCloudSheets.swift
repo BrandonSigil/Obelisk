@@ -97,23 +97,35 @@ struct SteamCloudFailureView: View {
     var storefront = "steam"
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Label(title, systemImage: "icloud.slash")
-                .font(.system(size: 12, weight: .semibold))
-            Text(L10n.message(message))
-                .font(.system(size: 12))
-                .foregroundStyle(.secondary)
-            HStack(spacing: 12) {
-                Button(L10n.string("ui.common.retry"), action: onRetry)
-                if canLaunchAnyway {
-                    Button(L10n.string("ui.cloud.launch_anyway"), action: onLaunchAnyway)
-                }
-                Button(L10n.string("ui.common.cancel"), action: onCancel)
+        VStack(alignment: .leading, spacing: 20) {
+            SheetHeader(title: title, subtitle: L10n.message(message), symbol: "icloud.slash",
+                        colors: TileColors.red)
+            if busy {
+                SheetNotice(kind: .progress, text: L10n.string("ui.cloud.working"))
             }
-            .obeliskButtonStyle(.borderless)
-            .controlSize(.small)
-            .disabled(busy)
+            HStack(spacing: 10) {
+                Spacer(minLength: 0)
+                // Cancel stays open while the sync works, as the conflict's
+                // does: the sheet holds the whole window.
+                GlassCapsuleButton(title: L10n.string("ui.common.cancel"), size: .large,
+                                   identifier: "\(storefront)-cloud-cancel", action: onCancel)
+                    .keyboardShortcut(.cancelAction)
+                if canLaunchAnyway {
+                    GlassCapsuleButton(title: L10n.string("ui.cloud.launch_anyway"), size: .large,
+                                       identifier: "\(storefront)-cloud-launch-anyway", action: onLaunchAnyway)
+                        .disabled(busy)
+                }
+                AccentCapsuleButton(title: L10n.string("ui.common.retry"), size: .large, isBusy: busy,
+                                    identifier: "\(storefront)-cloud-retry", action: onRetry)
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(busy)
+            }
         }
+        .padding(24)
+        .frame(width: 460)
+        .tint(ObeliskStyle.accent)
+        .animation(.easeInOut(duration: 0.2), value: busy)
+        .interactiveDismissDisabled()
         .accessibilityIdentifier("\(storefront)-cloud-failure")
     }
 }
