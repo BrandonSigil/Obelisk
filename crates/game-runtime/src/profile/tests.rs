@@ -12,12 +12,23 @@ const ROCKET_LEAGUE: Game<'static> = Game::Epic {
     app_name: "Sugar",
 };
 
+const FALL_GUYS: Game<'static> = Game::Epic {
+    namespace: "50118b7f954e450f8823df1614b24e80",
+    app_name: "0a2d9f6403244d12969e11da6713137b",
+};
+
 #[test]
-fn rocket_league_and_elden_ring_run_on_the_linux_engine_and_nothing_else_does() {
+fn rocket_league_fall_guys_and_elden_ring_run_on_the_linux_engine_and_nothing_else_does() {
     assert_eq!(by_id(ROCKET_LEAGUE).engine, Engine::Linux);
     assert_eq!(
         by_id(ROCKET_LEAGUE).executable,
         Some("Binaries/Win64/RocketLeague_EAC.exe")
+    );
+    assert_eq!(by_id(FALL_GUYS).engine, Engine::Linux);
+    assert_eq!(by_id(FALL_GUYS).graphics, Graphics::Dxmt);
+    assert_eq!(
+        by_id(FALL_GUYS).executable,
+        Some("start_protected_game.exe")
     );
     assert_eq!(by_id(Game::Steam { app_id: 1245620 }).engine, Engine::Linux);
     for other in [
