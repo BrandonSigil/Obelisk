@@ -32,6 +32,9 @@ final class AppLifecycle: NSObject, NSApplicationDelegate {
         if ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil {
             let locations = ObeliskLocations.live
             Task.detached(priority: .utility) { _ = endOrphanedWindowsGames(locations: locations) }
+            // Game pages show the notes kept last until a release build has
+            // read them again from Obelisk's main.
+            Task.detached(priority: .utility) { await refreshGameNotes(locations: locations) }
         }
         // Closing the last library window hides Obelisk like quitting does.
         windowClosing = NotificationCenter.default.addObserver(

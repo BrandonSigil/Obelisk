@@ -66,16 +66,47 @@ extension View {
     }
 }
 
-/// A game page's launch row: its launch and management buttons, then its metrics.
+/// A game page's launch row: its launch and management buttons, then its
+/// metrics, then Obelisk's note on the game, when it has one.
 struct GameLaunchRow<Buttons: View>: View {
     let metrics: GameMetrics
+    var note: String?
     @ViewBuilder let buttons: Buttons
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 10) { buttons }
             GameMetricsRow(metrics: metrics)
+            if let note {
+                GameNote(text: note)
+            }
         }
+    }
+}
+
+/// What Obelisk tells players about a game, such as what works of it and
+/// what does not yet: a metric's caption over a few lines.
+struct GameNote: View {
+    let text: String
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 9) {
+            GameMetricSymbol(name: "info.circle")
+            VStack(alignment: .leading, spacing: 4) {
+                Text(L10n.string("ui.game.note"))
+                    .font(.system(size: 10, weight: .semibold))
+                    .tracking(0.4)
+                    .textCase(.uppercase)
+                    .foregroundStyle(.secondary)
+                Text(text)
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .frame(maxWidth: 560, alignment: .leading)
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("game-note")
     }
 }
 

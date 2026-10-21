@@ -1184,6 +1184,16 @@ RustBuffer uniffi_obelisk_bridge_fn_func_epic_login_url(RustCallStatus *_Nonnull
     
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_OBELISK_BRIDGE_FN_FUNC_GAME_NOTE
+#define UNIFFI_FFIDEF_UNIFFI_OBELISK_BRIDGE_FN_FUNC_GAME_NOTE
+RustBuffer uniffi_obelisk_bridge_fn_func_game_note(RustBuffer storefront, RustBuffer id, RustBuffer languages, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_OBELISK_BRIDGE_FN_FUNC_REFRESH_GAME_NOTES
+#define UNIFFI_FFIDEF_UNIFFI_OBELISK_BRIDGE_FN_FUNC_REFRESH_GAME_NOTES
+uint64_t uniffi_obelisk_bridge_fn_func_refresh_game_notes(RustBuffer locations
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_OBELISK_BRIDGE_FN_FUNC_GOG_AUTHORIZATION_CODE
 #define UNIFFI_FFIDEF_UNIFFI_OBELISK_BRIDGE_FN_FUNC_GOG_AUTHORIZATION_CODE
 RustBuffer uniffi_obelisk_bridge_fn_func_gog_authorization_code(RustBuffer input, RustCallStatus *_Nonnull out_status
@@ -1517,6 +1527,18 @@ uint16_t uniffi_obelisk_bridge_checksum_func_epic_authorization_code(void
 #ifndef UNIFFI_FFIDEF_UNIFFI_OBELISK_BRIDGE_CHECKSUM_FUNC_EPIC_LOGIN_URL
 #define UNIFFI_FFIDEF_UNIFFI_OBELISK_BRIDGE_CHECKSUM_FUNC_EPIC_LOGIN_URL
 uint16_t uniffi_obelisk_bridge_checksum_func_epic_login_url(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_OBELISK_BRIDGE_CHECKSUM_FUNC_GAME_NOTE
+#define UNIFFI_FFIDEF_UNIFFI_OBELISK_BRIDGE_CHECKSUM_FUNC_GAME_NOTE
+uint16_t uniffi_obelisk_bridge_checksum_func_game_note(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_OBELISK_BRIDGE_CHECKSUM_FUNC_REFRESH_GAME_NOTES
+#define UNIFFI_FFIDEF_UNIFFI_OBELISK_BRIDGE_CHECKSUM_FUNC_REFRESH_GAME_NOTES
+uint16_t uniffi_obelisk_bridge_checksum_func_refresh_game_notes(void
     
 );
 #endif

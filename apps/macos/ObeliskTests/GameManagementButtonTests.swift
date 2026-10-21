@@ -65,6 +65,44 @@ final class GameManagementButtonTests: XCTestCase {
     }
 
     @MainActor
+    func testTheLaunchRowShowsTheNoteRustHasOnTheGame() async throws {
+        // As the game page asks: by the game's id, in Obelisk's language.
+        let note = try XCTUnwrap(gameNote(storefront: .steam, id: "\(UInt32(440))", languages: ["en"]))
+        XCTAssertTrue(note.contains("LAN"))
+        XCTAssertEqual(gameNote(storefront: .steam, id: "440", languages: ["fr"])?.contains("hors ligne"), true)
+        XCTAssertNil(gameNote(storefront: .steam, id: "620", languages: ["en"]))
+
+        let metrics = GameMetrics(isInstalled: true, size: "33,4 Go", lastPlayed: nil, playtime: nil,
+                                  achievements: GameAchievementsModel(storeID: "steam", describe: SteamModel.message))
+        func row(_ note: String?) -> some View {
+            GameLaunchRow(metrics: metrics, note: note) {
+                GameActionButton(
+                    action: GameAction(kind: .launch, title: L10n.string("model.game.launch"), isAvailable: true,
+                                       launches: true),
+                    gameName: "Team Fortress 2"
+                )
+            }
+            .padding(18)
+            .frame(width: 760)
+            .environment(\.colorScheme, .dark)
+            .background(ObeliskPalette(colorScheme: .dark).background)
+        }
+        let plain = ManagementButtonWindow(row(nil))
+        defer { plain.close() }
+        await plain.prepare()
+        let noted = ManagementButtonWindow(row(note))
+        defer { noted.close() }
+        await noted.prepare()
+
+        // The note adds its caption and a few lines under the metrics.
+        XCTAssertGreaterThan(noted.host.fittingSize.height, plain.host.fittingSize.height + 30)
+        let bitmap = try XCTUnwrap(noted.host.bitmapImageRepForCachingDisplay(in: noted.host.bounds))
+        noted.host.cacheDisplay(in: noted.host.bounds, to: bitmap)
+        let png = try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
+        try png.write(to: URL(fileURLWithPath: "/tmp/obelisk-game-note-preview.png"))
+    }
+
+    @MainActor
     private func attribute(_ name: String, of element: NSObject) -> Any? {
         element.responds(to: NSSelectorFromString(name)) ? element.value(forKey: name) : nil
     }

@@ -119,7 +119,7 @@ struct GameDetailPage<Model: LibraryStorefront, HeroArtwork: View, Cover: View, 
             VStack(alignment: .leading, spacing: 0) {
                 // The part of the cover over the artwork.
                 Color.clear.frame(height: Self.coverOverlap)
-                GameLaunchRow(metrics: metrics) {
+                GameLaunchRow(metrics: metrics, note: note) {
                     GamePageAction(installations: installations, gameName: name)
                     if let id = Model.Store.storeGameID(game.id) {
                         GameReportButton(subject: .game(store: Model.Store.storefront, id: id, name: name),
@@ -193,6 +193,14 @@ struct GameDetailPage<Model: LibraryStorefront, HeroArtwork: View, Cover: View, 
         let playtime = model.library.playtime(of: game)
         return showsUnplayed ? GameFormatting.playtime(playtime ?? .zero) : playtime.map(GameFormatting.playtime)
     }
+
+    /// Obelisk's note on the game, in Obelisk's language. Every storefront's
+    /// game id spells the way the notes name it: a Steam app id, an Epic
+    /// `namespace:appName`, a GOG product id.
+    private var note: String? {
+        gameNote(storefront: Model.Store.storefront, id: "\(game.id)", languages: [L10n.languageCode])
+    }
+
     private var metrics: GameMetrics {
         GameMetrics(
             isInstalled: installations.selectedReceipt != nil,
