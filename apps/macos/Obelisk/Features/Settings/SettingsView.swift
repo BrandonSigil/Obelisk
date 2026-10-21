@@ -894,9 +894,6 @@ private struct SettingsStoreRow: View {
     }
 }
 
-#if DEBUG
-/// Debug builds only: each modal Obelisk presents, opened over made-up data
-/// to check how it looks.
 /// A folder's path under a row's description, whole in its help tag.
 private struct FolderPath: View {
     let path: String
@@ -912,6 +909,9 @@ private struct FolderPath: View {
     }
 }
 
+#if DEBUG
+/// Debug builds only: each modal Obelisk presents, opened over made-up data
+/// to check how it looks.
 private struct DeveloperModalsCard: View {
     @State private var modals = DeveloperModals()
 
