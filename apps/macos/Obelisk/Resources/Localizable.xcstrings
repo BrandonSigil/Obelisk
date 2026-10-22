@@ -6516,6 +6516,57 @@
         }
       }
     },
+    "ui.game.delete_download": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Delete download"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Supprimer le téléchargement"
+          }
+        }
+      }
+    },
+    "ui.game.delete_download_message": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The files downloaded so far will be deleted. Downloading the game again will start over."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Les fichiers déjà téléchargés seront supprimés. Un nouveau téléchargement du jeu repartira de zéro."
+          }
+        }
+      }
+    },
+    "ui.game.delete_download_title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Delete the download of %@?"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Supprimer le téléchargement de %@ ?"
+          }
+        }
+      }
+    },
     "ui.game.launch_named": {
       "extractionState": "manual",
       "localizations": {

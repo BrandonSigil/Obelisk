@@ -700,6 +700,11 @@ public protocol AccountInstallationsProtocol: AnyObject, Sendable {
     func cloudIndicators(games: [String]) async throws  -> [GameCloudIndicator]
     
     /**
+     * Deletes the files of the incomplete `installation` and forgets it.
+     */
+    func discard(installation: String) 
+    
+    /**
      * Installs what `offer` names, or updates the game's installation; a
      * Transfer of the game that stopped resumes instead. An offer of the
      * other storefront does nothing.
@@ -959,6 +964,18 @@ open func cloudIndicators(games: [String])async throws  -> [GameCloudIndicator] 
             liftFunc: FfiConverterSequenceTypeGameCloudIndicator.lift,
             errorHandler: FfiConverterTypeGameSessionError_lift
         )
+}
+    
+    /**
+     * Deletes the files of the incomplete `installation` and forgets it.
+     */
+open func discard(installation: String)  {try! rustCall() {
+        uniffiCallStatus in
+    uniffi_obelisk_bridge_fn_method_accountinstallations_discard(
+            self.uniffiCloneHandle(),
+        FfiConverterString.lower(installation),uniffiCallStatus
+    )
+}
 }
     
     /**
@@ -7723,6 +7740,11 @@ public struct InstallationsState: Equatable, Hashable {
      * resume it.
      */
     public var resumable: String?
+    /**
+     * The new installations whose Transfer has not succeeded yet: the player
+     * resumes or discards each. None is an installed game.
+     */
+    public var incomplete: [Installation]
     public var report: InstallationReport?
     public var warning: InstallationWarning?
     public var gate: InstallationGate
@@ -7744,7 +7766,11 @@ public struct InstallationsState: Equatable, Hashable {
         /**
          * The game whose Transfer stopped before its receipt: the player can
          * resume it.
-         */resumable: String?, report: InstallationReport?, warning: InstallationWarning?, gate: InstallationGate, cloudSync: CloudSync?, 
+         */resumable: String?, 
+        /**
+         * The new installations whose Transfer has not succeeded yet: the player
+         * resumes or discards each. None is an installed game.
+         */incomplete: [Installation], report: InstallationReport?, warning: InstallationWarning?, gate: InstallationGate, cloudSync: CloudSync?, 
         /**
          * The games whose Transfer waits in the download queue.
          */queued: [String]) {
@@ -7758,6 +7784,7 @@ public struct InstallationsState: Equatable, Hashable {
         self.launchGame = launchGame
         self.uninstallGame = uninstallGame
         self.resumable = resumable
+        self.incomplete = incomplete
         self.report = report
         self.warning = warning
         self.gate = gate
@@ -7791,6 +7818,7 @@ public struct FfiConverterTypeInstallationsState: FfiConverterRustBuffer {
                 launchGame: FfiConverterOptionString.read(from: &buf), 
                 uninstallGame: FfiConverterOptionString.read(from: &buf), 
                 resumable: FfiConverterOptionString.read(from: &buf), 
+                incomplete: FfiConverterSequenceTypeInstallation.read(from: &buf), 
                 report: FfiConverterOptionTypeInstallationReport.read(from: &buf), 
                 warning: FfiConverterOptionTypeInstallationWarning.read(from: &buf), 
                 gate: FfiConverterTypeInstallationGate.read(from: &buf), 
@@ -7810,6 +7838,7 @@ public struct FfiConverterTypeInstallationsState: FfiConverterRustBuffer {
         FfiConverterOptionString.write(value.launchGame, into: &buf)
         FfiConverterOptionString.write(value.uninstallGame, into: &buf)
         FfiConverterOptionString.write(value.resumable, into: &buf)
+        FfiConverterSequenceTypeInstallation.write(value.incomplete, into: &buf)
         FfiConverterOptionTypeInstallationReport.write(value.report, into: &buf)
         FfiConverterOptionTypeInstallationWarning.write(value.warning, into: &buf)
         FfiConverterTypeInstallationGate.write(value.gate, into: &buf)
@@ -16041,6 +16070,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_obelisk_bridge_checksum_method_accountinstallations_cloud_indicators() != 38851) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_obelisk_bridge_checksum_method_accountinstallations_discard() != 52529) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_obelisk_bridge_checksum_method_accountinstallations_install() != 6039) {

@@ -129,9 +129,9 @@ struct GameDetailPage<Model: LibraryStorefront, HeroArtwork: View, Cover: View, 
                         GameManagementButton(
                             gameName: name,
                             canVerify: installations.canVerifySelectedGame,
-                            canUninstall: installations.canUninstallSelectedGame,
+                            canRemove: installations.canUninstallSelectedGame,
                             verify: { installations.verify(receipt) },
-                            uninstall: { installations.uninstall(receipt) },
+                            remove: { installations.uninstall(receipt) },
                             directory: receipt.directory,
                             launchSettings: receipt.platform == .mac ? nil : {
                                 launchSettings = LaunchSettingsModel(
@@ -143,6 +143,17 @@ struct GameDetailPage<Model: LibraryStorefront, HeroArtwork: View, Cover: View, 
                             }
                         )
                         .id(receipt.id + receipt.directory)
+                    } else if let incomplete = installations.selectedIncompleteReceipt {
+                        GameManagementButton(
+                            gameName: name,
+                            canVerify: false,
+                            canRemove: installations.canDiscardSelectedGame,
+                            verify: nil,
+                            remove: { installations.discard(incomplete) },
+                            directory: incomplete.directory,
+                            removal: .download
+                        )
+                        .id(incomplete.id + incomplete.directory)
                     }
                 }
                 .padding(.top, 18)

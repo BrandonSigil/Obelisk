@@ -16,6 +16,7 @@ final class FakeInstallations<Store: InstallationStorefront>: InstallationsBacke
         case launch(InstallationReceipt<Store.GameID>)
         case join(InstallationReceipt<Store.GameID>, SteamGameInvite)
         case uninstall(InstallationReceipt<Store.GameID>)
+        case discard(InstallationReceipt<Store.GameID>)
         case signedOut
         case maintain(Store.GameID, installed: InstallationReceipt<Store.GameID>?)
         case answer(Store.GameID, decision: UInt64, CloudChoice)
@@ -75,6 +76,7 @@ final class FakeInstallations<Store: InstallationStorefront>: InstallationsBacke
         record(.join(receipt, invite))
     }
     func uninstall(_ receipt: InstallationReceipt<Store.GameID>) { record(.uninstall(receipt)) }
+    func discard(_ receipt: InstallationReceipt<Store.GameID>) { record(.discard(receipt)) }
     func signedOut() { record(.signedOut) }
     func maintainCloud(_ game: Store.GameID, installed: InstallationReceipt<Store.GameID>?) {
         record(.maintain(game, installed: installed))
