@@ -93,11 +93,7 @@ struct GameNote: View {
         HStack(alignment: .top, spacing: 9) {
             GameMetricSymbol(name: "info.circle")
             VStack(alignment: .leading, spacing: 4) {
-                Text(L10n.string("ui.game.note"))
-                    .font(.system(size: 10, weight: .semibold))
-                    .tracking(0.4)
-                    .textCase(.uppercase)
-                    .foregroundStyle(.secondary)
+                GameMetricCaption(text: L10n.string("ui.game.note"))
                 Text(text)
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
@@ -219,6 +215,19 @@ struct GameExpectedFPSButton: View {
     }
 }
 
+/// The uppercase caption over a game page metric, and over the game's note.
+private struct GameMetricCaption: View {
+    let text: String
+
+    var body: some View {
+        Text(text)
+            .font(.system(size: 10, weight: .semibold))
+            .tracking(0.4)
+            .textCase(.uppercase)
+            .foregroundStyle(.secondary)
+    }
+}
+
 /// A game page metric: an uppercase caption over its value, after an optional
 /// large symbol. A metric that is a control highlights under the pointer.
 struct GameMetricLabel<Icon: View, Value: View>: View {
@@ -239,11 +248,7 @@ struct GameMetricLabel<Icon: View, Value: View>: View {
         HStack(spacing: 9) {
             icon
             VStack(alignment: .leading, spacing: 4) {
-                Text(caption)
-                    .font(.system(size: 10, weight: .semibold))
-                    .tracking(0.4)
-                    .textCase(.uppercase)
-                    .foregroundStyle(.secondary)
+                GameMetricCaption(text: caption)
                 value
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(.primary)

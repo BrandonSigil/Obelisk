@@ -1,38 +1,42 @@
 use super::*;
+use serde_json::{Value, json};
 use std::collections::HashSet;
 
-const TEAM_FORTRESS_2: Game<'static> = Game::Steam { app_id: 440 };
-
-fn languages(codes: &[&str]) -> Vec<String> {
-    codes.iter().map(|code| (*code).to_owned()).collect()
+fn built_in() -> Vec<Known> {
+    parsed(TABLE.as_bytes()).unwrap()
 }
 
-fn entries() -> Vec<serde_json::Map<String, serde_json::Value>> {
-    let table: serde_json::Value = serde_json::from_str(TABLE).unwrap();
-    table["games"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|entry| entry.as_object().unwrap().clone())
-        .collect()
+/// The note Obelisk keeps from a table holding only `entry`.
+fn known(entry: Value) -> Option<Known> {
+    let table = json!({"format": FORMAT, "games": [entry]});
+    parsed(table.to_string().as_bytes()).unwrap().pop()
+}
+
+/// A note Obelisk keeps, with `key` set to `value`.
+fn entry_with(key: &str, value: Value) -> Option<Known> {
+    let mut entry = json!({
+        "name": "A game",
+        "steam": 42,
+        "text": {"en": "Plays offline.", "fr": "Se joue hors ligne."}
+    });
+    entry[key] = value;
+    known(entry)
 }
 
 #[test]
 fn every_note_of_the_table_passes_the_checks_a_table_read_from_main_passes() {
-    assert_eq!(table().len(), entries().len());
+    let table: Value = serde_json::from_str(TABLE).unwrap();
+    assert_eq!(built_in().len(), table["games"].as_array().unwrap().len());
 }
 
 #[test]
 fn no_two_notes_of_the_table_name_the_same_game() {
     let mut names = HashSet::new();
-    for known in table() {
+    for known in built_in() {
         let ids = [
             known.steam.map(|app_id| format!("steam {app_id}")),
-            known
-                .epic
-                .as_ref()
-                .map(|epic| format!("epic {}:{}", epic.namespace, epic.app_name)),
-            known.gog.as_ref().map(|product| format!("gog {product}")),
+            known.epic.map(|epic| format!("epic {epic:?}")),
+            known.gog.map(|product| format!("gog {product}")),
         ];
         for id in ids.into_iter().flatten() {
             assert!(names.insert(id.clone()), "{id}");
@@ -41,73 +45,42 @@ fn no_two_notes_of_the_table_name_the_same_game() {
 }
 
 #[test]
-fn team_fortress_2_says_it_plays_on_lan_but_not_on_secure_servers() {
-    let english = of(TEAM_FORTRESS_2, &languages(&["en-US"])).unwrap();
-    assert!(english.contains("LAN"), "{english}");
-    assert!(english.contains("VAC"), "{english}");
-    assert!(of(Game::Steam { app_id: 730 }, &languages(&["en"])).is_none());
-}
-
-/// A table entry Obelisk keeps, with `key` set to `value`, or removed
-/// without one.
-fn entry_with(key: &str, value: Option<serde_json::Value>) -> Option<Known> {
-    let mut entry = serde_json::json!({
-        "name": "A game",
-        "steam": 42,
-        "text": {"en": "Plays offline.", "fr": "Se joue hors ligne.", "pt-BR": "Joga offline."}
-    });
-    let fields = entry.as_object_mut().unwrap();
-    match value {
-        Some(value) => fields.insert(key.into(), value),
-        None => fields.remove(key),
-    };
-    checked(entry)
+fn a_note_names_its_game_by_its_storefront_s_id() {
+    let known = entry_with("gog", "1207658924".into()).unwrap();
+    assert!(known.names(Game::Steam { app_id: 42 }));
+    assert!(known.names(Game::Gog {
+        product_id: "1207658924"
+    }));
+    assert!(!known.names(Game::Steam { app_id: 43 }));
+    assert!(!known.names(Game::Gog { product_id: "42" }));
 }
 
 #[test]
-fn a_note_follows_the_player_s_languages_in_order_then_english() {
-    let known = entry_with("name", Some("A game".into())).unwrap();
-    assert_eq!(
-        known.text(&languages(&["fr-FR", "en"])),
-        "Se joue hors ligne."
-    );
-    assert_eq!(known.text(&languages(&["fr-CA"])), "Se joue hors ligne.");
-    assert_eq!(
-        known.text(&languages(&["de-DE", "fr"])),
-        "Se joue hors ligne."
-    );
-    assert_eq!(known.text(&languages(&["pt-BR"])), "Joga offline.");
-    assert_eq!(known.text(&languages(&["pt-PT"])), "Joga offline.");
-    assert_eq!(known.text(&languages(&["de"])), "Plays offline.");
-    assert_eq!(known.text(&[]), "Plays offline.");
+fn a_note_is_in_obelisk_s_language_else_in_english() {
+    let known = entry_with("name", "A game".into()).unwrap();
+    assert_eq!(known.text("fr"), "Se joue hors ligne.");
+    assert_eq!(known.text("de"), "Plays offline.");
 }
 
 #[test]
-fn an_entry_that_is_not_a_note_obelisk_can_show_is_left_out() {
-    use serde_json::json;
-    assert!(entry_with("name", Some("A game".into())).is_some());
-    // A storefront's id, and a name.
-    assert!(entry_with("steam", None).is_none());
-    assert!(entry_with("gog", Some("1207658924".into())).is_some());
-    assert!(entry_with("name", Some("".into())).is_none());
+fn a_note_obelisk_cannot_show_is_left_out() {
+    assert!(entry_with("name", "A game".into()).is_some());
     // English always, every language short and not empty.
-    assert!(entry_with("text", Some(json!({"fr": "Se joue hors ligne."}))).is_none());
-    assert!(entry_with("text", Some(json!({"en": "  "}))).is_none());
-    assert!(entry_with("text", Some(json!({"en": "a".repeat(LONGEST)}))).is_some());
-    assert!(entry_with("text", Some(json!({"en": "a".repeat(LONGEST + 1)}))).is_none());
-    assert!(entry_with("text", Some(json!({"en": "Plays.", "english": "Plays."}))).is_none());
-    assert!(entry_with("text", Some(json!({"en": "Plays.", "f1": "Plays."}))).is_none());
-    // Nothing else: an Obelisk that reads only notes never runs a game by them.
-    assert!(entry_with("arguments", Some(json!(["-dxlevel", "95"]))).is_none());
-    assert!(checked(json!([["A game"]])).is_none());
+    assert!(entry_with("text", json!({"fr": "Se joue hors ligne."})).is_none());
+    assert!(entry_with("text", json!({"en": "  "})).is_none());
+    assert!(entry_with("text", json!({"en": "a".repeat(LONGEST)})).is_some());
+    assert!(entry_with("text", json!({"en": "a".repeat(LONGEST + 1)})).is_none());
+    // A key Obelisk does not read is left aside, and never runs a game.
+    assert!(entry_with("arguments", json!(["-dxlevel", "95"])).is_some());
 }
 
 #[test]
-fn a_table_of_another_format_is_not_read() {
-    let mut table: serde_json::Value = serde_json::from_str(TABLE).unwrap();
+fn a_table_that_does_not_parse_or_of_another_format_shows_no_note() {
+    let mut table: Value = serde_json::from_str(TABLE).unwrap();
     table["format"] = 2.into();
     assert!(parsed(table.to_string().as_bytes()).is_none());
     assert!(parsed(b"404: Not Found").is_none());
+    assert!(parsed(br#"{"format": 1, "games": ["#).is_none());
     assert_eq!(
         parsed(br#"{"format": 1, "games": []}"#).map(|games| games.len()),
         Some(0)

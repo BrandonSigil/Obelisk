@@ -194,11 +194,9 @@ struct GameDetailPage<Model: LibraryStorefront, HeroArtwork: View, Cover: View, 
         return showsUnplayed ? GameFormatting.playtime(playtime ?? .zero) : playtime.map(GameFormatting.playtime)
     }
 
-    /// Obelisk's note on the game, in Obelisk's language. Every storefront's
-    /// game id spells the way the notes name it: a Steam app id, an Epic
-    /// `namespace:appName`, a GOG product id.
+    /// Obelisk's note on the game, in Obelisk's language.
     private var note: String? {
-        gameNote(storefront: Model.Store.storefront, id: "\(game.id)", languages: [L10n.languageCode])
+        gameNote(storefront: Model.Store.storefront, id: Model.Store.name(game.id), language: L10n.languageCode)
     }
 
     private var metrics: GameMetrics {

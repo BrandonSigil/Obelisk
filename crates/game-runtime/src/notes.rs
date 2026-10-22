@@ -4,9 +4,9 @@
 //! Obelisk that reads only profiles never meets its keys. Obelisk is built
 //! with it, and a release build reads it again from Obelisk's `main` when it
 //! starts, keeping the last one beside its library; a development build
-//! keeps the one it was built with. Each entry is checked as it is read, and
-//! one that is not a note Obelisk can show is left out.
-use crate::profile::Game;
+//! keeps the one it was built with. A table that does not parse shows no
+//! note, and an entry that is not a note Obelisk can show is left out.
+use crate::profile::{EpicGame, Game};
 use serde::Deserialize;
 use std::{
     collections::BTreeMap,
@@ -29,20 +29,18 @@ const FALLBACK: &str = "en";
 /// game's details, not an article.
 const LONGEST: usize = 400;
 
-/// The table, as `notes.json` holds it: each game as written there, which
-/// `checked` reads.
+/// The table, as `notes.json` holds it: each game as written there.
 #[derive(Debug, Deserialize)]
 struct Table {
     format: u32,
     games: Vec<serde_json::Value>,
 }
 
-/// One game of the table: its name, for the table's readers, the
-/// storefronts' names for it and its note by language. Nothing else.
+/// One game of the table: the storefronts' ids for it and its note by
+/// language. Other keys, such as the `name` the table's readers go by, are
+/// left aside.
 #[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
 struct Known {
-    name: String,
     steam: Option<u32>,
     epic: Option<EpicGame>,
     gog: Option<String>,
@@ -51,151 +49,75 @@ struct Known {
     text: BTreeMap<String, String>,
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct EpicGame {
-    namespace: String,
-    app_name: String,
-}
+/// The notes pages read now: the table Obelisk was built with until a
+/// release build reads another.
+static NOTES: LazyLock<Mutex<Vec<Known>>> =
+    LazyLock::new(|| Mutex::new(parsed(TABLE.as_bytes()).unwrap_or_default()));
 
-/// The table pages read now.
-struct Current {
-    games: &'static [Known],
-    /// The table read last, as it came: none until one is read, which
-    /// leaves the one Obelisk was built with. A read that brings the same
-    /// leaves `games` in place.
-    read: Option<Vec<u8>>,
-}
-
-static CURRENT: LazyLock<Mutex<Current>> = LazyLock::new(|| {
-    Mutex::new(Current {
-        games: Vec::leak(parsed(TABLE.as_bytes()).expect("checked-in notes")),
-        read: None,
-    })
-});
-
-fn table() -> &'static [Known] {
-    CURRENT.lock().unwrap().games
-}
-
-/// The entries of `table` that `checked` keeps, when it is a table of the
-/// format Obelisk reads.
+/// The notes of `table` Obelisk can show, when it is a table of the format
+/// Obelisk reads. Each entry is read alone: one Obelisk cannot show leaves
+/// the others in place.
 fn parsed(table: &[u8]) -> Option<Vec<Known>> {
     let table: Table = serde_json::from_slice(table).ok()?;
-    (table.format == FORMAT).then(|| table.games.into_iter().filter_map(checked).collect())
-}
-
-/// `entry` as Obelisk reads it, when it holds only what Obelisk reads: a
-/// name, a storefront's id and a note in English, each language's short
-/// enough to show beside a game.
-fn checked(entry: serde_json::Value) -> Option<Known> {
-    // An entry is an object: serde would also read an array, field by field.
-    if !entry.is_object() {
-        return None;
-    }
-    let known: Known = serde_json::from_value(entry).ok()?;
-    known.allowed().then_some(known)
-}
-
-/// Whether `code` is a language code: letters, with a region after a dash,
-/// such as `pt-BR`.
-fn language(code: &str) -> bool {
-    let primary = code.split('-').next().unwrap_or_default();
-    (2..=3).contains(&primary.len())
-        && code.len() <= 8
-        && code
-            .split('-')
-            .all(|part| !part.is_empty() && part.chars().all(|letter| letter.is_ascii_alphabetic()))
+    (table.format == FORMAT).then(|| {
+        table
+            .games
+            .into_iter()
+            .filter_map(|entry| serde_json::from_value::<Known>(entry).ok())
+            .filter(Known::allowed)
+            .collect()
+    })
 }
 
 impl Known {
+    /// Whether Obelisk can show this note: in English, and in each language
+    /// short enough to show beside a game.
     fn allowed(&self) -> bool {
-        !self.name.is_empty()
-            && (self.steam.is_some() || self.epic.is_some() || self.gog.is_some())
-            && self.text.contains_key(FALLBACK)
-            && self.text.iter().all(|(code, note)| {
-                language(code) && !note.trim().is_empty() && note.chars().count() <= LONGEST
-            })
+        self.text.contains_key(FALLBACK)
+            && self
+                .text
+                .values()
+                .all(|note| !note.trim().is_empty() && note.chars().count() <= LONGEST)
     }
 
-    /// Whether this entry names `game` by its storefront's id.
     fn names(&self, game: Game<'_>) -> bool {
-        match game {
-            Game::Steam { app_id } => self.steam == Some(app_id),
-            Game::Epic {
-                namespace,
-                app_name,
-            } => self
-                .epic
-                .as_ref()
-                .is_some_and(|epic| epic.namespace == namespace && epic.app_name == app_name),
-            Game::Gog { product_id } => self.gog.as_deref() == Some(product_id),
-        }
+        game.named_by(self.steam, self.epic.as_ref(), self.gog.as_deref())
     }
 
-    /// The note in the first of `languages` it is written in, matched
-    /// exactly then by language alone, else in English.
-    fn text(&self, languages: &[String]) -> &str {
-        let primary = |code: &str| code.split('-').next().unwrap_or(code).to_ascii_lowercase();
-        languages
-            .iter()
-            .find_map(|wanted| {
-                self.text.get(wanted.as_str()).or_else(|| {
-                    self.text
-                        .iter()
-                        .find(|(code, _)| primary(code) == primary(wanted))
-                        .map(|(_, note)| note)
-                })
-            })
-            .unwrap_or(&self.text[FALLBACK])
+    /// The note in `language`, else in English.
+    fn text(&self, language: &str) -> &str {
+        self.text.get(language).unwrap_or(&self.text[FALLBACK])
     }
 }
 
-/// The note on `game`, in the first of `languages`, the player's in order
-/// of preference, that it is written in, else in English. None when the
-/// table has none for it.
-pub fn of(game: Game<'_>, languages: &[String]) -> Option<String> {
-    table()
+/// The note on `game` in `language`, else in English. None when the table
+/// has none for it.
+pub fn of(game: Game<'_>, language: &str) -> Option<String> {
+    NOTES
+        .lock()
+        .unwrap()
         .iter()
         .find(|known| known.names(game))
-        .map(|known| known.text(languages).to_owned())
+        .map(|known| known.text(language).to_owned())
 }
 
 /// Reads the table again from Obelisk's `main` and keeps it in `library`.
-/// Without the network, pages read the last one kept, else the one Obelisk
-/// was built with. A development build keeps the one it was built with, as
-/// edited.
+/// When `main` does not answer in time, or with a table Obelisk reads, pages
+/// read the last one kept, else the one Obelisk was built with. A
+/// development build keeps the one it was built with, as edited.
 pub async fn refresh(library: &Path) {
     if cfg!(debug_assertions) {
         return;
     }
     let kept = library.join(KEPT);
-    match crate::remote::fetched(URL).await {
-        Some(table) if read(&table) => {
-            let _ = crate::remote::keep(&kept, &table);
-        }
-        _ => {
-            let unread = CURRENT.lock().unwrap().read.is_none();
-            if unread && let Ok(table) = fs::read(&kept) {
-                read(&table);
-            }
-        }
+    let fetched = crate::remote::fetched(URL).await.and_then(|table| {
+        let notes = parsed(&table)?;
+        let _ = crate::remote::keep(&kept, &table);
+        Some(notes)
+    });
+    if let Some(notes) = fetched.or_else(|| parsed(&fs::read(&kept).ok()?)) {
+        *NOTES.lock().unwrap() = notes;
     }
-}
-
-/// Makes `table` the one pages read, when it is a table Obelisk reads.
-/// Whether it is. Unlike the profiles, a table without notes is one: the
-/// last note may go.
-fn read(table: &[u8]) -> bool {
-    let mut current = CURRENT.lock().unwrap();
-    if current.read.as_deref().unwrap_or(TABLE.as_bytes()) != table {
-        let Some(games) = parsed(table) else {
-            return false;
-        };
-        current.games = Vec::leak(games);
-    }
-    current.read = Some(table.to_vec());
-    true
 }
 
 #[cfg(test)]
