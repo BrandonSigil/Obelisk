@@ -266,3 +266,13 @@ fn a_game_is_found_by_its_storefront_s_id_first_then_by_a_file_of_its_installati
         by_id(Game::Steam { app_id: 1245620 })
     );
 }
+
+#[test]
+fn the_named_games_are_the_ones_the_table_names_by_a_storefront_s_id() {
+    let named: Vec<_> = named().collect();
+
+    assert!(named.contains(&Game::Steam { app_id: 1245620 }));
+    assert!(named.contains(&Game::Steam { app_id: 377160 }));
+    assert!(!named.contains(&Game::Steam { app_id: 252950 }));
+    assert!(named.contains(&ROCKET_LEAGUE));
+}

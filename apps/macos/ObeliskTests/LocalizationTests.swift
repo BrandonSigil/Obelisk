@@ -81,7 +81,7 @@ final class LocalizationTests: XCTestCase {
         let locale = L10n.formattingLocale(language: "fr", region: "CA")
         XCTAssertEqual(locale.language.languageCode?.identifier, "fr")
         XCTAssertEqual(locale.region?.identifier, "CA")
-        let date = Date(timeIntervalSince1970: 1_735_689_600)
+        let date = Date(timeIntervalSince1970: 1_736_942_400)
         XCTAssertEqual(date.formatted(.dateTime.month(.wide).locale(Locale(identifier: "en"))), "January")
         XCTAssertEqual(date.formatted(.dateTime.month(.wide).locale(Locale(identifier: "fr"))), "janvier")
     }

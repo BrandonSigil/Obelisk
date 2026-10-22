@@ -6754,6 +6754,23 @@
         }
       }
     },
+    "ui.game.note": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "OBELISK NOTE"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "NOTE D’OBELISK"
+          }
+        }
+      }
+    },
     "ui.game.metric.space_required": {
       "extractionState": "manual",
       "localizations": {
@@ -7257,6 +7274,40 @@
           "stringUnit": {
             "state": "translated",
             "value": "Effacer la recherche"
+          }
+        }
+      }
+    },
+    "ui.search.owned_only": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Search only looks through the games you own."
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "La recherche ne porte que sur les jeux que vous possédez."
+          }
+        }
+      }
+    },
+    "ui.search.store": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Search %@ Store"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Rechercher dans le magasin %@"
           }
         }
       }
@@ -12583,6 +12634,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "Joués récemment"
+          }
+        }
+      }
+    },
+    "ui.home.verified": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ Verified"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Vérifiés par %@"
           }
         }
       }

@@ -13,7 +13,7 @@ protocol InstallationStorefront: GameStorefront {
     static var otherGameOperation: String { get }
     /// Whether Obelisk syncs the storefront's Cloud saves.
     static var syncsCloud: Bool { get }
-    /// Names a Cloud question or banner; the game's name follows it.
+    /// Names a Cloud question; the game's name follows it.
     static var cloudTitle: String { get }
 }
 
