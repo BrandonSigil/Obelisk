@@ -386,6 +386,99 @@ async fn library_adds_the_free_games_owned_games_leave_out() {
 }
 
 #[tokio::test]
+async fn library_adds_the_free_license_games_never_played() {
+    let (client, mut server, _) = fixture().await;
+    push_licenses(
+        &mut server,
+        vec![proto::License {
+            package_id: 0,
+            ..Default::default()
+        }],
+    )
+    .await;
+    let answer = async {
+        let owned = server.request(SERVICE_REQUEST).await;
+        let response = proto::OwnedGamesResponse::default();
+        server.reply(&owned, SERVICE_RESPONSE, &response).await;
+        let packages = server.request(PRODUCT_REQUEST).await;
+        let request = proto::ProductRequest::decode(packages.body.clone()).unwrap();
+        assert_eq!(request.packages[0].id, 0);
+        let response = proto::ProductResponse {
+            packages: vec![package(0, &[440])],
+            ..Default::default()
+        };
+        server.reply(&packages, PRODUCT_RESPONSE, &response).await;
+        let apps = proto::ProductResponse {
+            apps: vec![proto::ProductInfo {
+                id: 440,
+                buffer: br#""appinfo" { "appid" "440" "common" { "name" "Team Fortress 2" "type" "game" } }"#
+                    .to_vec()
+                    .into(),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        respond_batch(&mut server, &[440], apps).await;
+    };
+    let (games, ()) = tokio::join!(client.games(), answer);
+    let names: Vec<_> = games.unwrap().into_iter().map(|game| game.name).collect();
+    assert_eq!(names, ["Team Fortress 2"]);
+    assert!(server.quiet().await);
+}
+
+#[tokio::test]
+async fn a_withheld_free_license_keeps_the_other_licenses_games() {
+    let (client, mut server, _) = fixture().await;
+    push_licenses(
+        &mut server,
+        vec![
+            proto::License {
+                package_id: 0,
+                ..Default::default()
+            },
+            proto::License {
+                package_id: 1,
+                ..Default::default()
+            },
+        ],
+    )
+    .await;
+    let answer = async {
+        let owned = server.request(SERVICE_REQUEST).await;
+        let response = proto::OwnedGamesResponse::default();
+        server.reply(&owned, SERVICE_RESPONSE, &response).await;
+        let packages = server.request(PRODUCT_REQUEST).await;
+        let response = proto::ProductResponse {
+            packages: vec![
+                proto::ProductInfo {
+                    id: 0,
+                    missing_token: true,
+                    ..Default::default()
+                },
+                package(1, &[730]),
+            ],
+            ..Default::default()
+        };
+        server.reply(&packages, PRODUCT_RESPONSE, &response).await;
+        let apps = proto::ProductResponse {
+            apps: vec![proto::ProductInfo {
+                id: 730,
+                buffer: br#""appinfo" { "appid" "730" "common" { "name" "Counter-Strike 2" "type" "Game" } }"#
+                    .to_vec()
+                    .into(),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        respond_batch(&mut server, &[730], apps).await;
+    };
+    let (games, ()) = tokio::join!(client.games(), answer);
+    let names: Vec<_> = games.unwrap().into_iter().map(|game| game.name).collect();
+    assert_eq!(names, ["Counter-Strike 2"]);
+    assert!(server.quiet().await);
+}
+
+#[tokio::test]
 async fn library_asks_steam_for_every_owned_game_field() {
     let (client, mut server, _) = fixture().await;
     push_licenses(&mut server, Vec::new()).await;

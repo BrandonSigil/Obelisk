@@ -54,6 +54,11 @@ const CONNECT_STAGGER: Duration = Duration::from_secs(1);
 pub(crate) const PROFILE_TIMEOUT: Duration = Duration::from_secs(5);
 /// Apps and packages PICS accepts in one access-token and product request.
 pub(crate) const PICS_BATCH: usize = 50;
+/// Steam's free license, package 0, which every account holds. The older free
+/// games, such as Team Fortress 2, come with it, and Player.GetOwnedGames
+/// lists them only once the account played them. Steam withholding it costs
+/// only those games, not the other licenses.
+const FREE_LICENSE: u32 = 0;
 /// Requests one query keeps in flight at once; the worker routes each reply
 /// to its own job, so they need not wait for each other.
 pub(crate) const CONCURRENT_REQUESTS: usize = 4;
@@ -658,7 +663,7 @@ impl SteamConnection {
         let active = || {
             list.licenses
                 .iter()
-                .filter(|license| license.package_id != 0 && license.flags & INACTIVE == 0)
+                .filter(|license| license.flags & INACTIVE == 0)
         };
         // A family member lends a game through a license of their own. The
         // account ID is the Steam ID's low 32 bits.
@@ -691,13 +696,21 @@ impl SteamConnection {
         let mut rights = ContentLicenses::default();
         while let Some(response) = batches.next().await {
             let response = response?;
-            if !response.unknown_packages.is_empty() {
+            if response
+                .unknown_packages
+                .iter()
+                .any(|id| *id != FREE_LICENSE)
+            {
                 return Err(CmError::Protocol(
                     "backend.steam.cm.packagesUnavailable".into(),
                 ));
             }
             for package in response.packages {
-                if package.missing_token || package.buffer.is_empty() {
+                let withheld = package.missing_token || package.buffer.is_empty();
+                if withheld && package.id == FREE_LICENSE {
+                    continue;
+                }
+                if withheld {
                     return Err(CmError::Protocol(
                         "backend.steam.cm.incompletePackageAccess".into(),
                     ));
