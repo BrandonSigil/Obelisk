@@ -268,29 +268,11 @@ fn a_game_is_found_by_its_storefront_s_id_first_then_by_a_file_of_its_installati
 }
 
 #[test]
-fn verified_games_are_the_ones_the_table_names_by_a_storefront_s_id() {
-    let verified = verified();
+fn the_named_games_are_the_ones_the_table_names_by_a_storefront_s_id() {
+    let named: Vec<_> = named().collect();
 
-    assert!(verified.steam.contains(&1245620));
-    assert!(verified.steam.contains(&377160));
-    assert!(!verified.steam.contains(&252950));
-    assert!(verified.epic.contains(&(
-        "9773aa1aa54f4f7b80e44bef04986cea".to_owned(),
-        "Sugar".to_owned()
-    )));
-    for known in table() {
-        assert!(
-            known.steam.is_none_or(|id| verified.steam.contains(&id)),
-            "{}",
-            known.name
-        );
-        assert!(
-            known
-                .gog
-                .as_ref()
-                .is_none_or(|id| verified.gog.contains(id)),
-            "{}",
-            known.name
-        );
-    }
+    assert!(named.contains(&Game::Steam { app_id: 1245620 }));
+    assert!(named.contains(&Game::Steam { app_id: 377160 }));
+    assert!(!named.contains(&Game::Steam { app_id: 252950 }));
+    assert!(named.contains(&ROCKET_LEAGUE));
 }

@@ -221,4 +221,9 @@ extension WebAccountModel where Store == EpicGames {
     func closeFriends() { presence.close() }
     /// Replaces only the social socket. The OAuth session and downloads stay alive.
     func retryFriends() { presence.retry() }
+
+    /// Epic's store searching for `query`, signed in as the account.
+    func storeSearch(_ query: String) async -> WebPageStart {
+        await storePage(at: EpicGames.storeSearchURL(query))
+    }
 }

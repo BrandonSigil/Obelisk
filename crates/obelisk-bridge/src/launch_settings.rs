@@ -88,38 +88,6 @@ pub struct LaunchGraphicsOffer {
     pub options: Vec<LaunchGraphicsOption>,
 }
 
-/// The games Obelisk was set up to run, each as its storefront names it.
-#[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
-pub struct VerifiedGames {
-    pub steam: Vec<u32>,
-    pub epic: Vec<VerifiedEpicGame>,
-    pub gog: Vec<String>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
-pub struct VerifiedEpicGame {
-    pub namespace: String,
-    pub app_name: String,
-}
-
-/// The games the profile table names, as launches read it now.
-#[uniffi::export]
-pub fn verified_games() -> VerifiedGames {
-    let verified = game_runtime::profile::verified();
-    VerifiedGames {
-        steam: verified.steam,
-        epic: verified
-            .epic
-            .into_iter()
-            .map(|(namespace, app_name)| VerifiedEpicGame {
-                namespace,
-                app_name,
-            })
-            .collect(),
-        gog: verified.gog,
-    }
-}
-
 impl From<View> for LaunchSettings {
     fn from(view: View) -> Self {
         Self {

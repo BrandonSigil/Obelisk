@@ -252,14 +252,13 @@ private struct HomePage: View {
     }
 
     private var homeLibraries: Libraries {
-        let verified = ObeliskVerified.games
-        return Libraries(
-            steam: model.steam.homeLibrary(in: .steam, verified: verified.contains, cover: SteamView.cover,
-                                           heroArtwork: SteamView.heroArtwork, heroLogo: SteamView.heroLogo),
-            epic: model.epic.homeLibrary(in: .epic, verified: verified.contains, cover: EpicView.cover,
-                                         heroArtwork: EpicView.heroArtwork, heroLogo: EpicView.heroLogo),
-            gog: model.gog.homeLibrary(in: .gog, verified: verified.contains, cover: GogView.cover,
-                                       heroArtwork: GogView.heroArtwork, heroLogo: GogView.heroLogo)
+        Libraries(
+            steam: model.steam.homeLibrary(in: .steam, cover: SteamView.cover, heroArtwork: SteamView.heroArtwork,
+                                           heroLogo: SteamView.heroLogo),
+            epic: model.epic.homeLibrary(in: .epic, cover: EpicView.cover, heroArtwork: EpicView.heroArtwork,
+                                         heroLogo: EpicView.heroLogo),
+            gog: model.gog.homeLibrary(in: .gog, cover: GogView.cover, heroArtwork: GogView.heroArtwork,
+                                       heroLogo: GogView.heroLogo)
         )
     }
 
@@ -435,13 +434,9 @@ private struct HomePage: View {
 
     /// The stores whose search Home offers for a game no library holds.
     private var stores: [StoreSearch] {
-        let steam = model.steam
-        let epic = model.epic
-        return [
-            StoreSearch(storeID: "steam", storeTitle: L10n.string("ui.store.steam"), page: steam.storeSearch),
-            StoreSearch(storeID: "epic", storeTitle: L10n.string("ui.store.epic")) {
-                await epic.storePage(at: EpicGames.storeSearchURL($0))
-            },
+        [
+            StoreSearch(storeID: "steam", storeTitle: L10n.string("ui.store.steam"), page: model.steam.storeSearch),
+            StoreSearch(storeID: "epic", storeTitle: L10n.string("ui.store.epic"), page: model.epic.storeSearch),
         ]
     }
 

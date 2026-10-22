@@ -123,7 +123,7 @@ struct StorefrontEmptyLibrary: View {
     @Environment(\.presentStore) private var presentStore
 
     init(searchText: Binding<String>, filter: Binding<StorefrontLibraryFilter> = .constant(.all),
-         stores: [StoreSearch] = [], refresh: @escaping () -> Void) {
+         stores: [StoreSearch], refresh: @escaping () -> Void) {
         self._searchText = searchText
         self._filter = filter
         self.stores = stores

@@ -86,7 +86,7 @@ struct StorefrontLibraryPage<Model: LibraryStorefront, HeroArtwork: View, HeroLo
         storeTitle: String,
         libraryTitle: String,
         scrollMemory: LibraryScrollMemory,
-        stores: [StoreSearch] = [],
+        stores: [StoreSearch],
         open: @escaping (Model.Game, GameOpeningSource) -> Void,
         @ViewBuilder heroArtwork: @escaping (Model.Game) -> HeroArtwork,
         @ViewBuilder heroLogo: @escaping (Model.Game) -> HeroLogo,

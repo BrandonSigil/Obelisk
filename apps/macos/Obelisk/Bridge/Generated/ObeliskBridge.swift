@@ -10385,121 +10385,6 @@ public func FfiConverterTypeStorefrontInfo_lower(_ value: StorefrontInfo) -> Rus
 }
 
 
-public struct VerifiedEpicGame: Equatable, Hashable {
-    public var namespace: String
-    public var appName: String
-
-    // Default memberwise initializers are never public by default, so we
-    // declare one manually.
-    public init(namespace: String, appName: String) {
-        self.namespace = namespace
-        self.appName = appName
-    }
-
-    
-
-    
-}
-
-#if compiler(>=6)
-extension VerifiedEpicGame: Sendable {}
-#endif
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public struct FfiConverterTypeVerifiedEpicGame: FfiConverterRustBuffer {
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> VerifiedEpicGame {
-        return
-            try VerifiedEpicGame(
-                namespace: FfiConverterString.read(from: &buf), 
-                appName: FfiConverterString.read(from: &buf)
-        )
-    }
-
-    public static func write(_ value: VerifiedEpicGame, into buf: inout [UInt8]) {
-        FfiConverterString.write(value.namespace, into: &buf)
-        FfiConverterString.write(value.appName, into: &buf)
-    }
-}
-
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeVerifiedEpicGame_lift(_ buf: RustBuffer) throws -> VerifiedEpicGame {
-    return try FfiConverterTypeVerifiedEpicGame.lift(buf)
-}
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeVerifiedEpicGame_lower(_ value: VerifiedEpicGame) -> RustBuffer {
-    return FfiConverterTypeVerifiedEpicGame.lower(value)
-}
-
-
-/**
- * The games Obelisk was set up to run, each as its storefront names it.
- */
-public struct VerifiedGames: Equatable, Hashable {
-    public var steam: [UInt32]
-    public var epic: [VerifiedEpicGame]
-    public var gog: [String]
-
-    // Default memberwise initializers are never public by default, so we
-    // declare one manually.
-    public init(steam: [UInt32], epic: [VerifiedEpicGame], gog: [String]) {
-        self.steam = steam
-        self.epic = epic
-        self.gog = gog
-    }
-
-    
-
-    
-}
-
-#if compiler(>=6)
-extension VerifiedGames: Sendable {}
-#endif
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public struct FfiConverterTypeVerifiedGames: FfiConverterRustBuffer {
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> VerifiedGames {
-        return
-            try VerifiedGames(
-                steam: FfiConverterSequenceUInt32.read(from: &buf), 
-                epic: FfiConverterSequenceTypeVerifiedEpicGame.read(from: &buf), 
-                gog: FfiConverterSequenceString.read(from: &buf)
-        )
-    }
-
-    public static func write(_ value: VerifiedGames, into buf: inout [UInt8]) {
-        FfiConverterSequenceUInt32.write(value.steam, into: &buf)
-        FfiConverterSequenceTypeVerifiedEpicGame.write(value.epic, into: &buf)
-        FfiConverterSequenceString.write(value.gog, into: &buf)
-    }
-}
-
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeVerifiedGames_lift(_ buf: RustBuffer) throws -> VerifiedGames {
-    return try FfiConverterTypeVerifiedGames.lift(buf)
-}
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeVerifiedGames_lower(_ value: VerifiedGames) -> RustBuffer {
-    return FfiConverterTypeVerifiedGames.lower(value)
-}
-
-
 
 public enum CloudChoice: Equatable, Hashable {
     
@@ -15525,31 +15410,6 @@ fileprivate struct FfiConverterSequenceTypeStorefrontInfo: FfiConverterRustBuffe
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
-fileprivate struct FfiConverterSequenceTypeVerifiedEpicGame: FfiConverterRustBuffer {
-    typealias SwiftType = [VerifiedEpicGame]
-
-    public static func write(_ value: [VerifiedEpicGame], into buf: inout [UInt8]) {
-        let len = Int32(value.count)
-        writeInt(&buf, len)
-        for item in value {
-            FfiConverterTypeVerifiedEpicGame.write(item, into: &buf)
-        }
-    }
-
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [VerifiedEpicGame] {
-        let len: Int32 = try readInt(&buf)
-        var seq = [VerifiedEpicGame]()
-        seq.reserveCapacity(Int(len))
-        for _ in 0 ..< len {
-            seq.append(try FfiConverterTypeVerifiedEpicGame.read(from: &buf))
-        }
-        return seq
-    }
-}
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
 fileprivate struct FfiConverterSequenceTypeCloudChoice: FfiConverterRustBuffer {
     typealias SwiftType = [CloudChoice]
 
@@ -15827,6 +15687,18 @@ public func refreshGameNotes(locations: ObeliskLocations)async   {
             
         )
 }
+/**
+ * The games of `storefront` the profile table names, as the app names
+ * them, read as launches read the table now.
+ */
+public func verifiedGames(storefront: SessionStorefront) -> [String]  {
+    return try!  FfiConverterSequenceString.lift(try! rustCall() {
+        uniffiCallStatus in
+    uniffi_obelisk_bridge_fn_func_verified_games(
+        FfiConverterTypeSessionStorefront_lower(storefront),uniffiCallStatus
+    )
+})
+}
 public func gogAuthorizationCode(input: String)throws  -> String  {
     return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeGogError_lift) {
         uniffiCallStatus in
@@ -15850,16 +15722,6 @@ public func gogLoginUrl() -> String  {
     return try!  FfiConverterString.lift(try! rustCall() {
         uniffiCallStatus in
     uniffi_obelisk_bridge_fn_func_gog_login_url(uniffiCallStatus
-    )
-})
-}
-/**
- * The games the profile table names, as launches read it now.
- */
-public func verifiedGames() -> VerifiedGames  {
-    return try!  FfiConverterTypeVerifiedGames_lift(try! rustCall() {
-        uniffiCallStatus in
-    uniffi_obelisk_bridge_fn_func_verified_games(uniffiCallStatus
     )
 })
 }
@@ -15968,6 +15830,9 @@ private let initializationResult: InitializationResult = {
     if (uniffi_obelisk_bridge_checksum_func_refresh_game_notes() != 43003) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_obelisk_bridge_checksum_func_verified_games() != 13684) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_obelisk_bridge_checksum_func_gog_authorization_code() != 19621) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -15975,9 +15840,6 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_obelisk_bridge_checksum_func_gog_login_url() != 21271) {
-        return InitializationResult.apiChecksumMismatch
-    }
-    if (uniffi_obelisk_bridge_checksum_func_verified_games() != 53309) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_obelisk_bridge_checksum_func_end_orphaned_windows_games() != 9000) {

@@ -282,31 +282,21 @@ pub(crate) fn of(game: Game<'_>, install: &Path) -> Profile {
         .unwrap_or_default()
 }
 
-/// The games the table names by a storefront's id, each as its storefront
-/// names it: the ones Obelisk was set up to run, which Home shows as
-/// Obelisk Verified.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct Verified {
-    pub steam: Vec<u32>,
-    /// Each game's namespace and app name.
-    pub epic: Vec<(String, String)>,
-    pub gog: Vec<String>,
-}
-
-/// Every game the table launches read now names by a storefront's id.
-pub fn verified() -> Verified {
-    let mut verified = Verified::default();
-    for known in table() {
-        verified.steam.extend(known.steam);
-        verified.epic.extend(
-            known
-                .epic
-                .as_ref()
-                .map(|epic| (epic.namespace.clone(), epic.app_name.clone())),
-        );
-        verified.gog.extend(known.gog.clone());
-    }
-    verified
+/// Every game the table launches read now names by a storefront's id, as
+/// its storefront names it.
+pub fn named() -> impl Iterator<Item = Game<'static>> {
+    table().iter().flat_map(|known| {
+        let steam = known.steam.map(|app_id| Game::Steam { app_id });
+        let epic = known.epic.as_ref().map(|epic| Game::Epic {
+            namespace: &epic.namespace,
+            app_name: &epic.app_name,
+        });
+        let gog = known
+            .gog
+            .as_deref()
+            .map(|product_id| Game::Gog { product_id });
+        [steam, epic, gog].into_iter().flatten()
+    })
 }
 
 /// Reads the table again from Obelisk's `main` and keeps it in `library`.

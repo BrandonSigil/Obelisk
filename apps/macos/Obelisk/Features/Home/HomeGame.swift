@@ -57,14 +57,15 @@ extension HomeGame {
 
 extension HomeLibrary {
     /// `library` as Home shows it; `home` makes each game Home lists.
-    init<Store, Game>(_ library: AccountLibrary<Store, Game>, verified: (Game) -> Bool,
+    init<Store, Game>(_ library: AccountLibrary<Store, Game>,
+                      verified: Set<Store.GameID> = ObeliskVerified.games(of: Store.self),
                       home: (Game) -> HomeGame) {
         let order = library.games(by: .lastPlayed)
         self.init(
             featured: library.featured.map(home),
             recent: order.prefix { library.lastPlayed(of: $0) != nil }.prefix(HomeShelves.shelfLimit + 1).map(home),
             installed: library.games(by: .lastPlayed, filter: .installed).map(home),
-            verified: order.lazy.filter(verified).prefix(HomeShelves.shelfLimit).map(home),
+            verified: order.lazy.filter { verified.contains($0.id) }.prefix(HomeShelves.shelfLimit).map(home),
             covers: order.prefix(3).map(home),
             count: library.games.count
         )
@@ -75,13 +76,12 @@ extension LibraryStorefront {
     /// The account's library as Home shows it, in the storefront's own artwork.
     func homeLibrary<Cover: View, Artwork: View, Logo: View>(
         in section: LibrarySection,
-        verified: (Game) -> Bool,
         cover: @escaping (Game) -> Cover,
         heroArtwork: @escaping (Game) -> Artwork,
         heroLogo: @escaping (Game) -> Logo
     ) -> HomeLibrary {
         let actions = GameActions(installations, in: .library)
-        return HomeLibrary(library, verified: verified) { game in
+        return HomeLibrary(library) { game in
             homeGame(game, in: section, actions: actions, cover: cover, heroArtwork: heroArtwork, heroLogo: heroLogo)
         }
     }
@@ -152,23 +152,11 @@ struct HomeShelves {
 }
 
 /// The games Obelisk was set up to run, as its profile table names them by
-/// their storefronts' ids: Home's Obelisk Verified shelf. Read once, from
-/// the table Obelisk launched with.
-struct ObeliskVerified: Sendable {
-    let steam: Set<UInt32>
-    /// Each game's namespace and app name.
-    let epic: Set<[String]>
-    let gog: Set<String>
-
-    static let games = ObeliskVerified(verifiedGames())
-
-    init(_ games: VerifiedGames) {
-        steam = Set(games.steam)
-        epic = Set(games.epic.map { [$0.namespace, $0.appName] })
-        gog = Set(games.gog)
+/// their storefronts' ids: Home's Obelisk Verified shelf. Read as launches
+/// read the table, so a table a launch read again shows on the next pass.
+enum ObeliskVerified {
+    /// `Store`'s games of the table.
+    static func games<Store: InstallationStorefront>(of store: Store.Type) -> Set<Store.GameID> {
+        Set(verifiedGames(storefront: Store.storefront).compactMap(Store.game))
     }
-
-    func contains(_ game: SteamGame) -> Bool { steam.contains(game.appId) }
-    func contains(_ game: EpicGame) -> Bool { epic.contains([game.namespace, game.appName]) }
-    func contains(_ game: GogGame) -> Bool { gog.contains(game.productId) }
 }

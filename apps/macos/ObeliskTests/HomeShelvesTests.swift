@@ -193,7 +193,7 @@ final class HomeShelvesTests: XCTestCase {
         library.connect(42)
         library.show(games)
         let verified = Set(zip(games, entries).filter { $1.verified }.map { game, _ in game.appId })
-        return HomeLibrary(library, verified: { verified.contains($0.appId) }) { game in
+        return HomeLibrary(library, verified: verified) { game in
             HomeGame(game, of: library, in: section,
                      action: GameAction(kind: .download(.install), title: L10n.string("model.game.download"),
                                         isAvailable: true, launches: false),
