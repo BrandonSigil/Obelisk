@@ -102,17 +102,17 @@ struct HomeView: View {
         switch game {
         case let .steam(game):
             SteamGameDetailView(model: model.steam, game: game, context: GamePageContext(
-                storeID: "steam", heroArtwork: SteamView.heroArtwork(game), cover: SteamView.cover(game)
+                heroArtwork: SteamView.heroArtwork(game), cover: SteamView.cover(game)
             ))
             .id(game.id)
         case let .epic(game):
             EpicGameDetailView(model: model.epic, game: game, context: GamePageContext(
-                storeID: "epic", heroArtwork: EpicView.heroArtwork(game), cover: EpicView.cover(game)
+                heroArtwork: EpicView.heroArtwork(game), cover: EpicView.cover(game)
             ))
             .id(game.id)
         case let .gog(game):
             GogGameDetailView(model: model.gog, game: game, context: GamePageContext(
-                storeID: "gog", heroArtwork: GogView.heroArtwork(game), cover: GogView.cover(game)
+                heroArtwork: GogView.heroArtwork(game), cover: GogView.cover(game)
             ))
             .id(game.id)
         }
@@ -326,29 +326,22 @@ private struct HomePage: View {
     }
 
     private var hasNotices: Bool {
-        hasNotice(model.steam) || hasNotice(model.epic) || hasNotice(model.gog)
-    }
-
-    private func hasNotice<Model: LibraryStorefront>(_ storefront: Model) -> Bool {
-        storefront.storageWarning != nil || storefront.cloud.failurePresented
+        model.steam.storageWarning != nil || model.epic.storageWarning != nil || model.gog.storageWarning != nil
     }
 
     @ViewBuilder private var notices: some View {
         if hasNotices {
             VStack(alignment: .leading, spacing: 22) {
-                notice(model.steam, storeID: "steam")
-                notice(model.epic, storeID: "epic")
-                notice(model.gog, storeID: "gog")
+                notice(model.steam)
+                notice(model.epic)
+                notice(model.gog)
             }
             .padding(.horizontal, ObeliskStyle.contentPadding)
         }
     }
 
-    @ViewBuilder private func notice<Model: LibraryStorefront>(_ storefront: Model, storeID: String) -> some View {
+    private func notice<Model: LibraryStorefront>(_ storefront: Model) -> some View {
         StorefrontWarningBanner(message: Bindable(storefront).storageWarning)
-        if storefront.cloud.failurePresented {
-            SteamCloudFailureView(model: storefront, storefront: storeID)
-        }
     }
 
     private func hero(_ game: HomeGame) -> some View {

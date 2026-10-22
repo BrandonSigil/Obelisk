@@ -93,7 +93,7 @@ final class HomeShelvesTests: XCTestCase {
         XCTAssertEqual(shelves.installed.last?.title, "Celeste")
     }
 
-    func testHomeShowsStorefrontCloudLaunchFailures() async throws {
+    func testHomeShowsStorageWarnings() async throws {
         let root = FileManager.default.temporaryDirectory.appending(path: "ObeliskHomeNotices-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }
@@ -105,7 +105,6 @@ final class HomeShelvesTests: XCTestCase {
             games: [EpicGames.game("rocket-league", title: "Rocket League")]
         ))
         let model = AppModel(directory: root, defaults: defaults, epic: epic)
-        model.steam.cloud.connect(account: 42, backend: FakeInstallations())
         let host = NSHostingView(rootView: HomeView(model: model).frame(width: 900, height: 700))
         let rect = NSRect(x: -20_000, y: -20_000, width: 900, height: 700)
         let window = NSWindow(contentRect: rect, styleMask: .borderless, backing: .buffered, defer: false)
@@ -136,23 +135,6 @@ final class HomeShelvesTests: XCTestCase {
         model.steam.storageWarning = nil
         let clearedWarningHeight = try await documentHeight()
         XCTAssertEqual(clearedWarningHeight, baseHeight, accuracy: 0.5)
-
-        model.steam.cloud.sync = GameCloudSync.launch(
-            2405060, question: .failed(1, error: "backend.steam.cloud.unsupported", launchAnyway: true)
-        )
-        let steamFailureHeight = try await documentHeight()
-        XCTAssertGreaterThan(steamFailureHeight, baseHeight)
-
-        model.steam.cloud.sync = nil
-        model.epic.cloud.sync = GameCloudSync.launch(
-            "fixture:rocket-league", question: .failed(2, error: "backend.epic.cloud_network", launchAnyway: true)
-        )
-        let epicFailureHeight = try await documentHeight()
-        XCTAssertGreaterThan(epicFailureHeight, baseHeight)
-
-        model.epic.cloud.sync = nil
-        let finalHeight = try await documentHeight()
-        XCTAssertEqual(finalHeight, baseHeight, accuracy: 0.5)
     }
 
     // MARK: Fixtures

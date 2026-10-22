@@ -217,9 +217,6 @@ struct GameDetailPage<Model: LibraryStorefront, HeroArtwork: View, Cover: View, 
     private var details: some View {
         VStack(alignment: .leading, spacing: 26) {
             StorefrontWarningBanner(message: $model.storageWarning)
-            if model.cloud.failurePresented {
-                SteamCloudFailureView(model: model, storefront: context.storeID)
-            }
             if let message = model.gameSessionMessage {
                 Text(message).font(.system(size: 12)).foregroundStyle(.secondary)
             }
