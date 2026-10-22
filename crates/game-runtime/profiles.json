@@ -13,6 +13,14 @@
       "executable": "Binaries/Win64/RocketLeague_EAC.exe"
     },
     {
+      "name": "Rocket League",
+      "note": "Its Steam build, which runs as its Epic one. Steam's launch already starts its Easy Anti-Cheat bootstrapper, RocketLeague_EAC.exe. It starts a Steam game server in its own process, which needs Voile v26.3.0-18: in older releases the Linux engine's steamclient.so took that server's threads for dead, and the game closed a second after the anti-cheat's splash.",
+      "steam": 252950,
+      "engine": "Linux",
+      "graphics": "Dxmt",
+      "minimum_voile": "v26.3.0-18"
+    },
+    {
       "name": "ELDEN RING",
       "note": "Easy Anti-Cheat, as Rocket League's. It only has Direct3D 12, which D3DMetal renders and DXMT does not. Steam's launch already starts its bootstrapper, start_protected_game.exe.",
       "steam": 1245620,
