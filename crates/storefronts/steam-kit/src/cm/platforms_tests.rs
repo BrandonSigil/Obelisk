@@ -479,6 +479,73 @@ async fn a_withheld_free_license_keeps_the_other_licenses_games() {
 }
 
 #[tokio::test]
+async fn a_withheld_package_keeps_the_other_licenses_games() {
+    let (client, mut server, _) = fixture().await;
+    push_licenses(
+        &mut server,
+        (1..=3)
+            .map(|package_id| proto::License {
+                package_id,
+                ..Default::default()
+            })
+            .collect(),
+    )
+    .await;
+    let answer = async {
+        let owned = server.request(SERVICE_REQUEST).await;
+        let response = proto::OwnedGamesResponse::default();
+        server.reply(&owned, SERVICE_RESPONSE, &response).await;
+        let packages = server.request(PRODUCT_REQUEST).await;
+        // Steam does not describe package 2 and withholds package 3.
+        let response = proto::ProductResponse {
+            packages: vec![
+                package(1, &[730]),
+                proto::ProductInfo {
+                    id: 3,
+                    missing_token: true,
+                    ..Default::default()
+                },
+            ],
+            unknown_packages: vec![2],
+            ..Default::default()
+        };
+        server.reply(&packages, PRODUCT_RESPONSE, &response).await;
+        let apps = proto::ProductResponse {
+            apps: vec![proto::ProductInfo {
+                id: 730,
+                buffer: br#""appinfo" { "appid" "730" "common" { "name" "Counter-Strike 2" "type" "Game" } }"#
+                    .to_vec()
+                    .into(),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        respond_batch(&mut server, &[730], apps).await;
+    };
+    let (games, ()) = tokio::join!(client.games(), answer);
+    let names: Vec<_> = games.unwrap().into_iter().map(|game| game.name).collect();
+    assert_eq!(names, ["Counter-Strike 2"]);
+    assert!(server.quiet().await);
+    // Download rights still read every package, so they ask Steam again and
+    // fail on the withheld ones.
+    let answer = async {
+        let packages = server.request(PRODUCT_REQUEST).await;
+        let response = proto::ProductResponse {
+            packages: vec![package(1, &[730])],
+            unknown_packages: vec![2, 3],
+            ..Default::default()
+        };
+        server.reply(&packages, PRODUCT_RESPONSE, &response).await;
+    };
+    let (acquired, ()) = tokio::join!(client.acquisitions(), answer);
+    let error = acquired.unwrap_err().to_string();
+    assert!(
+        error.contains("backend.steam.cm.packagesUnavailable"),
+        "{error}"
+    );
+}
+
+#[tokio::test]
 async fn library_asks_steam_for_every_owned_game_field() {
     let (client, mut server, _) = fixture().await;
     push_licenses(&mut server, Vec::new()).await;

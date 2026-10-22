@@ -499,16 +499,40 @@ impl Client {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .clear();
-        let (games, licensed) = tokio::join!(self.cm.owned_games(), self.licensed_content());
+        let (games, licensed) = tokio::join!(self.cm.owned_games(), self.readable_licenses());
         let mut games = games?;
+        let unplayed = match licensed {
+            Ok(licensed) => self.unplayed_games(&licensed, &games).await,
+            Err(error) => Err(error),
+        };
         // The owned games alone still make a library.
-        if let Ok(licensed) = licensed
-            && let Ok(unplayed) = self.unplayed_games(&licensed, &games).await
-        {
-            games.extend(unplayed);
-            games.sort_by(crate::cm::library_order);
+        match unplayed {
+            Ok(unplayed) => {
+                games.extend(unplayed);
+                games.sort_by(crate::cm::library_order);
+            }
+            Err(error) => eprintln!("steam-kit: library leaves out never-played games: {error}"),
         }
         Ok(games)
+    }
+
+    /// As `licensed_content`, but the packages Steam withholds cost the
+    /// library only their own games. Rights missing a package would leave
+    /// depots out of a download, so only a complete expansion becomes the
+    /// catalog.
+    async fn readable_licenses(&self) -> Result<Arc<ContentLicenses>, ClientError> {
+        let mut catalog = self.catalog.lock().await;
+        if let Some(owned) = catalog.as_ref() {
+            return Ok(Arc::clone(owned));
+        }
+        let (owned, withheld) = self.cm.readable_content_licenses().await?;
+        let owned = Arc::new(owned);
+        if withheld.is_empty() {
+            *catalog = Some(Arc::clone(&owned));
+        } else {
+            eprintln!("steam-kit: library leaves out the games of withheld packages {withheld:?}");
+        }
+        Ok(owned)
     }
 
     /// The released games the account's own licenses grant that `listed`

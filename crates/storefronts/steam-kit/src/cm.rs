@@ -645,8 +645,27 @@ impl SteamConnection {
         Ok(games)
     }
 
-    /// Preserve both namespaces when expanding active PICS packages.
+    /// Preserve both namespaces when expanding active PICS packages. A package
+    /// Steam does not describe fails the expansion: depot and DLC rights read
+    /// without it would leave depots out of a download.
     pub async fn content_licenses(&self) -> Result<ContentLicenses, CmError> {
+        let (rights, _) = self.licenses_withheld(false).await?;
+        Ok(rights)
+    }
+
+    /// As `content_licenses`, also leaving out the packages Steam does not
+    /// describe to the account, and returning their IDs. The rights are
+    /// complete only when none is returned.
+    pub async fn readable_content_licenses(&self) -> Result<(ContentLicenses, Vec<u32>), CmError> {
+        self.licenses_withheld(true).await
+    }
+
+    /// Withheld packages, other than the free license, fail the expansion
+    /// unless `skip_withheld`.
+    async fn licenses_withheld(
+        &self,
+        skip_withheld: bool,
+    ) -> Result<(ContentLicenses, Vec<u32>), CmError> {
         self.ensure_logged_on()?;
         // Steam pushes the license list after logon, and again when it changes.
         let mut pushed = self.licenses.clone();
@@ -694,13 +713,16 @@ impl SteamConnection {
             .collect();
         let mut batches = futures_util::stream::iter(requests).buffered(CONCURRENT_REQUESTS);
         let mut rights = ContentLicenses::default();
+        let mut skipped = Vec::new();
         while let Some(response) = batches.next().await {
             let response = response?;
-            if response
+            let unknown = response
                 .unknown_packages
                 .iter()
-                .any(|id| *id != FREE_LICENSE)
-            {
+                .copied()
+                .filter(|id| *id != FREE_LICENSE);
+            skipped.extend(unknown);
+            if !skip_withheld && !skipped.is_empty() {
                 return Err(CmError::Protocol(
                     "backend.steam.cm.packagesUnavailable".into(),
                 ));
@@ -710,10 +732,14 @@ impl SteamConnection {
                 if withheld && package.id == FREE_LICENSE {
                     continue;
                 }
-                if withheld {
+                if withheld && !skip_withheld {
                     return Err(CmError::Protocol(
                         "backend.steam.cm.incompletePackageAccess".into(),
                     ));
+                }
+                if withheld {
+                    skipped.push(package.id);
+                    continue;
                 }
                 let tree = kv::package(&package.buffer)?;
                 let name = package.id.to_string();
@@ -725,7 +751,7 @@ impl SteamConnection {
                 );
             }
         }
-        Ok(rights)
+        Ok((rights, skipped))
     }
 
     pub async fn app_info(&self, app_id: u32) -> Result<AppInfo, CmError> {
