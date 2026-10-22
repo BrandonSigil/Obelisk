@@ -104,6 +104,7 @@ fn every_kind_of_choices() -> [Choices; 5] {
             graphics: Some(Graphics::D3DMetal),
             ray_tracing: Some(true),
             performance_hud: false,
+            steam_client: Some(SteamClient::Obelisk),
         },
         Choices {
             arguments: Some("-dx11 \"+exec autoexec.cfg\"".into()),
@@ -586,4 +587,27 @@ fn a_chosen_engine_needs_no_profile() {
     };
     choose(&library, OTHER, &install, None, rosetta).unwrap();
     assert_eq!(engine(&library, OTHER, &install), Engine::Rosetta);
+}
+
+#[test]
+fn windows_steam_is_kept_on_rosetta_s_wine_and_dropped_elsewhere() {
+    let windows = Choices {
+        steam_client: Some(SteamClient::Windows),
+        ..Choices::default()
+    };
+    let view = chosen(OTHER, windows.clone());
+    assert_eq!(view.settings.steam_client, SteamClient::Windows);
+    assert_eq!(view.choices.steam_client, Some(SteamClient::Windows));
+
+    // The Linux engine runs no Windows Steam: the choice goes with the move.
+    let view = chosen(ELDEN_RING, windows);
+    assert_eq!(view.settings.steam_client, SteamClient::Obelisk);
+    assert_eq!(view.choices, Choices::default());
+
+    // Obelisk's own client is the default, which keeps no file.
+    let obelisk = Choices {
+        steam_client: Some(SteamClient::Obelisk),
+        ..Choices::default()
+    };
+    assert_eq!(chosen(OTHER, obelisk).choices, Choices::default());
 }
