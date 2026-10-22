@@ -44,7 +44,9 @@ You can also open `apps/macos/Obelisk.xcodeproj` in Xcode, select the **Obelisk*
 
 Keep the same signing identity across builds: macOS then keeps trusting it for the Keychain items Obelisk saves sessions in. After a change of identity, macOS asks once for your login Keychain password; choose **Always Allow**.
 
-By default, a build uses the same library as the installed app, in `~/Library/Application Support/com.zagrios.obelisk`. Set `OBELISK_LIBRARY_DIRECTORY` before launching the binary to use another one. The Keychain items stay shared.
+Debug builds save sessions in their own Keychain items, `com.zagrios.obelisk.debug.steam`, `.debug.epic` and `.debug.gog`, so sign in to each store once in a Debug build. A release is signed by another team, and macOS would otherwise ask for your password each time one build reads an item the other saved.
+
+By default, a build uses the same library as the installed app, in `~/Library/Application Support/com.zagrios.obelisk`. Set `OBELISK_LIBRARY_DIRECTORY` before launching the binary to use another one.
 
 ## Testing
 
