@@ -8189,6 +8189,11 @@ public struct LaunchSettings: Equatable, Hashable {
      */
     public var defaultEngine: LaunchEngine
     /**
+     * The Steam client a Steam game starts through on Rosetta's Wine
+     * without choices.
+     */
+    public var defaultSteamClient: LaunchSteamClient
+    /**
      * Every engine, with what it offers and how the game runs there
      * without choices.
      */
@@ -8213,6 +8218,10 @@ public struct LaunchSettings: Equatable, Hashable {
          * The engine the game runs on without choices.
          */defaultEngine: LaunchEngine, 
         /**
+         * The Steam client a Steam game starts through on Rosetta's Wine
+         * without choices.
+         */defaultSteamClient: LaunchSteamClient, 
+        /**
          * Every engine, with what it offers and how the game runs there
          * without choices.
          */engines: [LaunchEngineOffer]) {
@@ -8223,6 +8232,7 @@ public struct LaunchSettings: Equatable, Hashable {
         self.steamClient = steamClient
         self.choices = choices
         self.defaultEngine = defaultEngine
+        self.defaultSteamClient = defaultSteamClient
         self.engines = engines
     }
 
@@ -8249,6 +8259,7 @@ public struct FfiConverterTypeLaunchSettings: FfiConverterRustBuffer {
                 steamClient: FfiConverterTypeLaunchSteamClient.read(from: &buf), 
                 choices: FfiConverterTypeLaunchChoices.read(from: &buf), 
                 defaultEngine: FfiConverterTypeLaunchEngine.read(from: &buf), 
+                defaultSteamClient: FfiConverterTypeLaunchSteamClient.read(from: &buf), 
                 engines: FfiConverterSequenceTypeLaunchEngineOffer.read(from: &buf)
         )
     }
@@ -8261,6 +8272,7 @@ public struct FfiConverterTypeLaunchSettings: FfiConverterRustBuffer {
         FfiConverterTypeLaunchSteamClient.write(value.steamClient, into: &buf)
         FfiConverterTypeLaunchChoices.write(value.choices, into: &buf)
         FfiConverterTypeLaunchEngine.write(value.defaultEngine, into: &buf)
+        FfiConverterTypeLaunchSteamClient.write(value.defaultSteamClient, into: &buf)
         FfiConverterSequenceTypeLaunchEngineOffer.write(value.engines, into: &buf)
     }
 }

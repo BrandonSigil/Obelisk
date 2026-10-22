@@ -306,9 +306,8 @@ impl Choices {
             variables: profile.variables.clone(),
             dll_overrides: profile.dll_overrides.clone(),
             performance_hud: self.performance_hud,
-            // Valve's Windows Steam runs in Rosetta's Wine only.
             steam_client: match engine {
-                Engine::Rosetta => self.steam_client.unwrap_or_default(),
+                Engine::Rosetta => self.steam_client.unwrap_or(profile.steam_client),
                 Engine::Linux => SteamClient::Obelisk,
             },
         }
@@ -332,7 +331,7 @@ impl Choices {
             ray_tracing: (applied.options.ray_tracing != options.ray_tracing)
                 .then_some(applied.options.ray_tracing),
             performance_hud: self.performance_hud,
-            steam_client: (applied.steam_client != SteamClient::default())
+            steam_client: (applied.steam_client != default_steam_client(profile, applied.engine))
                 .then_some(applied.steam_client),
         }
     }
@@ -350,6 +349,16 @@ fn default_graphics(profile: &Profile, engine: Engine) -> Graphics {
         profile.graphics
     } else {
         Graphics::default_on(engine)
+    }
+}
+
+/// The Steam client `profile`'s game starts through on `engine` without
+/// choices: what its profile says on Rosetta's Wine, where Valve's Windows
+/// Steam runs, else Obelisk's.
+fn default_steam_client(profile: &Profile, engine: Engine) -> SteamClient {
+    match engine {
+        Engine::Rosetta => profile.steam_client,
+        Engine::Linux => SteamClient::Obelisk,
     }
 }
 
@@ -422,6 +431,9 @@ pub struct View {
     /// whatever the player chose: its launch waits for one when an older one
     /// is in place.
     pub minimum_voile: Option<&'static str>,
+    /// The Steam client a Steam game starts through on Rosetta's Wine
+    /// without choices.
+    pub default_steam_client: SteamClient,
 }
 
 impl View {
@@ -443,6 +455,7 @@ impl View {
             default_engine: profile.engine,
             default_graphics: ENGINES.map(|offer| default_graphics(profile, offer.engine)),
             minimum_voile: profile.minimum_voile,
+            default_steam_client: default_steam_client(profile, Engine::Rosetta),
         }
     }
 }
