@@ -25,6 +25,8 @@ extension EpicGames: WebStorefront {
         var url = URLComponents(string: "https://store.epicgames.com/browse")!
         url.queryItems = [URLQueryItem(name: "q", value: query), URLQueryItem(name: "sortBy", value: "relevancy"),
                           URLQueryItem(name: "sortDir", value: "DESC")]
+        // A `+` left as is reads as a space.
+        url.percentEncodedQuery = url.percentEncodedQuery?.replacingOccurrences(of: "+", with: "%2B")
         return url.url!
     }
     static let webSignIn = WebSignIn.epic

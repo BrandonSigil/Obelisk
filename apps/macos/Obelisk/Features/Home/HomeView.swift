@@ -432,12 +432,21 @@ private struct HomePage: View {
         )
     }
 
-    /// The stores whose search Home offers for a game no library holds.
+    /// The stores whose search Home offers for a game no library holds: those
+    /// of the storefronts signed in.
     private var stores: [StoreSearch] {
-        [
-            StoreSearch(storeID: "steam", storeTitle: L10n.string("ui.store.steam"), page: model.steam.storeSearch),
-            StoreSearch(storeID: "epic", storeTitle: L10n.string("ui.store.epic"), page: model.epic.storeSearch),
-        ]
+        let steam = StoreSearch(storeID: "steam", storeTitle: L10n.string("ui.store.steam"), page: model.steam.storeSearch)
+        let epic = StoreSearch(storeID: "epic", storeTitle: L10n.string("ui.store.epic"), page: model.epic.storeSearch)
+        return [model.steam.isConnected ? steam : nil, model.epic.isConnected ? epic : nil].compactMap { $0 }
+    }
+
+    /// A signed-in library is still fetching its first games, so a search
+    /// that finds nothing cannot tell yet.
+    private var isFetching: Bool {
+        func fetching(_ storefront: some LibraryStorefront) -> Bool {
+            storefront.isLoadingGames && storefront.library.games.isEmpty
+        }
+        return fetching(model.steam) || fetching(model.epic) || fetching(model.gog)
     }
 
     private func results(_ games: [HomeGame]) -> some View {
@@ -451,7 +460,9 @@ private struct HomePage: View {
                     .foregroundStyle(.secondary)
                     .monospacedDigit()
             }
-            if games.isEmpty {
+            if games.isEmpty, isFetching {
+                ProgressView(L10n.string("ui.library.fetching")).frame(maxWidth: .infinity, minHeight: 260)
+            } else if games.isEmpty {
                 StorefrontEmptyLibrary(searchText: $model.searchText, stores: stores, refresh: model.refresh)
             } else {
                 LazyVGrid(columns: Self.columns, alignment: .leading, spacing: 18) {

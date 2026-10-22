@@ -138,9 +138,10 @@ struct StorefrontEmptyLibrary: View {
         filter != .all || !query.isEmpty
     }
 
-    /// The stores to search, once a search found nothing.
+    /// The stores to search, once a search of the whole library found
+    /// nothing: under a filter, the game may be owned.
     private var searchedStores: [StoreSearch] {
-        query.isEmpty || presentStore == nil ? [] : stores
+        query.isEmpty || filter != .all || presentStore == nil ? [] : stores
     }
 
     var body: some View {
