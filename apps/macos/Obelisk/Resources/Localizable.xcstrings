@@ -6703,6 +6703,23 @@
         }
       }
     },
+    "ui.game.note": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "OBELISK NOTE"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "NOTE D’OBELISK"
+          }
+        }
+      }
+    },
     "ui.game.metric.space_required": {
       "extractionState": "manual",
       "localizations": {

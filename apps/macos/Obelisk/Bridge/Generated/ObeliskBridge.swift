@@ -15653,6 +15653,40 @@ public func epicLoginUrl() -> String  {
     )
 })
 }
+/**
+ * The note on the game `id` names, as the app names it, in `language`, else
+ * in English: none for a game the table leaves out.
+ */
+public func gameNote(storefront: SessionStorefront, id: String, language: String) -> String?  {
+    return try!  FfiConverterOptionString.lift(try! rustCall() {
+        uniffiCallStatus in
+    uniffi_obelisk_bridge_fn_func_game_note(
+        FfiConverterTypeSessionStorefront_lower(storefront),
+        FfiConverterString.lower(id),
+        FfiConverterString.lower(language),uniffiCallStatus
+    )
+})
+}
+/**
+ * Reads the notes again from Obelisk's `main`, keeping them in the
+ * library. Runs once at startup: pages read those Obelisk was built with
+ * until then, and the last ones kept when `main` does not answer.
+ */
+public func refreshGameNotes(locations: ObeliskLocations)async   {
+    return
+        try!  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_obelisk_bridge_fn_func_refresh_game_notes(FfiConverterTypeObeliskLocations_lower(locations)
+                )
+            },
+            pollFunc: ffi_obelisk_bridge_rust_future_poll_void,
+            completeFunc: ffi_obelisk_bridge_rust_future_complete_void,
+            freeFunc: ffi_obelisk_bridge_rust_future_free_void,
+            liftFunc: { $0 },
+            errorHandler: nil
+            
+        )
+}
 public func gogAuthorizationCode(input: String)throws  -> String  {
     return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeGogError_lift) {
         uniffiCallStatus in
@@ -15776,6 +15810,12 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_obelisk_bridge_checksum_func_epic_login_url() != 45052) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_obelisk_bridge_checksum_func_game_note() != 45148) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_obelisk_bridge_checksum_func_refresh_game_notes() != 43003) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_obelisk_bridge_checksum_func_gog_authorization_code() != 19621) {
