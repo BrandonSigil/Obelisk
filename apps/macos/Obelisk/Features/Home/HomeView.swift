@@ -102,17 +102,17 @@ struct HomeView: View {
         switch game {
         case let .steam(game):
             SteamGameDetailView(model: model.steam, game: game, context: GamePageContext(
-                storeID: "steam", heroArtwork: SteamView.heroArtwork(game), cover: SteamView.cover(game)
+                heroArtwork: SteamView.heroArtwork(game), cover: SteamView.cover(game)
             ))
             .id(game.id)
         case let .epic(game):
             EpicGameDetailView(model: model.epic, game: game, context: GamePageContext(
-                storeID: "epic", heroArtwork: EpicView.heroArtwork(game), cover: EpicView.cover(game)
+                heroArtwork: EpicView.heroArtwork(game), cover: EpicView.cover(game)
             ))
             .id(game.id)
         case let .gog(game):
             GogGameDetailView(model: model.gog, game: game, context: GamePageContext(
-                storeID: "gog", heroArtwork: GogView.heroArtwork(game), cover: GogView.cover(game)
+                heroArtwork: GogView.heroArtwork(game), cover: GogView.cover(game)
             ))
             .id(game.id)
         }

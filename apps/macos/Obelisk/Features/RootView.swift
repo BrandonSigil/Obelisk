@@ -78,36 +78,13 @@ struct RootView: View {
         case .steamRosetta:
             RosettaPromptView(model: model.steam.rosetta)
         case .steamCloud:
-            let cloud = model.steam.cloud
-            SteamCloudPromptView(
-                title: model.steam.cloudTitle(for: cloud.promptGame),
-                message: cloud.promptMessage,
-                busy: cloud.promptWorking,
-                onCancel: { cloud.respond(.cancel) },
-                onChooseLocal: { cloud.respond(.local) },
-                onChooseCloud: { cloud.respond(.cloud) }
-            )
-        case .steamCloudFailure:
-            SteamCloudFailureView(model: model.steam, storefront: "steam")
+            CloudQuestionSheet(model: model.steam)
         case .epicRosetta:
             RosettaPromptView(model: model.epic.rosetta, storefront: "epic")
         case .epicCloud:
-            let cloud = model.epic.cloud
-            SteamCloudPromptView(
-                title: model.epic.cloudTitle(for: cloud.promptGame),
-                message: cloud.promptMessage,
-                busy: cloud.promptWorking,
-                onCancel: { cloud.respond(.cancel) },
-                onChooseLocal: { cloud.respond(.local) },
-                onChooseCloud: { cloud.respond(.cloud) },
-                storefront: "epic"
-            )
-        case .epicCloudFailure:
-            SteamCloudFailureView(model: model.epic, storefront: "epic")
+            CloudQuestionSheet(model: model.epic)
         case .gogRosetta:
             RosettaPromptView(model: model.gog.rosetta, storefront: "gog")
-        case .gogCloudFailure:
-            SteamCloudFailureView(model: model.gog, storefront: "gog")
         case nil:
             EmptyView()
         }

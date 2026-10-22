@@ -171,7 +171,7 @@ final class SteamCloudModelTests: XCTestCase {
             $0.cloudSync = .launch(42, question: .failed(4, error: "backend.steam.cloud.network", launchAnyway: true))
         }
         try await eventually { model.failurePresented }
-        XCTAssertFalse(model.promptPresented, "A failed check is a banner, not a sheet")
+        XCTAssertFalse(model.promptPresented, "A failed check asks in its own sheet, not the conflict's")
         XCTAssertTrue(model.canLaunchAnyway)
         XCTAssertEqual(model.promptMessage, "backend.steam.cloud.network")
         fixture.backend.publish { $0.cloudSync = .launch(42, question: .failed(4, launchAnyway: false)) }
