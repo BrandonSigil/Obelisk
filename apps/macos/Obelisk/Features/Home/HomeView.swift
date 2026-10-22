@@ -1,11 +1,12 @@
 import SwiftUI
 
 /// Home: every library at once. The last game played anywhere is its hero,
-/// then come the games played before it and the games on the Mac, each a
-/// shelf of covers, then a tile for each library. Its search looks through
-/// every library. A game opens its page over Home, its cover flying in as
-/// from the game's own library. Signed in nowhere, Home is a sign-in page
-/// leading to each storefront's.
+/// then come the games played before it, the games on the Mac and the ones
+/// Obelisk was set up to run, each a shelf of covers, then a tile for each
+/// library. Its search looks through every library, and offers Steam's and
+/// Epic's stores when it finds nothing. A game opens its page over Home, its
+/// cover flying in as from the game's own library. Signed in nowhere, Home is
+/// a sign-in page leading to each storefront's.
 struct HomeView: View {
     @Bindable var model: AppModel
     @Namespace private var namespace
@@ -295,6 +296,11 @@ private struct HomePage: View {
                             CoverShelf(title: L10n.string("ui.home.installed"), items: shelves.installed, id: "installed",
                                        memory: shelfMemory) { card($0, on: "installed") }
                         }
+                        if !shelves.verified.isEmpty {
+                            CoverShelf(title: L10n.string("ui.home.verified", AppIdentity.name),
+                                       items: shelves.verified, id: "verified",
+                                       memory: shelfMemory) { card($0, on: "verified") }
+                        }
                         self.libraries(libraries)
                     } else {
                         results(homeResults(matching: query))
@@ -426,6 +432,23 @@ private struct HomePage: View {
         )
     }
 
+    /// The stores whose search Home offers for a game no library holds: those
+    /// of the storefronts signed in.
+    private var stores: [StoreSearch] {
+        let steam = StoreSearch(storeID: "steam", storeTitle: L10n.string("ui.store.steam"), page: model.steam.storeSearch)
+        let epic = StoreSearch(storeID: "epic", storeTitle: L10n.string("ui.store.epic"), page: model.epic.storeSearch)
+        return [model.steam.isConnected ? steam : nil, model.epic.isConnected ? epic : nil].compactMap { $0 }
+    }
+
+    /// A signed-in library is still fetching its first games, so a search
+    /// that finds nothing cannot tell yet.
+    private var isFetching: Bool {
+        func fetching(_ storefront: some LibraryStorefront) -> Bool {
+            storefront.isLoadingGames && storefront.library.games.isEmpty
+        }
+        return fetching(model.steam) || fetching(model.epic) || fetching(model.gog)
+    }
+
     private func results(_ games: [HomeGame]) -> some View {
         VStack(alignment: .leading, spacing: 22) {
             VStack(alignment: .leading, spacing: 3) {
@@ -437,8 +460,10 @@ private struct HomePage: View {
                     .foregroundStyle(.secondary)
                     .monospacedDigit()
             }
-            if games.isEmpty {
-                StorefrontEmptyLibrary(searchText: $model.searchText, refresh: model.refresh)
+            if games.isEmpty, isFetching {
+                ProgressView(L10n.string("ui.library.fetching")).frame(maxWidth: .infinity, minHeight: 260)
+            } else if games.isEmpty {
+                StorefrontEmptyLibrary(searchText: $model.searchText, stores: stores, refresh: model.refresh)
             } else {
                 LazyVGrid(columns: Self.columns, alignment: .leading, spacing: 18) {
                     ForEach(games) { card($0, on: "search") }

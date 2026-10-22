@@ -15687,6 +15687,18 @@ public func refreshGameNotes(locations: ObeliskLocations)async   {
             
         )
 }
+/**
+ * The games of `storefront` the profile table names, as the app names
+ * them, read as launches read the table now.
+ */
+public func verifiedGames(storefront: SessionStorefront) -> [String]  {
+    return try!  FfiConverterSequenceString.lift(try! rustCall() {
+        uniffiCallStatus in
+    uniffi_obelisk_bridge_fn_func_verified_games(
+        FfiConverterTypeSessionStorefront_lower(storefront),uniffiCallStatus
+    )
+})
+}
 public func gogAuthorizationCode(input: String)throws  -> String  {
     return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeGogError_lift) {
         uniffiCallStatus in
@@ -15816,6 +15828,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_obelisk_bridge_checksum_func_refresh_game_notes() != 43003) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_obelisk_bridge_checksum_func_verified_games() != 13684) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_obelisk_bridge_checksum_func_gog_authorization_code() != 19621) {

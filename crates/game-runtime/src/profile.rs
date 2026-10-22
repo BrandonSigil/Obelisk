@@ -282,6 +282,23 @@ pub(crate) fn of(game: Game<'_>, install: &Path) -> Profile {
         .unwrap_or_default()
 }
 
+/// Every game the table launches read now names by a storefront's id, as
+/// its storefront names it.
+pub fn named() -> impl Iterator<Item = Game<'static>> {
+    table().iter().flat_map(|known| {
+        let steam = known.steam.map(|app_id| Game::Steam { app_id });
+        let epic = known.epic.as_ref().map(|epic| Game::Epic {
+            namespace: &epic.namespace,
+            app_name: &epic.app_name,
+        });
+        let gog = known
+            .gog
+            .as_deref()
+            .map(|product_id| Game::Gog { product_id });
+        [steam, epic, gog].into_iter().flatten()
+    })
+}
+
 /// Reads the table again from Obelisk's `main` and keeps it in `library`.
 /// Without the network, launches read the last one kept, else the one
 /// Obelisk was built with. A development build keeps the one it was built

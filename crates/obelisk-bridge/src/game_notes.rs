@@ -1,7 +1,8 @@
 //! The note a game's page shows, such as what works of it and what does not
-//! yet, and the table it comes from.
+//! yet, and the table it comes from; and the games the profile table names,
+//! which Home shows as Obelisk Verified.
 use crate::{ObeliskLocations, SessionStorefront, installations::Named};
-use game_runtime::{epic, gog, notes, profile::Game, steam};
+use game_runtime::{epic, gog, notes, profile, profile::Game, steam};
 use std::path::Path;
 
 /// The note on the game `id` names, as the app names it, in `language`, else
@@ -34,6 +35,33 @@ pub fn game_note(storefront: SessionStorefront, id: String, language: String) ->
     }
 }
 
+/// The games of `storefront` the profile table names, as the app names
+/// them, read as launches read the table now.
+#[uniffi::export]
+pub fn verified_games(storefront: SessionStorefront) -> Vec<String> {
+    profile::named()
+        .filter_map(|game| match (storefront, game) {
+            (SessionStorefront::Steam, Game::Steam { app_id }) => {
+                Some(<steam::Steam as Named>::name(&app_id))
+            }
+            (
+                SessionStorefront::Epic,
+                Game::Epic {
+                    namespace,
+                    app_name,
+                },
+            ) => Some(<epic::Epic as Named>::name(&epic::Store {
+                namespace: namespace.into(),
+                app_name: app_name.into(),
+            })),
+            (SessionStorefront::Gog, Game::Gog { product_id }) => {
+                Some(<gog::Gog as Named>::name(&product_id.into()))
+            }
+            _ => None,
+        })
+        .collect()
+}
+
 /// Reads the notes again from Obelisk's `main`, keeping them in the
 /// library. Runs once at startup: pages read those Obelisk was built with
 /// until then, and the last ones kept when `main` does not answer.
@@ -51,6 +79,14 @@ mod tests {
         let note = |id: &str| game_note(SessionStorefront::Steam, id.into(), "en".into());
         assert!(note("440").is_some());
         assert_eq!(note("tf2"), None);
+    }
+
+    #[test]
+    fn verified_games_are_named_as_the_app_names_them() {
+        assert!(verified_games(SessionStorefront::Steam).contains(&"1245620".into()));
+        let epic = verified_games(SessionStorefront::Epic);
+        assert!(epic.contains(&"9773aa1aa54f4f7b80e44bef04986cea:Sugar".into()));
+        assert!(!epic.contains(&"1245620".into()));
     }
 
     #[test]
