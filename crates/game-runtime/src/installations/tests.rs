@@ -559,8 +559,12 @@ impl Fixture {
     /// Account 42's installations again, from `file`, in the same games
     /// folder.
     fn reload(&self, file: PathBuf) -> Installations<Steam> {
+        self.reload_through(file, Fake::new())
+    }
+    /// As `reload`, its storefront doing what `fake` scripts.
+    fn reload_through(&self, file: PathBuf, fake: Arc<Fake>) -> Installations<Steam> {
         Installations::new(
-            Arc::new(Content(Fake::new())),
+            Arc::new(Content(fake)),
             self.sessions.clone(),
             42,
             file,
@@ -804,10 +808,19 @@ async fn a_new_installation_that_stopped_stays_resumable_after_obelisk_quits() {
     assert_eq!(state.last_download, None);
     assert_eq!(state.incomplete, incomplete);
 
-    // Installing it again goes on in its folder, with the build it began.
-    fixture.installations.install(fixture.offer());
-    idle(&fixture.installations).await;
-    let state = fixture.installations.state();
+    // Installing it again goes on in its folder, with the build it began,
+    // though Steam would now pick another for a new installation.
+    drop(reloaded);
+    let reloaded = fixture.reload_through(
+        fixture.root.join("steam-installations-42.json"),
+        fixture.fake.clone(),
+    );
+    fixture
+        .fake
+        .with(|script| script.picked = Some(Platform::Windows));
+    reloaded.install(fixture.offer());
+    idle(&reloaded).await;
+    let state = reloaded.state();
     assert_eq!(state.receipts.len(), 1);
     assert!(state.incomplete.is_empty());
     assert!(saved_incomplete(&fixture).is_empty());
@@ -875,6 +888,76 @@ async fn a_transfer_over_an_installed_game_records_no_incomplete_installation() 
     fixture.fake.release();
     idle(&fixture.installations).await;
     assert!(fixture.installations.state().incomplete.is_empty());
+}
+
+#[tokio::test]
+async fn a_download_into_a_folder_already_there_leaves_nothing_to_delete() {
+    // Another account of the storefront installed the game there: the
+    // folder carries no account.
+    let fixture = Fixture::new(false).await;
+    let theirs = fixture.root.join("Games/Steam/steam-620-macos");
+    std::fs::create_dir_all(&theirs).unwrap();
+    std::fs::write(theirs.join("portal2_dlc1.dat"), b"whole").unwrap();
+    stopped_install(&fixture).await;
+
+    let state = fixture.installations.state();
+    assert!(state.incomplete.is_empty());
+    assert!(
+        state.last_download.is_some(),
+        "it still resumes until Obelisk quits"
+    );
+    fixture.installations.discard("620-macos");
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    assert!(theirs.join("portal2_dlc1.dat").exists());
+}
+
+#[tokio::test]
+async fn discarding_keeps_a_folder_an_installation_receipt_names() {
+    let fixture = Fixture::new(false).await;
+    let folder = stopped_install(&fixture).await;
+    // Another account's Transfer finished there since.
+    std::fs::write(folder.join(obelisk_core::install::RECEIPT_FILE), b"{}").unwrap();
+
+    fixture.installations.discard("620-macos");
+    eventually(|| fixture.installations.state().incomplete.is_empty()).await;
+    assert!(folder.join("portal2.dat").exists());
+    assert!(saved_incomplete(&fixture).is_empty());
+    assert_eq!(fixture.installations.state().report, None);
+}
+
+#[tokio::test]
+async fn an_incomplete_installation_never_takes_a_folder_of_its_name_elsewhere() {
+    let fixture = Fixture::new(false).await;
+    let gone = fixture.outside.path().join("Steam/steam-620-macos");
+    let mut record = receipt(&gone, Platform::Mac);
+    record.needs_verification = true;
+    save(
+        &fixture.root.join("steam-installations-42.incomplete.json"),
+        &[record],
+    )
+    .unwrap();
+    // Another account's installation of the same name, in the games folder.
+    std::fs::create_dir_all(fixture.root.join("Games/Steam/steam-620-macos")).unwrap();
+
+    let reloaded = fixture.reload(fixture.root.join("steam-installations-42.json"));
+    assert!(reloaded.state().incomplete.is_empty());
+    assert!(saved_incomplete(&fixture).is_empty());
+}
+
+#[tokio::test]
+async fn a_disk_change_keeps_the_record_of_a_download_before_its_first_file() {
+    let fixture = Fixture::new(false).await;
+    fixture.fake.hold();
+    fixture.installations.install(fixture.offer());
+    eventually(|| fixture.fake.calls().len() == 1).await;
+    assert_eq!(fixture.installations.state().incomplete.len(), 1);
+
+    fixture.folder.volumes_changed();
+    assert_eq!(fixture.installations.state().incomplete.len(), 1);
+    assert_eq!(saved_incomplete(&fixture).len(), 1);
+    fixture.installations.cancel(&620);
+    idle(&fixture.installations).await;
+    fixture.fake.release();
 }
 
 #[tokio::test]

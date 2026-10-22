@@ -75,7 +75,7 @@ final class SteamAchievementsTests: XCTestCase {
                             isAvailable: true, launches: launches
                         ), gameName: "Thronefall")
                         if launches {
-                            GameManagementButton(gameName: "Thronefall", canVerify: true, canUninstall: true, verify: {}, uninstall: {}, directory: "/Applications")
+                            GameManagementButton(gameName: "Thronefall", canVerify: true, canRemove: true, verify: {}, remove: {}, directory: "/Applications")
                         }
                     }
                         .padding(24).frame(width: width).environment(\.colorScheme, scheme)

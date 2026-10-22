@@ -436,8 +436,7 @@ final class GameInstallations<Store: InstallationStorefront> {
     /// Whether the files of the game on screen's incomplete installation may
     /// be deleted.
     var canDiscardSelectedGame: Bool {
-        guard account != nil, selectedIncompleteReceipt != nil, let game = selection()?.game else { return false }
-        return gate.uninstall.allows(game)
+        account != nil && selectedIncompleteReceipt.map { gate.uninstall.allows($0.gameID) } == true
     }
 
     /// Whether the game on screen's installation may be verified.

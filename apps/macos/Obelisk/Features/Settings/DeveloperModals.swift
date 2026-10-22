@@ -154,9 +154,13 @@ struct DeveloperModal: Identifiable {
                 ]),
             DeveloperModal(
                 id: "uninstall", title: "Uninstall",
-                detail: "Alert, from a game's management menu. Uninstalls nothing here.",
+                detail: "Alert, from a game's management menu: an installation's, or a stopped download's. "
+                    + "Deletes nothing here.",
                 symbol: "trash.fill",
-                variants: [Variant("Open") { $0.confirmsUninstall = true }]),
+                variants: [
+                    Variant("Open") { $0.confirmsRemoval = .uninstall },
+                    Variant("Delete download") { $0.confirmsRemoval = .download },
+                ]),
             DeveloperModal(
                 id: "force-quit", title: "Force Quit",
                 detail: "Alert, from a running game's button once its quit did not end it. Quits nothing here.",
@@ -187,7 +191,7 @@ struct DeveloperModal: Identifiable {
 @MainActor @Observable
 final class DeveloperModals {
     var sheet: Sheet?
-    var confirmsUninstall = false
+    var confirmsRemoval: GameRemoval?
     var forceQuit: GameAction?
 
     /// A sheet and the models it shows, kept while it is open.
@@ -388,8 +392,10 @@ private struct DeveloperModalsPresentation: ViewModifier {
     func body(content: Content) -> some View {
         content
             .sheet(item: $modals.sheet) { sheet in sheet.content { modals.sheet = nil } }
-            .uninstallConfirmation(DeveloperModals.gameName, isPresented: $modals.confirmsUninstall,
-                                   canUninstall: true) {}
+            .removalConfirmation(modals.confirmsRemoval ?? .uninstall, DeveloperModals.gameName,
+                                 isPresented: Binding(get: { modals.confirmsRemoval != nil },
+                                                      set: { if !$0 { modals.confirmsRemoval = nil } }),
+                                 canRemove: true) {}
             .forceQuitConfirmation(DeveloperModals.gameName, for: DeveloperModals.forceQuitAction,
                                    asking: $modals.forceQuit)
     }

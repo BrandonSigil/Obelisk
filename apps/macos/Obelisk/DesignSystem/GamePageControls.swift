@@ -1,22 +1,43 @@
 import AppKit
 import SwiftUI
 
+/// What a game's management menu deletes: its installation, or the files of
+/// a download that stopped before it was installed.
+enum GameRemoval {
+    case uninstall, download
+
+    /// The menu item and the confirmation's button.
+    var action: String {
+        L10n.string(self == .uninstall ? "ui.game.uninstall" : "ui.game.delete_download")
+    }
+
+    func confirmation(_ gameName: String) -> String {
+        L10n.string(self == .uninstall ? "ui.game.uninstall_title" : "ui.game.delete_download_title", gameName)
+    }
+
+    var message: String {
+        L10n.string(self == .uninstall ? "ui.game.uninstall_message" : "ui.game.delete_download_message")
+    }
+}
+
 struct GameManagementButton: View {
     let gameName: String
     let canVerify: Bool
-    let canUninstall: Bool
-    /// Verifies the installed game's files, repairing or updating them.
-    let verify: () -> Void
-    let uninstall: () -> Void
-    /// The installed game's directory, revealed in Finder from the menu.
+    let canRemove: Bool
+    /// Verifies the installed game's files, repairing or updating them; nil
+    /// for a download that stopped first.
+    let verify: (() -> Void)?
+    let remove: () -> Void
+    /// The game's directory, revealed in Finder from the menu.
     let directory: String
+    var removal = GameRemoval.uninstall
     /// Opens a Windows build's launch settings; nil for a Mac build.
     var launchSettings: (() -> Void)?
-    @State private var confirmsUninstall = false
+    @State private var confirmsRemoval = false
 
     /// The menu opens while either of its actions may start, and whenever a
     /// Windows build's launch settings may change.
-    private var isAvailable: Bool { canVerify || canUninstall || launchSettings != nil }
+    private var isAvailable: Bool { canVerify || canRemove || launchSettings != nil }
 
     var body: some View {
         Menu {
@@ -28,13 +49,15 @@ struct GameManagementButton: View {
             Button(L10n.string("ui.game.show_files"), systemImage: "folder") {
                 NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: directory)
             }
-            Button(L10n.string("ui.game.verify_files"), systemImage: "checkmark.shield", action: verify)
-                .disabled(!canVerify)
-            Divider()
-            Button(L10n.string("ui.game.uninstall"), systemImage: "trash", role: .destructive) {
-                confirmsUninstall = true
+            if let verify {
+                Button(L10n.string("ui.game.verify_files"), systemImage: "checkmark.shield", action: verify)
+                    .disabled(!canVerify)
             }
-            .disabled(!canUninstall)
+            Divider()
+            Button(removal.action, systemImage: "trash", role: .destructive) {
+                confirmsRemoval = true
+            }
+            .disabled(!canRemove)
         } label: {
             StorefrontGlassIcon(systemName: "gearshape.fill", size: 15)
                 .foregroundStyle(.primary)
@@ -47,63 +70,21 @@ struct GameManagementButton: View {
         .accessibilityLabel(L10n.string("ui.game.manage_named", gameName))
         .accessibilityIdentifier("game-management-menu")
         .help(L10n.string("ui.game.manage"))
-        .uninstallConfirmation(gameName, isPresented: $confirmsUninstall, canUninstall: canUninstall,
-                               uninstall: uninstall)
-    }
-}
-
-/// The menu of a game whose download stopped before it was installed: its
-/// files wait in their folder until the player resumes or deletes them.
-struct IncompleteDownloadButton: View {
-    let gameName: String
-    let canDiscard: Bool
-    let discard: () -> Void
-    /// The download's directory, revealed in Finder from the menu.
-    let directory: String
-    @State private var confirmsDiscard = false
-
-    var body: some View {
-        Menu {
-            Button(L10n.string("ui.game.show_files"), systemImage: "folder") {
-                NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: directory)
-            }
-            .disabled(!FileManager.default.fileExists(atPath: directory))
-            Divider()
-            Button(L10n.string("ui.game.delete_download"), systemImage: "trash", role: .destructive) {
-                confirmsDiscard = true
-            }
-            .disabled(!canDiscard)
-        } label: {
-            StorefrontGlassIcon(systemName: "gearshape.fill", size: 15)
-                .foregroundStyle(.primary)
-        }
-        .menuStyle(.button)
-        .obeliskButtonStyle(.plain)
-        .menuIndicator(.hidden)
-        .fixedSize()
-        .accessibilityLabel(L10n.string("ui.game.manage_named", gameName))
-        .accessibilityIdentifier("game-management-menu")
-        .help(L10n.string("ui.game.manage"))
-        .alert(L10n.string("ui.game.delete_download_title", gameName), isPresented: $confirmsDiscard) {
-            Button(L10n.string("ui.common.cancel"), role: .cancel) {}
-            Button(L10n.string("ui.game.delete_download"), role: .destructive, action: discard)
-                .disabled(!canDiscard)
-        } message: {
-            Text(L10n.string("ui.game.delete_download_message"))
-        }
+        .removalConfirmation(removal, gameName, isPresented: $confirmsRemoval, canRemove: canRemove,
+                             remove: remove)
     }
 }
 
 extension View {
-    /// Asks before uninstalling `gameName`: its files are deleted.
-    func uninstallConfirmation(_ gameName: String, isPresented: Binding<Bool>, canUninstall: Bool,
-                               uninstall: @escaping () -> Void) -> some View {
-        alert(L10n.string("ui.game.uninstall_title", gameName), isPresented: isPresented) {
+    /// Asks before `removal` deletes `gameName`'s files.
+    func removalConfirmation(_ removal: GameRemoval, _ gameName: String, isPresented: Binding<Bool>,
+                             canRemove: Bool, remove: @escaping () -> Void) -> some View {
+        alert(removal.confirmation(gameName), isPresented: isPresented) {
             Button(L10n.string("ui.common.cancel"), role: .cancel) {}
-            Button(L10n.string("ui.game.uninstall"), role: .destructive, action: uninstall)
-                .disabled(!canUninstall)
+            Button(removal.action, role: .destructive, action: remove)
+                .disabled(!canRemove)
         } message: {
-            Text(L10n.string("ui.game.uninstall_message"))
+            Text(removal.message)
         }
     }
 }
