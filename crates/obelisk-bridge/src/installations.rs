@@ -630,7 +630,8 @@ impl AccountInstallations {
     }
 
     /// Verifies `installation`'s files and repairs or updates them in place;
-    /// a Transfer of the game that stopped resumes instead.
+    /// a Transfer of the game that stopped resumes instead. The player asked:
+    /// every file is hashed again, whatever the last Transfer recorded.
     pub fn update(&self, installation: String) {
         each!(self, installations => installations.update(&installation))
     }

@@ -17,7 +17,6 @@ use std::{
     io::{Read, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
     sync::Arc,
-    time::Duration,
 };
 
 use futures_util::future::BoxFuture;
@@ -482,16 +481,25 @@ impl ContentClient {
             local.set_query(url.query());
             local
         };
+        // A server that stops sending fails the request, not a slow link.
+        let request = self
+            .client
+            .get(url)
+            // Chunks are compressed already: never gzip them again.
+            .header(reqwest::header::ACCEPT_ENCODING, "identity")
+            .timeout(transfer::CHUNK_DEADLINE)
+            .send();
         let response = cancel
-            .race(self.client.get(url).timeout(Duration::from_secs(45)).send())
+            .race(tokio::time::timeout(transfer::CHUNK_STALL, request))
             .await?
+            .map_err(|_| ContentError::Network)?
             .map_err(|_| ContentError::Network)?;
         if !response.status().is_success() {
             return Err(ContentError::Http(response.status().as_u16()));
         }
         let bytes = transfer::read_body(
             response.content_length(),
-            response.bytes_stream(),
+            transfer::unless_stalled(response.bytes_stream(), transfer::CHUNK_STALL),
             BodySize::AtMost(limit as u64),
             cancel,
             on_bytes,
@@ -798,8 +806,11 @@ impl DiskInstall {
             )?;
         }
         if let Some(directory) = pending_directory {
-            File::open(directory)?.sync_all()?;
+            install::write_out(&File::open(directory)?)?;
         }
+        // Every file is in place: durable before the receipt says so, and
+        // recorded whole for the next Transfer to skip.
+        verification::complete(&root, &manifest.files)?;
         Ok(reused_bytes)
     }
 
@@ -909,7 +920,7 @@ impl DiskInstall {
         // phase stays the network side's: chunks still arrive for other files.
         self.reporter
             .update(|status| status.current_file.clone_from(&file.name));
-        partial.sync_all()?;
+        install::write_out(&partial)?;
         drop(partial);
         if hashed != present.len() || hasher.finalize()[..] != file.sha {
             return Err(invalid("backend.steam.content.assembledHashMismatch"));
@@ -922,7 +933,7 @@ impl DiskInstall {
         if pending_directory.as_ref() != Some(&directory)
             && let Some(previous) = pending_directory.replace(directory)
         {
-            File::open(previous)?.sync_all()?;
+            install::write_out(&File::open(previous)?)?;
         }
         self.reporter.update(|status| status.completed_files += 1);
         Ok(reused_bytes)

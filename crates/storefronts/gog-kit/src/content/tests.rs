@@ -23,12 +23,29 @@ struct Cdn {
 
 impl Cdn {
     fn new(responses: HashMap<String, Vec<u8>>) -> Self {
+        Self::unavailable_for(responses, 0)
+    }
+
+    /// A CDN that answers its first `unavailable` requests with 503.
+    fn unavailable_for(responses: HashMap<String, Vec<u8>>, unavailable: usize) -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let base = format!("http://{}/store", listener.local_addr().unwrap());
         let requests = Arc::new(StdMutex::new(Vec::new()));
         let recorded = requests.clone();
         thread::spawn(move || {
-            for socket in listener.incoming().flatten() {
+            for (index, mut socket) in listener.incoming().flatten().enumerate() {
+                if index < unavailable {
+                    let mut request = BufReader::new(socket.try_clone().unwrap());
+                    let mut line = String::new();
+                    while request.read_line(&mut line).unwrap() > 2 {
+                        line.clear();
+                    }
+                    let _ = write!(
+                        socket,
+                        "HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                    );
+                    continue;
+                }
                 serve(socket, &responses, &recorded);
             }
         });
@@ -171,6 +188,25 @@ impl Fixture {
         )
         .await
     }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_chunk_outlasts_a_cdn_unavailable_past_its_quick_retries() {
+    let mut fixture = fixture();
+    let (bytes, path) = fixture.chunks["a"].clone();
+    let packed = compressed(&bytes);
+    // Four answers of 503 used up every attempt before: three quick retries
+    // after the first.
+    fixture.cdn = Cdn::unavailable_for([(path.clone(), packed)].into(), 4);
+    let http = crate::http::client().unwrap();
+    let file = &fixture.installed.files[0];
+    let started = std::time::Instant::now();
+    let head = read(&http, &fixture.links(), file, 5, &CancelToken::new())
+        .await
+        .unwrap();
+    assert_eq!(head, b"first");
+    assert_eq!(fixture.cdn.requests(), [path]);
+    assert!(started.elapsed() >= transfer::NETWORK_RETRY_WAITS[0]);
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -321,6 +357,14 @@ fn one_chunk_files() -> (Arc<Installed>, Decoded) {
     (Arc::new(installed), decoded)
 }
 
+/// The requests the disk side plans ahead of the one it writes, with one chunk
+/// per file.
+const WINDOW: usize = if FILE_PREFETCH < QUEUED_CHUNKS {
+    FILE_PREFETCH
+} else {
+    QUEUED_CHUNKS
+};
+
 /// How long a scripted install may wait on either side before the test fails.
 const WAIT: Duration = Duration::from_secs(5);
 
@@ -389,9 +433,9 @@ async fn a_failed_chunk_reports_its_own_error_not_protocol() {
     let root = folder.path().join("game");
     let mut network = ScriptedInstall::start(&root, &CancelToken::new(), |_| {});
 
-    let window = network.take(FILE_PREFETCH).await;
+    let window = network.take(WINDOW).await;
     assert!(
-        window.iter().map(|(index, _)| *index).eq(0..FILE_PREFETCH),
+        window.iter().map(|(index, _)| *index).eq(0..WINDOW),
         "the first files are planned in order"
     );
     // The network side stops here, as after a chunk that failed for good:
@@ -433,7 +477,7 @@ async fn a_cancelled_transfer_reports_cancelled_not_protocol() {
     };
     let mut network = ScriptedInstall::start(&root, &cancel, progress);
 
-    let window = network.take(FILE_PREFETCH).await;
+    let window = network.take(WINDOW).await;
     network
         .outcomes
         .send(Ok(window[0].1.clone()))

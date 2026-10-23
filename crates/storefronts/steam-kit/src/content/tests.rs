@@ -3,13 +3,13 @@ use std::{
     net::TcpListener,
     sync::{Arc, Mutex},
     thread,
-    time::Instant,
+    time::{Duration, Instant},
 };
 
 use aes::cipher::{BlockCipherEncrypt, BlockModeEncrypt, KeyInit, KeyIvInit, block_padding::Pkcs7};
 use prost::Message;
 
-use super::format::{Chunk, steam_adler};
+use super::format::Chunk;
 use super::*;
 
 mod mirrors;
@@ -105,7 +105,8 @@ fn vzstd(bytes: &[u8]) -> Vec<u8> {
 fn chunk(bytes: &[u8], offset: u64, compressed_size: usize) -> Chunk {
     Chunk {
         sha: Sha1::digest(bytes).to_vec(),
-        adler: steam_adler(bytes),
+        // Never checked: the SHA-1 proves the chunk.
+        adler: 0,
         offset,
         original_size: bytes.len() as u32,
         compressed_size: compressed_size as u32,
@@ -200,11 +201,13 @@ fn decrypts_all_three_steam_chunk_compression_envelopes_and_rejects_corruption()
         assert!(decode_chunk(&mut encrypted.clone(), &wrong, &KEY).is_err());
         wrong = expected.clone();
         wrong.adler ^= 1;
-        assert!(decode_chunk(&mut encrypted.clone(), &wrong, &KEY).is_err());
+        assert_eq!(
+            decode_chunk(&mut encrypted.clone(), &wrong, &KEY).unwrap(),
+            bytes,
+            "the SHA-1 alone proves the chunk"
+        );
         assert!(decode_chunk(&mut encrypted.clone(), &expected, &[9; 32]).is_err());
     }
-    // zlib's standard Adler value for this input would be 0x024d0127.
-    assert_eq!(steam_adler(b"abc"), 0x024a0126);
 }
 
 #[test]
@@ -1065,7 +1068,8 @@ async fn cached_manifest_still_hashes_and_repairs_corrupt_or_missing_files() {
     let good_path = directory.path().join("good.bin");
     let original = fs::metadata(&good_path).unwrap();
     let bad_path = directory.path().join("bad.bin");
-    // Preserve size and mtime: an unchanged manifest must never skip the SHA-1 read.
+    // Preserve size and mtime: an unchanged manifest never skips the SHA-1
+    // read of a verification the player asked for.
     let bad_metadata = fs::metadata(&bad_path).unwrap();
     let mut corrupted = repair.to_vec();
     corrupted[0] ^= 1;
@@ -1077,6 +1081,9 @@ async fn cached_manifest_still_hashes_and_repairs_corrupt_or_missing_files() {
         .set_modified(bad_metadata.modified().unwrap())
         .unwrap();
     fs::remove_file(directory.path().join("missing.bin")).unwrap();
+    // The player's verification forgets what the last Transfer recorded:
+    // the file still says its size, time and inode, and is read anyway.
+    obelisk_core::verification::forget_verified(directory.path()).unwrap();
     let mut cached_plan = plan(directory.path());
     cached_plan.cached_manifest = client
         .cached_manifest(directory.path(), 42, 99, &KEY)

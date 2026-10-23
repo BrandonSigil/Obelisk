@@ -36,13 +36,23 @@ use crate::{
     manifest::{Chunk, Installed, InstalledFile, galaxy_path, relative_target},
 };
 
-const CHUNK_CONCURRENCY: usize = 12;
-/// Files whose chunks are requested ahead of the one being written.
-const FILE_PREFETCH: usize = 8;
+/// Chunk requests in flight. Chunks reach 10 MiB and arrive in request
+/// order, so one slow chunk holds up the ones after it: more in flight keep
+/// the link busy meanwhile.
+const CHUNK_CONCURRENCY: usize = 16;
+/// Decoded chunks waiting for the disk worker, which writes them as they
+/// come: few are enough, and each may hold 10 MiB.
+const WRITE_QUEUE: usize = 4;
+/// Chunks requested ahead of the disk worker: enough that requests in
+/// flight never wait for it to plan files. Small files hold one chunk each,
+/// so a count of files planned ahead left only a few requests in flight.
+const QUEUED_CHUNKS: usize = 2 * CHUNK_CONCURRENCY;
+/// Files whose chunks are requested ahead of the one being written, at most.
+const FILE_PREFETCH: usize = 256;
 const PIPELINE: Pipeline = Pipeline {
     delivery: Delivery::InOrder,
     fetches: CHUNK_CONCURRENCY,
-    queue: CHUNK_CONCURRENCY,
+    queue: WRITE_QUEUE,
 };
 
 /// One CDN a product's chunks come from, as its secure link describes it.
@@ -244,7 +254,7 @@ async fn fetch_chunk(
     let path = galaxy_path(&request.chunk.compressed_md5)?;
     let mut failure = GogError::Network;
     let mut stale = false;
-    for attempt in 0..4 {
+    for attempt in 0_usize.. {
         cancel.check()?;
         let endpoints = links.endpoints(&request.source, stale).await?;
         stale = false;
@@ -273,12 +283,20 @@ async fn fetch_chunk(
                 Err(error) => failure = error,
             }
         }
-        if attempt < 3 {
-            cancel
-                .race(tokio::time::sleep(Duration::from_millis(
-                    250 * (attempt + 1),
-                )))
-                .await?;
+        // Three quick retries, then, while the network or the server fails,
+        // about a minute more.
+        let wait = match attempt.checked_sub(3) {
+            None => Some(Duration::from_millis(250 * (attempt as u64 + 1))),
+            Some(late)
+                if matches!(failure, GogError::Network | GogError::Http(429 | 500..=599)) =>
+            {
+                transfer::NETWORK_RETRY_WAITS.get(late).copied()
+            }
+            Some(_) => None,
+        };
+        match wait {
+            Some(wait) => cancel.race(tokio::time::sleep(wait)).await?,
+            None => return Err(failure),
         }
     }
     Err(failure)
@@ -291,16 +309,25 @@ async fn fetch(
     cancel: &CancelToken,
     reporter: &Reporter,
 ) -> ChunkResult {
+    // A server that stops sending fails the request, not a slow link: GOG's
+    // chunks reach 10 MiB, and many share the bandwidth.
+    // Chunks are compressed already: never gzip them again.
+    let request = http
+        .get(url)
+        .header(reqwest::header::ACCEPT_ENCODING, "identity")
+        .timeout(transfer::CHUNK_DEADLINE)
+        .send();
     let response = cancel
-        .race(http.get(url).timeout(Duration::from_secs(60)).send())
+        .race(tokio::time::timeout(transfer::CHUNK_STALL, request))
         .await?
+        .map_err(|_| GogError::Network)?
         .map_err(|_| GogError::Network)?;
     if !response.status().is_success() {
         return Err(GogError::Http(response.status().as_u16()));
     }
     Ok(transfer::read_body(
         response.content_length(),
-        response.bytes_stream(),
+        transfer::unless_stalled(response.bytes_stream(), transfer::CHUNK_STALL),
         BodySize::Exactly(expected),
         cancel,
         |length| {
@@ -313,9 +340,11 @@ async fn fetch(
     .await?)
 }
 
-/// A chunk's zlib stream, checked before and after it inflates.
+/// A chunk's zlib stream, inflated within its size and checked by the MD5
+/// of what it holds. The MD5 of the stream itself, which names it on the
+/// CDN, would be another pass over every byte proving nothing more.
 pub(crate) fn decode_chunk(bytes: &[u8], chunk: &Chunk) -> ChunkResult {
-    if bytes.len() as u64 != chunk.compressed_size || !md5_is(bytes, &chunk.compressed_md5) {
+    if bytes.len() as u64 != chunk.compressed_size {
         return Err(GogError::Integrity);
     }
     let mut decoder = flate2::read::ZlibDecoder::new(bytes);
@@ -495,6 +524,9 @@ impl DiskInstall {
         for link in &installed.links {
             place_link(&root, &link.path, &link.target)?;
         }
+        // Every file is in place: durable before the receipt says so, and
+        // recorded whole for the next Transfer to skip.
+        verification::complete(&root, &checked)?;
         // Partial copies stay only after a failure or a cancellation.
         fs::remove_dir_all(partial_root)?;
         Ok(reused_bytes)
@@ -511,6 +543,7 @@ impl DiskInstall {
         root: &Path,
     ) -> Result<(), GogError> {
         while self.planned.len() < FILE_PREFETCH
+            && self.requested() < QUEUED_CHUNKS
             && self.next_file < files.len()
             && !self.chunks.refused()
         {
@@ -557,6 +590,16 @@ impl DiskInstall {
         Ok(())
     }
 
+    /// The chunks the planned files requested, none of which has arrived:
+    /// the file being written was planned too and left the plan already.
+    fn requested(&self) -> usize {
+        self.planned
+            .iter()
+            .flat_map(|plan| &plan.sources)
+            .filter(|source| matches!(source, Source::Download))
+            .count()
+    }
+
     /// Writes the file's chunks in order into a fresh partial copy, checks
     /// each one, then publishes the file atomically.
     fn assemble(
@@ -598,13 +641,13 @@ impl DiskInstall {
                 .update(|status| status.completed_bytes += chunk.size);
         }
         self.cancel.check()?;
-        output.sync_all()?;
+        install::write_out(&output)?;
         drop(output);
         fs::rename(&next, &partial)?;
         apply_permissions(&partial, is_executable(&file.installed.file, &partial)?)?;
         self.cancel.check()?;
         fs::rename(&partial, target)?;
-        File::open(target.parent().ok_or(GogError::Protocol)?)?.sync_all()?;
+        install::write_out(&File::open(target.parent().ok_or(GogError::Protocol)?)?)?;
         Ok(reused_bytes)
     }
 }

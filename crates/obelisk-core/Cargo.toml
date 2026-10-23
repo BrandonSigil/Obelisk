@@ -15,6 +15,11 @@ tokio.workspace = true
 futures-util.workspace = true
 sha1.workspace = true
 md-5.workspace = true
+# A plain fsync: std's `sync_all` is F_FULLFSYNC on macOS.
+rustix = { version = "1", features = ["fs"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }
 
 [features]
 # A detached `transfer::Chunks`, for storefront tests that play the network side.

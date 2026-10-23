@@ -353,6 +353,14 @@ async fn cancellation_keeps_existing_file_and_verified_chunks_for_resume() {
         .await;
     assert!(matches!(result, Err(EpicError::Cancelled)));
     assert_eq!(fs::read(&target).unwrap(), b"previous installed game");
+    let record = temporary
+        .path()
+        .join(PARTIAL_DIRECTORY)
+        .join("verified.json");
+    assert!(
+        !record.exists(),
+        "a Transfer stopped halfway records nothing"
+    );
     let first_path = format!(
         "/{}",
         manifest.chunks[&manifest.files[0].parts[0].guid].relative_path(18)
@@ -377,6 +385,7 @@ async fn cancellation_keeps_existing_file_and_verified_chunks_for_resume() {
         .unwrap();
     assert_eq!(fs::read(&target).unwrap(), expected);
     assert_eq!(resumed.reused_bytes, 5);
+    assert!(record.exists(), "a finished Transfer records its files");
     assert_eq!(
         server
             .paths()
@@ -926,4 +935,23 @@ fn unflagged_programs_are_recognised_by_their_header() {
         assert_eq!(is_executable(&file(0), &path).unwrap(), executable);
         assert!(is_executable(&file(4), &path).unwrap());
     }
+}
+
+#[test]
+fn recent_chunks_keep_the_newest_within_their_budget() {
+    let mut recent = RecentChunks::default();
+    let megabyte = 1024 * 1024;
+    for index in 0..80 {
+        recent.keep([index, 0, 0, 0], vec![index as u8; megabyte]);
+    }
+    assert!(recent.bytes <= RECENT_CHUNK_BYTES);
+    assert_eq!(recent.get(&[79, 0, 0, 0]), Some(&[79_u8; 1024 * 1024][..]));
+    assert!(recent.get(&[0, 0, 0, 0]).is_none(), "the oldest went first");
+    recent.keep([99, 0, 0, 0], vec![1; RECENT_CHUNK_BYTES * 2]);
+    assert_eq!(
+        recent.chunks.len(),
+        1,
+        "the newest stays, whatever its size"
+    );
+    assert!(recent.get(&[99, 0, 0, 0]).is_some());
 }
