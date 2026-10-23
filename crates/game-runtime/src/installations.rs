@@ -1475,9 +1475,19 @@ impl<S: Storefront> Installations<S> {
 
     /// The Windows installation `receipt` names; `None` for a Mac build or an
     /// installation the account no longer has.
-    fn windows_receipt(&self, receipt: &str) -> Option<Receipt<S>> {
+    pub fn windows_receipt(&self, receipt: &str) -> Option<Receipt<S>> {
         let receipt = self.shared.inner.lock().unwrap().receipt(receipt)?;
         (receipt.platform == Platform::Windows).then_some(receipt)
+    }
+
+    /// Whether the Reservation would let the game of the installation
+    /// `receipt` names launch now: no Game session uses its prefix.
+    pub fn may_launch(&self, receipt: &str) -> bool {
+        let shared = &self.shared;
+        let inner = shared.inner.lock().unwrap();
+        inner
+            .receipt(receipt)
+            .is_some_and(|receipt| shared.gate(&inner).launch.allows(&receipt.game()))
     }
 
     /// Asks the storefront whether each installation has a newer build, at
