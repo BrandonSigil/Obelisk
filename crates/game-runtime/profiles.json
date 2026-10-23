@@ -76,6 +76,17 @@
       ]
     },
     {
+      "name": "Genshin Impact",
+      "note": "Epic installs the HoYoPlay launcher, HYP.exe, which downloads the game itself. The launcher draws its window with Chromium: Chromium's separate GPU process crashes on its first command buffer, and the window stays white. With --in-process-gpu, the launcher's own process draws it.",
+      "epic": {
+        "namespace": "879b0d8776ab46a59a129983ba78f0ce",
+        "app_name": "41869934302e4b8cafac2d3c0e7c293d"
+      },
+      "arguments": [
+        "--in-process-gpu"
+      ]
+    },
+    {
       "name": "Fallout 4",
       "note": "Renders through DXMT rather than D3DMetal. Loads the XAudio2 and X3DAudio DLLs that DirectX's installer puts in the prefix before Wine's own.",
       "steam": 377160,
