@@ -748,6 +748,13 @@ public protocol AccountInstallationsProtocol: AnyObject, Sendable {
     func setLaunchSettings(installation: String, choices: LaunchChoices) async throws  -> LaunchSettings?
     
     /**
+     * Signs Valve's Windows Steam, which starts the Steam game of
+     * `installation`, in to the account of `credentials`: a sign-in Obelisk
+     * made for Windows Steam alone, apart from its own session.
+     */
+    func signInWindowsSteam(installation: String, credentials: SteamCredentials) async throws 
+    
+    /**
      * Stops the account's Transfer, Cloud maintenance and launch still
      * preparing.
      */
@@ -762,6 +769,13 @@ public protocol AccountInstallationsProtocol: AnyObject, Sendable {
      * a Transfer of the game that stopped resumes instead.
      */
     func update(installation: String) 
+    
+    /**
+     * The account Valve's Windows Steam signs in to by itself to start the
+     * Steam game of `installation`, when its Launch settings start it so;
+     * `None` while Windows Steam would ask, or for another storefront's game.
+     */
+    func windowsSteamAccount(installation: String) async  -> String?
     
 }
 /**
@@ -1082,6 +1096,27 @@ open func setLaunchSettings(installation: String, choices: LaunchChoices)async t
 }
     
     /**
+     * Signs Valve's Windows Steam, which starts the Steam game of
+     * `installation`, in to the account of `credentials`: a sign-in Obelisk
+     * made for Windows Steam alone, apart from its own session.
+     */
+open func signInWindowsSteam(installation: String, credentials: SteamCredentials)async throws   {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_obelisk_bridge_fn_method_accountinstallations_sign_in_windows_steam(
+                        self.uniffiCloneHandle(),FfiConverterString.lower(installation),FfiConverterTypeSteamCredentials_lower(credentials)
+                )
+            },
+            pollFunc: ffi_obelisk_bridge_rust_future_poll_void,
+            completeFunc: ffi_obelisk_bridge_rust_future_complete_void,
+            freeFunc: ffi_obelisk_bridge_rust_future_free_void,
+            liftFunc: { $0 },
+            errorHandler: FfiConverterTypeGameSessionError_lift
+        )
+}
+    
+    /**
      * Stops the account's Transfer, Cloud maintenance and launch still
      * preparing.
      */
@@ -1122,6 +1157,28 @@ open func update(installation: String)  {try! rustCall() {
         FfiConverterString.lower(installation),uniffiCallStatus
     )
 }
+}
+    
+    /**
+     * The account Valve's Windows Steam signs in to by itself to start the
+     * Steam game of `installation`, when its Launch settings start it so;
+     * `None` while Windows Steam would ask, or for another storefront's game.
+     */
+open func windowsSteamAccount(installation: String)async  -> String?  {
+    return
+        try!  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_obelisk_bridge_fn_method_accountinstallations_windows_steam_account(
+                        self.uniffiCloneHandle(),FfiConverterString.lower(installation)
+                )
+            },
+            pollFunc: ffi_obelisk_bridge_rust_future_poll_rust_buffer,
+            completeFunc: ffi_obelisk_bridge_rust_future_complete_rust_buffer,
+            freeFunc: ffi_obelisk_bridge_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterOptionString.lift,
+            errorHandler: nil
+            
+        )
 }
     
 
@@ -16127,6 +16184,9 @@ private let initializationResult: InitializationResult = {
     if (uniffi_obelisk_bridge_checksum_method_accountinstallations_set_launch_settings() != 55881) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_obelisk_bridge_checksum_method_accountinstallations_sign_in_windows_steam() != 25220) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_obelisk_bridge_checksum_method_accountinstallations_signed_out() != 26245) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -16137,6 +16197,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_obelisk_bridge_checksum_method_accountinstallations_update() != 64898) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_obelisk_bridge_checksum_method_accountinstallations_windows_steam_account() != 61988) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_obelisk_bridge_checksum_method_librarycache_epic_library() != 25582) {

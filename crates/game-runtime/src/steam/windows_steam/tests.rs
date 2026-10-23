@@ -297,3 +297,89 @@ fn the_launcher_lasts_as_long_as_the_game_then_shuts_steam_down() {
     );
     assert_eq!(calls.next(), Some("shutdown"));
 }
+
+/// Steam's loginusers.vdf with an account it forgot, then two it remembers,
+/// the second the most recent.
+const LOGIN_USERS_VDF: &str = "\"users\"\n{\n\t\"76561197960287930\"\n\t{\n\t\t\"AccountName\"\t\t\"forgotten\"\n\t\t\"RememberPassword\"\t\t\"0\"\n\t\t\"MostRecent\"\t\t\"1\"\n\t}\n\t\"76561197960287931\"\n\t{\n\t\t\"AccountName\"\t\t\"older\"\n\t\t\"RememberPassword\"\t\t\"1\"\n\t\t\"MostRecent\"\t\t\"0\"\n\t}\n\t\"76561197960287932\"\n\t{\n\t\t\"AccountName\"\t\t\"goose\"\n\t\t\"RememberPassword\"\t\t\"1\"\n\t\t\"MostRecent\"\t\t\"1\"\n\t}\n}\n";
+
+#[test]
+fn steam_signs_in_by_itself_to_the_most_recent_account_whose_login_it_kept() {
+    assert_eq!(
+        remembered_account(LOGIN_USERS_VDF).as_deref(),
+        Some("goose")
+    );
+    assert_eq!(
+        remembered_account(
+            &LOGIN_USERS_VDF.replace("\"MostRecent\"\t\t\"1\"", "\"MostRecent\"\t\t\"0\"")
+        )
+        .as_deref(),
+        Some("older")
+    );
+    assert_eq!(remembered_account("\"users\"\n{\n}\n"), None);
+}
+
+#[test]
+fn a_prefix_without_steam_s_kept_token_is_signed_out() {
+    let (_directory, root) = installation();
+    let prefix = root.join("prefix");
+    let users = prefix.join(STEAM).join(LOGIN_USERS);
+    fs::create_dir_all(users.parent().unwrap()).unwrap();
+    fs::write(&users, LOGIN_USERS_VDF).unwrap();
+    assert_eq!(account(&prefix), None);
+
+    let tokens = prefix.join(LOGIN_TOKENS);
+    fs::create_dir_all(tokens.parent().unwrap()).unwrap();
+    fs::write(&tokens, "\"MachineUserConfigStore\"\n{\n}\n").unwrap();
+    assert_eq!(account(&prefix).as_deref(), Some("goose"));
+}
+
+#[test]
+fn the_steam_a_sign_in_started_ends_however_the_sign_in_ends() {
+    let (_directory, root) = installation();
+    let config = crate::wine::tests::recording_runtime(&root);
+    let steam = Command::new("/bin/sleep").arg("60").spawn().unwrap();
+    let pid = steam.id();
+
+    drop(Running { steam, config });
+
+    // Reaped, not left running: the pid names no process of ours.
+    let alive = Command::new("/bin/kill")
+        .args(["-0", &pid.to_string()])
+        .status()
+        .unwrap()
+        .success();
+    assert!(!alive);
+}
+
+#[test]
+fn a_sign_in_sets_the_kept_login_aside_and_gives_it_back_unless_it_took_its_place() {
+    let (_directory, root) = installation();
+    let prefix = root.join("prefix");
+    let users = prefix.join(STEAM).join(LOGIN_USERS);
+    let tokens = prefix.join(LOGIN_TOKENS);
+    for (file, contents) in [(&users, LOGIN_USERS_VDF), (&tokens, "kept token")] {
+        fs::create_dir_all(file.parent().unwrap()).unwrap();
+        fs::write(file, contents).unwrap();
+    }
+
+    let kept = KeptLogin::set_aside(&prefix).unwrap();
+    // Steam starts signed out, and writes what the failed sign-in left.
+    assert_eq!(account(&prefix), None);
+    fs::write(&users, "a failed attempt").unwrap();
+    drop(kept);
+    assert_eq!(fs::read_to_string(&tokens).unwrap(), "kept token");
+    assert_eq!(account(&prefix).as_deref(), Some("goose"));
+
+    let kept = KeptLogin::set_aside(&prefix).unwrap();
+    fs::write(&users, LOGIN_USERS_VDF.replace("goose", "gander")).unwrap();
+    fs::write(&tokens, "new token").unwrap();
+    kept.discard();
+    assert_eq!(account(&prefix).as_deref(), Some("gander"));
+    assert!(!KeptLogin::aside(&tokens).exists());
+
+    // A login a sign-in left aside when Obelisk stopped comes back first.
+    fs::rename(&tokens, KeptLogin::aside(&tokens)).unwrap();
+    fs::rename(&users, KeptLogin::aside(&users)).unwrap();
+    drop(KeptLogin::set_aside(&prefix).unwrap());
+    assert_eq!(account(&prefix).as_deref(), Some("gander"));
+}

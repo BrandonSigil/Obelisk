@@ -108,10 +108,56 @@ final class LaunchSettingsModelTests: XCTestCase {
     }
 
     @MainActor
+    func testWindowsSteamGetsTheLoginTheCodeApprovedThenTheSheetIsDone() async throws {
+        let login = FakeQRLogin(approvedAfter: 1)
+        var handed: [String] = []
+        let model = WindowsSteamSignInModel(signIn: { handed.append($0.accountName) }, begin: { login })
+
+        model.start()
+        try await waitUntil { model.phase == .done }
+
+        XCTAssertEqual(handed, ["goose"])
+        XCTAssertGreaterThanOrEqual(login.polls, 2)
+    }
+
+    @MainActor
+    func testWindowsSteamRefusingTheLoginSaysSoAndOffersANewCode() async throws {
+        let model = WindowsSteamSignInModel(
+            signIn: { _ in throw SteamGames.failure("backend.steam.windowsSteam.signInFailed") },
+            begin: { FakeQRLogin(approvedAfter: 0) }
+        )
+
+        model.start()
+        try await waitUntil { if case .failed = model.phase { true } else { false } }
+
+        XCTAssertEqual(model.phase, .failed(L10n.string("backend.steam.windowsSteam.signInFailed")))
+    }
+
+    @MainActor
     private func waitUntil(_ condition: () -> Bool) async throws {
-        for _ in 0..<200 where !condition() {
+        for _ in 0..<500 where !condition() {
             try await Task.sleep(for: .milliseconds(10))
         }
         XCTAssertTrue(condition())
     }
+}
+
+/// A QR sign-in the Steam Mobile App approves after `approvedAfter` polls.
+private final class FakeQRLogin: SteamLoginProtocol, @unchecked Sendable {
+    private let approvedAfter: Int
+    private(set) var polls = 0
+
+    init(approvedAfter: Int) { self.approvedAfter = approvedAfter }
+
+    func challenge() async -> SteamChallenge {
+        SteamChallenge(qrUrl: "https://s.team/q/1/2", confirmations: [], pollIntervalMs: 1, remoteInteraction: false)
+    }
+
+    func poll() async throws -> SteamCredentials? {
+        polls += 1
+        return polls > approvedAfter
+            ? SteamCredentials(accountName: "goose", steamId: 76_561_197_960_287_930, refreshToken: "token") : nil
+    }
+
+    func submitGuard(code: String, kind: SteamGuardKind) async throws {}
 }
