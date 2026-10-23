@@ -301,6 +301,26 @@ fn package(id: u32, apps: &[u32]) -> proto::ProductInfo {
     }
 }
 
+/// An app as PICS sends it, in text KeyValues, with `common` fields.
+fn app(id: u32, common: &str) -> proto::ProductInfo {
+    proto::ProductInfo {
+        id,
+        buffer: format!(r#""appinfo" {{ "appid" "{id}" "common" {{ {common} }} }}"#)
+            .into_bytes()
+            .into(),
+        ..Default::default()
+    }
+}
+
+/// A product Steam withholds from the account.
+fn withheld(id: u32) -> proto::ProductInfo {
+    proto::ProductInfo {
+        id,
+        missing_token: true,
+        ..Default::default()
+    }
+}
+
 #[tokio::test]
 async fn library_adds_the_free_games_owned_games_leave_out() {
     const ACCOUNT: u32 = 76_561_198_000_000_000_u64 as u32;
@@ -343,13 +363,6 @@ async fn library_adds_the_free_games_owned_games_leave_out() {
             ..Default::default()
         };
         server.reply(&packages, PRODUCT_RESPONSE, &response).await;
-        let app = |id: u32, common: &str| proto::ProductInfo {
-            id,
-            buffer: format!(r#""appinfo" {{ "appid" "{id}" "common" {{ {common} }} }}"#)
-                .into_bytes()
-                .into(),
-            ..Default::default()
-        };
         let apps = proto::ProductResponse {
             apps: vec![
                 app(
@@ -362,11 +375,7 @@ async fn library_adds_the_free_games_owned_games_leave_out() {
                     r#""name" "Upcoming" "type" "Game" "releasestate" "prerelease""#,
                 ),
                 // Steam withholds this one's metadata from the account.
-                proto::ProductInfo {
-                    id: 733,
-                    missing_token: true,
-                    ..Default::default()
-                },
+                withheld(733),
             ],
             ..Default::default()
         };
@@ -411,20 +420,11 @@ async fn library_adds_the_free_license_games_the_store_sells() {
         // Spacewar, Valve's test app, has no store page.
         let apps = proto::ProductResponse {
             apps: vec![
-                proto::ProductInfo {
-                    id: 440,
-                    buffer: br#""appinfo" { "appid" "440" "common" { "name" "Team Fortress 2" "type" "game" "store_asset_mtime" "1745368576" } }"#
-                        .to_vec()
-                        .into(),
-                    ..Default::default()
-                },
-                proto::ProductInfo {
-                    id: 480,
-                    buffer: br#""appinfo" { "appid" "480" "common" { "name" "Spacewar" "type" "Game" } }"#
-                        .to_vec()
-                        .into(),
-                    ..Default::default()
-                },
+                app(
+                    440,
+                    r#""name" "Team Fortress 2" "type" "game" "store_asset_mtime" "1745368576""#,
+                ),
+                app(480, r#""name" "Spacewar" "type" "Game""#),
             ],
             ..Default::default()
         };
@@ -459,25 +459,12 @@ async fn a_withheld_free_license_keeps_the_other_licenses_games() {
         server.reply(&owned, SERVICE_RESPONSE, &response).await;
         let packages = server.request(PRODUCT_REQUEST).await;
         let response = proto::ProductResponse {
-            packages: vec![
-                proto::ProductInfo {
-                    id: 0,
-                    missing_token: true,
-                    ..Default::default()
-                },
-                package(1, &[730]),
-            ],
+            packages: vec![withheld(0), package(1, &[730])],
             ..Default::default()
         };
         server.reply(&packages, PRODUCT_RESPONSE, &response).await;
         let apps = proto::ProductResponse {
-            apps: vec![proto::ProductInfo {
-                id: 730,
-                buffer: br#""appinfo" { "appid" "730" "common" { "name" "Counter-Strike 2" "type" "Game" } }"#
-                    .to_vec()
-                    .into(),
-                ..Default::default()
-            }],
+            apps: vec![app(730, r#""name" "Counter-Strike 2" "type" "Game""#)],
             ..Default::default()
         };
         respond_batch(&mut server, &[730], apps).await;
@@ -508,26 +495,13 @@ async fn a_withheld_package_keeps_the_other_licenses_games() {
         let packages = server.request(PRODUCT_REQUEST).await;
         // Steam does not describe package 2 and withholds package 3.
         let response = proto::ProductResponse {
-            packages: vec![
-                package(1, &[730]),
-                proto::ProductInfo {
-                    id: 3,
-                    missing_token: true,
-                    ..Default::default()
-                },
-            ],
+            packages: vec![package(1, &[730]), withheld(3)],
             unknown_packages: vec![2],
             ..Default::default()
         };
         server.reply(&packages, PRODUCT_RESPONSE, &response).await;
         let apps = proto::ProductResponse {
-            apps: vec![proto::ProductInfo {
-                id: 730,
-                buffer: br#""appinfo" { "appid" "730" "common" { "name" "Counter-Strike 2" "type" "Game" } }"#
-                    .to_vec()
-                    .into(),
-                ..Default::default()
-            }],
+            apps: vec![app(730, r#""name" "Counter-Strike 2" "type" "Game""#)],
             ..Default::default()
         };
         respond_batch(&mut server, &[730], apps).await;

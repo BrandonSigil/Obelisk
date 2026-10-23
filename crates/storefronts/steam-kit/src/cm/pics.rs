@@ -74,9 +74,26 @@ pub struct ContentLicenses {
     /// When the account got each app: the creation of its oldest license
     /// that grants it, in seconds since the Unix epoch.
     pub acquired: BTreeMap<u32, u32>,
+    /// The packages PICS does not know, and those it withholds from the
+    /// account: what they grant is missing here.
+    pub unknown_packages: Vec<u32>,
+    pub withheld_packages: Vec<u32>,
 }
 
 impl ContentLicenses {
+    /// Fails when Steam left a package out: depot and DLC rights read
+    /// without it would leave depots out of a download.
+    pub(crate) fn complete(&self) -> Result<(), CmError> {
+        let code = if !self.unknown_packages.is_empty() {
+            "backend.steam.cm.packagesUnavailable"
+        } else if !self.withheld_packages.is_empty() {
+            "backend.steam.cm.incompletePackageAccess"
+        } else {
+            return Ok(());
+        };
+        Err(CmError::Protocol(code.into()))
+    }
+
     /// Adds what a package grants, under a license created at `created`
     /// when Steam told it, which is the account's `own` or a family member's.
     pub(super) fn extend_package(&mut self, root: &kv::Kv, created: Option<u32>, own: bool) {
@@ -311,6 +328,18 @@ mod tests {
         assert!(!rights.apps.contains(&1046443));
         assert!(!rights.depots.contains(&99));
         assert!(!rights.depots.contains(&0));
+    }
+
+    #[test]
+    fn rights_missing_a_package_are_incomplete() {
+        let mut rights = ContentLicenses::default();
+        assert!(rights.complete().is_ok());
+        rights.withheld_packages.push(3);
+        let error = rights.complete().unwrap_err().to_string();
+        assert!(error.contains("incompletePackageAccess"), "{error}");
+        rights.unknown_packages.push(2);
+        let error = rights.complete().unwrap_err().to_string();
+        assert!(error.contains("packagesUnavailable"), "{error}");
     }
 
     #[test]
