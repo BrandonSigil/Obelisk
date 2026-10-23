@@ -1,9 +1,11 @@
 // Display identity can change without moving the user's library.
 PRODUCT_NAME = Obelisk
-PRODUCT_BUNDLE_IDENTIFIER = com.zagrios.obelisk
+// Helium's build of Obelisk: its own app beside Zagrios's, sharing its library
+// (AppIdentity.storageIdentifier), so games and sign-ins stay where they are.
+PRODUCT_BUNDLE_IDENTIFIER = com.heliumdev.obelisk
 MARKETING_VERSION = 0.3.0
 // Sparkle compares the build version: each release must raise it, so it follows the version.
 CURRENT_PROJECT_VERSION = $(MARKETING_VERSION)
-INFOPLIST_KEY_CFBundleDisplayName = Obelisk
+INFOPLIST_KEY_CFBundleDisplayName = Obelisk (Helium)
 INFOPLIST_KEY_LSApplicationCategoryType = public.app-category.games
 

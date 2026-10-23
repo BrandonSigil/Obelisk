@@ -3,7 +3,7 @@ set -euo pipefail
 # Writes the Sparkle feed of one release: its DMG, signed with the EdDSA key
 # whose public half is SUPublicEDKey in apps/macos/Config/Info.plist, and its
 # notes. The key comes from $SPARKLE_ED_PRIVATE_KEY, as in CI, or else from
-# the login Keychain, where generate_keys --account zagrios keeps it.
+# the login Keychain, where generate_keys --account heliumdev keeps it.
 if [[ $# -ne 4 ]]; then
     echo "Usage: $0 DMG DMG_URL NOTES_HTML OUTPUT" >&2
     exit 2
@@ -39,7 +39,7 @@ rmdir "$MOUNT"
 if [[ -n "${SPARKLE_ED_PRIVATE_KEY:-}" ]]; then
     SIGNATURE="$(printf '%s' "$SPARKLE_ED_PRIVATE_KEY" | "$TOOLS/bin/sign_update" --ed-key-file - -p "$DMG")"
 else
-    SIGNATURE="$("$TOOLS/bin/sign_update" --account zagrios -p "$DMG")"
+    SIGNATURE="$("$TOOLS/bin/sign_update" --account heliumdev -p "$DMG")"
 fi
 LENGTH="$(stat -f %z "$DMG")"
 
