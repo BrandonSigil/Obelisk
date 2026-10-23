@@ -488,7 +488,7 @@ pub struct Installation {
 impl Installation {
     /// The installation of `game` in `install`, when `platform` is the
     /// Windows build, run as the game's profile and its player's launch
-    /// settings say.
+    /// settings say, in the player's language.
     pub fn of(
         locations: &crate::Locations,
         game: crate::profile::Game<'_>,
@@ -498,7 +498,11 @@ impl Installation {
         if platform != Platform::Windows {
             return Ok(None);
         }
-        let settings = crate::launch_settings::of(&locations.library, game, install).settings;
+        let mut settings = crate::launch_settings::of(&locations.library, game, install).settings;
+        if let Some(locale) = crate::native::player_locale() {
+            let language = crate::profile::language_argument(game, &settings.arguments, &locale);
+            settings.profile_arguments.extend(language);
+        }
         let rosetta = prefix(&locations.wine_prefixes, install)?;
         let prefix = settings.engine.adapter().prefix(&rosetta)?;
         Ok(Some(Self {

@@ -282,6 +282,37 @@ pub(crate) fn of(game: Game<'_>, install: &Path) -> Profile {
         .unwrap_or_default()
 }
 
+/// What starts `game` in the player's language, `locale` such as `it_IT`,
+/// when the game reads its language from its command line rather than from
+/// Windows, and the player put no language of their own in `chosen`, their
+/// arguments. Rocket League, from Epic or Steam, takes `-language=` in any
+/// case for the languages below; another one leaves it to choose. This is no
+/// table field: the builds that read the table from `main` refuse an entry
+/// with a field they do not know.
+pub(crate) fn language_argument(game: Game<'_>, chosen: &[String], locale: &str) -> Option<String> {
+    let rocket_league = matches!(
+        game,
+        Game::Epic {
+            namespace: "9773aa1aa54f4f7b80e44bef04986cea",
+            ..
+        } | Game::Steam { app_id: 252950 }
+    );
+    let chose = chosen
+        .iter()
+        .any(|argument| argument.to_ascii_lowercase().starts_with("-language="));
+    if !rocket_league || chose {
+        return None;
+    }
+    let value = match locale.split('_').next()? {
+        "en" => "INT",
+        "fr" => "FRA",
+        "it" => "ITA",
+        "de" => "DEU",
+        _ => return None,
+    };
+    Some(format!("-language={value}"))
+}
+
 /// Every game the table launches read now names by a storefront's id, as
 /// its storefront names it.
 pub fn named() -> impl Iterator<Item = Game<'static>> {

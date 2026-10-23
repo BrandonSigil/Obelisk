@@ -95,6 +95,7 @@ static FACTS: Facts = Facts {
             "LOGNAME",
             "PATH",
             "LANG",
+            "LC_ALL",
             "WINEPREFIX",
             "WINEARCH",
             "WINEDEBUG",
@@ -325,8 +326,13 @@ fn installed(config: &Config) -> bool {
 }
 
 /// What every Wine command of the engine runs with in the guest, then the
-/// variables the game's profile adds.
+/// variables the game's profile adds. Wine takes its Windows locale from the
+/// guest's `LC_ALL`, and only from it: not from `LANG`, nor from the
+/// `WINEUSERLOCALE` its own sources name. The guest holds no locale but
+/// `C.utf8`, which Wine does not need.
 fn guest_environment(config: &Config) -> Vec<(String, String)> {
+    let locale = crate::native::player_locale()
+        .map(|locale| ("LC_ALL".to_owned(), format!("{locale}.UTF-8")));
     let own = [
         ("HOME", HOME.into()),
         ("USER", "user".into()),
@@ -346,6 +352,7 @@ fn guest_environment(config: &Config) -> Vec<(String, String)> {
     ];
     own.into_iter()
         .map(|(name, value)| (name.to_owned(), value))
+        .chain(locale)
         .chain(config.settings.variables.clone())
         .collect()
 }
