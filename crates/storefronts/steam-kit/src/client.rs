@@ -555,6 +555,11 @@ impl Client {
         for app in self.cm.readable_app_infos(&missing).await? {
             let app = Arc::new(app);
             self.remember_app(&app);
+            // Steam's free license also grants Valve's Spacewar test app,
+            // which the store does not sell.
+            if licensed.free_apps.contains(&app.app_id) && !app.on_store() {
+                continue;
+            }
             games.extend(app.unplayed_game());
         }
         Ok(games)

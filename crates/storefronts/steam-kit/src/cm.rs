@@ -744,11 +744,12 @@ impl SteamConnection {
                 let tree = kv::package(&package.buffer)?;
                 let name = package.id.to_string();
                 let root = tree.get(&name).unwrap_or(&tree);
-                rights.extend_package(
-                    root,
-                    created.get(&package.id).copied(),
-                    own.contains(&package.id),
-                );
+                let created = created.get(&package.id).copied();
+                if package.id == FREE_LICENSE {
+                    rights.extend_free_license(root, created);
+                } else {
+                    rights.extend_package(root, created, own.contains(&package.id));
+                }
             }
         }
         Ok((rights, skipped))

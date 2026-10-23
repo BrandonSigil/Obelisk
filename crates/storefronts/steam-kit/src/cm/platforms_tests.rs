@@ -386,7 +386,7 @@ async fn library_adds_the_free_games_owned_games_leave_out() {
 }
 
 #[tokio::test]
-async fn library_adds_the_free_license_games_never_played() {
+async fn library_adds_the_free_license_games_the_store_sells() {
     let (client, mut server, _) = fixture().await;
     push_licenses(
         &mut server,
@@ -404,21 +404,31 @@ async fn library_adds_the_free_license_games_never_played() {
         let request = proto::ProductRequest::decode(packages.body.clone()).unwrap();
         assert_eq!(request.packages[0].id, 0);
         let response = proto::ProductResponse {
-            packages: vec![package(0, &[440])],
+            packages: vec![package(0, &[440, 480])],
             ..Default::default()
         };
         server.reply(&packages, PRODUCT_RESPONSE, &response).await;
+        // Spacewar, Valve's test app, has no store page.
         let apps = proto::ProductResponse {
-            apps: vec![proto::ProductInfo {
-                id: 440,
-                buffer: br#""appinfo" { "appid" "440" "common" { "name" "Team Fortress 2" "type" "game" } }"#
-                    .to_vec()
-                    .into(),
-                ..Default::default()
-            }],
+            apps: vec![
+                proto::ProductInfo {
+                    id: 440,
+                    buffer: br#""appinfo" { "appid" "440" "common" { "name" "Team Fortress 2" "type" "game" "store_asset_mtime" "1745368576" } }"#
+                        .to_vec()
+                        .into(),
+                    ..Default::default()
+                },
+                proto::ProductInfo {
+                    id: 480,
+                    buffer: br#""appinfo" { "appid" "480" "common" { "name" "Spacewar" "type" "Game" } }"#
+                        .to_vec()
+                        .into(),
+                    ..Default::default()
+                },
+            ],
             ..Default::default()
         };
-        respond_batch(&mut server, &[440], apps).await;
+        respond_batch(&mut server, &[440, 480], apps).await;
     };
     let (games, ()) = tokio::join!(client.games(), answer);
     let names: Vec<_> = games.unwrap().into_iter().map(|game| game.name).collect();
