@@ -51,6 +51,14 @@
       "minimum_voile": "v26.3.0-18"
     },
     {
+      "name": "VRChat",
+      "note": "Easy Anti-Cheat, as Rocket League's, with its Linux support turned on. Unity renders it with Direct3D 11, through DXMT as Rocket League. Its publisher executable, launch.exe, is a .NET program and the engine's Wine has no Mono: the game starts with the Easy Anti-Cheat bootstrapper launch.exe would start, with the same arguments, such as Steam's --no-vr.",
+      "steam": 438100,
+      "engine": "Linux",
+      "graphics": "Dxmt",
+      "executable": "start_protected_game.exe"
+    },
+    {
       "name": "Counter-Strike 2",
       "note": "Renders through DXMT rather than D3DMetal.",
       "steam": 730,
