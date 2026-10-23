@@ -21,9 +21,9 @@ use std::{
 };
 
 const TABLE: &str = include_str!("../profiles.json");
-/// Where the table is on Obelisk's `main`.
+/// Where the table is on the `main` of Helium's fork, which follows Zagrios's.
 const URL: &str =
-    "https://raw.githubusercontent.com/Zagrios/Obelisk/main/crates/game-runtime/profiles.json";
+    "https://raw.githubusercontent.com/BrandonSigil/Obelisk/main/crates/game-runtime/profiles.json";
 /// The table's format this Obelisk reads. Another one is a table it ignores.
 const FORMAT: u32 = 1;
 /// The last table read, in Obelisk's library.

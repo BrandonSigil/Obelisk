@@ -6,9 +6,9 @@
 <plist version="1.0">
 <dict>
 	<key>SUFeedURL</key>
-	<string>https://github.com/Zagrios/Obelisk/releases/latest/download/appcast.xml</string>
+	<string>https://github.com/BrandonSigil/Obelisk/releases/latest/download/appcast.xml</string>
 	<key>SUPublicEDKey</key>
-	<string>pBrOTkfrxqlCTkKhDfXsiULL9PfDFBGGKsNn5uhsUdM=</string>
+	<string>onA1JCi/XyexUD2t4elc/SB8PPw6pna77U9Wj7H39EU=</string>
 	<key>SUEnableAutomaticChecks</key>
 	<true/>
 	<key>SUAutomaticallyUpdate</key>
