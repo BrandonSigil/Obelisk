@@ -9,9 +9,15 @@
 //! with. Each entry is checked as it is read, and one that sets what a
 //! profile may not is left out. It names a game by its storefronts' ids, or
 //! by a file of its installation, which finds the game whatever the
-//! storefront. Every game it does not name runs with the defaults, in
-//! Rosetta's Wine with D3DMetal. The player's launch settings apply over it.
-use crate::wine::{Engine, Graphics, GraphicsOptions};
+//! storefront. A game it does not name whose installation holds Easy
+//! Anti-Cheat, which refuses Rosetta's Wine, runs on the Linux engine; every
+//! other one runs with the defaults, in Rosetta's Wine with D3DMetal. The
+//! player's launch settings apply over it.
+use crate::{
+    easy_anti_cheat::{self, EasyAntiCheat},
+    pe::Program,
+    wine::{Engine, Graphics, GraphicsOptions},
+};
 use serde::Deserialize;
 use std::{
     collections::BTreeMap,
@@ -69,7 +75,7 @@ impl Game<'_> {
 }
 
 /// How Obelisk runs one Windows game.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Profile {
     pub engine: Engine,
     /// What renders its Direct3D on that engine.
@@ -79,6 +85,10 @@ pub(crate) struct Profile {
     /// The program the game starts with instead of its publisher's, relative
     /// to the installation, when that one cannot run there.
     pub executable: Option<&'static str>,
+    /// Its installation's Easy Anti-Cheat bootstrapper, relative to it, which
+    /// starts instead of a publisher's program the engine cannot run: that
+    /// program would start it, and it starts the game.
+    pub bootstrapper: Option<String>,
     /// What it adds to the storefront's arguments, before the player's.
     pub arguments: &'static [String],
     /// The environment variables every Wine command of its prefix runs
@@ -102,6 +112,7 @@ impl Default for Profile {
             graphics: Graphics::default_on(Engine::Rosetta),
             options: GraphicsOptions::default(),
             executable: None,
+            bootstrapper: None,
             arguments: &[],
             variables: &NONE,
             dll_overrides: &NONE,
@@ -254,6 +265,7 @@ impl Known {
             graphics: self.graphics.unwrap_or(Graphics::default_on(engine)),
             options: GraphicsOptions::default(),
             executable: self.executable.as_deref(),
+            bootstrapper: None,
             arguments: &self.arguments,
             variables: &self.variables,
             dll_overrides: &self.dll_overrides,
@@ -269,17 +281,48 @@ impl Known {
     }
 }
 
-/// The profile of `game`, installed in `install`: the one the table gives
-/// its storefront's id, else the one whose file the installation holds, else
-/// the defaults.
-pub(crate) fn of(game: Game<'_>, install: &Path) -> Profile {
+/// The profile the table gives `game`, installed in `install`: the one of
+/// its storefront's id, else the one whose file the installation holds.
+pub(crate) fn known(game: Game<'_>, install: &Path) -> Option<Profile> {
     let table = table();
     table
         .iter()
         .find(|known| known.names(game))
         .or_else(|| table.iter().find(|known| known.found_in(install)))
         .map(Known::profile)
-        .unwrap_or_default()
+}
+
+/// The profile of `game`, installed in `install`: the table's, else the one
+/// of its Easy Anti-Cheat, else the defaults; with the installation's Easy
+/// Anti-Cheat bootstrapper in any case.
+pub(crate) fn of(game: Game<'_>, install: &Path) -> Profile {
+    let easy_anti_cheat = easy_anti_cheat::of(install);
+    let profile = known(game, install)
+        .or_else(|| {
+            easy_anti_cheat
+                .as_ref()
+                .map(|found| protected(install, found))
+        })
+        .unwrap_or_default();
+    Profile {
+        bootstrapper: easy_anti_cheat
+            .map(|found| found.bootstrapper.to_string_lossy().into_owned()),
+        ..profile
+    }
+}
+
+/// The profile of a game the table does not name whose installation in
+/// `install` holds `easy_anti_cheat`, which refuses Rosetta's Wine: the
+/// Linux engine, where the anti-cheat loads its Linux module, with the
+/// backend that renders the game's program there.
+fn protected(install: &Path, easy_anti_cheat: &EasyAntiCheat) -> Profile {
+    let engine = Engine::Linux;
+    let program = Program::open(&install.join(&easy_anti_cheat.game));
+    Profile {
+        engine,
+        graphics: Graphics::default_for(engine, program.as_ref()),
+        ..Profile::default()
+    }
 }
 
 /// What starts `game` in the player's language, `locale` such as `it_IT`,

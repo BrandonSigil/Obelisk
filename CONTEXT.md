@@ -47,7 +47,7 @@ The Windows machine one Windows installation runs in, shared by every account th
 _Avoid_: bottle, Wine folder
 
 **Engine**:
-What runs a Windows game's Wine: Rosetta's Wine, Voile's Wine for macOS under Rosetta, for most games, or the Linux engine, Voile's Wine for Linux that voile-lkd runs natively, for games whose anti-cheat supports Linux. Each engine keeps its own Wine prefix of an installation and its own runtime in Voile, offers its own Graphics backends, and starts, quits and stops a game its own way; Prerequisites run only in Rosetta's Wine. Launch settings pick it, and a game moved to the other engine starts in that engine's Wine prefix.
+What runs a Windows game's Wine: Rosetta's Wine, Voile's Wine for macOS under Rosetta, for most games, or the Linux engine, Voile's Wine for Linux that voile-lkd runs natively, for games whose anti-cheat supports Linux. Each engine keeps its own Wine prefix of an installation and its own runtime in Voile, offers its own Graphics backends, and starts, quits and stops a game its own way; Prerequisites run only in Rosetta's Wine. Launch settings pick it, and a game moved to the other engine starts in that engine's Wine prefix. Without a choice, a game whose installation holds Easy Anti-Cheat runs on the Linux engine, unless what Obelisk knows of the game says otherwise.
 _Avoid_: backend (a Graphics backend renders), runner, bottle, Wine flavour
 
 **Launch settings**:

@@ -312,3 +312,60 @@ fn the_named_games_are_the_ones_the_table_names_by_a_storefront_s_id() {
     assert!(!named.contains(&Game::Steam { app_id: 1172470 }));
     assert!(named.contains(&ROCKET_LEAGUE));
 }
+
+#[test]
+fn a_game_the_table_does_not_name_runs_on_the_linux_engine_when_its_installation_holds_easy_anti_cheat()
+ {
+    use crate::{
+        easy_anti_cheat::tests::{protect, write},
+        pe::tests::Fixture,
+    };
+    let directory = tempfile::tempdir().unwrap();
+    let install = directory.path();
+    protect(install, "Game", "start_protected_game.exe", "eldenring.exe");
+    write(
+        install,
+        "Game/eldenring.exe",
+        &Fixture::importing(&["d3d12.dll", "dxgi.dll"]).bytes(),
+    );
+    let other = Game::Steam { app_id: 42 };
+
+    assert_eq!(
+        of(other, install),
+        Profile {
+            engine: Engine::Linux,
+            graphics: Graphics::D3DMetal,
+            bootstrapper: Some("Game/start_protected_game.exe".into()),
+            ..Profile::default()
+        }
+    );
+    assert_eq!(known(other, install), None);
+}
+
+#[test]
+fn the_table_s_entry_for_a_game_wins_over_its_easy_anti_cheat_whose_bootstrapper_it_keeps() {
+    let directory = tempfile::tempdir().unwrap();
+    let install = directory.path();
+    crate::easy_anti_cheat::tests::protect(
+        install,
+        "Game",
+        "start_protected_game.exe",
+        "eldenring.exe",
+    );
+    for game in [
+        Game::Steam { app_id: 1245620 },
+        Game::Steam { app_id: 377160 },
+    ] {
+        assert_eq!(
+            of(game, install),
+            Profile {
+                bootstrapper: Some("Game/start_protected_game.exe".into()),
+                ..by_id(game)
+            }
+        );
+    }
+    assert_eq!(
+        of(Game::Steam { app_id: 377160 }, install).engine,
+        Engine::Rosetta
+    );
+}

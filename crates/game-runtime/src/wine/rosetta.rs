@@ -1,6 +1,6 @@
 //! Voile's Wine for macOS, which Rosetta runs: the engine of every Windows
 //! game whose Launch settings name no other.
-use super::{Adapter, Additions, Config, Facts, Furnisher, Game, Graphics, Prerequisite};
+use super::{Adapter, Additions, Config, Facts, Furnisher, Game, Graphics, Prerequisite, Programs};
 use crate::{
     Error,
     supervisor::{Target, architecture::Architecture},
@@ -73,6 +73,7 @@ static FACTS: Facts = Facts {
         ],
         dlls: &["mscoree", "mshtml", "winemenubuilder.exe"],
     },
+    programs: Programs::All,
 };
 
 impl Adapter for RosettaWine {

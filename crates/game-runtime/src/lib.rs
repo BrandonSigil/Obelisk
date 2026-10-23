@@ -2,6 +2,7 @@
 pub mod cloud;
 pub mod cloud_status;
 pub mod diagnostics;
+mod easy_anti_cheat;
 pub mod epic;
 mod files;
 pub mod games_folder;
@@ -14,6 +15,7 @@ pub mod metal_hud;
 mod native;
 pub mod notes;
 pub mod package;
+mod pe;
 mod process;
 pub mod profile;
 pub mod protocol;

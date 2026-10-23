@@ -12,7 +12,6 @@ use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
     fs,
-    io::Read,
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
     thread,
@@ -75,6 +74,19 @@ impl Graphics {
     /// player picks another backend.
     pub fn default_on(engine: Engine) -> Self {
         engine.adapter().facts().graphics
+    }
+
+    /// What renders `program` on `engine` when neither the game's profile
+    /// nor its player picks another backend: the engine's default, unless
+    /// that is DXMT and the program imports Direct3D 12 without Direct3D 11,
+    /// as ELDEN RING does, since DXMT has no Direct3D 12.
+    pub(crate) fn default_for(engine: Engine, program: Option<&crate::pe::Program>) -> Self {
+        let imports = program.map(crate::pe::Program::imports).unwrap_or_default();
+        let imported = |dll: &str| imports.iter().any(|import| import == dll);
+        match Self::default_on(engine) {
+            Self::Dxmt if imported("d3d12.dll") && !imported("d3d11.dll") => Self::D3DMetal,
+            graphics => graphics,
+        }
     }
 
     /// The name Wine, Neptune and Obelisk's reports know it by.
@@ -299,6 +311,18 @@ struct Facts {
     launcher_grace: Option<Duration>,
     /// The variables and DLL overrides its Wine gets from Obelisk.
     reserved: Reserved,
+    /// The Windows programs its Wine runs.
+    programs: Programs,
+}
+
+/// The Windows programs an engine's Wine runs.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Programs {
+    /// 32-bit and 64-bit ones, and .NET ones through Wine Mono.
+    All,
+    /// x86-64 ones only, and no .NET one: its Wine has neither 32-bit
+    /// support nor Wine Mono.
+    X86_64,
 }
 
 /// Names Obelisk sets in an engine's Wine. A profile could still replace one
@@ -366,6 +390,16 @@ impl Engine {
     /// The names Obelisk sets in this engine's Wine.
     pub(crate) fn reserved(self) -> &'static Reserved {
         &self.adapter().facts().reserved
+    }
+
+    /// Whether this engine's Wine runs the Windows program at `path`. A file
+    /// that is no Windows program is left to the launch to refuse.
+    pub(crate) fn runs(self, path: &Path) -> bool {
+        match self.adapter().facts().programs {
+            Programs::All => true,
+            Programs::X86_64 => crate::pe::Program::open(path)
+                .is_none_or(|program| program.is_x86_64() && !program.is_dotnet()),
+        }
     }
 }
 
@@ -450,7 +484,7 @@ fn program(install: &Path, target: &LaunchTarget) -> Result<PathBuf, Error> {
     let executable = Path::new(&target.executable)
         .canonicalize()
         .map_err(|_| Error::NotExecutable)?;
-    if !executable.starts_with(&root) || !portable_executable(&executable)? {
+    if !executable.starts_with(&root) || crate::pe::Program::open(&executable).is_none() {
         return Err(Error::NotExecutable);
     }
     Ok(executable)
@@ -749,20 +783,6 @@ fn typed(arguments: &[String]) -> String {
         })
         .collect::<Vec<_>>()
         .join(" ")
-}
-
-/// Whether `path` starts like a Windows program: a DOS header naming a PE header.
-fn portable_executable(path: &Path) -> Result<bool, Error> {
-    let mut file = fs::File::open(path)?;
-    let mut dos = [0u8; 64];
-    if file.read_exact(&mut dos).is_err() || &dos[..2] != b"MZ" {
-        return Ok(false);
-    }
-    let offset = u32::from_le_bytes(dos[60..64].try_into().expect("four bytes")) as u64;
-    let mut signature = [0u8; 4];
-    use std::io::{Seek, SeekFrom};
-    file.seek(SeekFrom::Start(offset))?;
-    Ok(file.read_exact(&mut signature).is_ok() && &signature == b"PE\0\0")
 }
 
 #[cfg(test)]

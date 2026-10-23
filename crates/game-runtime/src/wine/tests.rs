@@ -2,14 +2,9 @@ use super::*;
 use crate::launch_settings::Settings;
 use std::collections::BTreeMap;
 
-/// The smallest file `portable_executable` accepts: a DOS header whose last
-/// field points just past it, at a PE signature.
+/// A 64-bit Windows program.
 pub(crate) fn pe() -> Vec<u8> {
-    let mut bytes = vec![0u8; 64];
-    bytes[..2].copy_from_slice(b"MZ");
-    bytes[60..64].copy_from_slice(&64u32.to_le_bytes());
-    bytes.extend_from_slice(b"PE\0\0");
-    bytes
+    crate::pe::tests::Fixture::default().bytes()
 }
 
 pub(crate) fn installation() -> (tempfile::TempDir, PathBuf) {
@@ -1182,6 +1177,7 @@ fn a_configuration_reaches_its_game_session_whole() {
             graphics: Graphics::Dxmt,
             options: GraphicsOptions::default(),
             executable: Some("Binaries/Game.exe".into()),
+            bootstrapper: Some("Binaries/start_protected_game.exe".into()),
             profile_arguments: vec!["-windowed".into()],
             arguments: vec!["-dx11".into(), "+exec auto exec.cfg".into()],
             variables: BTreeMap::from([("SteamDeck".to_owned(), "1".to_owned())]),
@@ -1412,4 +1408,71 @@ fn only_a_prefix_and_its_wine_server_belong_to_one_windows_game() {
         private_folders(&linux, &HashMap::new(), None),
         [root.join("Game-linux")]
     );
+}
+
+#[test]
+fn the_linux_engine_runs_only_x86_64_programs_that_are_not_dotnet_and_rosetta_s_wine_runs_them_all()
+{
+    use crate::pe::tests::Fixture;
+    let (_directory, root) = installation();
+    let program = |name: &str, fixture: Fixture<'_>| {
+        let path = root.join(name);
+        fs::write(&path, fixture.bytes()).unwrap();
+        path
+    };
+    let native = program("native.exe", Fixture::default());
+    let dotnet = program(
+        "dotnet.exe",
+        Fixture {
+            dotnet: true,
+            ..Fixture::default()
+        },
+    );
+    let x86 = program(
+        "x86.exe",
+        Fixture {
+            machine: crate::pe::tests::I386,
+            ..Fixture::default()
+        },
+    );
+    let script = root.join("start.bat");
+    fs::write(&script, "@echo off").unwrap();
+
+    assert!(Engine::Linux.runs(&native));
+    assert!(!Engine::Linux.runs(&dotnet));
+    assert!(!Engine::Linux.runs(&x86));
+    // The launch refuses what is no Windows program, on either engine.
+    assert!(Engine::Linux.runs(&script));
+    for path in [&native, &dotnet, &x86, &script] {
+        assert!(Engine::Rosetta.runs(path), "{}", path.display());
+    }
+}
+
+#[test]
+fn a_program_that_imports_direct3d_12_without_11_renders_through_d3dmetal_where_dxmt_is_the_default()
+ {
+    let (_directory, root) = installation();
+    let path = root.join("Game.exe");
+    let graphics = |engine, imports: &[&str]| {
+        fs::write(&path, crate::pe::tests::Fixture::importing(imports).bytes()).unwrap();
+        Graphics::default_for(engine, crate::pe::Program::open(&path).as_ref())
+    };
+    assert_eq!(
+        graphics(Engine::Linux, &["d3d12.dll", "dxgi.dll"]),
+        Graphics::D3DMetal
+    );
+    assert_eq!(
+        graphics(Engine::Linux, &["dxgi.dll", "d3d11.dll"]),
+        Graphics::Dxmt
+    );
+    assert_eq!(
+        graphics(Engine::Linux, &["d3d12.dll", "d3d11.dll"]),
+        Graphics::Dxmt
+    );
+    assert_eq!(graphics(Engine::Linux, &[]), Graphics::Dxmt);
+    assert_eq!(
+        graphics(Engine::Rosetta, &["d3d11.dll"]),
+        Graphics::D3DMetal
+    );
+    assert_eq!(Graphics::default_for(Engine::Linux, None), Graphics::Dxmt);
 }

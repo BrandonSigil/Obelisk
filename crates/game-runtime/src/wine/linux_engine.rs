@@ -4,7 +4,7 @@
 //! anti-cheat then loads its Linux module. Only the games whose Launch settings
 //! name the engine run there, by their profile's choice or their player's;
 //! every other Windows game keeps Rosetta's Wine.
-use super::{Adapter, Additions, Config, Facts, Furnisher, Game, Graphics};
+use super::{Adapter, Additions, Config, Facts, Furnisher, Game, Graphics, Programs};
 use crate::{
     Error,
     supervisor::{Target, architecture::Architecture},
@@ -113,6 +113,7 @@ static FACTS: Facts = Facts {
             "d3d12",
         ],
     },
+    programs: Programs::X86_64,
 };
 
 impl Adapter for LinuxEngine {

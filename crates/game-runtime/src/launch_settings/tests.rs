@@ -341,3 +341,59 @@ fn the_profile_s_variables_and_dll_overrides_and_the_player_s_hud_are_carried() 
     };
     assert!(chosen(OTHER, hud).settings.performance_hud);
 }
+
+#[test]
+fn on_the_linux_engine_a_launcher_it_cannot_run_gives_way_to_the_easy_anti_cheat_bootstrapper() {
+    use crate::{
+        easy_anti_cheat::tests::{protect, write},
+        pe::tests::Fixture,
+    };
+    let directory = tempfile::tempdir().unwrap();
+    let library = directory.path().join("library");
+    let install = directory.path().join("game");
+    protect(&install, "", "start_protected_game.exe", "VRChat.exe");
+    let dotnet = Fixture {
+        dotnet: true,
+        ..Fixture::default()
+    };
+    write(&install, "launch.exe", &dotnet.bytes());
+    write(&install, "native.exe", &Fixture::default().bytes());
+    let launch = |name: &str| publisher(&install.join(name).to_string_lossy(), &["--no-vr"]);
+    let settings = of(&library, OTHER, &install).settings;
+    assert_eq!(settings.engine, Engine::Linux);
+
+    assert_eq!(
+        settings.started(&install, &launch("launch.exe")),
+        launch("start_protected_game.exe")
+    );
+    // A native launcher runs there and starts the bootstrapper itself.
+    for program in ["native.exe", "start_protected_game.exe"] {
+        assert_eq!(
+            settings.started(&install, &launch(program)),
+            launch(program),
+            "{program}"
+        );
+    }
+
+    // On Rosetta's Wine, which runs the publisher's launcher.
+    let rosetta = Choices {
+        engine: Some(Engine::Rosetta),
+        ..Choices::default()
+    };
+    let settings = choose(&library, OTHER, &install, rosetta).unwrap().settings;
+    assert_eq!(
+        settings.started(&install, &launch("launch.exe")),
+        launch("launch.exe")
+    );
+
+    // Without Easy Anti-Cheat, nothing starts instead.
+    let linux = Choices {
+        engine: Some(Engine::Linux),
+        ..Choices::default()
+    };
+    let bare = directory.path().join("bare");
+    write(&bare, "launch.exe", &dotnet.bytes());
+    let target = publisher(&bare.join("launch.exe").to_string_lossy(), &[]);
+    let settings = choose(&library, OTHER, &bare, linux).unwrap().settings;
+    assert_eq!(settings.started(&bare, &target), target);
+}

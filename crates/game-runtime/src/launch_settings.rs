@@ -33,6 +33,9 @@ pub struct Settings {
     /// The program its profile starts instead of its publisher's, relative
     /// to the installation.
     pub executable: Option<String>,
+    /// Its installation's Easy Anti-Cheat bootstrapper, relative to it, which
+    /// starts instead of a publisher's program the engine cannot run.
+    pub bootstrapper: Option<String>,
     /// What its profile adds to the storefront's arguments; a launch adds
     /// the player's language there for a game that reads it from them.
     pub profile_arguments: Vec<String>,
@@ -59,10 +62,17 @@ impl Default for Settings {
 
 impl Settings {
     /// What starts for `target` inside `install`: `target`, or the program
-    /// the profile names instead, with the same arguments, in that program's
-    /// folder; then the profile's arguments, then the player's.
+    /// the profile names instead, or the installation's Easy Anti-Cheat
+    /// bootstrapper when the engine cannot run `target`, with the same
+    /// arguments, in that program's folder; then the profile's arguments,
+    /// then the player's.
     pub(crate) fn started(&self, install: &Path, target: &LaunchTarget) -> LaunchTarget {
-        let mut started = match &self.executable {
+        let instead = self.executable.as_ref().or_else(|| {
+            self.bootstrapper
+                .as_ref()
+                .filter(|_| !self.engine.runs(Path::new(&target.executable)))
+        });
+        let mut started = match instead {
             None => target.clone(),
             Some(executable) => {
                 let executable = install.join(executable);
@@ -226,6 +236,7 @@ impl Choices {
                 ray_tracing: self.ray_tracing.unwrap_or(options.ray_tracing),
             },
             executable: profile.executable.map(str::to_owned),
+            bootstrapper: profile.bootstrapper.clone(),
             profile_arguments: profile.arguments.to_vec(),
             arguments: crate::wine::command_line(self.arguments.as_deref().unwrap_or_default()),
             variables: profile.variables.clone(),

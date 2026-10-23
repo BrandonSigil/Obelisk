@@ -71,9 +71,10 @@ impl<S: Storefront> Receipt<S> {
         }
     }
 
-    /// Its game's profile.
-    pub(crate) fn profile(&self) -> crate::profile::Profile {
-        crate::profile::of(S::profile_game(&self.product), Path::new(&self.directory))
+    /// The oldest Voile release its game runs in, as the profiles table says.
+    pub(crate) fn minimum_voile(&self) -> Option<&'static str> {
+        crate::profile::known(S::profile_game(&self.product), Path::new(&self.directory))?
+            .minimum_voile
     }
 
     /// Its launch settings, by its game's profile and the choices kept for it
