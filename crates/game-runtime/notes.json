@@ -8,6 +8,30 @@
         "en": "Plays offline and on LAN or community servers that allow insecure players. Secure (VAC) servers, Casual matchmaking included, refuse it: Steam on a Mac can't confirm the signatures of its Windows files.",
         "fr": "Se joue hors ligne et sur les serveurs LAN ou communautaires qui acceptent les joueurs non sécurisés. Les serveurs sécurisés (VAC), matchmaking Casual compris, le refusent : Steam sur Mac ne peut pas confirmer les signatures de ses fichiers Windows."
       }
+    },
+    {
+      "name": "HELLDIVERS 2",
+      "steam": 553850,
+      "text": {
+        "en": "The game uses several protection mechanisms on top of Easy Anti-Cheat, which stops it from launching for now. Investigation is ongoing.",
+        "fr": "Le jeu utilise plusieurs mécanismes de protection en plus d'Easy Anti-Cheat, ce qui empêche de le lancer pour l'instant. Des recherches sont en cours."
+      }
+    },
+    {
+      "name": "Hunt: Showdown 1896",
+      "steam": 594650,
+      "text": {
+        "en": "The game uses several protection mechanisms on top of Easy Anti-Cheat, which stops it from launching for now. Investigation is ongoing.",
+        "fr": "Le jeu utilise plusieurs mécanismes de protection en plus d'Easy Anti-Cheat, ce qui empêche de le lancer pour l'instant. Des recherches sont en cours."
+      }
+    },
+    {
+      "name": "THE FINALS",
+      "steam": 2073850,
+      "text": {
+        "en": "The game uses several protection mechanisms on top of Easy Anti-Cheat, which stops it from launching for now. Investigation is ongoing.",
+        "fr": "Le jeu utilise plusieurs mécanismes de protection en plus d'Easy Anti-Cheat, ce qui empêche de le lancer pour l'instant. Des recherches sont en cours."
+      }
     }
   ]
 }
