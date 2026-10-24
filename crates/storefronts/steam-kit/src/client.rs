@@ -516,8 +516,8 @@ impl Client {
         Ok(games)
     }
 
-    /// The released games the account's own licenses grant that `listed`
-    /// leaves out.
+    /// The released games, demos and playtests the account's own licenses
+    /// grant that `listed` leaves out.
     async fn unplayed_games(
         &self,
         licensed: &ContentLicenses,
@@ -534,8 +534,8 @@ impl Client {
         // stay out.
         let mut games = Vec::new();
         for app in self.cm.readable_app_infos(&missing).await? {
-            // Steam's free license also grants Valve's Spacewar test app,
-            // which the store does not sell.
+            // Steam's free license also grants apps the store does not sell,
+            // such as Valve's Spacewar test app and Half-Life 2's old demo.
             if licensed.free_apps.contains(&app.app_id) && !app.on_store() {
                 continue;
             }

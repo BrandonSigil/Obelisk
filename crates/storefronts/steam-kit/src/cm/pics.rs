@@ -31,12 +31,15 @@ impl AppInfo {
     }
 
     /// The game as the library lists one the account never played, when it
-    /// is a released game: not a DLC, tool, soundtrack or demo, nor a game
-    /// Steam has yet to release.
+    /// is a released game, demo or playtest, which Steam's library all lists
+    /// as games: not a DLC, tool or soundtrack, nor a game Steam has yet to
+    /// release.
     pub(crate) fn unplayed_game(&self) -> Option<OwnedGameInfo> {
-        let game = self
-            .common("type")
-            .is_some_and(|kind| kind.eq_ignore_ascii_case("game"));
+        let game = self.common("type").is_some_and(|kind| {
+            ["game", "demo", "beta"]
+                .iter()
+                .any(|listed| kind.eq_ignore_ascii_case(listed))
+        });
         let released = self
             .common("releasestate")
             .is_none_or(|state| state.eq_ignore_ascii_case("released"));
@@ -355,7 +358,7 @@ mod tests {
     }
 
     #[test]
-    fn only_a_released_game_joins_the_library_unplayed() {
+    fn only_a_released_game_demo_or_playtest_joins_the_library_unplayed() {
         let app = |common: &str| {
             let info = format!(r#""appinfo" {{ "appid" "730" "common" {{ {common} }} }}"#);
             parse_app(730, info.as_bytes()).unwrap().unplayed_game()
@@ -368,6 +371,8 @@ mod tests {
         assert_eq!(game.icon_hash, "8dbc71");
         assert_eq!((game.last_played, game.playtime_minutes), (0, 0));
         assert!(app(r#""name" "Old game" "type" "game""#).is_some());
+        assert!(app(r#""name" "Trials Rising Demo" "type" "Demo""#).is_some());
+        assert!(app(r#""name" "WARDOGS Playtest" "type" "Beta""#).is_some());
         assert!(app(r#""name" "Soundtrack" "type" "Music""#).is_none());
         assert!(app(r#""name" "Expansion" "type" "DLC""#).is_none());
         assert!(app(r#""name" "Server" "type" "Tool""#).is_none());
