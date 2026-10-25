@@ -281,7 +281,7 @@ pub fn serve(
             expected_id as u32
         ));
         let started = Instant::now();
-        while !game_runtime::native_cache_checkpoint(cache.clone(), app, platforms) {
+        while !game_runtime::steam::host::native_cache_checkpoint(cache.clone(), app, platforms) {
             if started.elapsed() > Duration::from_millis(500) {
                 return Err("Native storage index incomplete".into());
             }

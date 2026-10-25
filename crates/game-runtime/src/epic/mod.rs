@@ -37,15 +37,15 @@ pub enum Error {
     Failed,
     #[error("backend.epic.cloud.unsupported")]
     Unsupported,
-    #[error("backend.runtime.macBuildNotNative")]
-    NotNative,
+    /// What readying or starting the game failed with, shown as every
+    /// storefront shows it.
+    #[error("{0}")]
+    Launch(crate::launch::Error),
     /// The other storefront's copy of this game uses the same save paths.
     #[error("backend.cloud.sharedSavesInUse")]
     SharedSaves,
     #[error("backend.runtime.rosettaUnavailable")]
     RosettaUnavailable,
-    #[error("backend.runtime.wineUnavailable")]
-    WineUnavailable,
     #[error("{0}")]
     Epic(#[from] epic_kit::EpicError),
     #[error("backend.epic.cloud.storage")]

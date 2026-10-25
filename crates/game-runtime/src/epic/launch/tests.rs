@@ -250,7 +250,9 @@ fn an_epic_target_checks_the_full_macho_before_repairing_its_permission() {
     fs::set_permissions(&executable, fs::Permissions::from_mode(0o600)).unwrap();
     assert!(matches!(
         native_target(&plan, &config, &HashMap::new()),
-        Err(Error::NotNative)
+        Err(Error::Launch(
+            crate::launch::Error::IncompatibleArchitecture
+        ))
     ));
     assert_eq!(
         fs::metadata(&executable).unwrap().permissions().mode() & 0o100,
@@ -260,7 +262,9 @@ fn an_epic_target_checks_the_full_macho_before_repairing_its_permission() {
     fs::write(&executable, thin(INTEL, true)).unwrap();
     assert!(matches!(
         native_target(&plan, &config, &HashMap::new()),
-        Err(Error::NotNative)
+        Err(Error::Launch(
+            crate::launch::Error::IncompatibleArchitecture
+        ))
     ));
     assert_eq!(
         fs::metadata(&executable).unwrap().permissions().mode() & 0o100,
@@ -388,5 +392,24 @@ fn a_windows_build_gets_its_ownership_token_where_its_engine_s_wine_reads_it() {
         assert_eq!(fs::read(&file).unwrap(), b"ownership");
         drop(ownership);
         assert!(!file.exists());
+    }
+}
+
+#[test]
+fn an_epic_launch_shows_every_launch_failure_with_a_key() {
+    use crate::launch::Error as Launch;
+    for (failure, key) in [
+        (
+            Launch::IncompatibleArchitecture,
+            "backend.runtime.macBuildNotNative",
+        ),
+        (Launch::WineUnavailable, "backend.runtime.wineUnavailable"),
+        (Launch::InvalidApplication, "backend.epic.cloud.unsupported"),
+        (Launch::NotExecutable, "backend.epic.cloud.unsupported"),
+        (Launch::Storage, "backend.epic.cloud.session"),
+        (Launch::StartFailed, "backend.epic.cloud.session"),
+        (Launch::Unavailable, "backend.epic.cloud.session"),
+    ] {
+        assert_eq!(Error::from(failure).to_string(), key, "{failure:?}");
     }
 }

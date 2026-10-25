@@ -220,7 +220,7 @@ fn a_windows_launch_waits_for_voile_and_a_mac_one_never_does() {
             receipt.windows(&locations).unwrap().as_ref(),
             &target(&install.join("Game.exe"), &[])
         ),
-        Err(Error::WineUnavailable)
+        Err(crate::steam::Error::Launch(Error::WineUnavailable))
     ));
     assert!(!locations.wine_prefixes.exists());
 }

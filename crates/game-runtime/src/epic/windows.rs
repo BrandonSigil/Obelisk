@@ -36,7 +36,7 @@ pub(super) struct Prefix<'a> {
 impl wine::Storefront for Prefix<'_> {
     /// The program the manifest names to run before its game first starts,
     /// unless it leaves the installation.
-    fn prerequisites(&self) -> std::result::Result<Vec<wine::Prerequisite>, crate::Error> {
+    fn prerequisites(&self) -> std::result::Result<Vec<wine::Prerequisite>, crate::launch::Error> {
         let Some(prerequisite) = self.prerequisite else {
             return Ok(Vec::new());
         };

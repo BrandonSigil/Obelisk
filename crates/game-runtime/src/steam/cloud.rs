@@ -170,7 +170,7 @@ impl From<serde_json::Error> for Failure {
         Self::Storage
     }
 }
-impl From<Failure> for crate::Error {
+impl From<Failure> for super::Error {
     fn from(failure: Failure) -> Self {
         match failure {
             Failure::Cancelled => Self::Cancelled,

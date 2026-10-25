@@ -90,3 +90,22 @@ fn a_cancelled_gog_launch_ends_silently() {
     assert!(Gog::cancelled(&Error::Gog(gog_kit::GogError::Cancelled)));
     assert!(!Gog::cancelled(&Error::Session));
 }
+
+#[test]
+fn a_gog_launch_shows_every_launch_failure_with_a_key() {
+    use crate::launch::Error as Launch;
+    for (failure, key) in [
+        (
+            Launch::IncompatibleArchitecture,
+            "backend.runtime.macBuildNotNative",
+        ),
+        (Launch::WineUnavailable, "backend.runtime.wineUnavailable"),
+        (Launch::InvalidApplication, "backend.gog.unsupported"),
+        (Launch::NotExecutable, "backend.gog.unsupported"),
+        (Launch::Storage, "backend.gog.session"),
+        (Launch::StartFailed, "backend.gog.session"),
+        (Launch::Unavailable, "backend.gog.session"),
+    ] {
+        assert_eq!(Error::from(failure).to_string(), key, "{failure:?}");
+    }
+}

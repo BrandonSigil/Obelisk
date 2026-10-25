@@ -362,7 +362,7 @@ async fn a_launch_gets_steam_components_for_every_build_and_voile_for_a_windows_
         .await;
     assert_eq!(
         launched,
-        Err(Failure::Failed(crate::Error::ApiMissing.to_string()))
+        Err(Failure::Failed(crate::steam::Error::ApiMissing.to_string()))
     );
     assert_eq!(*events.lock().unwrap(), ["steam components"]);
 

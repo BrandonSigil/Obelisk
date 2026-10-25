@@ -281,11 +281,11 @@ impl<N: Network> installations::Content<Steam> for Content<N> {
             // Its launch settings, resolved once and off the async runtime:
             // finding Easy Anti-Cheat may read hundreds of folders.
             let (locations, resolved) = (self.locations.clone(), receipt.clone());
-            let windows = blocking(crate::Error::StartFailed.to_string(), move || {
+            let windows = blocking(super::Error::StartFailed.to_string(), move || {
                 resolved.windows(&locations)
             })
             .await?
-            .map_err(failed)?;
+            .map_err(|error| failed(super::Error::from(error)))?;
             admission
                 .hand_off(Handover {
                     locations: self.locations.clone(),
@@ -308,7 +308,7 @@ impl<N: Network> installations::Content<Steam> for Content<N> {
                 return Ok(());
             };
             let config = self.cloud(receipt);
-            blocking(crate::Error::Storage.to_string(), move || {
+            blocking(super::Error::Storage.to_string(), move || {
                 steam_cloud::archive_with_rules(&config, metadata, listing)
             })
             .await?
@@ -410,12 +410,12 @@ impl sessions::Handover<Steam> for Handover {
             self.windows.clone(),
         );
         Box::pin(async move {
-            blocking(crate::Error::StartFailed.to_string(), move || {
+            blocking(super::Error::StartFailed.to_string(), move || {
                 super::prepare(&locations, &receipt, windows.as_ref(), &target)
             })
             .await?
             .map_err(|error| match error {
-                crate::Error::Cancelled => Failure::Cancelled,
+                super::Error::Cancelled => Failure::Cancelled,
                 error => failed(error),
             })
         })

@@ -1,7 +1,7 @@
 //! Hash-pinned Valve payload. Runtime preparation is local-only: it reads the
 //! payload `crate::valve` downloaded from Valve's CDN, with a Steam game's
 //! Transfer or, when it is still missing, its launch.
-use crate::{Config, Error};
+use crate::steam::{Error, host::Config};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use std::{

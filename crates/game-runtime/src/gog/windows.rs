@@ -26,7 +26,7 @@ pub(super) struct Prefix {
 impl wine::Storefront for Prefix {
     /// The build's installer scripts and redistributables, as Galaxy runs
     /// them.
-    fn prerequisites(&self) -> std::result::Result<Vec<wine::Prerequisite>, crate::Error> {
+    fn prerequisites(&self) -> std::result::Result<Vec<wine::Prerequisite>, crate::launch::Error> {
         Ok(self
             .prerequisites
             .iter()

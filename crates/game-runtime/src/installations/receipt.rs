@@ -103,7 +103,7 @@ impl<S: Storefront> Receipt<S> {
     pub fn windows(
         &self,
         locations: &crate::Locations,
-    ) -> Result<Option<crate::wine::Installation>, crate::Error> {
+    ) -> Result<Option<crate::wine::Installation>, crate::launch::Error> {
         if self.platform != Platform::Windows {
             return Ok(None);
         }

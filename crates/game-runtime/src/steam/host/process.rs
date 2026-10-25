@@ -1,4 +1,5 @@
-use crate::{Config, Error, files::Prepared, protocol::Event};
+use super::{Config, files::Prepared};
+use crate::{protocol::Event, steam::Error};
 use std::{
     io::{BufRead, BufReader, Read},
     process::{ChildStdin, Command, Stdio},

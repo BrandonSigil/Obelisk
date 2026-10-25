@@ -2,10 +2,9 @@
 //! drives. Steam stands in; Epic differs only in names and keys.
 use super::*;
 use crate::{
-    HostState,
     epic::Epic,
     runtimes::tests::{FakeRuntimes, fake_offer, ready, recorded},
-    steam::{Steam, Store},
+    steam::{Steam, Store, host::HostState},
 };
 use std::{
     sync::Condvar,

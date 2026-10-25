@@ -66,7 +66,9 @@ pub(crate) struct Adapter<R: CloudRemote = SteamCm> {
 }
 
 impl<R: CloudRemote> Adapter<R> {
-    pub fn native_storage(&self) -> Result<Option<crate::NativeStorage>, crate::Error> {
+    pub fn native_storage(
+        &self,
+    ) -> Result<Option<crate::steam::host::NativeStorage>, crate::steam::Error> {
         self.context
             .as_ref()
             .map(|context| context.prepare_sdk())

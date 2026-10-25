@@ -4,7 +4,7 @@
 //! translated here for the engine its Launch settings name, by that engine's
 //! adapter.
 use crate::{
-    Error,
+    launch::Error,
     supervisor::{Target, architecture::Architecture},
 };
 use obelisk_core::{Platform, launch::LaunchTarget};

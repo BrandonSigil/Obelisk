@@ -66,6 +66,10 @@ _Avoid_: redistributable (Steam's name for the package, not the run), dependency
 What Obelisk downloads beside a game's own files for it to run: Voile for a Windows build, Valve's Steam components for every Steam game. A Transfer gets the missing ones before the game's files, and a launch that still misses one gets it after its Admission, before its game is prepared. A launch that finds a newer Voile release asks the player there, with what it brings: they take it before the game starts, or skip it for that launch, unless the game needs it. A Voile release a newer one replaced goes only once no game of any storefront may still run from it.
 _Avoid_: dependency, prerequisite (a Prerequisite runs inside a Wine prefix)
 
+**Steam host**:
+The sandboxed process that holds a Steam game's Steam session beside it, run from Valve's Steam components: it signs in as the account, proves the game's license, and carries what the game asks of Steam, its overlays, invitations and purchases. Each Steam Game session has one; losing it never ends the game.
+_Avoid_: runtime (what Obelisk downloads), native runtime
+
 **Reservation**:
 The exclusive claim a Game session or Cloud maintenance holds on a game's installation. While it exists, no Transfer, uninstall or other launch of that game can start.
 _Avoid_: lock, busy state

@@ -28,9 +28,9 @@ pub(crate) fn plain_absolute(path: &Path) -> bool {
 }
 
 /// The conversions a storefront's session `Error` makes from the
-/// supervisor's and the runtime's errors, alike for Epic and GOG: its
-/// `Session`, `Busy`, `Cancelled`, `Storage`, `Unsupported`, `NotNative`,
-/// `RosettaUnavailable` and `WineUnavailable` stand for them.
+/// supervisor's errors and the launch failure, alike for Epic and GOG: its
+/// `Session`, `Busy`, `Cancelled`, `Storage`, `Unsupported`,
+/// `RosettaUnavailable` and `Launch` stand for them.
 macro_rules! session_error_conversions {
     ($error:ty) => {
         impl From<$crate::supervisor::Error> for $error {
@@ -45,16 +45,14 @@ macro_rules! session_error_conversions {
                 }
             }
         }
-        impl From<$crate::Error> for $error {
-            fn from(error: $crate::Error) -> Self {
+        impl From<$crate::launch::Error> for $error {
+            fn from(error: $crate::launch::Error) -> Self {
+                use $crate::launch::Error as E;
                 match error {
-                    $crate::Error::RosettaUnavailable => Self::RosettaUnavailable,
-                    $crate::Error::WineUnavailable => Self::WineUnavailable,
-                    $crate::Error::IncompatibleArchitecture => Self::NotNative,
-                    $crate::Error::InvalidApplication | $crate::Error::NotExecutable => {
-                        Self::Unsupported
-                    }
-                    _ => Self::Session,
+                    E::IncompatibleArchitecture | E::WineUnavailable => Self::Launch(error),
+                    E::InvalidApplication | E::NotExecutable => Self::Unsupported,
+                    // Epic's `Storage` key speaks of saves, not of readying a launch.
+                    E::Storage | E::StartFailed | E::Unavailable => Self::Session,
                 }
             }
         }
@@ -338,18 +336,5 @@ pub enum Error {
 impl From<std::io::Error> for Error {
     fn from(_: std::io::Error) -> Self {
         Self::Storage
-    }
-}
-impl From<Error> for crate::Error {
-    fn from(error: Error) -> Self {
-        match error {
-            Error::Storage => Self::Storage,
-            Error::InvalidSession => Self::InvalidSession,
-            Error::NewerSession | Error::Busy => Self::SessionBusy,
-            Error::Unavailable => Self::Unavailable,
-            Error::Cancelled => Self::Cancelled,
-            Error::StartFailed => Self::StartFailed,
-            Error::RosettaUnavailable => Self::RosettaUnavailable,
-        }
     }
 }

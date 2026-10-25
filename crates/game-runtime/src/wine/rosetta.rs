@@ -2,7 +2,7 @@
 //! game whose Launch settings name no other.
 use super::{Adapter, Additions, Config, Facts, Furnisher, Game, Graphics, Prerequisite, Programs};
 use crate::{
-    Error,
+    launch::Error,
     supervisor::{Target, architecture::Architecture},
 };
 use obelisk_core::launch::LaunchTarget;
@@ -101,7 +101,7 @@ impl Adapter for RosettaWine {
         storefront.furnish_prefix(config)?;
         install_prerequisites(config, &locations.home, &storefront.prerequisites_to_run()?)?;
         match config.log.parent() {
-            Some(logs) => crate::files::private_directory(logs),
+            Some(logs) => Ok(crate::files::private_directory(logs)?),
             None => Err(Error::Storage),
         }
     }

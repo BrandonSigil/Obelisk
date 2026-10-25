@@ -1,7 +1,7 @@
 //! A native game's executable inside its installation, and the environment
 //! every game starts with, whatever its storefront.
 use crate::{
-    Error,
+    launch::Error,
     supervisor::{Target, architecture::Architecture},
 };
 use obelisk_core::launch::LaunchTarget;

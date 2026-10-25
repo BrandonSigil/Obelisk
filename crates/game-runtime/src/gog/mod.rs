@@ -27,12 +27,12 @@ pub enum Error {
     Storage,
     #[error("backend.gog.unsupported")]
     Unsupported,
-    #[error("backend.runtime.macBuildNotNative")]
-    NotNative,
+    /// What readying or starting the game failed with, shown as every
+    /// storefront shows it.
+    #[error("{0}")]
+    Launch(crate::launch::Error),
     #[error("backend.runtime.rosettaUnavailable")]
     RosettaUnavailable,
-    #[error("backend.runtime.wineUnavailable")]
-    WineUnavailable,
     #[error("{0}")]
     Gog(#[from] gog_kit::GogError),
     #[error("backend.gog.storage")]

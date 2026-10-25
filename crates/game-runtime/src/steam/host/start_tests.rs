@@ -37,8 +37,8 @@ fn ready_host(_: &files::Prepared, _: &Config, _: &str) -> Result<process::Child
 fn host_readiness_admits_an_unknown_sdk_and_reports_it_as_unchecked() {
     let root = tempfile::tempdir().unwrap();
     let (config, prepared) = fixture(root.path());
-    let runtime = Launch::new(credentials())
-        .prepare_runtime(
+    let host = Startup::new(credentials())
+        .prepare_host(
             &config,
             None,
             &mut Vec::new(),
@@ -47,13 +47,13 @@ fn host_readiness_admits_an_unknown_sdk_and_reports_it_as_unchecked() {
             ready_host,
         )
         .unwrap();
-    assert_eq!(runtime.environment()["Steam3Master"], "127.0.0.1:1");
+    assert_eq!(host.environment()["Steam3Master"], "127.0.0.1:1");
     let report: serde_json::Value =
         serde_json::from_slice(&fs::read(root.path().join("report.json")).unwrap()).unwrap();
     assert_eq!(report["host_account_verified"], true);
     assert_eq!(report["host_license_verified"], true);
     assert_eq!(report["sdk_checked"], false);
-    runtime.stopped(None);
+    host.stopped(None);
 }
 
 fn storage(root: &std::path::Path) -> (NativeStorage, PathBuf) {
@@ -85,9 +85,9 @@ fn local_storage_is_validated_before_host_start_without_an_sdk_consumer() {
     let (config, prepared) = fixture(&root);
     let (storage, cache) = storage(&root);
     let index = fs::read(cache.join("remotecache.vdf")).unwrap();
-    let launch = Launch::new(credentials());
-    let runtime = launch
-        .prepare_runtime(
+    let startup = Startup::new(credentials());
+    let host = startup
+        .prepare_host(
             &config,
             Some(storage.clone()),
             &mut Vec::new(),
@@ -97,16 +97,16 @@ fn local_storage_is_validated_before_host_start_without_an_sdk_consumer() {
         )
         .unwrap();
     // The host ran against the prepared projection, not a scratch home.
-    assert_eq!(runtime.prepared.home(), storage.home);
+    assert_eq!(host.prepared.home(), storage.home);
     assert!(
-        process::Child::host_command(&runtime.prepared, &config, "fixture")
+        process::Child::host_command(&host.prepared, &config, "fixture")
             .get_envs()
             .any(|(key, value)| key == "OBELISK_STORAGE_METADATA"
                 && value == Some(std::ffi::OsStr::new("2")))
     );
     assert_eq!(native_cache_files(cache.clone(), 42, 2).unwrap().len(), 1);
-    runtime.stopped(None);
-    drop(runtime);
+    host.stopped(None);
+    drop(host);
     assert_eq!(
         fs::read(cache.join("remote/slot.sav")).unwrap(),
         b"reconciled save"
@@ -144,8 +144,8 @@ fn invalid_or_wrong_account_storage_never_starts_the_host() {
             "wrong-account" => storage.account_id += 1,
             _ => unreachable!(),
         }
-        let launch = Launch::new(credentials());
-        let result = launch.prepare_runtime(
+        let startup = Startup::new(credentials());
+        let result = startup.prepare_host(
             &config,
             Some(storage),
             &mut Vec::new(),
@@ -169,7 +169,7 @@ fn native_authentication_and_ownership_failures_still_block_admission() {
     for reason in ["authentication", "ownership"] {
         let root = tempfile::tempdir().unwrap();
         let (config, prepared) = fixture(root.path());
-        let result = Launch::new(credentials()).prepare_runtime(
+        let result = Startup::new(credentials()).prepare_host(
             &config,
             None,
             &mut Vec::new(),

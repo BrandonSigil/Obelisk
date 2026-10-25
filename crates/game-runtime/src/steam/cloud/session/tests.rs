@@ -343,7 +343,7 @@ async fn a_windows_game_reads_its_sdk_saves_from_the_same_native_storage() {
     assert_eq!(fs::read(saved).unwrap(), b"windows progress");
     let index = storage.cache_directory();
     assert_eq!(
-        crate::native_cache_files(index, 42, storage.platforms)
+        crate::steam::host::native_cache_files(index, 42, storage.platforms)
             .unwrap()
             .len(),
         1

@@ -6,7 +6,7 @@
 //! every other Windows game keeps Rosetta's Wine.
 use super::{Adapter, Additions, Config, Facts, Furnisher, Game, Graphics, Programs};
 use crate::{
-    Error,
+    launch::Error,
     supervisor::{Target, architecture::Architecture},
 };
 use obelisk_core::launch::LaunchTarget;
