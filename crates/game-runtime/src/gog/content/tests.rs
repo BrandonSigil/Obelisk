@@ -305,7 +305,8 @@ async fn gog_keeps_no_cloud_saves() {
 fn only_a_windows_build_runs_in_its_own_prefix() {
     let fixture = Fixture::new();
     let windows = fixture.receipt(Platform::Windows);
-    let configuration = fixture.content.configuration(&windows);
+    let prefix = windows.wine_prefix(&fixture.locations);
+    let configuration = fixture.content.configuration(&windows, prefix);
     assert_eq!(
         configuration.prefix.as_deref(),
         Some(
@@ -324,7 +325,8 @@ fn only_a_windows_build_runs_in_its_own_prefix() {
     configuration.validate(ACCOUNT).unwrap();
 
     let mac = fixture.receipt(Platform::Mac);
-    let configuration = fixture.content.configuration(&mac);
+    let prefix = mac.wine_prefix(&fixture.locations);
+    let configuration = fixture.content.configuration(&mac, prefix);
     assert_eq!(configuration.prefix, None);
     configuration.validate(ACCOUNT).unwrap();
     assert_eq!(fixture.content.directory_name(&mac), "gog-1207658924-macos");

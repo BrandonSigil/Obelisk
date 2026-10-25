@@ -4,8 +4,8 @@ use super::*;
 use crate::{
     installations::{Content as _, tests::eventually},
     runtimes::{
-        Runtimes,
-        tests::{FakeRuntimes, ready, recorded},
+        Runtime, Runtimes,
+        tests::{FakeRuntimes, fake_offer, ready, recorded},
     },
     sessions::Sessions,
 };
@@ -361,7 +361,8 @@ async fn an_uninstalled_game_syncs_the_configuration_its_record_names_with_this_
     std::fs::create_dir_all(fixture.locations.home.join("Saves")).unwrap();
     // An earlier Obelisk, whose sessions and helper lived elsewhere, saved
     // the record of the game it installed.
-    let mut configuration = fixture.content.configuration(&receipt);
+    let prefix = receipt.wine_prefix(&fixture.locations);
+    let mut configuration = fixture.content.configuration(&receipt, prefix);
     configuration.session_directory = fixture.locations.library.join("Older/Sessions");
     configuration.helper = fixture.locations.library.join("Older/helper");
     let (vault, _) = record::locked::<Context>(&configuration, ACCOUNT).unwrap();
@@ -427,6 +428,48 @@ async fn a_launch_code_that_another_account_signed_is_refused_before_the_game_st
         sessions.state().active.is_none(),
         "a refused launch gives its Reservation back"
     );
+}
+
+#[tokio::test]
+async fn a_windows_launch_requires_the_voile_release_its_profile_names() {
+    let fixture = Fixture::new();
+    let runtimes = FakeRuntimes::new(&[], |_| {});
+    runtimes.outdate(Runtime::Voile);
+    let sessions = Sessions::<Epic>::new(Box::new(|| Ok(None)), Runtimes::from_source(runtimes));
+    eventually(|| !sessions.state().recovering).await;
+    // Dead by Daylight, from Epic.
+    let (namespace, app_name) = ("611482b8586142cda48a0786eb8a127c", "Brill");
+    let dead_by_daylight = Receipt {
+        product: Product {
+            namespace: namespace.into(),
+            catalog_item_id: "catalog".into(),
+            app_name: app_name.into(),
+        },
+        ..fixture.installed(Platform::Windows)
+    };
+    let shown = || {
+        sessions
+            .state()
+            .active
+            .and_then(|active| active.voile_update)
+    };
+    let game = Store {
+        namespace: namespace.into(),
+        app_name: app_name.into(),
+    };
+
+    let admission = sessions.admit(game, ACCOUNT.into()).unwrap();
+    let canceller = admission.canceller();
+    let (launched, ()) = tokio::join!(
+        fixture.content.launch(&dead_by_daylight, admission, None),
+        async {
+            eventually(|| shown().is_some()).await;
+            assert_eq!(shown(), Some(fake_offer(true)));
+            canceller.cancel();
+        }
+    );
+
+    assert_eq!(launched, Err(Failure::Cancelled), "nothing is prepared");
 }
 
 #[tokio::test]

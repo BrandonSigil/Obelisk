@@ -14,6 +14,14 @@ const ROCKET_LEAGUE: Game<'static> = Game::Epic {
 const MINDSEYE: Game<'static> = Game::Steam { app_id: 3265250 };
 /// A game whose profile adds an environment variable.
 const GOW_RAGNAROK: Game<'static> = Game::Steam { app_id: 2322010 };
+/// A game whose profile names the oldest Voile release it runs in.
+const FALL_GUYS: Game<'static> = Game::Epic {
+    namespace: "50118b7f954e450f8823df1614b24e80",
+    app_name: "0a2d9f6403244d12969e11da6713137b",
+};
+/// Rocket League's Steam build, which reads its language from its command
+/// line as its Epic one does.
+const ROCKET_LEAGUE_ON_STEAM: Game<'static> = Game::Steam { app_id: 252950 };
 
 /// An installation that holds no file of the table.
 fn nowhere() -> &'static Path {
@@ -27,6 +35,7 @@ fn chosen(game: Game<'_>, choices: Choices) -> View {
         directory.path(),
         game,
         Path::new("/library/Games/game"),
+        None,
         choices,
     )
     .unwrap()
@@ -48,13 +57,13 @@ fn a_game_without_choices_runs_as_its_profile_says() {
     let directory = tempfile::tempdir().unwrap();
     let library = directory.path();
 
-    let settings = of(library, OTHER, nowhere()).settings;
+    let settings = of(library, OTHER, nowhere(), None).settings;
     assert_eq!(settings, Settings::default());
     assert_eq!(settings.engine, Engine::Rosetta);
     assert_eq!(settings.graphics, Graphics::D3DMetal);
     assert!(settings.options.ray_tracing);
 
-    let settings = of(library, ELDEN_RING, nowhere()).settings;
+    let settings = of(library, ELDEN_RING, nowhere(), None).settings;
     assert_eq!(settings.engine, Engine::Linux);
     assert_eq!(settings.graphics, Graphics::D3DMetal);
 }
@@ -128,7 +137,7 @@ fn only_what_differs_from_the_profile_is_kept() {
     let library = directory.path();
     let install = Path::new("/library/Games/Steam/steam-42-windows");
     assert_eq!(
-        choose(library, OTHER, install, same).unwrap().choices,
+        choose(library, OTHER, install, None, same).unwrap().choices,
         Choices::default()
     );
     assert!(
@@ -160,10 +169,17 @@ fn choose_returns_what_the_next_launch_runs() {
     let install = Path::new("/library/Games/game");
     for game in [OTHER, ELDEN_RING, ROCKET_LEAGUE] {
         for choices in every_kind_of_choices() {
-            let chosen = choose(library, game, install, choices.clone()).unwrap();
-            assert_eq!(chosen, of(library, game, install), "{game:?} {choices:?}");
+            let chosen = choose(library, game, install, None, choices.clone()).unwrap();
+            assert_eq!(
+                chosen,
+                of(library, game, install, None),
+                "{game:?} {choices:?}"
+            );
         }
     }
+    let [_, dxmt, ..] = every_kind_of_choices();
+    let chosen = choose(library, ROCKET_LEAGUE, install, Some("it_IT"), dxmt).unwrap();
+    assert_eq!(chosen, of(library, ROCKET_LEAGUE, install, Some("it_IT")));
 }
 
 #[test]
@@ -179,19 +195,25 @@ fn choices_are_kept_per_installation_folder_and_none_leaves_no_file() {
         ..Choices::default()
     };
 
-    choose(library, OTHER, install, choices.clone()).unwrap();
+    choose(library, OTHER, install, None, choices.clone()).unwrap();
 
     assert!(file.is_file());
     assert_eq!(
         serde_json::from_slice::<serde_json::Value>(&fs::read(&file).unwrap()).unwrap(),
         serde_json::json!({"arguments": "-windowed", "engine": "Linux", "ray_tracing": false})
     );
-    assert_eq!(of(library, OTHER, install).choices, choices);
+    assert_eq!(of(library, OTHER, install, None).choices, choices);
     assert_eq!(
-        of(library, OTHER, Path::new("/elsewhere/steam-43-windows")).choices,
+        of(
+            library,
+            OTHER,
+            Path::new("/elsewhere/steam-43-windows"),
+            None
+        )
+        .choices,
         Choices::default()
     );
-    choose(library, OTHER, install, Choices::default()).unwrap();
+    choose(library, OTHER, install, None, Choices::default()).unwrap();
     assert!(!file.exists());
     remove(library, install).unwrap();
 }
@@ -204,7 +226,7 @@ fn an_unreadable_file_means_no_choices() {
     fs::write(library.join("LaunchSettings/game.json"), "not json").unwrap();
 
     assert_eq!(
-        of(library, OTHER, Path::new("/games/game")).choices,
+        of(library, OTHER, Path::new("/games/game"), None).choices,
         Choices::default()
     );
 }
@@ -283,7 +305,7 @@ fn a_substitute_starts_with_the_storefront_s_then_the_profile_s_then_the_player_
         "/games/rl/Binaries/Win64/Launcher.exe",
         &["-AUTH_TYPE=exchangecode"],
     );
-    let started = of(library, ROCKET_LEAGUE, nowhere())
+    let started = of(library, ROCKET_LEAGUE, nowhere(), None)
         .settings
         .started(Path::new("/games/rl"), &launcher);
     assert_eq!(
@@ -296,7 +318,7 @@ fn a_substitute_starts_with_the_storefront_s_then_the_profile_s_then_the_player_
     let protected = publisher("/games/er/Game/start_protected_game.exe", &[]);
     let install = Path::new("/games/er");
     assert_eq!(
-        of(library, ELDEN_RING, nowhere())
+        of(library, ELDEN_RING, nowhere(), None)
             .settings
             .started(install, &protected),
         protected
@@ -328,11 +350,15 @@ fn the_profile_s_variables_and_dll_overrides_and_the_player_s_hud_are_carried() 
     let library = directory.path();
 
     assert_eq!(
-        of(library, MINDSEYE, nowhere()).settings.dll_overrides["vcruntime140_1"],
+        of(library, MINDSEYE, nowhere(), None)
+            .settings
+            .dll_overrides["vcruntime140_1"],
         "n,b"
     );
     assert_eq!(
-        of(library, GOW_RAGNAROK, nowhere()).settings.variables["SteamDeck"],
+        of(library, GOW_RAGNAROK, nowhere(), None)
+            .settings
+            .variables["SteamDeck"],
         "1"
     );
     let hud = Choices {
@@ -359,7 +385,7 @@ fn on_the_linux_engine_a_launcher_it_cannot_run_gives_way_to_the_easy_anti_cheat
     write(&install, "launch.exe", &dotnet.bytes());
     write(&install, "native.exe", &Fixture::default().bytes());
     let launch = |name: &str| publisher(&install.join(name).to_string_lossy(), &["--no-vr"]);
-    let settings = of(&library, OTHER, &install).settings;
+    let settings = of(&library, OTHER, &install, None).settings;
     assert_eq!(settings.engine, Engine::Linux);
 
     assert_eq!(
@@ -380,7 +406,9 @@ fn on_the_linux_engine_a_launcher_it_cannot_run_gives_way_to_the_easy_anti_cheat
         engine: Some(Engine::Rosetta),
         ..Choices::default()
     };
-    let settings = choose(&library, OTHER, &install, rosetta).unwrap().settings;
+    let settings = choose(&library, OTHER, &install, None, rosetta)
+        .unwrap()
+        .settings;
     assert_eq!(
         settings.started(&install, &launch("launch.exe")),
         launch("launch.exe")
@@ -394,6 +422,168 @@ fn on_the_linux_engine_a_launcher_it_cannot_run_gives_way_to_the_easy_anti_cheat
     let bare = directory.path().join("bare");
     write(&bare, "launch.exe", &dotnet.bytes());
     let target = publisher(&bare.join("launch.exe").to_string_lossy(), &[]);
-    let settings = choose(&library, OTHER, &bare, linux).unwrap().settings;
+    let settings = choose(&library, OTHER, &bare, None, linux)
+        .unwrap()
+        .settings;
     assert_eq!(settings.started(&bare, &target), target);
+}
+
+/// An installation the table does not name, in `directory`, that holds
+/// Easy Anti-Cheat.
+fn protected(directory: &Path) -> PathBuf {
+    let install = directory.join("protected");
+    crate::easy_anti_cheat::tests::protect(&install, "", "start_protected_game.exe", "Game.exe");
+    install
+}
+
+#[test]
+fn a_game_that_reads_its_language_from_its_command_line_gets_the_players() {
+    let directory = tempfile::tempdir().unwrap();
+    let library = directory.path();
+    // What its launch settings add after its profile's own arguments.
+    let added = |game: Game<'static>, locale: Option<&'static str>| {
+        let profile = of(library, game, nowhere(), None)
+            .settings
+            .profile_arguments;
+        let arguments = of(library, game, nowhere(), locale)
+            .settings
+            .profile_arguments;
+        assert_eq!(arguments[..profile.len()], profile[..], "{game:?}");
+        arguments[profile.len()..].to_vec()
+    };
+    assert_eq!(added(ROCKET_LEAGUE, Some("it_IT")), ["-language=ITA"]);
+    assert_eq!(
+        added(ROCKET_LEAGUE_ON_STEAM, Some("en_GB")),
+        ["-language=INT"]
+    );
+    // A language it has no value for, a game without a flag, and a player
+    // without a language add nothing.
+    assert!(added(ROCKET_LEAGUE, Some("ja_JP")).is_empty());
+    assert!(added(OTHER, Some("it_IT")).is_empty());
+    assert!(added(ROCKET_LEAGUE, None).is_empty());
+    // The player's own language wins, whatever its case.
+    for chosen in ["-language=FRA", "-LANGUAGE=FRA"] {
+        let choices = Choices {
+            arguments: Some(chosen.into()),
+            ..Choices::default()
+        };
+        let settings = choose(library, ROCKET_LEAGUE, nowhere(), Some("it_IT"), choices)
+            .unwrap()
+            .settings;
+        assert_eq!(settings.profile_arguments, Vec::<String>::new(), "{chosen}");
+        assert_eq!(settings.arguments, [chosen], "{chosen}");
+    }
+}
+
+#[test]
+fn the_language_starts_after_the_profile_s_arguments_and_before_the_player_s() {
+    let directory = tempfile::tempdir().unwrap();
+    let choices = Choices {
+        arguments: Some("-x".into()),
+        ..Choices::default()
+    };
+    let settings = choose(
+        directory.path(),
+        ROCKET_LEAGUE,
+        nowhere(),
+        Some("fr_FR"),
+        choices,
+    )
+    .unwrap()
+    .settings;
+    let launcher = publisher(
+        "/games/rl/Binaries/Win64/Launcher.exe",
+        &["-AUTH_TYPE=exchangecode"],
+    );
+
+    assert_eq!(
+        settings
+            .started(Path::new("/games/rl"), &launcher)
+            .arguments,
+        ["-AUTH_TYPE=exchangecode", "-language=FRA", "-x"]
+    );
+}
+
+#[test]
+fn a_game_waits_for_the_voile_release_its_profile_names_whatever_the_player_chose() {
+    let directory = tempfile::tempdir().unwrap();
+    let library = directory.path().join("library");
+    let rosetta = Choices {
+        engine: Some(Engine::Rosetta),
+        ..Choices::default()
+    };
+
+    assert_eq!(
+        of(&library, FALL_GUYS, nowhere(), None).minimum_voile,
+        Some("v26.3.0-16")
+    );
+    assert_eq!(chosen(FALL_GUYS, rosetta).minimum_voile, Some("v26.3.0-16"));
+    assert_eq!(
+        of(&library, ROCKET_LEAGUE_ON_STEAM, nowhere(), None).minimum_voile,
+        Some("v26.3.0-18")
+    );
+    assert_eq!(of(&library, OTHER, nowhere(), None).minimum_voile, None);
+    let install = protected(directory.path());
+    assert_eq!(of(&library, OTHER, &install, None).minimum_voile, None);
+}
+
+#[test]
+fn the_engine_alone_is_the_launch_settings_engine() {
+    let directory = tempfile::tempdir().unwrap();
+    let library = directory.path().join("library");
+    let protected = protected(directory.path());
+    for (game, install) in [
+        (OTHER, nowhere()),
+        (ELDEN_RING, nowhere()),
+        (ROCKET_LEAGUE, nowhere()),
+        (OTHER, protected.as_path()),
+    ] {
+        assert_eq!(
+            engine(&library, game, install),
+            of(&library, game, install, None).settings.engine,
+            "{game:?} {install:?}"
+        );
+        let other = match engine(&library, game, install) {
+            Engine::Rosetta => Engine::Linux,
+            Engine::Linux => Engine::Rosetta,
+        };
+        let choices = Choices {
+            engine: Some(other),
+            ..Choices::default()
+        };
+        choose(&library, game, install, None, choices).unwrap();
+        assert_eq!(
+            engine(&library, game, install),
+            other,
+            "{game:?} {install:?}"
+        );
+        assert_eq!(
+            of(&library, game, install, None).settings.engine,
+            other,
+            "{game:?} {install:?}"
+        );
+        remove(&library, install).unwrap();
+    }
+}
+
+#[test]
+fn a_chosen_engine_needs_no_profile() {
+    let directory = tempfile::tempdir().unwrap();
+    let library = directory.path().join("library");
+    let missing = directory.path().join("missing");
+    let linux = Choices {
+        engine: Some(Engine::Linux),
+        ..Choices::default()
+    };
+    choose(&library, OTHER, &missing, None, linux).unwrap();
+    assert_eq!(engine(&library, OTHER, &missing), Engine::Linux);
+
+    // Its Easy Anti-Cheat alone would put it on the Linux engine.
+    let install = protected(directory.path());
+    let rosetta = Choices {
+        engine: Some(Engine::Rosetta),
+        ..Choices::default()
+    };
+    choose(&library, OTHER, &install, None, rosetta).unwrap();
+    assert_eq!(engine(&library, OTHER, &install), Engine::Rosetta);
 }

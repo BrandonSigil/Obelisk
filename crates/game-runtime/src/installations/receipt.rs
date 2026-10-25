@@ -71,19 +71,14 @@ impl<S: Storefront> Receipt<S> {
         }
     }
 
-    /// The oldest Voile release its game runs in, as the profiles table says.
-    pub(crate) fn minimum_voile(&self) -> Option<&'static str> {
-        crate::profile::known(S::profile_game(&self.product), Path::new(&self.directory))?
-            .minimum_voile
-    }
-
-    /// Its launch settings, by its game's profile and the choices kept for it
-    /// in Obelisk's `library`.
+    /// Its launch settings, by its game's profile, the choices kept for it in
+    /// Obelisk's `library` and the player's language.
     pub(crate) fn launch_settings(&self, library: &Path) -> crate::launch_settings::View {
         crate::launch_settings::of(
             library,
             S::profile_game(&self.product),
             Path::new(&self.directory),
+            crate::native::player_locale().as_deref(),
         )
     }
 
@@ -98,22 +93,41 @@ impl<S: Storefront> Receipt<S> {
             library,
             S::profile_game(&self.product),
             Path::new(&self.directory),
+            crate::native::player_locale().as_deref(),
             choices,
         )
     }
 
     /// Its Wine prefix and how its game runs there, when it is a Windows
-    /// build.
+    /// build: its launch settings resolved once, for one launch.
     pub fn windows(
         &self,
         locations: &crate::Locations,
     ) -> Result<Option<crate::wine::Installation>, crate::Error> {
-        crate::wine::Installation::of(
+        if self.platform != Platform::Windows {
+            return Ok(None);
+        }
+        let launch_settings = self.launch_settings(&locations.library);
+        crate::wine::Installation::new(
             locations,
             S::profile_game(&self.product),
-            self.platform,
             Path::new(&self.directory),
+            launch_settings,
         )
+        .map(Some)
+    }
+
+    /// Its Wine prefix when it is a Windows build, the one of the engine it
+    /// runs on, without the rest of its launch settings: where its saves
+    /// live. None for a Mac build, or one whose folder names no prefix.
+    pub(crate) fn wine_prefix(&self, locations: &crate::Locations) -> Option<PathBuf> {
+        if self.platform != Platform::Windows {
+            return None;
+        }
+        let (game, install) = (S::profile_game(&self.product), Path::new(&self.directory));
+        crate::launch_settings::engine(&locations.library, game, install)
+            .prefix(&locations.wine_prefixes, install)
+            .ok()
     }
 
     /// Follows its installation, which moved from `from`: the Cloud
@@ -130,8 +144,11 @@ impl<S: Storefront> Receipt<S> {
     /// Deletes its Wine prefix once its folder is gone. `None` when it has
     /// none.
     pub(crate) fn remove_prefix(&self, locations: &crate::Locations) -> Option<Result<(), String>> {
-        let windows = self.windows(locations).ok().flatten()?;
-        Some(windows.remove(locations).map_err(|error| error.to_string()))
+        if self.platform != Platform::Windows {
+            return None;
+        }
+        crate::wine::remove(locations, Path::new(&self.directory))
+            .map(|removed| removed.map_err(|error| error.to_string()))
     }
 
     /// The Transfer that verifies its installation, or updates it in place,

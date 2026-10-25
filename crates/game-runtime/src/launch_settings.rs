@@ -1,5 +1,5 @@
 //! Launch settings: how one Windows installation runs, its game's profile
-//! with the player's choices over it. The player picks the arguments added
+//! with the player's choices over it, in the player's language. The player picks the arguments added
 //! to its command line, its engine, then the CPU translator that engine has,
 //! then the graphics backend that renders its Direct3D there and that
 //! backend's options, each offered as the engine allows, and Metal's
@@ -21,8 +21,9 @@ use std::{
 };
 
 /// How one Windows installation runs from its next launch: its game's
-/// profile with its player's choices over it. It travels whole to the Game
-/// session, so nothing there looks the profile up again.
+/// profile with its player's choices over it, in its player's language. It
+/// travels whole to the Game session, so nothing there looks the profile up
+/// again.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Settings {
     pub engine: Engine,
@@ -36,8 +37,8 @@ pub struct Settings {
     /// Its installation's Easy Anti-Cheat bootstrapper, relative to it, which
     /// starts instead of a publisher's program the engine cannot run.
     pub bootstrapper: Option<String>,
-    /// What its profile adds to the storefront's arguments; a launch adds
-    /// the player's language there for a game that reads it from them.
+    /// What its profile adds to the storefront's arguments, then the
+    /// player's language for a game that reads it from its command line.
     pub profile_arguments: Vec<String>,
     /// What its player adds after those, split as typed. The game's log
     /// shows only these.
@@ -97,27 +98,69 @@ impl Settings {
 }
 
 /// The launch settings of the Windows installation of `game` in `install`,
-/// by its profile and the choices kept for it in Obelisk's `library`. An
-/// installation without choices, or whose file cannot be read, runs as its
-/// profile says.
-pub fn of(library: &Path, game: profile::Game<'_>, install: &Path) -> View {
+/// by its profile and the choices kept for it in Obelisk's `library`, for a
+/// player whose locale is `locale`, such as `it_IT`. An installation without
+/// choices, or whose file cannot be read, runs as its profile says.
+pub fn of(library: &Path, game: profile::Game<'_>, install: &Path, locale: Option<&str>) -> View {
     let profile = profile::of(game, install);
-    View::new(&profile, load(library, install))
+    View::new(game, &profile, load(library, install), locale)
 }
 
 /// Keeps `choices` for that installation, without those its profile or its
 /// engine already gives, and returns its launch settings from its next
-/// launch on. No choice at all leaves no file.
+/// launch on, for a player whose locale is `locale`. No choice at all leaves
+/// no file.
 pub fn choose(
     library: &Path,
     game: profile::Game<'_>,
     install: &Path,
+    locale: Option<&str>,
     choices: Choices,
 ) -> std::io::Result<View> {
     let profile = profile::of(game, install);
     let choices = choices.normalized(&profile);
     save(library, install, &choices)?;
-    Ok(View::new(&profile, choices))
+    Ok(View::new(game, &profile, choices, locale))
+}
+
+/// The engine the Windows installation of `game` in `install` runs on from
+/// its next launch, as `of` gives it: its player's, else its profile's,
+/// reading no more of the profile than that engine takes.
+pub(crate) fn engine(library: &Path, game: profile::Game<'_>, install: &Path) -> Engine {
+    load(library, install)
+        .engine
+        .unwrap_or_else(|| profile::engine(game, install))
+}
+
+/// What starts `game` in the player's language, `locale` such as `it_IT`,
+/// when the game reads its language from its command line rather than from
+/// Windows, and the player put no language of their own in `chosen`, their
+/// arguments. Rocket League, from Epic or Steam, takes `-language=` in any
+/// case for the languages below; another one leaves it to choose. This is no
+/// table field: the builds that read the table from `main` refuse an entry
+/// with a field they do not know.
+fn language_argument(game: profile::Game<'_>, chosen: &[String], locale: &str) -> Option<String> {
+    let rocket_league = matches!(
+        game,
+        profile::Game::Epic {
+            namespace: "9773aa1aa54f4f7b80e44bef04986cea",
+            ..
+        } | profile::Game::Steam { app_id: 252950 }
+    );
+    let chose = chosen
+        .iter()
+        .any(|argument| argument.to_ascii_lowercase().starts_with("-language="));
+    if !rocket_league || chose {
+        return None;
+    }
+    let value = match locale.split('_').next()? {
+        "en" => "INT",
+        "fr" => "FRA",
+        "it" => "ITA",
+        "de" => "DEU",
+        _ => return None,
+    };
+    Some(format!("-language={value}"))
 }
 
 /// What the player changed from the profile. A missing choice follows the
@@ -337,7 +380,8 @@ pub fn remove(library: &Path, install: &Path) -> std::io::Result<()> {
 }
 
 /// One installation's launch settings as its player sees them: how it runs,
-/// what the player changed, and how it runs without choices.
+/// what the player changed, how it runs without choices, and the oldest
+/// Voile release it waits for.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct View {
     pub settings: Settings,
@@ -346,16 +390,31 @@ pub struct View {
     pub default_engine: Engine,
     /// What renders it on each engine without choices, in `ENGINES`' order.
     pub default_graphics: [Graphics; ENGINES.len()],
+    /// The oldest Voile release its game runs in, as its profile says,
+    /// whatever the player chose: its launch waits for one when an older one
+    /// is in place.
+    pub minimum_voile: Option<&'static str>,
 }
 
 impl View {
-    /// The launch settings of `profile`'s game with `choices`.
-    fn new(profile: &Profile, choices: Choices) -> Self {
+    /// The launch settings of `game`, whose profile is `profile`, with
+    /// `choices`, for a player whose locale is `locale`.
+    fn new(
+        game: profile::Game<'_>,
+        profile: &Profile,
+        choices: Choices,
+        locale: Option<&str>,
+    ) -> Self {
+        let mut settings = choices.apply(profile);
+        let language =
+            locale.and_then(|locale| language_argument(game, &settings.arguments, locale));
+        settings.profile_arguments.extend(language);
         Self {
-            settings: choices.apply(profile),
+            settings,
             choices,
             default_engine: profile.engine,
             default_graphics: ENGINES.map(|offer| default_graphics(profile, offer.engine)),
+            minimum_voile: profile.minimum_voile,
         }
     }
 }

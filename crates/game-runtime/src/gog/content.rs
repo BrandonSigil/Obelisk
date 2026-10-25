@@ -9,7 +9,10 @@ use crate::{
 };
 use gog_kit::{GogError, client::Client as GogClient};
 use obelisk_core::{Platform, installation::TransferProgress, transfer::CancelToken};
-use std::{path::Path, sync::Arc};
+use std::{
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 /// What an account's installations ask of GOG's network. Every call may wait
 /// on it.
@@ -133,7 +136,9 @@ impl<N: Network> Content<N> {
         }
     }
 
-    fn configuration(&self, receipt: &Receipt<Gog>) -> Configuration {
+    /// What a Game session of the build starts: a Windows build runs in its
+    /// Wine `prefix`.
+    fn configuration(&self, receipt: &Receipt<Gog>, prefix: Option<PathBuf>) -> Configuration {
         Configuration {
             home: self.locations.home.clone(),
             install: receipt.directory.clone().into(),
@@ -142,11 +147,7 @@ impl<N: Network> Content<N> {
             product_id: receipt.product.product_id.clone(),
             platform: receipt.platform,
             title: receipt.name.clone(),
-            prefix: receipt
-                .windows(&self.locations)
-                .ok()
-                .flatten()
-                .map(|windows| windows.prefix().to_owned()),
+            prefix,
         }
     }
 }
@@ -212,11 +213,19 @@ impl<N: Network> installations::Content<Gog> for Content<N> {
         _: Option<&'a std::convert::Infallible>,
     ) -> BoxFuture<'a, Result<(), Failure>> {
         Box::pin(async move {
+            // Its launch settings, resolved once and off the async runtime:
+            // finding Easy Anti-Cheat may read hundreds of folders.
+            let (locations, resolved) = (self.locations.clone(), receipt.clone());
+            let windows = blocking(Error::Session.to_string(), move || {
+                resolved.windows(&locations).ok().flatten()
+            })
+            .await?;
+            let prefix = windows.as_ref().map(|windows| windows.prefix().to_owned());
             admission
                 .hand_off(Handover {
                     network: self.network.clone(),
-                    configuration: self.configuration(receipt),
-                    windows: receipt.windows(&self.locations).ok().flatten(),
+                    configuration: self.configuration(receipt, prefix),
+                    windows,
                     locations: self.locations.clone(),
                 })
                 .await
@@ -236,14 +245,13 @@ impl<N: Network> installations::Content<Gog> for Content<N> {
     /// the new one at the next launch.
     fn relocated(&self, receipt: &Receipt<Gog>, from: &Path) -> Result<(), String> {
         receipt.relocated(&self.locations, from)?;
-        let Ok(Some(windows)) = receipt.windows(&self.locations) else {
+        if receipt.platform != Platform::Windows {
             return Ok(());
-        };
-        windows
-            .forget_prerequisites(&self.locations, |id| {
-                id.starts_with("gog:isi:") || id.starts_with("gog:installer:")
-            })
-            .map_err(|error| error.to_string())
+        }
+        crate::wine::forget_prerequisites(&self.locations, Path::new(&receipt.directory), |id| {
+            id.starts_with("gog:isi:") || id.starts_with("gog:installer:")
+        })
+        .map_err(|error| error.to_string())
     }
     fn remove_prefix(&self, receipt: &Receipt<Gog>) -> Option<Result<(), String>> {
         receipt.remove_prefix(&self.locations)
@@ -276,6 +284,9 @@ impl<N: Network> sessions::Handover<Gog> for Handover<N> {
     type Prepared = (String, Option<crate::wine::Config>);
     fn platform(&self) -> Platform {
         self.configuration.platform
+    }
+    fn windows(&self) -> Option<&crate::wine::Installation> {
+        self.windows.as_ref()
     }
     fn prepare(&self) -> BoxFuture<'_, Result<Self::Prepared, Failure>> {
         Box::pin(async move {

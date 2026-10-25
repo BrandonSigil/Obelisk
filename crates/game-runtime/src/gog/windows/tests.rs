@@ -1,5 +1,5 @@
 use super::*;
-use crate::wine::tests::{calls, installation, locations, pe, record_calls};
+use crate::wine::tests::{calls, installation, locations, pe, record_calls, windows_of};
 use std::fs;
 
 #[test]
@@ -75,14 +75,8 @@ fn a_windows_build_readies_its_prefix_with_its_prerequisites() {
     // readied.
     let started = config.game();
     assert_eq!(
-        wine::Installation::of(
-            &locations,
-            config.profile_game(),
-            config.platform,
-            started.install
-        )
-        .unwrap(),
-        Some(windows)
+        windows_of(&locations, config.profile_game(), started.install),
+        windows
     );
     assert!(config.runs_in(Some(&wine)));
     assert_eq!(

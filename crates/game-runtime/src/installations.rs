@@ -1706,10 +1706,6 @@ impl<S: Storefront> Installations<S> {
                     return Err(Failure::Cancelled);
                 }
                 shared.update(|inner| inner.state.verifying_before_launch = false);
-                let mut admission = admission;
-                if ready.platform == Platform::Windows {
-                    admission.needs_voile(ready.minimum_voile());
-                }
                 shared
                     .content
                     .launch(&ready, admission, join.as_ref())

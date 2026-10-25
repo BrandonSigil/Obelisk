@@ -191,11 +191,7 @@ impl<N: Network> Content<N> {
             home: self.locations.home.clone(),
             install: receipt.directory.clone().into(),
             app_id: receipt.product.app_id,
-            prefix: receipt
-                .windows(&self.locations)
-                .ok()
-                .flatten()
-                .map(|windows| windows.prefix().to_owned()),
+            prefix: receipt.wine_prefix(&self.locations),
         }
     }
 }
@@ -282,12 +278,21 @@ impl<N: Network> installations::Content<Steam> for Content<N> {
             if let Some(join) = join {
                 target.arguments.extend(join.arguments(receipt.platform));
             }
+            // Its launch settings, resolved once and off the async runtime:
+            // finding Easy Anti-Cheat may read hundreds of folders.
+            let (locations, resolved) = (self.locations.clone(), receipt.clone());
+            let windows = blocking(crate::Error::StartFailed.to_string(), move || {
+                resolved.windows(&locations)
+            })
+            .await?
+            .map_err(failed)?;
             admission
                 .hand_off(Handover {
                     locations: self.locations.clone(),
                     credentials: self.credentials.clone(),
                     receipt: receipt.clone(),
                     target,
+                    windows,
                 })
                 .await
         })
@@ -385,6 +390,8 @@ struct Handover {
     credentials: Credentials,
     receipt: Receipt<Steam>,
     target: LaunchTarget,
+    /// Set for a Windows build, whose prefix it readies.
+    windows: Option<crate::wine::Installation>,
 }
 
 impl sessions::Handover<Steam> for Handover {
@@ -392,15 +399,19 @@ impl sessions::Handover<Steam> for Handover {
     fn platform(&self) -> Platform {
         self.receipt.platform
     }
+    fn windows(&self) -> Option<&crate::wine::Installation> {
+        self.windows.as_ref()
+    }
     fn prepare(&self) -> BoxFuture<'_, Result<super::Request, Failure>> {
-        let (locations, receipt, target) = (
+        let (locations, receipt, target, windows) = (
             self.locations.clone(),
             self.receipt.clone(),
             self.target.clone(),
+            self.windows.clone(),
         );
         Box::pin(async move {
             blocking(crate::Error::StartFailed.to_string(), move || {
-                super::prepare(&locations, &receipt, &target)
+                super::prepare(&locations, &receipt, windows.as_ref(), &target)
             })
             .await?
             .map_err(|error| match error {

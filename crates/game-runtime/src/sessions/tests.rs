@@ -1048,6 +1048,8 @@ type Started<P> = Result<Arc<dyn Supervised<P>>, String>;
 struct Scripted<P: Provider> {
     /// The platform of the build it starts: a Mac one unless the test says.
     platform: Platform,
+    /// How its Windows build runs in Wine: none unless the test says.
+    windows: Option<crate::wine::Installation>,
     steps: Arc<Mutex<Vec<&'static str>>>,
     /// Preparing waits until the test notifies it.
     held: Option<Arc<tokio::sync::Notify>>,
@@ -1061,6 +1063,7 @@ impl<P: Provider> Scripted<P> {
     fn starting(supervisor: Started<P>) -> Self {
         Self {
             platform: Platform::Mac,
+            windows: None,
             steps: Arc::default(),
             held: None,
             prepared: Ok(()),
@@ -1077,6 +1080,9 @@ impl<P: Storefront> Handover<P> for Scripted<P> {
     type Prepared = ();
     fn platform(&self) -> Platform {
         self.platform
+    }
+    fn windows(&self) -> Option<&crate::wine::Installation> {
+        self.windows.as_ref()
     }
     fn prepare(&self) -> BoxFuture<'_, Result<(), Failure>> {
         Box::pin(async move {
@@ -1322,6 +1328,19 @@ async fn a_runtime_that_fails_to_download_refuses_the_launch_before_it_prepares(
     assert!(!sessions.state().busy());
 }
 
+/// Rocket League's Windows build as a launch resolves it, whose profile
+/// names the oldest Voile release it runs in.
+fn rocket_league_on_windows() -> crate::wine::Installation {
+    let root = tempfile::tempdir().unwrap();
+    let windows = crate::wine::tests::windows_of(
+        &crate::wine::tests::locations(root.path()),
+        crate::profile::Game::Steam { app_id: 252950 },
+        &root.path().join("Rocket League"),
+    );
+    assert!(windows.minimum_voile().is_some());
+    windows
+}
+
 /// A Windows build's launch from Epic sessions whose Voile is in place while
 /// a newer release is offered, waiting for the player's answer.
 struct OfferingVoile {
@@ -1343,11 +1362,11 @@ impl OfferingVoile {
         let game = Fake::<Epic>::with("account".into(), store.clone(), Phase::Preparing);
         let mut handover = Scripted::starting(Ok(game.clone() as Arc<dyn Supervised<Epic>>));
         handover.platform = Platform::Windows;
-        let steps = handover.steps();
-        let mut admission = sessions.admit(store, "account".into()).unwrap();
         if required {
-            admission.needs_voile(Some("v2"));
+            handover.windows = Some(rocket_league_on_windows());
         }
+        let steps = handover.steps();
+        let admission = sessions.admit(store, "account".into()).unwrap();
         let launch = tokio::spawn(admission.hand_off(handover));
         let offering = Self {
             sessions,

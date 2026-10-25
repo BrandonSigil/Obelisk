@@ -202,6 +202,7 @@ mod tests {
             std::path::Path::new("/nowhere"),
             profile::Game::Steam { app_id: 42 },
             std::path::Path::new("/nowhere"),
+            None,
         );
 
         let settings = LaunchSettings::from(view);

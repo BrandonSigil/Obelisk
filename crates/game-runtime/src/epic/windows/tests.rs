@@ -1,5 +1,5 @@
 use super::*;
-use crate::wine::tests::{calls, installation, locations, pe, record_calls};
+use crate::wine::tests::{calls, installation, locations, pe, record_calls, windows_of};
 use obelisk_core::Platform;
 use std::fs;
 
@@ -124,14 +124,7 @@ fn a_windows_build_readies_its_prefix_with_its_prerequisite_before_any_credentia
     );
     fs::create_dir_all(config.install.join("Redist")).unwrap();
     fs::write(config.install.join("Redist/setup.exe"), "").unwrap();
-    let windows = wine::Installation::of(
-        &locations,
-        config.profile_game(),
-        config.platform,
-        &config.install,
-    )
-    .unwrap()
-    .unwrap();
+    let windows = windows_of(&locations, config.profile_game(), &config.install);
 
     let wine = ready(&windows, &config, &locations).unwrap();
 

@@ -240,9 +240,13 @@ impl Known {
     }
 }
 
+/// The engine of a game the table does not name whose installation holds
+/// Easy Anti-Cheat, which refuses Rosetta's Wine.
+const PROTECTED: Engine = Engine::Linux;
+
 /// The profile the table gives `game`, installed in `install`: the one of
 /// its storefront's id, else the one whose file the installation holds.
-pub(crate) fn known(game: Game<'_>, install: &Path) -> Option<Profile> {
+fn known(game: Game<'_>, install: &Path) -> Option<Profile> {
     let table = PROFILES.entries();
     table
         .iter()
@@ -253,20 +257,31 @@ pub(crate) fn known(game: Game<'_>, install: &Path) -> Option<Profile> {
 
 /// The profile of `game`, installed in `install`: the table's, else the one
 /// of its Easy Anti-Cheat, else the defaults; with the installation's Easy
-/// Anti-Cheat bootstrapper in any case.
+/// Anti-Cheat bootstrapper in any case. `engine` gives its engine alone, in
+/// the same order.
 pub(crate) fn of(game: Game<'_>, install: &Path) -> Profile {
     let easy_anti_cheat = easy_anti_cheat::of(install);
-    let profile = known(game, install)
-        .or_else(|| {
-            easy_anti_cheat
-                .as_ref()
-                .map(|found| protected(install, found))
-        })
-        .unwrap_or_default();
+    let profile = match (known(game, install), &easy_anti_cheat) {
+        (Some(profile), _) => profile,
+        (None, Some(found)) => protected(install, found),
+        (None, None) => Profile::default(),
+    };
     Profile {
         bootstrapper: easy_anti_cheat
             .map(|found| found.bootstrapper.to_string_lossy().into_owned()),
         ..profile
+    }
+}
+
+/// The engine `game`, installed in `install`, runs on without choices, as
+/// `of` gives it: the table's, else the Linux engine when the installation
+/// holds Easy Anti-Cheat, else Rosetta's Wine. Only an installation the table
+/// does not name is searched for its anti-cheat.
+pub(crate) fn engine(game: Game<'_>, install: &Path) -> Engine {
+    match known(game, install) {
+        Some(profile) => profile.engine,
+        None if easy_anti_cheat::of(install).is_some() => PROTECTED,
+        None => Profile::default().engine,
     }
 }
 
@@ -275,44 +290,13 @@ pub(crate) fn of(game: Game<'_>, install: &Path) -> Profile {
 /// Linux engine, where the anti-cheat loads its Linux module, with the
 /// backend that renders the game's program there.
 fn protected(install: &Path, easy_anti_cheat: &EasyAntiCheat) -> Profile {
-    let engine = Engine::Linux;
+    let engine = PROTECTED;
     let program = Program::open(&install.join(&easy_anti_cheat.game));
     Profile {
         engine,
         graphics: Graphics::default_for(engine, program.as_ref()),
         ..Profile::default()
     }
-}
-
-/// What starts `game` in the player's language, `locale` such as `it_IT`,
-/// when the game reads its language from its command line rather than from
-/// Windows, and the player put no language of their own in `chosen`, their
-/// arguments. Rocket League, from Epic or Steam, takes `-language=` in any
-/// case for the languages below; another one leaves it to choose. This is no
-/// table field: the builds that read the table from `main` refuse an entry
-/// with a field they do not know.
-pub(crate) fn language_argument(game: Game<'_>, chosen: &[String], locale: &str) -> Option<String> {
-    let rocket_league = matches!(
-        game,
-        Game::Epic {
-            namespace: "9773aa1aa54f4f7b80e44bef04986cea",
-            ..
-        } | Game::Steam { app_id: 252950 }
-    );
-    let chose = chosen
-        .iter()
-        .any(|argument| argument.to_ascii_lowercase().starts_with("-language="));
-    if !rocket_league || chose {
-        return None;
-    }
-    let value = match locale.split('_').next()? {
-        "en" => "INT",
-        "fr" => "FRA",
-        "it" => "ITA",
-        "de" => "DEU",
-        _ => return None,
-    };
-    Some(format!("-language={value}"))
 }
 
 /// Every game the table Obelisk reads now names by a storefront's id, as

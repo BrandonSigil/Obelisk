@@ -30,6 +30,17 @@ const OTHER: crate::profile::Game<'static> = crate::profile::Game::Steam { app_i
 /// A game whose profile names the Linux engine and D3DMetal.
 const ELDEN_RING: crate::profile::Game<'static> = crate::profile::Game::Steam { app_id: 1245620 };
 
+/// The Windows installation of `game` in `install`, as a launch resolves it
+/// for a player without a language.
+pub(crate) fn windows_of(
+    locations: &crate::Locations,
+    game: crate::profile::Game<'_>,
+    install: &Path,
+) -> Installation {
+    let launch_settings = crate::launch_settings::of(&locations.library, game, install, None);
+    Installation::new(locations, game, install, launch_settings).unwrap()
+}
+
 /// Obelisk's folders under `root`: its library, its bundle and its home.
 pub(crate) fn locations(root: &Path) -> crate::Locations {
     crate::Locations::new(
@@ -440,10 +451,8 @@ fn a_missing_runtime_is_reported_before_any_prefix_is_created_on_either_engine()
             engine: Some(offer.engine),
             ..Default::default()
         };
-        crate::launch_settings::choose(&locations.library, OTHER, &install, choices).unwrap();
-        let windows = Installation::of(&locations, OTHER, Platform::Windows, &install)
-            .unwrap()
-            .unwrap();
+        crate::launch_settings::choose(&locations.library, OTHER, &install, None, choices).unwrap();
+        let windows = windows_of(&locations, OTHER, &install);
 
         assert!(matches!(
             windows.ready(
@@ -539,9 +548,7 @@ fn each_storefront_s_game_is_readied_in_its_prefix_and_logs_into_its_store_s_dia
                 programs: vec![(install.join("setup.exe"), "/quiet".into())],
             }],
         };
-        let windows = Installation::of(&locations, game, Platform::Windows, &install)
-            .unwrap()
-            .unwrap();
+        let windows = windows_of(&locations, game, &install);
 
         let config = windows
             .ready(
@@ -585,9 +592,7 @@ fn the_program_a_profile_names_instead_is_the_one_readied_and_the_one_started() 
     fs::write(install.join("Launcher.exe"), b"#!/bin/sh\n").unwrap();
     fs::write(install.join("Binaries/Win64/RocketLeague_EAC.exe"), pe()).unwrap();
     let launcher = target(&install.join("Launcher.exe"), &["-AUTH_TYPE=exchangecode"]);
-    let windows = Installation::of(&locations, rocket_league, Platform::Windows, &install)
-        .unwrap()
-        .unwrap();
+    let windows = windows_of(&locations, rocket_league, &install);
     // A prefix the engine already created.
     fs::create_dir_all(windows.prefix().join("drive_c/windows/system32")).unwrap();
     fs::write(windows.prefix().join("system.reg"), "registry").unwrap();
@@ -612,9 +617,7 @@ fn the_program_a_profile_names_instead_is_the_one_readied_and_the_one_started() 
     );
     // Without the profile, the publisher's program is neither readied nor
     // started.
-    let other = Installation::of(&locations, OTHER, Platform::Windows, &install)
-        .unwrap()
-        .unwrap();
+    let other = windows_of(&locations, OTHER, &install);
     assert!(matches!(
         other.ready(&locations, &launcher, &Plain::default()),
         Err(Error::NotExecutable)
@@ -651,9 +654,7 @@ fn a_d3dmetal_game_is_translated_once_it_is_readied() {
     .unwrap();
     fs::set_permissions(&helper, fs::Permissions::from_mode(0o755)).unwrap();
     let (install, target) = game(&root);
-    let windows = Installation::of(&locations, ELDEN_RING, Platform::Windows, &install)
-        .unwrap()
-        .unwrap();
+    let windows = windows_of(&locations, ELDEN_RING, &install);
     fs::create_dir_all(windows.prefix().join("drive_c/windows/system32")).unwrap();
     fs::write(windows.prefix().join("system.reg"), "registry").unwrap();
 
@@ -839,11 +840,9 @@ fn launch_settings_move_a_game_to_the_engine_and_backend_its_player_chose() {
         performance_hud: true,
         ..Default::default()
     };
-    crate::launch_settings::choose(&locations.library, OTHER, &install, choices).unwrap();
+    crate::launch_settings::choose(&locations.library, OTHER, &install, None, choices).unwrap();
 
-    let windows = Installation::of(&locations, OTHER, Platform::Windows, &install)
-        .unwrap()
-        .unwrap();
+    let windows = windows_of(&locations, OTHER, &install);
 
     assert_eq!(
         windows.prefix(),
@@ -1144,26 +1143,51 @@ fn a_windows_installation_runs_in_the_prefix_named_after_its_folder_whatever_the
         "/library/Games/Steam/steam-42-windows",
         "/library/Games/Epic/epic-hash-Windows",
     ] {
-        let windows = Installation::of(&locations, OTHER, Platform::Windows, Path::new(install))
-            .unwrap()
-            .expect("a Windows build");
+        let windows = windows_of(&locations, OTHER, Path::new(install));
         let folder = Path::new(install).file_name().unwrap();
         assert_eq!(
             windows.prefix(),
             Path::new("/library/Prefixes").join(folder)
         );
     }
-    let native = Installation::of(
-        &locations,
-        OTHER,
-        Platform::Mac,
-        Path::new("/library/Games/native"),
-    );
-    assert_eq!(native.unwrap(), None, "a Mac build runs outside Wine");
+    let root = Path::new("/");
+    let launch_settings = crate::launch_settings::of(&locations.library, OTHER, root, None);
     assert!(
-        Installation::of(&locations, OTHER, Platform::Windows, Path::new("/")).is_err(),
+        Installation::new(&locations, OTHER, root, launch_settings).is_err(),
         "no folder names no prefix"
     );
+    assert!(
+        Engine::Rosetta
+            .prefix(&locations.wine_prefixes, root)
+            .is_err()
+    );
+}
+
+#[test]
+fn each_engine_keeps_its_prefix_of_an_installation_where_its_launch_runs() {
+    let locations = crate::Locations::new(
+        Path::new("/library"),
+        Path::new("/Obelisk.app"),
+        Path::new("/home"),
+    );
+    let install = Path::new("/library/Games/Steam/steam-42-windows");
+    let prefixes = &locations.wine_prefixes;
+
+    assert_eq!(
+        Engine::Rosetta.prefix(prefixes, install).unwrap(),
+        Path::new("/library/Prefixes/steam-42-windows")
+    );
+    assert_eq!(
+        Engine::Linux.prefix(prefixes, install).unwrap(),
+        Path::new("/library/Prefixes/steam-42-windows-linux/prefix")
+    );
+    for (game, engine) in [(OTHER, Engine::Rosetta), (ELDEN_RING, Engine::Linux)] {
+        assert_eq!(
+            windows_of(&locations, game, install).prefix(),
+            engine.prefix(prefixes, install).unwrap(),
+            "{game:?}"
+        );
+    }
 }
 
 #[test]
@@ -1199,9 +1223,7 @@ fn a_game_whose_profile_names_the_linux_engine_runs_there_in_its_own_prefix_with
     let runtime = engine_runtime(&locations);
     let install = library.join("Games/Steam/steam-1245620-windows");
 
-    let windows = Installation::of(&locations, ELDEN_RING, Platform::Windows, &install)
-        .unwrap()
-        .unwrap();
+    let windows = windows_of(&locations, ELDEN_RING, &install);
 
     assert_eq!(
         windows.prefix(),
@@ -1211,13 +1233,18 @@ fn a_game_whose_profile_names_the_linux_engine_runs_there_in_its_own_prefix_with
     assert_eq!(config.settings.engine, Engine::Linux);
     assert_eq!(config.settings.graphics, Graphics::D3DMetal);
     assert_eq!(config.runtime, runtime);
-    let other = Installation::of(&locations, OTHER, Platform::Windows, &install)
-        .unwrap()
-        .unwrap();
+    let other = windows_of(&locations, OTHER, &install);
     assert_eq!(
         other.prefix(),
         library.join("Prefixes/steam-1245620-windows")
     );
+    // Its launch waits for the Voile release its profile names.
+    let rocket_league = crate::profile::Game::Steam { app_id: 252950 };
+    assert_eq!(
+        windows_of(&locations, rocket_league, &install).minimum_voile(),
+        Some("v26.3.0-18")
+    );
+    assert_eq!(windows.minimum_voile(), None);
 }
 
 #[test]
@@ -1226,31 +1253,26 @@ fn an_uninstalled_windows_game_loses_its_prefix_but_never_what_a_link_points_to(
     let (_directory, root) = installation();
     let library = root.join("library");
     let locations = crate::Locations::new(&library, Path::new("/Obelisk.app"), Path::new("/home"));
-    let windows = |name: &str| {
-        Installation::of(
-            &locations,
-            OTHER,
-            Platform::Windows,
-            &library.join("Games/Steam").join(name),
-        )
-        .unwrap()
-        .unwrap()
-    };
+    let removed = |name: &str| remove(&locations, &library.join("Games/Steam").join(name)).unwrap();
     let prefix = library.join("Prefixes/steam-42-windows");
     fs::create_dir_all(prefix.join("drive_c/users")).unwrap();
     fs::write(prefix.join("system.reg"), "registry").unwrap();
-    windows("steam-42-windows").remove(&locations).unwrap();
+    removed("steam-42-windows").unwrap();
     assert!(!prefix.exists());
-    windows("steam-42-windows").remove(&locations).unwrap();
+    removed("steam-42-windows").unwrap();
 
     let elsewhere = root.join("elsewhere");
     fs::create_dir_all(&elsewhere).unwrap();
     std::os::unix::fs::symlink(&elsewhere, library.join("Prefixes/steam-43-windows")).unwrap();
     assert!(matches!(
-        windows("steam-43-windows").remove(&locations),
+        removed("steam-43-windows"),
         Err(RemovalFailure::Unsafe(_))
     ));
     assert!(elsewhere.is_dir());
+    assert!(
+        remove(&locations, Path::new("/")).is_none(),
+        "no folder names no prefix"
+    );
 }
 
 #[test]
@@ -1258,34 +1280,45 @@ fn uninstalling_removes_both_engines_prefixes_and_the_launch_settings() {
     let (_directory, root) = installation();
     let locations = locations(&root);
     let install = root.join("library/Games/Steam/steam-1245620-windows");
-    let rosetta = Installation::of(&locations, OTHER, Platform::Windows, &install)
-        .unwrap()
-        .unwrap();
+    let rosetta = windows_of(&locations, OTHER, &install);
     fs::create_dir_all(rosetta.prefix().join("drive_c")).unwrap();
-    let linux = Installation::of(&locations, ELDEN_RING, Platform::Windows, &install)
-        .unwrap()
-        .unwrap();
+    let linux = windows_of(&locations, ELDEN_RING, &install);
     fs::create_dir_all(linux.prefix().join("drive_c")).unwrap();
     let choices = crate::launch_settings::Choices {
         engine: Some(Engine::Rosetta),
         ..Default::default()
     };
-    crate::launch_settings::choose(&locations.library, ELDEN_RING, &install, choices).unwrap();
+    crate::launch_settings::choose(&locations.library, ELDEN_RING, &install, None, choices)
+        .unwrap();
     let settings = locations
         .library
         .join("LaunchSettings/steam-1245620-windows.json");
     assert!(settings.is_file());
 
     // The player moved the game back to Rosetta: the engine's folder still goes.
-    Installation::of(&locations, ELDEN_RING, Platform::Windows, &install)
-        .unwrap()
-        .unwrap()
-        .remove(&locations)
-        .unwrap();
+    remove(&locations, &install).unwrap().unwrap();
 
     assert!(!rosetta.prefix().exists());
     assert!(!linux.prefix().parent().unwrap().exists());
     assert!(!settings.exists());
+}
+
+#[test]
+fn a_moved_installation_forgets_only_the_prerequisites_picked_in_its_rosetta_prefix() {
+    let (_directory, root) = installation();
+    let locations = locations(&root);
+    let install = root.join("library/Games/GOG/gog-1207658924-windows");
+    let prefix = locations.wine_prefixes.join("gog-1207658924-windows");
+    fs::create_dir_all(&prefix).unwrap();
+    fs::write(prefix.join("obelisk-prerequisites"), "gog:isi:1\nvcredist").unwrap();
+
+    forget_prerequisites(&locations, &install, |id| id.starts_with("gog:isi:")).unwrap();
+
+    assert_eq!(
+        fs::read_to_string(prefix.join("obelisk-prerequisites")).unwrap(),
+        "vcredist"
+    );
+    forget_prerequisites(&locations, Path::new("/"), |_| true).unwrap();
 }
 
 #[test]

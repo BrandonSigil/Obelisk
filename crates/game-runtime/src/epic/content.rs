@@ -13,7 +13,10 @@ use crate::{
 use cloud_vault::{EpicScope, StoreScope};
 use epic_kit::{EpicError, client::Client as EpicClient};
 use obelisk_core::{Platform, installation::TransferProgress, transfer::CancelToken};
-use std::{path::Path, sync::Arc};
+use std::{
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 /// What an account's installations ask of Epic's network. Every call may wait
 /// on it.
@@ -169,8 +172,8 @@ impl<N: Network> Content<N> {
     }
 
     /// The build's Cloud configuration: a Windows build keeps its saves in
-    /// its Wine prefix.
-    fn configuration(&self, receipt: &Receipt<Epic>) -> Configuration {
+    /// its Wine `prefix`.
+    fn configuration(&self, receipt: &Receipt<Epic>, prefix: Option<PathBuf>) -> Configuration {
         Configuration {
             root: self.locations.cloud_archive.clone(),
             home: self.locations.home.clone(),
@@ -183,11 +186,7 @@ impl<N: Network> Content<N> {
             platform: receipt.platform,
             language: self.language.clone(),
             title: receipt.name.clone(),
-            prefix: receipt
-                .windows(&self.locations)
-                .ok()
-                .flatten()
-                .map(|windows| windows.prefix().to_owned()),
+            prefix,
         }
     }
 
@@ -209,7 +208,7 @@ impl<N: Network> Content<N> {
         installed: Option<&Receipt<Epic>>,
     ) -> Result<Configuration, Failure> {
         if let Some(receipt) = installed {
-            return Ok(self.configuration(receipt));
+            return Ok(self.configuration(receipt, receipt.wine_prefix(&self.locations)));
         }
         let (root, scope) = (self.locations.cloud_archive.clone(), self.scope(game));
         let saved = blocking(Epic::SESSION_FAILED, move || {
@@ -292,11 +291,19 @@ impl<N: Network> installations::Content<Epic> for Content<N> {
         _: Option<&'a std::convert::Infallible>,
     ) -> BoxFuture<'a, Result<(), Failure>> {
         Box::pin(async move {
+            // Its launch settings, resolved once and off the async runtime:
+            // finding Easy Anti-Cheat may read hundreds of folders.
+            let (locations, resolved) = (self.locations.clone(), receipt.clone());
+            let windows = blocking(Error::Session.to_string(), move || {
+                resolved.windows(&locations).ok().flatten()
+            })
+            .await?;
+            let prefix = windows.as_ref().map(|windows| windows.prefix().to_owned());
             let outcome = admission
                 .hand_off(Handover {
                     network: self.network.clone(),
-                    configuration: self.configuration(receipt),
-                    windows: receipt.windows(&self.locations).ok().flatten(),
+                    configuration: self.configuration(receipt, prefix),
+                    windows,
                     locations: self.locations.clone(),
                     saved: self.credentials.saved.clone(),
                 })
@@ -308,14 +315,16 @@ impl<N: Network> installations::Content<Epic> for Content<N> {
     fn archive<'a>(&'a self, receipt: &'a Receipt<Epic>) -> BoxFuture<'a, Result<(), Failure>> {
         Box::pin(async move {
             self.prepare().await?;
-            let archived = self.network.archive(self.configuration(receipt)).await;
+            let configuration = self.configuration(receipt, receipt.wine_prefix(&self.locations));
+            let archived = self.network.archive(configuration).await;
             self.credentials.save_later();
             archived.map_err(failed)
         })
     }
     fn removed<'a>(&'a self, receipt: &'a Receipt<Epic>) -> BoxFuture<'a, Result<(), Failure>> {
         Box::pin(async move {
-            let (config, account) = (self.configuration(receipt), self.account.clone());
+            let prefix = receipt.wine_prefix(&self.locations);
+            let (config, account) = (self.configuration(receipt, prefix), self.account.clone());
             blocking(Epic::SESSION_FAILED, move || {
                 record::removed::<Context>(&config, &account)
             })
@@ -401,6 +410,9 @@ impl<N: Network> sessions::Handover<Epic> for Handover<N> {
     type Prepared = (String, String, Option<crate::wine::Config>);
     fn platform(&self) -> Platform {
         self.configuration.platform
+    }
+    fn windows(&self) -> Option<&crate::wine::Installation> {
+        self.windows.as_ref()
     }
     fn prepare(&self) -> BoxFuture<'_, Result<Self::Prepared, Failure>> {
         Box::pin(async move {

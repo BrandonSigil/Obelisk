@@ -4,8 +4,8 @@ use super::*;
 use crate::{
     installations::{Content as _, tests::eventually},
     runtimes::{
-        Runtimes,
-        tests::{FakeRuntimes, recorded},
+        Runtime, Runtimes,
+        tests::{FakeRuntimes, fake_offer, recorded},
     },
     sessions::Sessions,
 };
@@ -377,4 +377,39 @@ async fn a_launch_gets_steam_components_for_every_build_and_voile_for_a_windows_
 
     assert_eq!(launched, Err(Failure::Cancelled), "nothing is prepared");
     assert_eq!(*events.lock().unwrap(), ["steam components", "voile"]);
+}
+
+#[tokio::test]
+async fn a_windows_launch_requires_the_voile_release_its_profile_names() {
+    let fixture = Fixture::new();
+    let runtimes = FakeRuntimes::new(&[Runtime::SteamComponents], |_| {});
+    runtimes.outdate(Runtime::Voile);
+    let sessions = Sessions::<Steam>::new(Box::new(|| Ok(None)), Runtimes::from_source(runtimes));
+    eventually(|| !sessions.state().recovering).await;
+    let rocket_league = Receipt {
+        product: Product {
+            app_id: 252950,
+            language: "english".into(),
+        },
+        ..fixture.installed(Platform::Windows)
+    };
+    let shown = || {
+        sessions
+            .state()
+            .active
+            .and_then(|active| active.voile_update)
+    };
+
+    let admission = sessions.admit(252950, 42).unwrap();
+    let canceller = admission.canceller();
+    let (launched, ()) = tokio::join!(
+        fixture.content.launch(&rocket_league, admission, None),
+        async {
+            eventually(|| shown().is_some()).await;
+            assert_eq!(shown(), Some(fake_offer(true)));
+            canceller.cancel();
+        }
+    );
+
+    assert_eq!(launched, Err(Failure::Cancelled), "nothing is prepared");
 }

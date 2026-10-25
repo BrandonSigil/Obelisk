@@ -267,36 +267,6 @@ fn a_game_is_found_by_its_storefront_s_id_first_then_by_a_file_of_its_installati
 }
 
 #[test]
-fn a_game_that_reads_its_language_from_its_command_line_gets_the_players() {
-    let rocket_league = Game::Epic {
-        namespace: "9773aa1aa54f4f7b80e44bef04986cea",
-        app_name: "Sugar",
-    };
-    let on_steam = Game::Steam { app_id: 252950 };
-    let other = Game::Steam { app_id: 620 };
-    let none: &[String] = &[];
-    assert_eq!(
-        language_argument(rocket_league, none, "it_IT").as_deref(),
-        Some("-language=ITA")
-    );
-    assert_eq!(
-        language_argument(on_steam, none, "en_GB").as_deref(),
-        Some("-language=INT")
-    );
-    // A language it has no value for, and a game without a flag, add nothing.
-    assert_eq!(language_argument(rocket_league, none, "ja_JP"), None);
-    assert_eq!(language_argument(other, none, "it_IT"), None);
-    // The player's own language wins, whatever its case.
-    for chosen in ["-language=FRA", "-LANGUAGE=FRA"] {
-        assert_eq!(
-            language_argument(rocket_league, &[chosen.to_owned()], "it_IT"),
-            None,
-            "{chosen}"
-        );
-    }
-}
-
-#[test]
 fn the_named_games_are_the_ones_the_table_names_by_a_storefront_s_id() {
     let named: Vec<_> = named().collect();
 
@@ -361,5 +331,39 @@ fn the_table_s_entry_for_a_game_wins_over_its_easy_anti_cheat_whose_bootstrapper
     assert_eq!(
         of(Game::Steam { app_id: 377160 }, install).engine,
         Engine::Rosetta
+    );
+}
+
+#[test]
+fn the_engine_alone_is_the_profile_s_and_only_an_untabled_installation_is_searched_for_its_anti_cheat()
+ {
+    let directory = tempfile::tempdir().unwrap();
+    let protected = directory.path().join("protected");
+    crate::easy_anti_cheat::tests::protect(
+        &protected,
+        "Game",
+        "start_protected_game.exe",
+        "eldenring.exe",
+    );
+    let other = Game::Steam { app_id: 42 };
+    let fallout_4 = Game::Steam { app_id: 377160 };
+
+    for game in [ROCKET_LEAGUE, FALL_GUYS, fallout_4, other] {
+        assert_eq!(
+            engine(game, Path::new("/nowhere")),
+            by_id(game).engine,
+            "{game:?}"
+        );
+    }
+    assert_eq!(engine(other, &protected), Engine::Linux);
+    assert_eq!(engine(other, &protected), of(other, &protected).engine);
+    let bare = directory.path().join("bare");
+    std::fs::create_dir(&bare).unwrap();
+    assert_eq!(engine(other, &bare), Engine::Rosetta);
+    // The table wins over the installation's Easy Anti-Cheat.
+    assert_eq!(engine(fallout_4, &protected), Engine::Rosetta);
+    assert_eq!(
+        engine(fallout_4, &protected),
+        of(fallout_4, &protected).engine
     );
 }
