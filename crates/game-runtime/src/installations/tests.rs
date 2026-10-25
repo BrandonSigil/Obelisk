@@ -2162,6 +2162,27 @@ async fn a_move_waits_behind_the_transfer_of_its_game_queued_before_it() {
 }
 
 #[tokio::test]
+async fn a_move_waits_for_its_games_session_then_moves() {
+    let fixture = Fixture::new(true).await;
+    let old = fixture.receipt().directory;
+    let (chosen, moved) = fixture.elsewhere();
+    let admission = fixture.sessions.admit(620, 42).unwrap();
+    fixture.folder.choose(&chosen).unwrap();
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    let view = fixture.queue.view();
+    assert!(
+        view.running.is_none(),
+        "a Game session holds its game's move"
+    );
+    assert_eq!(fixture.moves().len(), 1);
+    assert_eq!(fixture.receipt().directory, old);
+
+    drop(admission);
+    eventually(|| fixture.receipt().directory == moved.to_string_lossy()).await;
+    assert!(moved.is_dir());
+}
+
+#[tokio::test]
 async fn a_game_whose_move_waits_still_launches_and_a_removed_move_leaves_it_in_place() {
     let fixture = Fixture::new(true).await;
     let old = fixture.receipt().directory;

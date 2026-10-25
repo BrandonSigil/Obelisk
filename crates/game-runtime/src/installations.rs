@@ -1,13 +1,14 @@
 //! One account's installed games of one storefront, and the actions on them:
 //! Transfers, moves into the games folder, launches, uninstalls and Cloud
-//! maintenance. Every
-//! action asks one Reservation gate, which the state publishes so the UI
-//! shows exactly what may start. The account's Installation receipts live
-//! here, in the file Obelisk keeps per storefront and account, and each
-//! action names one of them: the Transfers it needs are built here and wait
-//! in the process's download queue. So is the account's one Cloud question,
-//! whichever sync asks it.
+//! maintenance. Every action, and the download queue's turns, ask one
+//! Reservation rule, whose gate the state publishes so the UI shows exactly
+//! what may start. The account's Installation receipts live here, in the
+//! file Obelisk keeps per storefront and account, and each action names one
+//! of them: the Transfers it needs are built here and wait in the process's
+//! download queue. So is the account's one Cloud question, whichever sync
+//! asks it.
 mod receipt;
+mod reservation;
 
 use crate::{
     cloud, cloud_status,
@@ -25,6 +26,8 @@ use obelisk_core::{
 };
 pub use receipt::{Offer, Receipt, Transfer};
 use receipt::{load, save};
+use reservation::Reservation;
+pub use reservation::{Gate, Opening};
 use serde::{Serialize, de::DeserializeOwned};
 use std::{
     fmt,
@@ -162,40 +165,6 @@ pub trait Content<S: Storefront>: Send + Sync {
 pub struct Maintenance<S: Storefront> {
     pub game: S::Game,
     pub cloud: cloud::Status,
-}
-
-/// What may start now, of one kind of action.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Opening<G> {
-    Closed,
-    /// It may start, for any game but these.
-    Open {
-        except: Vec<G>,
-    },
-}
-
-impl<G: PartialEq> Opening<G> {
-    pub fn allows(&self, game: &G) -> bool {
-        match self {
-            Self::Closed => false,
-            Self::Open { except } => !except.contains(game),
-        }
-    }
-}
-
-/// What the Reservation lets start now. A Game session holds its own game's
-/// files, a Transfer its own game, and an uninstall or Cloud maintenance the
-/// whole storefront's installations.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Gate<G> {
-    /// A Transfer, which waits in the download queue.
-    pub modify: Opening<G>,
-    /// An uninstall: no Transfer, launch or other uninstall of the
-    /// storefront runs.
-    pub uninstall: Opening<G>,
-    /// A launch: no Game session runs. A Transfer holds only its own game.
-    pub launch: Opening<G>,
-    pub maintain: Opening<G>,
 }
 
 /// Why a Cloud sync runs.
@@ -390,25 +359,18 @@ struct Shared<S: Storefront> {
 
 /// What the download queue asks of an account's installations.
 impl<S: Storefront> Owner for Shared<S> {
-    /// Whether the queued Transfer `id` may start now: no Game session holds
-    /// its game, and no Transfer, uninstall or Cloud maintenance holds the
-    /// storefront.
+    /// Whether the queued Transfer `id` may start now, as the Reservation
+    /// says.
     fn ready(&self, id: u64) -> bool {
         let inner = self.inner.lock().unwrap();
-        let Some(queued) = inner.queued.iter().find(|queued| queued.id == id) else {
-            return false;
-        };
-        let game = queued.transfer.game();
-        let sessions = self.sessions.state();
-        let launching = inner.state.launching && inner.state.launch_game.as_ref() == Some(&game);
-        !inner.signed_out
-            && !inner.diagnostic
-            && !inner.state.downloading
-            && inner.state.uninstall_game.is_none()
-            && inner.state.maintenance.is_none()
-            && !sessions.recovering
-            && !sessions.active.iter().any(|active| active.game == game)
-            && !(queued.job == Job::Move && launching)
+        inner
+            .queued
+            .iter()
+            .find(|queued| queued.id == id)
+            .is_some_and(|queued| {
+                self.reservation(&inner)
+                    .starts(&queued.transfer.game(), &queued.job)
+            })
     }
 
     /// Starts the queued Transfer `id`, whose turn came.
@@ -506,7 +468,7 @@ impl<S: Storefront> Shared<S> {
         let result = change(&mut inner);
         inner.state.downloading = inner.running.is_some();
         let sessions = self.sessions.state();
-        inner.state.gate = gate(&inner, &sessions);
+        inner.state.gate = Reservation::of(&inner, &sessions).gate();
         inner.state.cloud_sync = cloud_sync(&inner, &sessions, &self.account);
         if inner.state.receipts != before.receipts {
             let State {
@@ -599,9 +561,15 @@ impl<S: Storefront> Shared<S> {
         true
     }
 
-    /// The Reservation gate every action asks.
+    /// What holds the installations now, which every action and the
+    /// download queue's turns ask.
+    fn reservation(&self, inner: &Inner<S>) -> Reservation<S::Game> {
+        Reservation::of(inner, &self.sessions.state())
+    }
+
+    /// What may start now, which each action asks before it starts.
     fn gate(&self, inner: &Inner<S>) -> Gate<S::Game> {
-        gate(inner, &self.sessions.state())
+        self.reservation(inner).gate()
     }
 
     /// Shows maintenance `number`'s progress while it runs. Retry and Launch
@@ -777,7 +745,7 @@ impl<S: Storefront> Shared<S> {
     fn update_automatically(self: &Arc<Self>) {
         let transfers: Vec<(Transfer<S>, String)> = {
             let inner = self.inner.lock().unwrap();
-            if !inner.automatic_updates || inner.signed_out {
+            if !inner.automatic_updates {
                 return;
             }
             let modify = self.gate(&inner).modify;
@@ -1086,68 +1054,6 @@ fn active(state: TransferState) -> bool {
     )
 }
 
-/// What the Reservation lets start, given the account's installations and the
-/// storefront's Game sessions.
-fn gate<S: Storefront>(inner: &Inner<S>, sessions: &sessions::State<S>) -> Gate<S::Game> {
-    let state = &inner.state;
-    let transferring = state.transfer_game.clone().filter(|_| state.downloading);
-    let uninstalled = state.uninstall_game.clone();
-    let held =
-        inner.signed_out || inner.diagnostic || state.maintenance.is_some() || sessions.recovering;
-    // The games a Game session holds, or whose Transfer is queued or under way.
-    let busy: Vec<S::Game> = sessions
-        .active
-        .iter()
-        .map(|active| active.game.clone())
-        .chain(inner.queued.iter().map(|queued| queued.transfer.game()))
-        .collect();
-    // A Transfer waits in the queue: one per game, never of a game a Game
-    // session, a Transfer or an uninstall holds.
-    let modify = match held {
-        true => Opening::Closed,
-        false => Opening::Open {
-            except: busy.iter().cloned().chain(uninstalled.clone()).collect(),
-        },
-    };
-    // An uninstall has the storefront's installations to itself.
-    let uninstall = match held || state.downloading || state.launching || uninstalled.is_some() {
-        true => Opening::Closed,
-        false => Opening::Open { except: busy },
-    };
-    // One Cloud operation at a time: a Game session, a launch or maintenance
-    // keeps every game out, a Transfer or uninstall only its own.
-    let cloud = inner.signed_out
-        || inner.diagnostic
-        || state.maintenance.is_some()
-        || state.launching
-        || sessions.busy();
-    let maintain = match cloud {
-        true => Opening::Closed,
-        false => Opening::Open {
-            except: [transferring.clone(), uninstalled]
-                .into_iter()
-                .flatten()
-                .collect(),
-        },
-    };
-    // A launch waits for another launch and every Game session, and for an
-    // uninstall or Cloud maintenance. A Transfer holds only its own game: a
-    // launch that needs one goes first in the queue.
-    let launches = held || state.launching || state.uninstall_game.is_some() || sessions.busy();
-    let launch = match launches {
-        true => Opening::Closed,
-        false => Opening::Open {
-            except: transferring.into_iter().collect(),
-        },
-    };
-    Gate {
-        modify,
-        uninstall,
-        launch,
-        maintain,
-    }
-}
-
 /// The account's Cloud sync now: its maintenance's, else its Game session's
 /// before the game starts or after it exited. A revoked account, or another
 /// account's session, asks nothing.
@@ -1384,7 +1290,7 @@ impl<S: Storefront> Installations<S> {
         }
         // The watcher follows the sessions from the state this gate shows.
         let seen = sessions.state();
-        inner.state.gate = gate(&inner, &seen);
+        inner.state.gate = Reservation::of(&inner, &seen).gate();
         inner.state.cloud_sync = cloud_sync(&inner, &seen, &account);
         let (published, _) = watch::channel(inner.state.clone());
         let shared = Arc::new(Shared {
@@ -2052,7 +1958,8 @@ impl<S: Storefront> Resident for Shared<S> {
     fn gather(self: Arc<Self>, folder: &Path) {
         let destination = folder.join(S::GAMES_DIRECTORY);
         let queued = self.update(|inner| {
-            if inner.signed_out || inner.diagnostic {
+            let moves = self.reservation(inner).moves();
+            if matches!(moves, Opening::Closed) {
                 return false;
             }
             let fresh: Vec<u64> = inner
@@ -2083,7 +1990,7 @@ impl<S: Storefront> Resident for Shared<S> {
                 .filter(|receipt| {
                     let game = receipt.game();
                     !Path::new(&receipt.directory).starts_with(folder)
-                        && inner.state.uninstall_game.as_ref() != Some(&game)
+                        && moves.allows(&game)
                         && !inner.queued.iter().any(|waiting| {
                             waiting.job == Job::Move && waiting.transfer.lands_on(receipt)
                         })
