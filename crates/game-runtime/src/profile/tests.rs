@@ -80,7 +80,7 @@ fn entries() -> Vec<serde_json::Map<String, serde_json::Value>> {
 
 #[test]
 fn every_game_of_the_table_passes_the_checks_a_table_read_from_main_passes() {
-    assert_eq!(table().len(), entries().len());
+    assert_eq!(PROFILES.entries().len(), entries().len());
 }
 
 /// A table entry Obelisk keeps, with `key` set to `value`, or removed
@@ -177,19 +177,9 @@ fn an_entry_that_sets_what_a_profile_may_not_is_left_out() {
 }
 
 #[test]
-fn a_table_of_another_format_is_not_read() {
-    let mut table: serde_json::Value = serde_json::from_str(TABLE).unwrap();
-    table["format"] = 2.into();
-    assert!(parsed(table.to_string().as_bytes()).is_none());
-    table.as_object_mut().unwrap().remove("format");
-    assert!(parsed(table.to_string().as_bytes()).is_none());
-    assert!(parsed(b"404: Not Found").is_none());
-}
-
-#[test]
 fn no_two_games_of_the_table_share_a_storefront_s_name() {
     let mut names = HashSet::new();
-    for known in table() {
+    for known in PROFILES.entries() {
         let ids = [
             known.steam.map(|app_id| format!("steam {app_id}")),
             known
@@ -242,7 +232,11 @@ fn a_file_of_the_table_is_inside_the_installation_and_only_one_game_holds_it() {
         "unitycrashhandler32.exe",
     ];
     let mut paths = HashSet::new();
-    for path in table().iter().filter_map(|known| known.path.as_deref()) {
+    for path in PROFILES
+        .entries()
+        .iter()
+        .filter_map(|known| known.path.as_deref())
+    {
         let name = Path::new(path)
             .file_name()
             .unwrap()

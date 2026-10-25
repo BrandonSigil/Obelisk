@@ -16013,15 +16013,16 @@ public func gameNote(storefront: SessionStorefront, id: String, language: String
 })
 }
 /**
- * Reads the notes again from Obelisk's `main`, keeping them in the
- * library. Runs once at startup: pages read those Obelisk was built with
- * until then, and the last ones kept when `main` does not answer.
+ * Reads the game notes and the profiles again from Obelisk's `main`,
+ * keeping them in the library. Runs once at startup, besides each Windows
+ * launch for the profiles: until `main` answers, pages read the last ones
+ * kept, else those Obelisk was built with.
  */
-public func refreshGameNotes(locations: ObeliskLocations)async   {
+public func refreshNotesAndProfiles(locations: ObeliskLocations)async   {
     return
         try!  await uniffiRustCallAsync(
             rustFutureFunc: {
-                uniffi_obelisk_bridge_fn_func_refresh_game_notes(FfiConverterTypeObeliskLocations_lower(locations)
+                uniffi_obelisk_bridge_fn_func_refresh_notes_and_profiles(FfiConverterTypeObeliskLocations_lower(locations)
                 )
             },
             pollFunc: ffi_obelisk_bridge_rust_future_poll_void,
@@ -16034,7 +16035,7 @@ public func refreshGameNotes(locations: ObeliskLocations)async   {
 }
 /**
  * The games of `storefront` the profile table names, as the app names
- * them, read as launches read the table now.
+ * them, read as Obelisk reads the table now.
  */
 public func verifiedGames(storefront: SessionStorefront) -> [String]  {
     return try!  FfiConverterSequenceString.lift(try! rustCall() {
@@ -16172,10 +16173,10 @@ private let initializationResult: InitializationResult = {
     if (uniffi_obelisk_bridge_checksum_func_game_note() != 45148) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_obelisk_bridge_checksum_func_refresh_game_notes() != 43003) {
+    if (uniffi_obelisk_bridge_checksum_func_refresh_notes_and_profiles() != 52799) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_obelisk_bridge_checksum_func_verified_games() != 13684) {
+    if (uniffi_obelisk_bridge_checksum_func_verified_games() != 41148) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_obelisk_bridge_checksum_func_gog_authorization_code() != 19621) {

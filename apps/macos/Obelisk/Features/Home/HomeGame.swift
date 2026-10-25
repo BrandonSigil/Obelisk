@@ -152,8 +152,9 @@ struct HomeShelves {
 }
 
 /// The games Obelisk was set up to run, as its profile table names them by
-/// their storefronts' ids: Home's Obelisk Verified shelf. Read as launches
-/// read the table, so a table a launch read again shows on the next pass.
+/// their storefronts' ids: Home's Obelisk Verified shelf. Read as Obelisk
+/// reads the table, as it starts and as a Windows game launches, so a table
+/// read again shows on the next pass.
 enum ObeliskVerified {
     /// `Store`'s games of the table.
     static func games<Store: InstallationStorefront>(of store: Store.Type) -> Set<Store.GameID> {
