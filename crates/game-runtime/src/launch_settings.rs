@@ -1,9 +1,9 @@
 //! Launch settings: how one Windows installation runs, its game's profile
-//! with the player's choices over it, in the player's language. The player picks the arguments added
-//! to its command line, its engine, then the CPU translator that engine has,
-//! then the graphics backend that renders its Direct3D there and that
-//! backend's options, each offered as the engine allows, and Metal's
-//! Performance HUD over the game. Only what differs from the profile is kept,
+//! with the player's choices over it, in the player's language. The player
+//! picks the arguments added to its command line, its engine, then the CPU
+//! translator that engine has, then the graphics backend that renders its
+//! Direct3D there and that backend's options, each offered as the engine
+//! allows, and Metal's Performance HUD over the game. Only what differs from the profile is kept,
 //! one file per installation in Obelisk's library, named after the
 //! installation's folder as its Wine prefix is. It goes when the
 //! installation is uninstalled, and a change applies from the game's next

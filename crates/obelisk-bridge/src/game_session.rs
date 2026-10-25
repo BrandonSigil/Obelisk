@@ -461,8 +461,8 @@ pub struct SteamOverlayRequest {
     pub sequence: u64,
     pub kind: SteamOverlayKind,
 }
-impl From<game_runtime::steam::host::OverlayRequest> for SteamOverlayRequest {
-    fn from(request: game_runtime::steam::host::OverlayRequest) -> Self {
+impl From<steam::host::OverlayRequest> for SteamOverlayRequest {
+    fn from(request: steam::host::OverlayRequest) -> Self {
         Self {
             sequence: request.sequence,
             kind: request.dialog.into(),
@@ -485,7 +485,7 @@ pub struct SteamReceivedInvite {
 }
 impl SteamReceivedInvite {
     /// An invitation the running game of `app_id` received.
-    fn into_game(app_id: u32, invite: game_runtime::steam::host::ReceivedInvite) -> Self {
+    fn into_game(app_id: u32, invite: steam::host::ReceivedInvite) -> Self {
         Self {
             friend_steam_id: invite.friend,
             app_id,
@@ -973,7 +973,7 @@ mod tests {
         assert_eq!(steam::Steam::lobby(&store), None);
         store.requests.lobby = Some(LOBBY);
         assert_eq!(steam::Steam::lobby(&store), Some(LOBBY));
-        store.requests.overlay = Some(game_runtime::steam::host::OverlayRequest {
+        store.requests.overlay = Some(steam::host::OverlayRequest {
             sequence: 2,
             dialog: protocol::OverlayDialog::LobbyInvite { lobby_id: LOBBY },
         });
@@ -984,7 +984,7 @@ mod tests {
                 invite: SteamGameInvite::Lobby { lobby_id: LOBBY },
             })
         );
-        store.requests.overlay = Some(game_runtime::steam::host::OverlayRequest {
+        store.requests.overlay = Some(steam::host::OverlayRequest {
             sequence: 3,
             dialog: protocol::OverlayDialog::ConnectInvite {
                 connect: "+connect_lobby 1".into(),
@@ -1088,8 +1088,8 @@ mod tests {
             ),
         ] {
             let store = steam::Store {
-                requests: game_runtime::steam::host::GameRequests {
-                    overlay: Some(game_runtime::steam::host::OverlayRequest {
+                requests: steam::host::GameRequests {
+                    overlay: Some(steam::host::OverlayRequest {
                         sequence: 9,
                         dialog,
                     }),
@@ -1107,22 +1107,22 @@ mod tests {
     #[test]
     fn received_invites_and_the_pending_purchase_reach_swift() {
         let store = steam::Store {
-            requests: game_runtime::steam::host::GameRequests {
+            requests: steam::host::GameRequests {
                 invites: vec![
-                    game_runtime::steam::host::ReceivedInvite {
+                    steam::host::ReceivedInvite {
                         friend: FRIEND,
                         target: protocol::InviteTarget::Connect {
                             connect: "+connect 10.0.0.1".into(),
                         },
                         received_at: 1_790_000_100,
                     },
-                    game_runtime::steam::host::ReceivedInvite {
+                    steam::host::ReceivedInvite {
                         friend: FRIEND + 1,
                         target: protocol::InviteTarget::Lobby { lobby_id: LOBBY },
                         received_at: 1_790_000_000,
                     },
                 ],
-                microtxn: Some(game_runtime::steam::host::MicroTxn {
+                microtxn: Some(steam::host::MicroTxn {
                     order_id: 4242,
                     app_id: 620,
                 }),

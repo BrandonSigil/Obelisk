@@ -256,18 +256,18 @@ fn failure(reason: protocol::Failure) -> Error {
 
 #[derive(Clone, Debug, serde::Serialize)]
 struct Proof {
-    pub app_id: u32,
-    pub host_pid: u32,
-    pub authenticated: bool,
-    pub ticket_bytes: u32,
-    pub host_account_verified: bool,
-    pub host_license_verified: bool,
-    pub sdk_checked: bool,
-    pub game_pid: Option<u32>,
-    pub game_exit: Option<i32>,
-    pub discovery_paths: u32,
-    pub host_state: HostState,
-    pub state: String,
+    app_id: u32,
+    host_pid: u32,
+    authenticated: bool,
+    ticket_bytes: u32,
+    host_account_verified: bool,
+    host_license_verified: bool,
+    sdk_checked: bool,
+    game_pid: Option<u32>,
+    game_exit: Option<i32>,
+    discovery_paths: u32,
+    host_state: HostState,
+    state: String,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -320,7 +320,7 @@ pub struct MicroTxn {
 }
 
 /// The most invitations a session keeps; the oldest goes first.
-pub const MAX_RECEIVED_INVITES: usize = 16;
+const MAX_RECEIVED_INVITES: usize = 16;
 
 /// What the running game asks of the player's Steam session, as its host
 /// tells it. A record from before any of it has none.

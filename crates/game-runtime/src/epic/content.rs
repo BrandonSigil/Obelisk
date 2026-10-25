@@ -291,13 +291,12 @@ impl<N: Network> installations::Content<Epic> for Content<N> {
         _: Option<&'a std::convert::Infallible>,
     ) -> BoxFuture<'a, Result<(), Failure>> {
         Box::pin(async move {
-            // Its launch settings, resolved once and off the async runtime:
-            // finding Easy Anti-Cheat may read hundreds of folders.
-            let (locations, resolved) = (self.locations.clone(), receipt.clone());
-            let windows = blocking(Error::Session.to_string(), move || {
-                resolved.windows(&locations).ok().flatten()
-            })
-            .await?;
+            // Its launch settings, resolved once.
+            let windows = receipt
+                .windows_for_launch(&self.locations, Error::Session.to_string())
+                .await?
+                .ok()
+                .flatten();
             let prefix = windows.as_ref().map(|windows| windows.prefix().to_owned());
             let outcome = admission
                 .hand_off(Handover {

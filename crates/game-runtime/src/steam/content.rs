@@ -278,14 +278,11 @@ impl<N: Network> installations::Content<Steam> for Content<N> {
             if let Some(join) = join {
                 target.arguments.extend(join.arguments(receipt.platform));
             }
-            // Its launch settings, resolved once and off the async runtime:
-            // finding Easy Anti-Cheat may read hundreds of folders.
-            let (locations, resolved) = (self.locations.clone(), receipt.clone());
-            let windows = blocking(super::Error::StartFailed.to_string(), move || {
-                resolved.windows(&locations)
-            })
-            .await?
-            .map_err(|error| failed(super::Error::from(error)))?;
+            // Its launch settings, resolved once.
+            let windows = receipt
+                .windows_for_launch(&self.locations, super::Error::StartFailed.to_string())
+                .await?
+                .map_err(|error| failed(super::Error::from(error)))?;
             admission
                 .hand_off(Handover {
                     locations: self.locations.clone(),

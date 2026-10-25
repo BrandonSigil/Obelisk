@@ -117,6 +117,21 @@ impl<S: Storefront> Receipt<S> {
         .map(Some)
     }
 
+    /// `windows`, worked out off the async runtime as a launch reads it:
+    /// finding Easy Anti-Cheat may read hundreds of folders. `failed` names a
+    /// lost join.
+    pub(crate) async fn windows_for_launch(
+        &self,
+        locations: &crate::Locations,
+        failed: impl Into<String>,
+    ) -> Result<
+        Result<Option<crate::wine::Installation>, crate::launch::Error>,
+        crate::sessions::Failure,
+    > {
+        let (locations, receipt) = (locations.clone(), self.clone());
+        super::blocking(failed, move || receipt.windows(&locations)).await
+    }
+
     /// Its Wine prefix when it is a Windows build, the one of the engine it
     /// runs on, without the rest of its launch settings: where its saves
     /// live. None for a Mac build, or one whose folder names no prefix.
